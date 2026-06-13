@@ -1,0 +1,18 @@
+{
+  "name": "outreach-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Backend server for the Outreach email campaign tool (Gmail sending via nodemailer)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "mongoose": "^9.7.0",
+    "multer": "^2.1.1",
+    "nodemailer": "^8.0.11"
+  }
+}

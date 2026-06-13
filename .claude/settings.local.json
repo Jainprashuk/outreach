@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(sort -u -t: -k2)",
+      "Bash(npm install *)",
+      "Skill(run)",
+      "Skill(run:*)",
+      "Bash(chromium-cli --help)",
+      "Bash(node -e \"require\\('playwright'\\)\")",
+      "Bash(npx --yes playwright --version)",
+      "Read(//Users/prashukjain/Library/Caches/**)",
+      "Read(//Users/prashukjain/.cache/**)",
+      "Read(//private/tmp/pw-test/**)",
+      "Bash(npm init *)",
+      "Bash(node -e \"console.log\\(require\\('multer/package.json'\\).version\\)\")"
+    ]
+  }
+}

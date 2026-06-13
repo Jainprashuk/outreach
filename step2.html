@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Outreach — Approve Templates</title>
+<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell" style="position:relative">
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><i class="ti ti-send"></i></div>
+      <span class="sidebar-logo-text">Outreach</span>
+    </div>
+    <a href="index.html" class="nav-item"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+    <a href="contacts.html" class="nav-item"><i class="ti ti-users"></i> Contacts</a>
+    <a href="templates.html" class="nav-item"><i class="ti ti-file-text"></i> Templates</a>
+    <div class="nav-section-label">Account</div>
+    <a href="settings.html" class="nav-item"><i class="ti ti-settings"></i> Settings</a>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" data-theme-toggle type="button">
+        <span class="tt-icon"><i class="ti ti-sun"></i><i class="ti ti-moon"></i>Appearance</span>
+        <i class="ti ti-chevron-right" style="font-size:12px"></i>
+      </button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" data-mobile-menu-toggle type="button" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+        <div>
+          <h1>New entry</h1>
+          <p>Step 2 of 3 — Approve templates</p>
+        </div>
+      </div>
+      <a href="index.html" class="btn btn-sm"><i class="ti ti-x"></i> Cancel</a>
+    </div>
+
+    <div class="stepper-bar">
+      <div class="step-item">
+        <div class="step-dot done"><i class="ti ti-check" style="font-size:12px"></i></div>
+        <span class="step-label idle">Add contacts</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-item">
+        <div class="step-dot active">2</div>
+        <span class="step-label active">Approve templates</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-item">
+        <div class="step-dot idle">3</div>
+        <span class="step-label idle">Send</span>
+      </div>
+    </div>
+
+    <div class="form-body" style="flex:1;overflow-y:auto">
+      <div class="info-box"><i class="ti ti-info-circle" style="font-size:15px;flex-shrink:0;margin-top:1px"></i> Review the personalised email for each contact. Approve, edit, or reject before sending. Rejected contacts will be skipped.</div>
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px">
+        <button class="btn btn-sm" onclick="approveAll()"><i class="ti ti-checks"></i> Approve all</button>
+      </div>
+      <div id="cards-list"></div>
+    </div>
+
+    <div class="step-footer">
+      <a href="step1.html" class="btn"><i class="ti ti-arrow-left"></i> Back</a>
+      <div style="display:flex;align-items:center;gap:12px">
+        <span style="font-size:12px;color:var(--text2)" id="approval-count">—</span>
+        <button class="btn btn-primary" onclick="goNext()">
+          Next — send <i class="ti ti-arrow-right"></i>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- EDIT MODAL -->
+  <div class="edit-modal-wrap" id="edit-modal">
+    <div class="edit-modal">
+      <h2>Edit email</h2>
+      <div class="form-group">
+        <label class="form-label">Subject</label>
+        <input type="text" id="edit-subject">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Body</label>
+        <textarea id="edit-body" style="min-height:160px"></textarea>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px">
+        <button class="btn" onclick="closeEdit()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveEdit()"><i class="ti ti-check"></i> Save & approve</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/app.js"></script>
+<script>
+let batch = JSON.parse(sessionStorage.getItem('batch') || '[]');
+let approvals = batch.map((c, i) => ({ ...c, idx: i, approvalStatus: 'pending', editedSubject: null, editedBody: null }));
+let editingIdx = null;
+
+function tplNames() { return { 'intro-v2': 'Intro v2', 'follow-up': 'Follow-up', 'cold': 'Cold outreach' }; }
+
+function renderCards() {
+  const approved = approvals.filter(a => a.approvalStatus === 'approved').length;
+  const total = approvals.length;
+  document.getElementById('approval-count').textContent = `${approved} of ${total} approved`;
+
+  document.getElementById('cards-list').innerHTML = approvals.map((a, i) => {
+    const { subject, body } = window._app.renderTemplate(a.template, a);
+    const displaySubject = a.editedSubject || subject;
+    const displayBody = (a.editedBody || body).replace(/\n/g, '<br>');
+    const isApproved = a.approvalStatus === 'approved';
+    const isRejected = a.approvalStatus === 'rejected';
+
+    return `
+    <div class="template-card ${isApproved ? 'approved' : ''}" id="card-${i}">
+      <div class="template-head">
+        <div class="contact-chip">
+          ${window._app.avatarEl(a.name)}
+          <div>
+            <div style="font-size:13px;font-weight:500">${a.name}</div>
+            <div style="font-size:11px;color:var(--text2)">${a.email} · ${tplNames()[a.template]||a.template}</div>
+          </div>
+        </div>
+        ${window._app.statusBadge(a.approvalStatus)}
+      </div>
+      <div class="template-preview" style="${isRejected ? 'opacity:.45' : ''}">
+        <div class="subject"><i class="ti ti-mail" style="font-size:13px;margin-right:4px"></i>${displaySubject}</div>
+        <div style="font-size:13px;line-height:1.7;color:var(--text2)">${displayBody}</div>
+      </div>
+      <div class="template-actions">
+        <button class="btn btn-sm" onclick="openEdit(${i})"><i class="ti ti-edit"></i> Edit</button>
+        <div style="display:flex;gap:8px">
+          ${!isRejected ? `<button class="btn btn-sm btn-danger" onclick="setApproval(${i},'rejected')"><i class="ti ti-x"></i> Reject</button>` : ''}
+          ${!isApproved ? `<button class="btn btn-sm btn-success" onclick="setApproval(${i},'approved')"><i class="ti ti-check"></i> Approve</button>` : `<span style="font-size:12px;color:var(--green);display:flex;align-items:center;gap:4px"><i class="ti ti-circle-check"></i> Approved</span>`}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function setApproval(idx, val) {
+  approvals[idx].approvalStatus = val;
+  renderCards();
+}
+
+function approveAll() {
+  approvals.forEach(a => { if (a.approvalStatus === 'pending') a.approvalStatus = 'approved'; });
+  renderCards();
+}
+
+function openEdit(idx) {
+  editingIdx = idx;
+  const a = approvals[idx];
+  const { subject, body } = window._app.renderTemplate(a.template, a);
+  document.getElementById('edit-subject').value = a.editedSubject || subject;
+  document.getElementById('edit-body').value = a.editedBody || body;
+  document.getElementById('edit-modal').classList.add('open');
+}
+
+function closeEdit() {
+  document.getElementById('edit-modal').classList.remove('open');
+  editingIdx = null;
+}
+
+function saveEdit() {
+  if (editingIdx === null) return;
+  approvals[editingIdx].editedSubject = document.getElementById('edit-subject').value;
+  approvals[editingIdx].editedBody = document.getElementById('edit-body').value;
+  approvals[editingIdx].approvalStatus = 'approved';
+  closeEdit();
+  renderCards();
+}
+
+async function goNext() {
+  const approved = approvals.filter(a => a.approvalStatus === 'approved');
+  if (approved.length === 0) { window._app.toast('Please approve at least one contact.', 'error'); return; }
+
+  try {
+    await Promise.all(approvals
+      .filter(a => a.approvalStatus !== 'pending')
+      .map(a => window._app.updateContact(a.id, {
+        approvalStatus: a.approvalStatus,
+        editedSubject: a.editedSubject,
+        editedBody: a.editedBody,
+      }))
+    );
+  } catch (err) {
+    window._app.toast('Could not save approvals: ' + err.message, 'error');
+    return;
+  }
+
+  sessionStorage.setItem('approved', JSON.stringify(approvals));
+  window.location.href = 'step3.html';
+}
+
+async function start() {
+  window._app.initTheme();
+  window._app.initMobileNav();
+
+  if (batch.length === 0) {
+    document.getElementById('cards-list').innerHTML = '<div class="empty-state"><i class="ti ti-inbox"></i>No contacts to review. <a href="step1.html">Go back and add contacts</a>.</div>';
+    return;
+  }
+
+  try {
+    await Promise.all([window._app.loadTemplates(), window._app.loadSettings()]);
+  } catch (err) {
+    document.getElementById('cards-list').innerHTML = `<div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div>`;
+    return;
+  }
+
+  renderCards();
+}
+
+start();
+
+document.getElementById('edit-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeEdit();
+});
+</script>
+</body>
+</html>

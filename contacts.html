@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Outreach — Contacts</title>
+<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><i class="ti ti-send"></i></div>
+      <span class="sidebar-logo-text">Outreach</span>
+    </div>
+    <a href="index.html" class="nav-item"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+    <a href="contacts.html" class="nav-item active"><i class="ti ti-users"></i> Contacts</a>
+    <a href="templates.html" class="nav-item"><i class="ti ti-file-text"></i> Templates</a>
+    <div class="nav-section-label">Account</div>
+    <a href="settings.html" class="nav-item"><i class="ti ti-settings"></i> Settings</a>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" data-theme-toggle type="button">
+        <span class="tt-icon"><i class="ti ti-sun"></i><i class="ti ti-moon"></i>Appearance</span>
+        <i class="ti ti-chevron-right" style="font-size:12px"></i>
+      </button>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" data-mobile-menu-toggle type="button" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+        <div><h1>Contacts</h1><p id="count-line">—</p></div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <input type="text" id="search" placeholder="Search name or email..." style="width:220px;max-width:100%">
+        <a href="step1.html" class="btn btn-primary"><i class="ti ti-plus"></i> New entry</a>
+      </div>
+    </div>
+    <div class="section">
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr><th>Contact</th><th>Company</th><th>Role</th><th>Template</th><th>Status</th><th>Approval</th></tr>
+          </thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="js/app.js"></script>
+<script>
+const tplNames = { 'intro-v2': 'Intro v2', 'follow-up': 'Follow-up', 'cold': 'Cold outreach' };
+function render(q) {
+  const all = window._app.state.contacts;
+  const filtered = q ? all.filter(c => (c.name+c.email+c.company).toLowerCase().includes(q.toLowerCase())) : all;
+  document.getElementById('count-line').textContent = filtered.length + ' contacts';
+  document.getElementById('tbody').innerHTML = filtered.map(c => `
+    <tr>
+      <td><div class="contact-chip">${window._app.avatarEl(c.name)}<div><div class="name">${c.name}</div><div class="email">${c.email}</div></div></div></td>
+      <td style="color:var(--text2)">${c.company}</td>
+      <td style="color:var(--text2)">${c.role}</td>
+      <td style="color:var(--text2)">${tplNames[c.template]||c.template}</td>
+      <td>${window._app.statusBadge(c.status)}</td>
+      <td>${window._app.statusBadge(c.approvalStatus)}</td>
+    </tr>`).join('') || '<tr><td colspan="6"><div class="empty-state"><i class="ti ti-users"></i>No contacts found</div></td></tr>';
+}
+
+async function start() {
+  window._app.initTheme();
+  window._app.initMobileNav();
+
+  try {
+    await window._app.init();
+  } catch (err) {
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div></td></tr>`;
+    return;
+  }
+  document.getElementById('search').addEventListener('input', e => render(e.target.value));
+  render('');
+}
+
+start();
+</script>
+</body>
+</html>

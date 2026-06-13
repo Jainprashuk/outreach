@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Outreach — Settings</title>
+<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><i class="ti ti-send"></i></div>
+      <span class="sidebar-logo-text">Outreach</span>
+    </div>
+    <a href="index.html" class="nav-item"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+    <a href="contacts.html" class="nav-item"><i class="ti ti-users"></i> Contacts</a>
+    <a href="templates.html" class="nav-item"><i class="ti ti-file-text"></i> Templates</a>
+    <div class="nav-section-label">Account</div>
+    <a href="settings.html" class="nav-item active"><i class="ti ti-settings"></i> Settings</a>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" data-theme-toggle type="button">
+        <span class="tt-icon"><i class="ti ti-sun"></i><i class="ti ti-moon"></i>Appearance</span>
+        <i class="ti ti-chevron-right" style="font-size:12px"></i>
+      </button>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" data-mobile-menu-toggle type="button" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+        <div><h1>Settings</h1><p>Sender details and Gmail configuration</p></div>
+      </div>
+    </div>
+    <div class="section" style="max-width:560px">
+
+      <!-- SENDER INFO -->
+      <div style="background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:20px">
+        <div style="font-size:14px;font-weight:500;margin-bottom:14px;display:flex;align-items:center;gap:8px"><i class="ti ti-user" style="font-size:16px;color:var(--text2)"></i> Sender details</div>
+        <div class="form-grid">
+          <div class="form-group"><label class="form-label">Your name</label><input type="text" id="s-name" placeholder="Your Name"></div>
+          <div class="form-group"><label class="form-label">Your company</label><input type="text" id="s-company" placeholder="Your Company"></div>
+        </div>
+        <p style="font-size:12px;color:var(--text2)">These replace <code style="background:var(--bg3);padding:1px 5px;border-radius:3px">{{sender}}</code> and <code style="background:var(--bg3);padding:1px 5px;border-radius:3px">{{senderCompany}}</code> in your templates.</p>
+      </div>
+
+      <!-- GMAIL -->
+      <div style="background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:20px">
+        <div style="font-size:14px;font-weight:500;margin-bottom:14px;display:flex;align-items:center;gap:8px"><i class="ti ti-brand-gmail" style="font-size:16px;color:var(--red)"></i> Gmail settings</div>
+        <div class="form-group"><label class="form-label">Default Gmail address</label><input type="email" id="s-email" placeholder="yourname@gmail.com"></div>
+        <div class="info-box">
+          <i class="ti ti-info-circle" style="font-size:15px;flex-shrink:0"></i>
+          <div>
+            To send via Gmail you need a <strong>16-character App Password</strong>.
+            Go to <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--blue)">Google Account → Security → App Passwords</a>.
+            You'll enter the password at send time — it's never stored.
+          </div>
+        </div>
+      </div>
+
+      <!-- RESUME -->
+      <div style="background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:20px">
+        <div style="font-size:14px;font-weight:500;margin-bottom:14px;display:flex;align-items:center;gap:8px"><i class="ti ti-file-cv" style="font-size:16px;color:var(--text2)"></i> Resume</div>
+        <div id="resume-empty">
+          <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Upload a resume (PDF or Word) to optionally attach to your outreach emails.</p>
+          <button class="btn btn-sm" onclick="document.getElementById('resume-input').click()" type="button"><i class="ti ti-upload"></i> Upload resume</button>
+        </div>
+        <div id="resume-current" style="display:none;align-items:center;gap:12px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius-md);padding:12px 14px">
+          <i class="ti ti-file-text" style="font-size:22px;color:var(--accent)"></i>
+          <div style="flex:1;overflow:hidden">
+            <div id="resume-name" style="font-size:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></div>
+            <div id="resume-meta" style="font-size:11px;color:var(--text2)"></div>
+          </div>
+          <a id="resume-download" class="btn btn-xs" href="#" target="_blank" title="Download"><i class="ti ti-download"></i></a>
+          <button class="btn btn-xs" onclick="document.getElementById('resume-input').click()" type="button" title="Replace"><i class="ti ti-replace"></i></button>
+          <button class="btn btn-xs" style="color:var(--red);border-color:var(--red-bg)" onclick="removeResume()" type="button" title="Remove"><i class="ti ti-trash"></i></button>
+        </div>
+        <input type="file" id="resume-input" accept=".pdf,.doc,.docx" style="display:none" onchange="handleResumeUpload(this)">
+      </div>
+
+      <!-- CUSTOM VARIABLES -->
+      <div style="background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:20px">
+        <div style="font-size:14px;font-weight:500;margin-bottom:6px;display:flex;align-items:center;gap:8px"><i class="ti ti-variable" style="font-size:16px;color:var(--text2)"></i> Custom variables</div>
+        <p style="font-size:12px;color:var(--text2);margin-bottom:14px">
+          Define your own merge tags and use them in any <a href="templates.html" style="color:var(--blue)">template</a> as <span class="var-pill">{{variableName}}</span>.
+        </p>
+        <div id="var-rows"></div>
+        <button class="btn btn-sm" style="border-style:dashed;margin-top:4px" onclick="addVarRow()" type="button"><i class="ti ti-plus"></i> Add variable</button>
+      </div>
+
+      <button class="btn btn-primary" onclick="save()"><i class="ti ti-check"></i> Save settings</button>
+      <div id="saved-msg" style="display:none;margin-top:10px;font-size:13px;color:var(--green)"><i class="ti ti-circle-check"></i> Settings saved</div>
+    </div>
+  </div>
+</div>
+<script src="js/app.js"></script>
+<script>
+const nameEl = document.getElementById('s-name');
+const companyEl = document.getElementById('s-company');
+const emailEl = document.getElementById('s-email');
+
+const VARIABLE_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/;
+
+function addVarRow(key = '', value = '') {
+  const div = document.createElement('div');
+  div.className = 'batch-row';
+  div.dataset.row = '';
+  div.innerHTML = `
+    <input type="text" class="v-key" placeholder="variableName" value="${key.replace(/"/g, '&quot;')}" style="flex:1;font-family:monospace">
+    <input type="text" class="v-value" placeholder="Value" value="${value.replace(/"/g, '&quot;')}" style="flex:2">
+    <button class="btn btn-xs" style="color:var(--red);border-color:var(--red-bg)" type="button" onclick="this.closest('[data-row]').remove()"><i class="ti ti-trash"></i></button>
+  `;
+  document.getElementById('var-rows').appendChild(div);
+}
+
+function formatBytes(bytes) {
+  if (!bytes) return '0 B';
+  const units = ['B', 'KB', 'MB'];
+  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  return `${(bytes / Math.pow(1024, i)).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+function renderResume() {
+  const resume = window._app.state.sender.resume;
+  const empty = document.getElementById('resume-empty');
+  const current = document.getElementById('resume-current');
+  if (!resume) {
+    empty.style.display = 'block';
+    current.style.display = 'none';
+    return;
+  }
+  empty.style.display = 'none';
+  current.style.display = 'flex';
+  document.getElementById('resume-name').textContent = resume.filename;
+  document.getElementById('resume-meta').textContent = `${formatBytes(resume.size)} · uploaded ${new Date(resume.uploadedAt).toLocaleDateString()}`;
+  document.getElementById('resume-download').href = `${window._app.API_BASE}/api/settings/resume`;
+}
+
+async function handleResumeUpload(input) {
+  const file = input.files[0];
+  if (!file) return;
+  try {
+    await window._app.uploadResume(file);
+    renderResume();
+    window._app.toast('Resume uploaded.', 'success');
+  } catch (err) {
+    window._app.toast(err.message, 'error');
+  } finally {
+    input.value = '';
+  }
+}
+
+async function removeResume() {
+  if (!confirm('Remove your uploaded resume?')) return;
+  try {
+    await window._app.deleteResume();
+    renderResume();
+    window._app.toast('Resume removed.', 'success');
+  } catch (err) {
+    window._app.toast(err.message, 'error');
+  }
+}
+
+async function load() {
+  window._app.initTheme();
+  window._app.initMobileNav();
+
+  try {
+    await window._app.loadSettings();
+    const { name, company, email, customVariables } = window._app.state.sender;
+    nameEl.value = name === 'Your Name' ? '' : name;
+    companyEl.value = company === 'Your Company' ? '' : company;
+    emailEl.value = email;
+    (customVariables || []).forEach(v => addVarRow(v.key, v.value));
+    renderResume();
+  } catch (err) {
+    window._app.toast('Could not load settings: ' + err.message, 'error');
+  }
+}
+
+async function save() {
+  const reserved = window._app.allVariables().filter(v => !v.custom).map(v => v.key);
+  const customVariables = [];
+  for (const row of document.querySelectorAll('#var-rows [data-row]')) {
+    const key = row.querySelector('.v-key').value.trim();
+    const value = row.querySelector('.v-value').value.trim();
+    if (!key) continue;
+    if (!VARIABLE_KEY_RE.test(key)) {
+      window._app.toast(`Invalid variable name "${key}". Use letters, numbers and underscores, starting with a letter.`, 'error');
+      return;
+    }
+    if (reserved.includes(key)) {
+      window._app.toast(`"${key}" is a built-in variable and can't be reused.`, 'error');
+      return;
+    }
+    customVariables.push({ key, value });
+  }
+
+  try {
+    await window._app.saveSettings({
+      senderName: nameEl.value.trim() || 'Your Name',
+      senderCompany: companyEl.value.trim() || 'Your Company',
+      gmailEmail: emailEl.value.trim(),
+      customVariables,
+    });
+    document.getElementById('saved-msg').style.display = 'block';
+    setTimeout(() => document.getElementById('saved-msg').style.display = 'none', 2500);
+  } catch (err) {
+    window._app.toast('Could not save settings: ' + err.message, 'error');
+  }
+}
+
+load();
+</script>
+</body>
+</html>

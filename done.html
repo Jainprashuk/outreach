@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Outreach — Done!</title>
+<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><i class="ti ti-send"></i></div>
+      <span class="sidebar-logo-text">Outreach</span>
+    </div>
+    <a href="index.html" class="nav-item"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+    <a href="contacts.html" class="nav-item"><i class="ti ti-users"></i> Contacts</a>
+    <a href="templates.html" class="nav-item"><i class="ti ti-file-text"></i> Templates</a>
+    <div class="nav-section-label">Account</div>
+    <a href="settings.html" class="nav-item"><i class="ti ti-settings"></i> Settings</a>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" data-theme-toggle type="button">
+        <span class="tt-icon"><i class="ti ti-sun"></i><i class="ti ti-moon"></i>Appearance</span>
+        <i class="ti ti-chevron-right" style="font-size:12px"></i>
+      </button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" data-mobile-menu-toggle type="button" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+        <h1>All done!</h1>
+      </div>
+      <a href="index.html" class="btn btn-sm"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+    </div>
+
+    <div class="success-screen">
+      <div class="success-icon"><i class="ti ti-circle-check"></i></div>
+      <div class="success-title" id="success-title">Emails sent!</div>
+      <div class="success-sub" id="success-sub">Your outreach batch has been delivered.</div>
+
+      <div class="stat-grid" style="max-width:480px;margin:0 auto 28px" id="result-stats"></div>
+
+      <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <a href="step1.html" class="btn"><i class="ti ti-plus"></i> Add more contacts</a>
+        <a href="step2.html" class="btn" id="review-pending-btn" style="display:none"><i class="ti ti-clock"></i> Review pending</a>
+        <a href="index.html" class="btn btn-primary"><i class="ti ti-layout-dashboard"></i> Back to dashboard</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+<script>
+const result = JSON.parse(sessionStorage.getItem('sendResult') || '{"sent":0,"failed":0,"skipped":0}');
+const failed = result.failed || 0;
+
+document.getElementById('success-title').textContent = failed > 0
+  ? `${result.sent} sent, ${failed} failed`
+  : `${result.sent} email${result.sent !== 1 ? 's' : ''} sent!`;
+
+const subParts = [];
+subParts.push(`${result.sent} email${result.sent !== 1 ? 's' : ''} delivered.`);
+if (failed > 0) subParts.push(`${failed} failed to send.`);
+if (result.skipped > 0) subParts.push(`${result.skipped} contact${result.skipped > 1 ? 's are' : ' is'} still pending approval.`);
+document.getElementById('success-sub').textContent = subParts.join(' ');
+
+async function start() {
+  window._app.initTheme();
+  window._app.initMobileNav();
+
+  let totalSent = result.sent;
+  try {
+    await window._app.loadContacts();
+    totalSent = window._app.getStats().sent;
+  } catch (err) {
+    // fall back to this batch's count if the API is unreachable
+  }
+
+  document.getElementById('result-stats').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Sent this batch</div><div class="stat-value green">${result.sent}</div></div>
+    ${failed > 0 ? `<div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:var(--red)">${failed}</div></div>` : ''}
+    <div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${result.skipped}</div></div>
+    <div class="stat-card"><div class="stat-label">Total ever sent</div><div class="stat-value">${totalSent}</div></div>
+  `;
+}
+
+start();
+
+if (result.skipped > 0) {
+  document.getElementById('review-pending-btn').style.display = 'inline-flex';
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Outreach — Add Contacts</title>
+<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><i class="ti ti-send"></i></div>
+      <span class="sidebar-logo-text">Outreach</span>
+    </div>
+    <a href="index.html" class="nav-item"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+    <a href="contacts.html" class="nav-item"><i class="ti ti-users"></i> Contacts</a>
+    <a href="templates.html" class="nav-item"><i class="ti ti-file-text"></i> Templates</a>
+    <div class="nav-section-label">Account</div>
+    <a href="settings.html" class="nav-item"><i class="ti ti-settings"></i> Settings</a>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" data-theme-toggle type="button">
+        <span class="tt-icon"><i class="ti ti-sun"></i><i class="ti ti-moon"></i>Appearance</span>
+        <i class="ti ti-chevron-right" style="font-size:12px"></i>
+      </button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" data-mobile-menu-toggle type="button" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+        <div>
+          <h1>New entry</h1>
+          <p>Step 1 of 3 — Add contacts</p>
+        </div>
+      </div>
+      <a href="index.html" class="btn btn-sm"><i class="ti ti-x"></i> Cancel</a>
+    </div>
+
+    <!-- STEPPER -->
+    <div class="stepper-bar">
+      <div class="step-item">
+        <div class="step-dot active">1</div>
+        <span class="step-label active">Add contacts</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-item">
+        <div class="step-dot idle">2</div>
+        <span class="step-label idle">Approve templates</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-item">
+        <div class="step-dot idle">3</div>
+        <span class="step-label idle">Send</span>
+      </div>
+    </div>
+
+    <!-- BODY -->
+    <div class="form-body" style="flex:1;overflow-y:auto">
+
+      <!-- UPLOAD ZONE -->
+      <div class="upload-zone" id="upload-zone" ondragover="event.preventDefault()" ondrop="handleDrop(event)">
+        <i class="ti ti-table-import"></i>
+        <div class="uz-title">Drop a CSV or Excel file here</div>
+        <div class="uz-sub">Columns detected: Name, Email, Company, Role</div>
+        <button class="btn btn-sm" style="margin-top:12px" onclick="document.getElementById('file-input').click()">
+          <i class="ti ti-upload"></i> Browse file
+        </button>
+        <input type="file" id="file-input" accept=".csv,.xlsx,.xls" style="display:none" onchange="handleFile(this)">
+      </div>
+      <div style="text-align:center;margin-top:10px">
+        <a href="sample-contacts.csv" download class="btn btn-xs" style="display:inline-flex"><i class="ti ti-download"></i> Download sample CSV</a>
+      </div>
+
+      <div class="divider-or">or enter manually</div>
+
+      <!-- MANUAL ENTRY FORM -->
+      <div id="manual-rows">
+        <!-- rows injected by JS -->
+      </div>
+
+      <button class="btn btn-sm" style="border-style:dashed;margin-top:4px" onclick="addRow()">
+        <i class="ti ti-plus"></i> Add another contact
+      </button>
+
+      <!-- BATCH PREVIEW -->
+      <div id="batch-preview" style="display:none;margin-top:24px">
+        <div class="section-head" style="margin-bottom:10px">
+          <span class="section-title">Contacts in this batch</span>
+          <span class="contact-count-badge" id="batch-count">0</span>
+        </div>
+        <div id="batch-list"></div>
+      </div>
+    </div>
+
+    <div class="step-footer">
+      <a href="index.html" class="btn"><i class="ti ti-arrow-left"></i> Back</a>
+      <button class="btn btn-primary" onclick="goNext()">
+        Next — approve templates <i class="ti ti-arrow-right"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+<script>
+let rowCount = 0;
+let templateOptions = `
+  <option value="intro-v2">Intro v2</option>
+  <option value="follow-up">Follow-up</option>
+  <option value="cold">Cold outreach</option>
+`;
+
+function addRow(prefill = {}) {
+  rowCount++;
+  const id = 'row-' + rowCount;
+  const div = document.createElement('div');
+  div.id = id;
+  div.style.cssText = 'background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:16px;margin-bottom:12px;position:relative';
+  div.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+      <span style="font-size:12px;font-weight:500;color:var(--text2)">Contact ${rowCount}</span>
+      <button class="btn btn-xs" style="color:var(--red);border-color:var(--red-bg)" onclick="removeRow('${id}')"><i class="ti ti-trash"></i></button>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label class="form-label">Full name *</label>
+        <input type="text" class="f-name" placeholder="Rahul Sharma" value="${prefill.name||''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Email *</label>
+        <input type="email" class="f-email" placeholder="rahul@company.com" value="${prefill.email||''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Company</label>
+        <input type="text" class="f-company" placeholder="Acme Inc." value="${prefill.company||''}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Role</label>
+        <input type="text" class="f-role" placeholder="VP of Sales" value="${prefill.role||''}">
+      </div>
+      <div class="form-group full">
+        <label class="form-label">Template</label>
+        <select class="f-template">${templateOptions}</select>
+      </div>
+    </div>
+  `;
+  if (prefill.template) div.querySelector('.f-template').value = prefill.template;
+  document.getElementById('manual-rows').appendChild(div);
+  updateBatchPreview();
+}
+
+function removeRow(id) {
+  document.getElementById(id)?.remove();
+  updateBatchPreview();
+}
+
+function collectRows() {
+  const rows = document.querySelectorAll('#manual-rows > div');
+  return Array.from(rows).map(row => ({
+    name: row.querySelector('.f-name')?.value.trim() || '',
+    email: row.querySelector('.f-email')?.value.trim() || '',
+    company: row.querySelector('.f-company')?.value.trim() || '',
+    role: row.querySelector('.f-role')?.value.trim() || '',
+    template: row.querySelector('.f-template')?.value || 'intro-v2',
+    approvalStatus: 'pending'
+  })).filter(r => r.name && r.email);
+}
+
+function updateBatchPreview() {
+  const rows = collectRows();
+  const section = document.getElementById('batch-preview');
+  const list = document.getElementById('batch-list');
+  const badge = document.getElementById('batch-count');
+  if (rows.length === 0) { section.style.display = 'none'; return; }
+  section.style.display = 'block';
+  badge.textContent = rows.length + ' contact' + (rows.length > 1 ? 's' : '');
+  list.innerHTML = rows.map(r => `
+    <div class="batch-row">
+      ${window._app.avatarEl(r.name)}
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500">${r.name}</div>
+        <div style="font-size:11px;color:var(--text2)">${r.email} · ${r.company}</div>
+      </div>
+      <span style="font-size:11px;color:var(--text2)">${r.template}</span>
+    </div>
+  `).join('');
+}
+
+function handleDrop(e) {
+  e.preventDefault();
+  const file = e.dataTransfer.files[0];
+  if (file) parseCSV(file);
+}
+
+function handleFile(input) {
+  const file = input.files[0];
+  if (file) parseCSV(file);
+}
+
+function parseCSV(file) {
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    const text = e.target.result;
+    const lines = text.split('\n').filter(l => l.trim());
+    const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/"/g,''));
+    const get = (row, ...keys) => {
+      for (const k of keys) {
+        const i = headers.indexOf(k);
+        if (i !== -1) return (row[i]||'').replace(/"/g,'').trim();
+      }
+      return '';
+    };
+    lines.slice(1).forEach(line => {
+      const row = line.split(',');
+      addRow({
+        name: get(row, 'name', 'full name', 'fullname'),
+        email: get(row, 'email', 'email address'),
+        company: get(row, 'company', 'organisation', 'organization'),
+        role: get(row, 'role', 'designation', 'title'),
+      });
+    });
+    document.getElementById('upload-zone').style.background = 'var(--green-bg)';
+    document.getElementById('upload-zone').querySelector('.uz-title').textContent = `${lines.length - 1} contacts imported from ${file.name}`;
+  };
+  reader.readAsText(file);
+}
+
+async function goNext() {
+  const rows = collectRows();
+  if (rows.length === 0) { window._app.toast('Please add at least one contact.', 'error'); return; }
+  try {
+    const created = await window._app.createContacts(rows.map(r => ({
+      name: r.name, email: r.email, company: r.company, role: r.role, template: r.template
+    })));
+    sessionStorage.setItem('batch', JSON.stringify(created));
+    window.location.href = 'step2.html';
+  } catch (err) {
+    window._app.toast('Could not save contacts: ' + err.message, 'error');
+  }
+}
+
+async function init() {
+  window._app.initTheme();
+  window._app.initMobileNav();
+
+  try {
+    await window._app.loadTemplates();
+    const templates = window._app.state.templates;
+    templateOptions = Object.entries(templates).map(([key, tpl]) => `<option value="${key}">${tpl.name}</option>`).join('');
+  } catch (err) {
+    // fall back to the default template options already set above
+  }
+
+  // Init with one empty row
+  addRow();
+
+  // Listen to input changes for live preview
+  document.getElementById('manual-rows').addEventListener('input', updateBatchPreview);
+}
+
+init();
+</script>
+</body>
+</html>

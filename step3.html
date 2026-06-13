@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Outreach — Send</title>
+<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell">
+
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><i class="ti ti-send"></i></div>
+      <span class="sidebar-logo-text">Outreach</span>
+    </div>
+    <a href="index.html" class="nav-item"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+    <a href="contacts.html" class="nav-item"><i class="ti ti-users"></i> Contacts</a>
+    <a href="templates.html" class="nav-item"><i class="ti ti-file-text"></i> Templates</a>
+    <div class="nav-section-label">Account</div>
+    <a href="settings.html" class="nav-item"><i class="ti ti-settings"></i> Settings</a>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" data-theme-toggle type="button">
+        <span class="tt-icon"><i class="ti ti-sun"></i><i class="ti ti-moon"></i>Appearance</span>
+        <i class="ti ti-chevron-right" style="font-size:12px"></i>
+      </button>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" data-mobile-menu-toggle type="button" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+        <div>
+          <h1>New entry</h1>
+          <p>Step 3 of 3 — Send emails</p>
+        </div>
+      </div>
+      <a href="index.html" class="btn btn-sm"><i class="ti ti-x"></i> Cancel</a>
+    </div>
+
+    <div class="stepper-bar">
+      <div class="step-item">
+        <div class="step-dot done"><i class="ti ti-check" style="font-size:12px"></i></div>
+        <span class="step-label idle">Add contacts</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-item">
+        <div class="step-dot done"><i class="ti ti-check" style="font-size:12px"></i></div>
+        <span class="step-label idle">Approve templates</span>
+      </div>
+      <div class="step-line"></div>
+      <div class="step-item">
+        <div class="step-dot active">3</div>
+        <span class="step-label active">Send</span>
+      </div>
+    </div>
+
+    <div class="form-body" style="flex:1;overflow-y:auto">
+
+      <!-- SEND SUMMARY -->
+      <div class="send-summary" id="send-summary">
+        <!-- injected -->
+      </div>
+
+      <!-- GMAIL CREDENTIALS -->
+      <div class="gmail-card" id="gmail-card">
+        <div class="gc-head">
+          <i class="ti ti-brand-gmail gc-icon"></i>
+          <div>
+            <div class="gc-title">Gmail credentials</div>
+            <div class="gc-sub">Used to send emails on your behalf</div>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="form-group">
+            <label class="form-label">Gmail address</label>
+            <input type="email" id="gmail-email" placeholder="yourname@gmail.com">
+          </div>
+          <div class="form-group">
+            <label class="form-label">App password</label>
+            <input type="password" id="gmail-pass" placeholder="xxxx xxxx xxxx xxxx">
+          </div>
+        </div>
+        <div class="gmail-hint"><i class="ti ti-lock" style="font-size:13px"></i> Credentials are used only for this session and never stored</div>
+        <div style="margin-top:10px;font-size:12px;color:var(--blue)">
+          <i class="ti ti-external-link" style="font-size:12px"></i>
+          <a href="https://myaccount.google.com/apppasswords" target="_blank" style="color:var(--blue)">Generate a Gmail App Password →</a>
+        </div>
+      </div>
+
+      <!-- RESUME ATTACHMENT -->
+      <div class="gmail-card" id="resume-card" style="display:none">
+        <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px">
+          <input type="checkbox" id="attach-resume" style="width:16px;height:16px">
+          <span><i class="ti ti-paperclip" style="font-size:14px;color:var(--text2)"></i> Attach my resume (<span id="resume-filename"></span>) to these emails</span>
+        </label>
+      </div>
+
+      <!-- SEND LOG (shown during/after send) -->
+      <div id="send-log" style="display:none">
+        <div style="margin-bottom:12px">
+          <div class="progress-label" id="progress-label">Preparing...</div>
+          <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+        </div>
+        <div id="log-rows" style="border:0.5px solid var(--border);border-radius:var(--radius-lg);overflow:hidden"></div>
+      </div>
+
+    </div>
+
+    <div class="step-footer">
+      <a href="step2.html" class="btn" id="back-btn"><i class="ti ti-arrow-left"></i> Back</a>
+      <button class="btn btn-primary" id="send-btn" onclick="startSend()">
+        <i class="ti ti-send"></i> <span id="send-btn-label">Send emails now</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<script src="js/app.js"></script>
+<script>
+const API_BASE = window._app.API_BASE;
+const approvals = JSON.parse(sessionStorage.getItem('approved') || '[]');
+const approved = approvals.filter(a => a.approvalStatus === 'approved');
+const skipped = approvals.filter(a => a.approvalStatus !== 'approved');
+let sending = false;
+
+function renderSummary() {
+  document.getElementById('send-summary').innerHTML = `
+    <div class="send-row"><span class="label">Total in this batch</span><span>${approvals.length}</span></div>
+    <div class="send-row"><span class="label">Approved and ready</span><span style="color:var(--green);font-weight:500">${approved.length} contacts</span></div>
+    ${skipped.length ? `<div class="send-row"><span class="label">Pending / rejected (will be skipped)</span><span style="color:var(--amber)">${skipped.length}</span></div>` : ''}
+    <div class="send-row"><span>Emails to send</span><span style="color:var(--green);font-weight:600">${approved.length}</span></div>
+  `;
+  document.getElementById('send-btn-label').textContent = `Send ${approved.length} email${approved.length!==1?'s':''} now`;
+}
+
+function emailFor(a) {
+  const { subject, body } = window._app.renderTemplate(a.template, a);
+  return {
+    subject: a.editedSubject || subject,
+    body: a.editedBody || body,
+  };
+}
+
+async function startSend() {
+  if (sending) return;
+  const email = document.getElementById('gmail-email').value.trim();
+  const pass = document.getElementById('gmail-pass').value.trim();
+  if (!email || !pass) { window._app.toast('Please enter your Gmail address and app password.', 'error'); return; }
+  if (approved.length === 0) { window._app.toast('No approved contacts to send to.', 'error'); return; }
+
+  sending = true;
+  document.getElementById('send-btn').disabled = true;
+  document.getElementById('send-btn').innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sending...';
+  document.getElementById('back-btn').style.pointerEvents = 'none';
+  document.getElementById('back-btn').style.opacity = '0.4';
+  document.getElementById('gmail-card').style.opacity = '0.4';
+  document.getElementById('send-log').style.display = 'block';
+
+  const logRows = document.getElementById('log-rows');
+  const fill = document.getElementById('progress-fill');
+  const label = document.getElementById('progress-label');
+
+  // Connect to Gmail via the backend
+  label.textContent = 'Connecting to Gmail...';
+  let configRes;
+  try {
+    configRes = await fetch(`${API_BASE}/api/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, appPassword: pass, name: window._app.state.sender.name })
+    });
+  } catch (err) {
+    resetSendUI();
+    window._app.toast(`Could not reach the backend server at ${API_BASE || window.location.origin}. Make sure it's running ("npm start").`, 'error');
+    return;
+  }
+
+  const configData = await configRes.json();
+  if (!configRes.ok) {
+    resetSendUI();
+    window._app.toast(configData.error || 'Could not connect to Gmail. Check your email and app password.', 'error');
+    return;
+  }
+
+  try {
+    await window._app.saveSettings({ gmailEmail: email });
+  } catch (err) {
+    // non-fatal — sending can continue even if saving the address fails
+  }
+
+  const attachResume = document.getElementById('attach-resume').checked;
+
+  let sent = 0;
+  let failed = 0;
+
+  for (let i = 0; i < approved.length; i++) {
+    const c = approved[i];
+    const { subject, body } = emailFor(c);
+    label.textContent = `Sending ${i + 1} of ${approved.length} — ${c.name}...`;
+    fill.style.width = Math.round((i / approved.length) * 100) + '%';
+
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 14px;border-top:0.5px solid var(--border);font-size:13px;background:var(--bg)';
+    row.innerHTML = `
+      ${window._app.avatarEl(c.name)}
+      <div style="flex:1">
+        <div style="font-weight:500">${c.name}</div>
+        <div style="font-size:11px;color:var(--text2)">${c.email}</div>
+      </div>
+      <span style="font-size:12px;color:var(--amber)"><i class="ti ti-loader" style="animation:spin 1s linear infinite"></i> Sending</span>
+    `;
+    if (i === 0) row.style.borderTop = 'none';
+    logRows.appendChild(row);
+
+    let newStatus;
+    try {
+      const sendRes = await fetch(`${API_BASE}/api/send`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: c.email, subject, body, attachResume })
+      });
+      const sendData = await sendRes.json();
+      if (!sendRes.ok) throw new Error(sendData.error || 'Send failed');
+      sent++;
+      newStatus = 'sent';
+      row.querySelector('span:last-child').innerHTML = `<span style="color:var(--green)"><i class="ti ti-circle-check"></i> Sent</span>`;
+    } catch (err) {
+      failed++;
+      newStatus = 'failed';
+      row.querySelector('span:last-child').innerHTML = `<span style="color:var(--red)" title="${(err.message||'').replace(/"/g,'&quot;')}"><i class="ti ti-circle-x"></i> Failed</span>`;
+    }
+
+    try {
+      await window._app.updateContact(c.id, { status: newStatus });
+    } catch (err) {
+      // non-fatal — the email send result above is what matters most
+    }
+
+    // small delay between sends to avoid hitting Gmail rate limits
+    if (i < approved.length - 1) {
+      await new Promise(r => setTimeout(r, 1200));
+    }
+  }
+
+  fill.style.width = '100%';
+  label.textContent = failed === 0
+    ? `All ${sent} emails sent!`
+    : `${sent} sent, ${failed} failed.`;
+
+  sessionStorage.setItem('sendResult', JSON.stringify({ sent, failed, skipped: skipped.length }));
+  setTimeout(() => window.location.href = 'done.html', 800);
+}
+
+function resetSendUI() {
+  sending = false;
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('send-btn').innerHTML = `<i class="ti ti-send"></i> <span id="send-btn-label">Send ${approved.length} email${approved.length!==1?'s':''} now</span>`;
+  document.getElementById('back-btn').style.pointerEvents = '';
+  document.getElementById('back-btn').style.opacity = '';
+  document.getElementById('gmail-card').style.opacity = '';
+  document.getElementById('send-log').style.display = 'none';
+  document.getElementById('log-rows').innerHTML = '';
+}
+
+async function start() {
+  window._app.initTheme();
+  window._app.initMobileNav();
+
+  if (approvals.length === 0) {
+    document.getElementById('send-summary').innerHTML = '<div class="empty-state"><i class="ti ti-inbox"></i>No contacts from previous step. <a href="step1.html">Start over</a>.</div>';
+    return;
+  }
+
+  try {
+    await Promise.all([window._app.loadTemplates(), window._app.loadSettings()]);
+  } catch (err) {
+    document.getElementById('send-summary').innerHTML = `<div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div>`;
+    return;
+  }
+
+  renderSummary();
+  if (window._app.state.sender.email) document.getElementById('gmail-email').value = window._app.state.sender.email;
+
+  const resume = window._app.state.sender.resume;
+  if (resume) {
+    document.getElementById('resume-filename').textContent = resume.filename;
+    document.getElementById('resume-card').style.display = 'block';
+  }
+}
+
+start();
+</script>
+</body>
+</html>

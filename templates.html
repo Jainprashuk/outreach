@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Outreach — Templates</title>
+<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+.tpl-card{background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);margin-bottom:14px;overflow:hidden;box-shadow:var(--shadow-sm);animation:fadeInUp .35s var(--ease) both;transition:background-color .2s var(--ease),border-color .2s var(--ease)}
+.tpl-card-head{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--bg2);border-bottom:0.5px solid var(--border);gap:10px;transition:background-color .2s var(--ease),border-color .2s var(--ease)}
+.tpl-card-body{padding:16px}
+.tpl-subject{font-size:12px;font-weight:500;color:var(--text2);margin-bottom:4px}
+.tpl-body-text{font-size:13px;color:var(--text);white-space:pre-wrap;line-height:1.7;font-family:var(--font)}
+.tpl-key{font-size:11px;color:var(--text3);font-family:monospace}
+.tpl-head-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.tpl-head-name{font-size:14px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><i class="ti ti-send"></i></div>
+      <span class="sidebar-logo-text">Outreach</span>
+    </div>
+    <a href="index.html" class="nav-item"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+    <a href="contacts.html" class="nav-item"><i class="ti ti-users"></i> Contacts</a>
+    <a href="templates.html" class="nav-item active"><i class="ti ti-file-text"></i> Templates</a>
+    <div class="nav-section-label">Account</div>
+    <a href="settings.html" class="nav-item"><i class="ti ti-settings"></i> Settings</a>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" data-theme-toggle type="button">
+        <span class="tt-icon"><i class="ti ti-sun"></i><i class="ti ti-moon"></i>Appearance</span>
+        <i class="ti ti-chevron-right" style="font-size:12px"></i>
+      </button>
+    </div>
+  </aside>
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" data-mobile-menu-toggle type="button" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+        <div><h1>Templates</h1><p>Manage your email templates</p></div>
+      </div>
+      <button class="btn btn-primary" onclick="openTemplateModal()"><i class="ti ti-plus"></i> New template</button>
+    </div>
+    <div class="section">
+      <div class="info-box" style="margin-bottom:16px;flex-wrap:wrap" id="vars-info">
+        <i class="ti ti-info-circle" style="font-size:15px;flex-shrink:0;margin-top:1px"></i>
+        <div>
+          <div style="margin-bottom:6px">Variables auto-replaced per contact — click <a href="settings.html" style="color:var(--blue)">Settings</a> to add your own.</div>
+          <div id="vars-pills"></div>
+        </div>
+      </div>
+      <div id="tpl-list"></div>
+    </div>
+  </div>
+
+  <!-- TEMPLATE EDITOR MODAL -->
+  <div class="edit-modal-wrap" id="tpl-modal">
+    <div class="edit-modal">
+      <h2 id="tpl-modal-title">New template</h2>
+      <div class="form-group">
+        <label class="form-label">Template name</label>
+        <input type="text" id="tpl-name" placeholder="e.g. Investor outreach">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Subject</label>
+        <input type="text" id="tpl-subject" placeholder="Quick question, {{name}}">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Body</label>
+        <textarea id="tpl-body" style="min-height:180px" placeholder="Hi {{name}}, ..."></textarea>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Insert a variable</label>
+        <div id="tpl-var-pills"></div>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px">
+        <button class="btn" onclick="closeTemplateModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="saveTemplate()"><i class="ti ti-check"></i> Save template</button>
+      </div>
+    </div>
+  </div>
+</div>
+<script src="js/app.js"></script>
+<script>
+let editingKey = null;
+let lastFocusedField = 'tpl-body';
+
+const escapeHtml = (str) => String(str ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
+
+function renderVarPills(containerId, clickable) {
+  const vars = window._app.allVariables();
+  document.getElementById(containerId).innerHTML = vars.map(v =>
+    `<span class="var-pill ${v.custom ? 'custom' : ''} ${clickable ? 'clickable' : ''}" ${clickable ? `onclick="insertVariable('${v.key}')"` : ''} title="${escapeHtml(v.desc || '')}">{{${v.key}}}</span>`
+  ).join(' ');
+}
+
+function insertVariable(key) {
+  const field = document.getElementById(lastFocusedField);
+  const text = `{{${key}}}`;
+  const start = field.selectionStart ?? field.value.length;
+  const end = field.selectionEnd ?? field.value.length;
+  field.value = field.value.slice(0, start) + text + field.value.slice(end);
+  field.focus();
+  field.selectionStart = field.selectionEnd = start + text.length;
+}
+
+function renderTemplates() {
+  const templates = window._app.state.templates;
+  const entries = Object.entries(templates);
+  document.getElementById('tpl-list').innerHTML = entries.length === 0
+    ? '<div class="empty-state"><i class="ti ti-file-text"></i>No templates yet — create your first one.</div>'
+    : entries.map(([key, tpl]) => `
+    <div class="tpl-card">
+      <div class="tpl-card-head">
+        <span class="tpl-head-name">${escapeHtml(tpl.name)}</span>
+        <div class="tpl-head-actions">
+          <span class="tpl-key">${escapeHtml(key)}</span>
+          <button class="btn btn-xs" onclick="openTemplateModal('${key}')" title="Edit"><i class="ti ti-edit"></i></button>
+          <button class="btn btn-xs" style="color:var(--red);border-color:var(--red-bg)" onclick="removeTemplate('${key}')" title="Delete"><i class="ti ti-trash"></i></button>
+        </div>
+      </div>
+      <div class="tpl-card-body">
+        <div class="tpl-subject">Subject: ${escapeHtml(tpl.subject)}</div>
+        <div class="tpl-body-text" style="margin-top:10px">${escapeHtml(tpl.body)}</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function openTemplateModal(key) {
+  editingKey = key || null;
+  document.getElementById('tpl-modal-title').textContent = key ? 'Edit template' : 'New template';
+
+  if (key) {
+    const tpl = window._app.state.templates[key];
+    document.getElementById('tpl-name').value = tpl.name;
+    document.getElementById('tpl-subject').value = tpl.subject;
+    document.getElementById('tpl-body').value = tpl.body;
+  } else {
+    document.getElementById('tpl-name').value = '';
+    document.getElementById('tpl-subject').value = '';
+    document.getElementById('tpl-body').value = '';
+  }
+
+  renderVarPills('tpl-var-pills', true);
+  document.getElementById('tpl-modal').classList.add('open');
+}
+
+function closeTemplateModal() {
+  document.getElementById('tpl-modal').classList.remove('open');
+  editingKey = null;
+}
+
+async function saveTemplate() {
+  const name = document.getElementById('tpl-name').value.trim();
+  const subject = document.getElementById('tpl-subject').value.trim();
+  const body = document.getElementById('tpl-body').value.trim();
+  if (!name || !subject || !body) {
+    window._app.toast('Please fill in the name, subject and body.', 'error');
+    return;
+  }
+
+  try {
+    if (editingKey) {
+      await window._app.updateTemplate(editingKey, { name, subject, body });
+      window._app.toast('Template updated.', 'success');
+    } else {
+      await window._app.createTemplate({ name, subject, body });
+      window._app.toast('Template created.', 'success');
+    }
+    closeTemplateModal();
+    renderTemplates();
+  } catch (err) {
+    window._app.toast(err.message, 'error');
+  }
+}
+
+async function removeTemplate(key) {
+  if (!confirm(`Delete the "${window._app.state.templates[key]?.name || key}" template? This cannot be undone.`)) return;
+  try {
+    await window._app.deleteTemplate(key);
+    window._app.toast('Template deleted.', 'success');
+    renderTemplates();
+  } catch (err) {
+    window._app.toast(err.message, 'error');
+  }
+}
+
+async function start() {
+  window._app.initTheme();
+  window._app.initMobileNav();
+
+  try {
+    await Promise.all([window._app.loadTemplates(), window._app.loadSettings()]);
+  } catch (err) {
+    document.getElementById('tpl-list').innerHTML = `<div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div>`;
+    return;
+  }
+
+  renderVarPills('vars-pills', false);
+  renderTemplates();
+
+  ['tpl-subject', 'tpl-body'].forEach(id => {
+    document.getElementById(id).addEventListener('focus', () => lastFocusedField = id);
+  });
+}
+
+document.getElementById('tpl-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeTemplateModal();
+});
+
+start();
+</script>
+</body>
+</html>

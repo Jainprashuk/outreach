@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Outreach — Dashboard</title>
+<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><i class="ti ti-send"></i></div>
+      <span class="sidebar-logo-text">Outreach</span>
+    </div>
+    <a href="index.html" class="nav-item active"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+    <a href="contacts.html" class="nav-item"><i class="ti ti-users"></i> Contacts</a>
+    <a href="templates.html" class="nav-item"><i class="ti ti-file-text"></i> Templates</a>
+    <div class="nav-section-label">Account</div>
+    <a href="settings.html" class="nav-item"><i class="ti ti-settings"></i> Settings</a>
+    <div class="sidebar-bottom">
+      <div style="font-size:12px;color:var(--text2)">Gmail connected</div>
+      <div style="font-size:11px;color:var(--text3);margin-top:2px" id="sb-email">Not set</div>
+      <button class="theme-toggle" data-theme-toggle type="button">
+        <span class="tt-icon"><i class="ti ti-sun"></i><i class="ti ti-moon"></i>Appearance</span>
+        <i class="ti ti-chevron-right" style="font-size:12px"></i>
+      </button>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" data-mobile-menu-toggle type="button" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+        <div>
+          <h1>Dashboard</h1>
+          <p id="last-run">Loading...</p>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-primary" id="resume-btn" style="display:none" onclick="resumeSending()"><i class="ti ti-player-play"></i> <span id="resume-btn-label">Resume sending</span></button>
+        <a href="step1.html" class="btn btn-primary"><i class="ti ti-plus"></i> New entry</a>
+      </div>
+    </div>
+
+    <!-- STATS -->
+    <div class="stat-grid" id="stats-grid"></div>
+
+    <!-- TABLE SECTION -->
+    <div class="section" style="flex:1">
+      <div class="section-head">
+        <div class="nav-tabs" id="tabs">
+          <div class="nav-tab active" data-tab="all">All</div>
+          <div class="nav-tab" data-tab="sent">Sent</div>
+          <div class="nav-tab" data-tab="pending">Pending approval</div>
+          <div class="nav-tab" data-tab="remaining">Remaining</div>
+        </div>
+        <span class="contact-count-badge" id="count-badge">—</span>
+      </div>
+      <div class="table-card">
+        <table>
+          <thead>
+            <tr>
+              <th>Contact</th>
+              <th>Company</th>
+              <th>Template</th>
+              <th>Status</th>
+              <th>Approval</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="contacts-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script src="js/app.js"></script>
+<script>
+const { getStats, filterContacts, avatarEl, statusBadge, state } = window._app;
+
+function resumeSending() {
+  const resumable = state.contacts.filter(c => c.status === 'queued' && c.approvalStatus === 'approved');
+  if (resumable.length === 0) return;
+  sessionStorage.setItem('approved', JSON.stringify(resumable));
+  window.location.href = 'step3.html';
+}
+
+function render(tab) {
+  const stats = getStats();
+
+  const resumable = state.contacts.filter(c => c.status === 'queued' && c.approvalStatus === 'approved');
+  const resumeBtn = document.getElementById('resume-btn');
+  if (resumable.length > 0) {
+    resumeBtn.style.display = '';
+    document.getElementById('resume-btn-label').textContent = `Resume sending (${resumable.length})`;
+  } else {
+    resumeBtn.style.display = 'none';
+  }
+  const sentPct = stats.total ? Math.round(stats.sent / stats.total * 100) : 0;
+  document.getElementById('stats-grid').innerHTML = `
+    <div class="stat-card"><div class="stat-label">Total contacts</div><div class="stat-value">${stats.total}</div></div>
+    <div class="stat-card"><div class="stat-label">Sent</div><div class="stat-value green">${stats.sent}</div><div class="stat-sub">${sentPct}% of total</div></div>
+    <div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${stats.pending}</div></div>
+    <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value">${stats.remaining}</div></div>
+  `;
+
+  const tplNames = { 'intro-v2': 'Intro v2', 'follow-up': 'Follow-up', 'cold': 'Cold outreach' };
+  const contacts = filterContacts(tab);
+  document.getElementById('count-badge').textContent = contacts.length + ' contacts';
+
+  document.getElementById('contacts-tbody').innerHTML = contacts.map(c => `
+    <tr>
+      <td>
+        <div class="contact-chip">
+          ${avatarEl(c.name)}
+          <div>
+            <div class="name">${c.name}</div>
+            <div class="email">${c.email}</div>
+          </div>
+        </div>
+      </td>
+      <td style="color:var(--text2)">${c.company}</td>
+      <td style="color:var(--text2)">${tplNames[c.template]||c.template}</td>
+      <td>${statusBadge(c.status)}</td>
+      <td>${statusBadge(c.approvalStatus)}</td>
+      <td>
+        ${c.approvalStatus === 'pending'
+          ? `<a href="step2.html" class="btn btn-sm">Review</a>`
+          : `<button class="btn btn-sm" onclick="showDetail('${c.id}')">View</button>`
+        }
+      </td>
+    </tr>
+  `).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-inbox"></i>No contacts here yet</div></td></tr>`;
+}
+
+document.getElementById('tabs').addEventListener('click', e => {
+  const tab = e.target.dataset.tab;
+  if (!tab) return;
+  document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+  window._app.setTab(tab);
+  render(tab);
+});
+
+function showDetail(id) {
+  const c = window._app.state.contacts.find(x => x.id === id);
+  if (!c) return;
+  alert(`Contact: ${c.name}\nEmail: ${c.email}\nCompany: ${c.company}\nStatus: ${c.status}`);
+}
+
+async function start() {
+  window._app.initTheme();
+  window._app.initMobileNav();
+
+  try {
+    await window._app.init();
+  } catch (err) {
+    document.getElementById('contacts-tbody').innerHTML = `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div></td></tr>`;
+  }
+
+  // Last run time
+  document.getElementById('last-run').textContent = 'Last run: ' + new Date().toLocaleDateString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+
+  // Sidebar email
+  if (state.sender.email) document.getElementById('sb-email').textContent = state.sender.email;
+
+  render('all');
+}
+
+start();
+</script>
+</body>
+</html>
