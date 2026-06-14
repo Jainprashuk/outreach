@@ -2,9 +2,11 @@ require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
+const { ImapFlow } = require('imapflow');
 const cors = require('cors');
 const db = require('./db');
 const Settings = require('./models/Settings');
+const Contact = require('./models/Contact');
 
 const app = express();
 app.use(cors());
@@ -26,6 +28,7 @@ app.use('/api/settings', requireDb, require('./routes/settings'));
 // ── Sender state ────────────────────────────────────────────────────────────
 let transporter = null;
 let senderConfig = { email: '', name: 'Prashuk Jain' };
+let senderAppPassword = ''; // retained in memory only, for IMAP bounce checks
 
 const buildTransporter = (email, appPassword) =>
   nodemailer.createTransport({
@@ -40,6 +43,7 @@ if (process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD) {
     email: process.env.GMAIL_EMAIL,
     name: process.env.SENDER_NAME || 'Prashuk Jain'
   };
+  senderAppPassword = process.env.GMAIL_APP_PASSWORD;
 }
 
 // ── Configure Gmail credentials ────────────────────────────────────────────
@@ -55,9 +59,52 @@ app.post('/api/config', (req, res) => {
     }
     transporter = candidate;
     senderConfig = { email, name: name || 'Prashuk Jain' };
+    senderAppPassword = appPassword;
     res.json({ ok: true, message: `Connected as ${email}` });
   });
 });
+
+// Escapes a string for safe use inside a RegExp.
+const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// Parses a raw RFC822 bounce/NDR message source for failed recipients + reasons.
+// Primary: machine-readable DSN fields (Final-Recipient / Diagnostic-Code / Status).
+// Fallback: Gmail's human-readable "wasn't delivered to ... because ..." text.
+const parseBounces = (raw) => {
+  const hits = [];
+  const finalRecipientRe = /Final-Recipient:\s*rfc822;\s*<?([^\s>]+)>?/gi;
+  let match;
+  while ((match = finalRecipientRe.exec(raw)) !== null) {
+    const email = match[1].toLowerCase();
+    const tail = raw.slice(match.index, match.index + 1000);
+    // Diagnostic-Code can be folded across multiple header-continuation lines
+    // (lines starting with whitespace) — capture and join them all.
+    const diagnostic = tail.match(/Diagnostic-Code:\s*(?:smtp|x-[\w-]+);\s*([^\r\n]+(?:\r?\n[ \t]+[^\r\n]+)*)/i);
+    const status = tail.match(/Status:\s*([\d.]+)/i);
+    // Some MTAs (e.g. Gmail's own NoSuchUser message) repeat the SMTP code
+    // ("550-5.1.1", "550 5.1.1") at the start of each continuation-line —
+    // strip those (only on continuation lines, since enhanced status code
+    // subcodes can be multi-digit, e.g. "554 5.4.14") before joining.
+    const reason = diagnostic
+      ? diagnostic[1].split(/\r?\n/).map((line, i) => {
+          const trimmed = line.trim();
+          return i === 0 ? trimmed : trimmed.replace(/^\d{3}[ -]\d+\.\d+\.\d+\s*/, '');
+        }).join(' ').trim()
+      : (status ? `SMTP status ${status[1]}` : 'Unknown bounce reason');
+    hits.push({ email, reason });
+  }
+
+  if (hits.length === 0) {
+    const bodyMatch = raw.match(/wasn'?t delivered to\s+([^\s]+@[^\s]+?)\s+because/i);
+    if (bodyMatch) {
+      const email = bodyMatch[1].replace(/[<>.,]+$/, '').toLowerCase();
+      const reasonMatch = raw.match(/because[:\s]+(.{10,300}?)[\r\n]/i);
+      hits.push({ email, reason: reasonMatch ? reasonMatch[1].trim() : 'Unknown bounce reason' });
+    }
+  }
+
+  return hits;
+};
 
 // Builds a nodemailer attachment for the stored resume, if requested and present.
 const getResumeAttachment = async (attachResume) => {
@@ -127,6 +174,91 @@ app.post('/api/bulk-send', async (req, res) => {
   }
 
   res.json({ ok: true, results });
+});
+
+// ── Check for bounces ───────────────────────────────────────────────────────
+// Scans the sender's Gmail inbox via IMAP for delivery-failure (NDR) messages
+// from the last BOUNCE_LOOKBACK_DAYS, and marks matching contacts as 'bounced'.
+const BOUNCE_LOOKBACK_DAYS = 7;
+
+app.post('/api/check-bounces', requireDb, async (req, res) => {
+  if (!senderConfig.email || !senderAppPassword) {
+    return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+  }
+
+  const client = new ImapFlow({
+    host: 'imap.gmail.com',
+    port: 993,
+    secure: true,
+    auth: { user: senderConfig.email, pass: senderAppPassword },
+    logger: false,
+  });
+
+  let scanned = 0;
+  const bounced = [];
+  const since = new Date(Date.now() - BOUNCE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+
+  // Scans a single mailbox for NDR messages, updating `scanned`/`bounced`.
+  // Skips silently if the mailbox can't be opened (e.g. doesn't exist).
+  const scanMailbox = async (mailbox) => {
+    let lock;
+    try {
+      lock = await client.getMailboxLock(mailbox);
+    } catch (err) {
+      return;
+    }
+    try {
+      // Union of several search strategies: Gmail's HEADER search for
+      // "multipart/report" misses some genuine DSNs (e.g. Office 365/Exchange
+      // bounces forwarded via postmaster@<recipient-domain>), so also catch
+      // messages from mailer-daemon (Gmail's own NDRs) or any postmaster@.
+      const [reportUids, daemonUids, postmasterUids] = await Promise.all([
+        client.search({ since, header: { 'content-type': 'multipart/report' } }, { uid: true }),
+        client.search({ since, from: 'mailer-daemon' }, { uid: true }),
+        client.search({ since, from: 'postmaster' }, { uid: true }),
+      ]);
+      const uids = [...new Set([...reportUids, ...daemonUids, ...postmasterUids])];
+      scanned += uids.length;
+
+      for (const uid of uids) {
+        const msg = await client.fetchOne(uid, { source: true }, { uid: true });
+        if (!msg || !msg.source) continue;
+        const hits = parseBounces(msg.source.toString('utf8'));
+
+        for (const { email, reason } of hits) {
+          const existing = await Contact.findOne({ email: new RegExp(`^${escapeRegExp(email)}$`, 'i') });
+          if (!existing) continue;
+
+          if (existing.status !== 'bounced') {
+            existing.status = 'bounced';
+            existing.bounceReason = reason;
+            await existing.save();
+            bounced.push({ email: existing.email, name: existing.name, reason });
+          } else if (reason !== existing.bounceReason && reason.length > (existing.bounceReason || '').length) {
+            // Reprocessing the same bounce message with an improved parser can
+            // recover a more complete reason than what was stored previously.
+            existing.bounceReason = reason;
+            await existing.save();
+          }
+        }
+      }
+    } finally {
+      lock.release();
+    }
+  };
+
+  try {
+    await client.connect();
+    for (const mailbox of ['INBOX', '[Gmail]/Spam']) {
+      await scanMailbox(mailbox);
+    }
+  } catch (err) {
+    return res.status(500).json({ error: 'IMAP check failed', detail: err.message });
+  } finally {
+    try { await client.logout(); } catch (_) { /* ignore */ }
+  }
+
+  res.json({ ok: true, scanned, bounced });
 });
 
 // ── Status ──────────────────────────────────────────────────────────────────

@@ -12,6 +12,7 @@ const App = (() => {
   const getStats = () => ({
     total: state.contacts.length,
     sent: state.contacts.filter(c => c.status === 'sent').length,
+    bounced: state.contacts.filter(c => c.status === 'bounced').length,
     pending: state.contacts.filter(c => c.approvalStatus === 'pending').length,
     remaining: state.contacts.filter(c => c.status === 'queued').length
   });
@@ -34,8 +35,8 @@ const App = (() => {
   };
 
   const statusBadge = (status) => {
-    const map = { sent: 'badge-sent', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected' };
-    const labels = { sent: 'Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected' };
+    const map = { sent: 'badge-sent', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced' };
+    const labels = { sent: 'Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced' };
     return `<span class="badge ${map[status] || 'badge-queued'}">${labels[status] || status}</span>`;
   };
 
@@ -44,6 +45,7 @@ const App = (() => {
     if (tab === 'pending') return state.contacts.filter(c => c.approvalStatus === 'pending');
     if (tab === 'sent') return state.contacts.filter(c => c.status === 'sent');
     if (tab === 'remaining') return state.contacts.filter(c => c.status === 'queued');
+    if (tab === 'bounced') return state.contacts.filter(c => c.status === 'bounced');
     return state.contacts;
   };
 
@@ -219,6 +221,12 @@ const App = (() => {
       const idx = state.contacts.findIndex(c => c.id === id);
       if (idx !== -1) state.contacts[idx] = updated;
       return updated;
+    },
+
+    async checkBounces() {
+      const result = await apiFetch('/api/check-bounces', { method: 'POST' });
+      await loadContacts();
+      return result;
     },
 
     async saveSettings(patch) {

@@ -45,6 +45,7 @@
       </div>
       <div style="display:flex;gap:10px">
         <button class="btn btn-primary" id="resume-btn" style="display:none" onclick="resumeSending()"><i class="ti ti-player-play"></i> <span id="resume-btn-label">Resume sending</span></button>
+        <button class="btn" id="check-bounces-btn" onclick="checkBounces()"><i class="ti ti-mail-search"></i> <span id="check-bounces-label">Check for bounces</span></button>
         <a href="step1.html" class="btn btn-primary"><i class="ti ti-plus"></i> New entry</a>
       </div>
     </div>
@@ -60,8 +61,29 @@
           <div class="nav-tab" data-tab="sent">Sent</div>
           <div class="nav-tab" data-tab="pending">Pending approval</div>
           <div class="nav-tab" data-tab="remaining">Remaining</div>
+          <div class="nav-tab" data-tab="bounced">Bounced</div>
         </div>
         <span class="contact-count-badge" id="count-badge">—</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+        <input type="text" id="search" placeholder="Search name, email or company..." style="flex:1;min-width:200px;max-width:320px">
+        <select id="filter-status" style="width:auto;min-width:140px">
+          <option value="">All statuses</option>
+          <option value="queued">Queued</option>
+          <option value="sent">Sent</option>
+          <option value="failed">Failed</option>
+          <option value="bounced">Bounced</option>
+        </select>
+        <select id="filter-approval" style="width:auto;min-width:140px">
+          <option value="">All approvals</option>
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <select id="filter-template" style="width:auto;min-width:140px">
+          <option value="">All templates</option>
+        </select>
+        <button class="btn btn-sm" id="clear-filters-btn" type="button">Clear filters</button>
       </div>
       <div class="table-card">
         <table>
@@ -94,6 +116,30 @@ function resumeSending() {
   window.location.href = 'step3.html';
 }
 
+async function checkBounces() {
+  const btn = document.getElementById('check-bounces-btn');
+  const label = document.getElementById('check-bounces-label');
+  const original = label.textContent;
+  btn.disabled = true;
+  label.textContent = 'Checking...';
+
+  try {
+    const result = await window._app.checkBounces();
+    if (!result.bounced || result.bounced.length === 0) {
+      window._app.toast(`Scanned ${result.scanned} message${result.scanned !== 1 ? 's' : ''} — no new bounces found.`, 'info');
+    } else {
+      const names = result.bounced.map(b => b.name).join(', ');
+      window._app.toast(`Found ${result.bounced.length} bounce${result.bounced.length !== 1 ? 's' : ''}: ${names}`, 'error');
+    }
+    render(activeTab());
+  } catch (err) {
+    window._app.toast(err.message, 'error');
+  } finally {
+    btn.disabled = false;
+    label.textContent = original;
+  }
+}
+
 function render(tab) {
   const stats = getStats();
 
@@ -109,12 +155,26 @@ function render(tab) {
   document.getElementById('stats-grid').innerHTML = `
     <div class="stat-card"><div class="stat-label">Total contacts</div><div class="stat-value">${stats.total}</div></div>
     <div class="stat-card"><div class="stat-label">Sent</div><div class="stat-value green">${stats.sent}</div><div class="stat-sub">${sentPct}% of total</div></div>
+    <div class="stat-card"><div class="stat-label">Bounced</div><div class="stat-value red">${stats.bounced}</div></div>
     <div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${stats.pending}</div></div>
     <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value">${stats.remaining}</div></div>
   `;
 
   const tplNames = { 'intro-v2': 'Intro v2', 'follow-up': 'Follow-up', 'cold': 'Cold outreach' };
-  const contacts = filterContacts(tab);
+  let contacts = filterContacts(tab);
+
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  if (q) contacts = contacts.filter(c => (c.name + c.email + c.company).toLowerCase().includes(q));
+
+  const statusFilter = document.getElementById('filter-status').value;
+  if (statusFilter) contacts = contacts.filter(c => c.status === statusFilter);
+
+  const approvalFilter = document.getElementById('filter-approval').value;
+  if (approvalFilter) contacts = contacts.filter(c => c.approvalStatus === approvalFilter);
+
+  const templateFilter = document.getElementById('filter-template').value;
+  if (templateFilter) contacts = contacts.filter(c => c.template === templateFilter);
+
   document.getElementById('count-badge').textContent = contacts.length + ' contacts';
 
   document.getElementById('contacts-tbody').innerHTML = contacts.map(c => `
@@ -150,10 +210,38 @@ document.getElementById('tabs').addEventListener('click', e => {
   render(tab);
 });
 
+function activeTab() {
+  return document.querySelector('.nav-tab.active')?.dataset.tab || 'all';
+}
+
+function populateTemplateFilter() {
+  const tplNames = { 'intro-v2': 'Intro v2', 'follow-up': 'Follow-up', 'cold': 'Cold outreach' };
+  const select = document.getElementById('filter-template');
+  Object.keys(state.templates).forEach(key => {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = tplNames[key] || state.templates[key].name || key;
+    select.appendChild(opt);
+  });
+}
+
+['search'].forEach(id => document.getElementById(id).addEventListener('input', () => render(activeTab())));
+['filter-status', 'filter-approval', 'filter-template'].forEach(id => document.getElementById(id).addEventListener('change', () => render(activeTab())));
+
+document.getElementById('clear-filters-btn').addEventListener('click', () => {
+  document.getElementById('search').value = '';
+  document.getElementById('filter-status').value = '';
+  document.getElementById('filter-approval').value = '';
+  document.getElementById('filter-template').value = '';
+  render(activeTab());
+});
+
 function showDetail(id) {
   const c = window._app.state.contacts.find(x => x.id === id);
   if (!c) return;
-  alert(`Contact: ${c.name}\nEmail: ${c.email}\nCompany: ${c.company}\nStatus: ${c.status}`);
+  let msg = `Contact: ${c.name}\nEmail: ${c.email}\nCompany: ${c.company}\nStatus: ${c.status}`;
+  if (c.status === 'bounced' && c.bounceReason) msg += `\nBounce reason: ${c.bounceReason}`;
+  alert(msg);
 }
 
 async function start() {
@@ -172,6 +260,7 @@ async function start() {
   // Sidebar email
   if (state.sender.email) document.getElementById('sb-email').textContent = state.sender.email;
 
+  populateTemplateFilter();
   render('all');
 }
 
