@@ -44,7 +44,7 @@ router.post('/', async (req, res) => {
 
 // PATCH /api/contacts/:id — update approval/send status or edited content
 router.patch('/:id', async (req, res) => {
-  const allowed = ['approvalStatus', 'status', 'editedSubject', 'editedBody', 'template'];
+  const allowed = ['approvalStatus', 'status', 'editedSubject', 'editedBody', 'template', 'messageId', 'sentSubject', 'repliedAt', 'replySnippet'];
   const update = {};
   for (const key of allowed) {
     if (key in req.body) update[key] = req.body[key];

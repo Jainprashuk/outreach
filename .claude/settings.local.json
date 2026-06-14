@@ -22,7 +22,11 @@
       "Bash(lsof -ti:3000)",
       "Bash(xargs ps -o pid,ppid,command -p)",
       "Bash(kill 38952)",
-      "Bash(node server.js)"
+      "Bash(node server.js)",
+      "Bash(curl -s -m 5 http://localhost:3000/api/status)",
+      "Bash(node /Users/prashukjain/Desktop/outreach/debug-imap-reply.js)",
+      "Bash(node /Users/prashukjain/Desktop/outreach/server.js)",
+      "WebSearch"
     ]
   }
 }

@@ -3,6 +3,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const nodemailer = require('nodemailer');
 const { ImapFlow } = require('imapflow');
+const { simpleParser } = require('mailparser');
 const cors = require('cors');
 const db = require('./db');
 const Settings = require('./models/Settings');
@@ -106,6 +107,74 @@ const parseBounces = (raw) => {
   return hits;
 };
 
+// Builds a short preview of a reply's body, stopping at the first quoted-reply
+// marker (">" lines, "On ... wrote:", or "--- Original Message ---").
+const REPLY_SNIPPET_MAX_LEN = 400;
+
+const buildSnippet = (text) => {
+  if (!text) return null;
+  const lines = text.replace(/<[^>]+>/g, ' ').split(/\r?\n/);
+  const kept = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('>')) break;
+    if (/^on .+wrote:$/i.test(trimmed)) break;
+    if (/^-{2,}\s*original message\s*-{2,}$/i.test(trimmed)) break;
+    kept.push(line);
+  }
+  let snippet = kept.join('\n').trim();
+  if (!snippet) return null;
+  if (snippet.length > REPLY_SNIPPET_MAX_LEN) {
+    snippet = snippet.slice(0, REPLY_SNIPPET_MAX_LEN).trim() + '…';
+  }
+  return snippet;
+};
+
+// Checks whether a raw message is a reply to one of our outreach emails, and if
+// so marks the matching contact as 'replied'. Two matching strategies:
+//  - Strong: the message's In-Reply-To/References references a Message-ID we
+//    stored when sending (works for emails sent after this feature shipped).
+//  - Fallback heuristic: From == contact's email, Subject starts with "Re:",
+//    and the message arrived after we sent to them (for older sends with no
+//    stored Message-ID).
+const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
+  const parsed = await simpleParser(raw);
+
+  const fromAddr = (parsed.from?.value?.[0]?.address || '').toLowerCase();
+  if (!fromAddr || /mailer-daemon|postmaster/i.test(fromAddr)) return;
+
+  const refTokens = [
+    parsed.inReplyTo,
+    ...(Array.isArray(parsed.references) ? parsed.references : (parsed.references ? [parsed.references] : [])),
+  ].filter(Boolean).map(t => t.replace(/^<|>$/g, ''));
+
+  let contact = null;
+  for (const token of refTokens) {
+    if (byMessageId.has(token)) { contact = byMessageId.get(token); break; }
+  }
+
+  if (!contact) {
+    const subject = (parsed.subject || '').trim();
+    // Match plain replies ("Re: ...") as well as common auto-responder
+    // prefixes (Outlook/Exchange "Automatic reply:", "Out of Office:", etc.)
+    // — these often carry useful info (e.g. "no longer employed, contact X").
+    if (/^(re|automatic reply|auto-?reply|out[ -]of[ -]office)\s*:/i.test(subject)) {
+      const candidate = byEmail.get(fromAddr);
+      if (candidate && !candidate.messageId && parsed.date && parsed.date > candidate.updatedAt) {
+        contact = candidate;
+      }
+    }
+  }
+
+  if (!contact || contact.status === 'replied') return;
+
+  contact.status = 'replied';
+  contact.repliedAt = parsed.date || new Date();
+  contact.replySnippet = buildSnippet(parsed.text || parsed.html || '');
+  await contact.save();
+  replied.push({ email: contact.email, name: contact.name, repliedAt: contact.repliedAt, snippet: contact.replySnippet });
+};
+
 // Builds a nodemailer attachment for the stored resume, if requested and present.
 const getResumeAttachment = async (attachResume) => {
   if (!attachResume) return undefined;
@@ -127,14 +196,14 @@ app.post('/api/send', async (req, res) => {
 
   try {
     const attachments = await getResumeAttachment(attachResume);
-    await transporter.sendMail({
+    const info = await transporter.sendMail({
       from: `"${senderConfig.name}" <${senderConfig.email}>`,
       to,
       subject,
       text: body,
       ...(attachments ? { attachments } : {}),
     });
-    res.json({ ok: true });
+    res.json({ ok: true, messageId: info.messageId || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -176,12 +245,14 @@ app.post('/api/bulk-send', async (req, res) => {
   res.json({ ok: true, results });
 });
 
-// ── Check for bounces ───────────────────────────────────────────────────────
-// Scans the sender's Gmail inbox via IMAP for delivery-failure (NDR) messages
-// from the last BOUNCE_LOOKBACK_DAYS, and marks matching contacts as 'bounced'.
+// ── Check mailbox for bounces & replies ────────────────────────────────────
+// Scans the sender's Gmail INBOX + Spam via IMAP for delivery-failure (NDR)
+// messages (marking contacts 'bounced') and for replies to outreach emails
+// (marking contacts 'replied').
 const BOUNCE_LOOKBACK_DAYS = 7;
+const REPLY_LOOKBACK_DAYS = 30;
 
-app.post('/api/check-bounces', requireDb, async (req, res) => {
+app.post('/api/check-mailbox', requireDb, async (req, res) => {
   if (!senderConfig.email || !senderAppPassword) {
     return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
   }
@@ -196,10 +267,23 @@ app.post('/api/check-bounces', requireDb, async (req, res) => {
 
   let scanned = 0;
   const bounced = [];
-  const since = new Date(Date.now() - BOUNCE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const replied = [];
+  const bounceSince = new Date(Date.now() - BOUNCE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const replySince = new Date(Date.now() - REPLY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
-  // Scans a single mailbox for NDR messages, updating `scanned`/`bounced`.
-  // Skips silently if the mailbox can't be opened (e.g. doesn't exist).
+  // Candidate contacts for reply-matching: only contacts we've sent to and
+  // haven't already heard back from (or had bounce) are still "awaiting reply".
+  const sentContacts = await Contact.find({ status: 'sent' });
+  const byEmail = new Map();
+  const byMessageId = new Map();
+  for (const c of sentContacts) {
+    byEmail.set(c.email.toLowerCase(), c);
+    if (c.messageId) byMessageId.set(c.messageId.replace(/^<|>$/g, ''), c);
+  }
+
+  // Scans a single mailbox for NDR messages and replies, updating
+  // `scanned`/`bounced`/`replied`. Skips silently if the mailbox can't be
+  // opened (e.g. doesn't exist).
   const scanMailbox = async (mailbox) => {
     let lock;
     try {
@@ -212,35 +296,42 @@ app.post('/api/check-bounces', requireDb, async (req, res) => {
       // "multipart/report" misses some genuine DSNs (e.g. Office 365/Exchange
       // bounces forwarded via postmaster@<recipient-domain>), so also catch
       // messages from mailer-daemon (Gmail's own NDRs) or any postmaster@.
-      const [reportUids, daemonUids, postmasterUids] = await Promise.all([
-        client.search({ since, header: { 'content-type': 'multipart/report' } }, { uid: true }),
-        client.search({ since, from: 'mailer-daemon' }, { uid: true }),
-        client.search({ since, from: 'postmaster' }, { uid: true }),
+      const [reportUids, daemonUids, postmasterUids, replyUids] = await Promise.all([
+        client.search({ since: bounceSince, header: { 'content-type': 'multipart/report' } }, { uid: true }),
+        client.search({ since: bounceSince, from: 'mailer-daemon' }, { uid: true }),
+        client.search({ since: bounceSince, from: 'postmaster' }, { uid: true }),
+        client.search({ since: replySince }, { uid: true }),
       ]);
-      const uids = [...new Set([...reportUids, ...daemonUids, ...postmasterUids])];
+      const uids = [...new Set([...reportUids, ...daemonUids, ...postmasterUids, ...replyUids])];
       scanned += uids.length;
 
       for (const uid of uids) {
         const msg = await client.fetchOne(uid, { source: true }, { uid: true });
         if (!msg || !msg.source) continue;
-        const hits = parseBounces(msg.source.toString('utf8'));
+        const raw = msg.source.toString('utf8');
+        const hits = parseBounces(raw);
 
-        for (const { email, reason } of hits) {
-          const existing = await Contact.findOne({ email: new RegExp(`^${escapeRegExp(email)}$`, 'i') });
-          if (!existing) continue;
+        if (hits.length > 0) {
+          for (const { email, reason } of hits) {
+            const existing = await Contact.findOne({ email: new RegExp(`^${escapeRegExp(email)}$`, 'i') });
+            if (!existing) continue;
 
-          if (existing.status !== 'bounced') {
-            existing.status = 'bounced';
-            existing.bounceReason = reason;
-            await existing.save();
-            bounced.push({ email: existing.email, name: existing.name, reason });
-          } else if (reason !== existing.bounceReason && reason.length > (existing.bounceReason || '').length) {
-            // Reprocessing the same bounce message with an improved parser can
-            // recover a more complete reason than what was stored previously.
-            existing.bounceReason = reason;
-            await existing.save();
+            if (existing.status !== 'bounced') {
+              existing.status = 'bounced';
+              existing.bounceReason = reason;
+              await existing.save();
+              bounced.push({ email: existing.email, name: existing.name, reason });
+            } else if (reason !== existing.bounceReason && reason.length > (existing.bounceReason || '').length) {
+              // Reprocessing the same bounce message with an improved parser can
+              // recover a more complete reason than what was stored previously.
+              existing.bounceReason = reason;
+              await existing.save();
+            }
           }
+          continue; // a DSN is never also a human reply
         }
+
+        await tryMatchReply(raw, byMessageId, byEmail, replied);
       }
     } finally {
       lock.release();
@@ -258,7 +349,7 @@ app.post('/api/check-bounces', requireDb, async (req, res) => {
     try { await client.logout(); } catch (_) { /* ignore */ }
   }
 
-  res.json({ ok: true, scanned, bounced });
+  res.json({ ok: true, scanned, bounced, replied });
 });
 
 // ── Status ──────────────────────────────────────────────────────────────────

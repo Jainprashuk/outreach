@@ -261,6 +261,7 @@ body {
 .stat-value.green { color: var(--green); }
 .stat-value.amber { color: var(--amber); }
 .stat-value.red { color: var(--red); }
+.stat-value.teal { color: var(--teal); }
 .stat-sub { font-size: 11px; color: var(--text3); margin-top: 3px; }
 
 /* ── SECTION ── */
@@ -309,6 +310,7 @@ tbody tr:hover { background: var(--bg2); }
 .badge-rejected { background: var(--red-bg); color: var(--red); }
 .badge-approved { background: var(--green-bg); color: var(--green); }
 .badge-bounced { background: var(--red-bg); color: var(--red); }
+.badge-replied { background: var(--teal-bg); color: var(--teal); }
 
 /* ── AVATAR ── */
 .avatar {

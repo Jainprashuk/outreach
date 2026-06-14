@@ -218,13 +218,14 @@ async function startSend() {
     logRows.appendChild(row);
 
     let newStatus;
+    let sendData = null;
     try {
       const sendRes = await fetch(`${API_BASE}/api/send`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ to: c.email, subject, body, attachResume })
       });
-      const sendData = await sendRes.json();
+      sendData = await sendRes.json();
       if (!sendRes.ok) throw new Error(sendData.error || 'Send failed');
       sent++;
       newStatus = 'sent';
@@ -236,7 +237,12 @@ async function startSend() {
     }
 
     try {
-      await window._app.updateContact(c.id, { status: newStatus });
+      const patch = { status: newStatus };
+      if (newStatus === 'sent' && sendData) {
+        patch.messageId = sendData.messageId || null;
+        patch.sentSubject = subject;
+      }
+      await window._app.updateContact(c.id, patch);
     } catch (err) {
       // non-fatal — the email send result above is what matters most
     }

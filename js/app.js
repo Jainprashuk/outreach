@@ -13,6 +13,7 @@ const App = (() => {
     total: state.contacts.length,
     sent: state.contacts.filter(c => c.status === 'sent').length,
     bounced: state.contacts.filter(c => c.status === 'bounced').length,
+    replied: state.contacts.filter(c => c.status === 'replied').length,
     pending: state.contacts.filter(c => c.approvalStatus === 'pending').length,
     remaining: state.contacts.filter(c => c.status === 'queued').length
   });
@@ -35,8 +36,8 @@ const App = (() => {
   };
 
   const statusBadge = (status) => {
-    const map = { sent: 'badge-sent', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced' };
-    const labels = { sent: 'Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced' };
+    const map = { sent: 'badge-sent', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied' };
+    const labels = { sent: 'Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied' };
     return `<span class="badge ${map[status] || 'badge-queued'}">${labels[status] || status}</span>`;
   };
 
@@ -46,6 +47,7 @@ const App = (() => {
     if (tab === 'sent') return state.contacts.filter(c => c.status === 'sent');
     if (tab === 'remaining') return state.contacts.filter(c => c.status === 'queued');
     if (tab === 'bounced') return state.contacts.filter(c => c.status === 'bounced');
+    if (tab === 'replied') return state.contacts.filter(c => c.status === 'replied');
     return state.contacts;
   };
 
@@ -223,8 +225,8 @@ const App = (() => {
       return updated;
     },
 
-    async checkBounces() {
-      const result = await apiFetch('/api/check-bounces', { method: 'POST' });
+    async checkMailbox() {
+      const result = await apiFetch('/api/check-mailbox', { method: 'POST' });
       await loadContacts();
       return result;
     },
