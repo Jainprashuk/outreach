@@ -183,18 +183,19 @@ async function goNext() {
   const approved = approvals.filter(a => a.approvalStatus === 'approved');
   if (approved.length === 0) { window._app.toast('Please approve at least one contact.', 'error'); return; }
 
-  try {
-    await Promise.all(approvals
-      .filter(a => a.approvalStatus !== 'pending')
-      .map(a => window._app.updateContact(a.id, {
+  const toUpdate = approvals.filter(a => a.approvalStatus !== 'pending');
+  if (toUpdate.length > 0) {
+    try {
+      await window._app.bulkUpdateContacts(toUpdate.map(a => ({
+        id: a.id,
         approvalStatus: a.approvalStatus,
-        editedSubject: a.editedSubject,
-        editedBody: a.editedBody,
-      }))
-    );
-  } catch (err) {
-    window._app.toast('Could not save approvals: ' + err.message, 'error');
-    return;
+        editedSubject: a.editedSubject || null,
+        editedBody: a.editedBody || null,
+      })));
+    } catch (err) {
+      window._app.toast('Could not save approvals: ' + err.message, 'error');
+      return;
+    }
   }
 
   sessionStorage.setItem('approved', JSON.stringify(approvals));

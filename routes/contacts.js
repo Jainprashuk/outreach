@@ -88,6 +88,28 @@ router.post('/', async (req, res) => {
   }
 });
 
+// PATCH /api/contacts — bulk update (array of {id, ...fields})
+router.patch('/', async (req, res) => {
+  try {
+    const updates = req.body;
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.status(400).json({ error: 'Expected non-empty array of updates' });
+    }
+    const allowed = new Set(['approvalStatus', 'status', 'editedSubject', 'editedBody', 'template', 'messageId', 'sentSubject', 'repliedAt', 'replySnippet', 'replyRead']);
+    const ops = updates.map(({ id, ...rest }) => {
+      const patch = {};
+      for (const key of Object.keys(rest)) {
+        if (allowed.has(key)) patch[key] = rest[key];
+      }
+      return { updateOne: { filter: { _id: id }, update: { $set: patch } } };
+    });
+    await Contact.bulkWrite(ops, { ordered: false });
+    res.json({ ok: true, count: ops.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/contacts/:id
 router.patch('/:id', async (req, res) => {
   try {

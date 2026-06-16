@@ -362,6 +362,11 @@ const App = (() => {
       return updated;
     },
 
+    // Bulk-update N contacts in a single request using bulkWrite on the server.
+    async bulkUpdateContacts(updates) {
+      return apiFetch('/api/contacts', { method: 'PATCH', body: JSON.stringify(updates) });
+    },
+
     async checkMailbox() {
       const result = await apiFetch('/api/check-mailbox', { method: 'POST' });
       await loadContacts();
