@@ -45,6 +45,7 @@
       </div>
       <div style="display:flex;gap:10px">
         <button class="btn btn-primary" id="resume-btn" style="display:none" onclick="resumeSending()"><i class="ti ti-player-play"></i> <span id="resume-btn-label">Resume sending</span></button>
+        <button class="btn" id="retry-failed-btn" style="display:none" onclick="retryFailed()"><i class="ti ti-refresh"></i> <span id="retry-failed-label">Retry failed</span></button>
         <button class="btn" id="check-mailbox-btn" onclick="checkMailbox()"><i class="ti ti-mail-search"></i> <span id="check-mailbox-label">Check for bounces & replies</span></button>
         <a href="step1.html" class="btn btn-primary"><i class="ti ti-plus"></i> New entry</a>
       </div>
@@ -136,6 +137,34 @@ function resumeSending() {
   window.location.href = 'step3.html';
 }
 
+async function retryFailed() {
+  const btn = document.getElementById('retry-failed-btn');
+  const restore = window._app.btnLoad(btn, 'Retrying…');
+  try {
+    const jobRes = await fetch(`${window._app.API_BASE}/api/jobs/latest`);
+    if (!jobRes.ok) throw new Error('Could not find the last job');
+    const job = await jobRes.json();
+    if (!job) throw new Error('No job found');
+
+    const res = await fetch(`${window._app.API_BASE}/api/jobs/${job.id}/retry-failed`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Retry failed');
+    if (data.retried === 0) { window._app.toast('No failed emails to retry.', 'info'); restore(); return; }
+
+    localStorage.setItem('activeJobId', job.id);
+    window._app._sjwStart(job.id);
+    restore();
+    window._app.toast(`Retrying ${data.retried} emails in background…`, 'success');
+
+    // Refresh contacts so the failed count updates
+    await window._app.loadContacts();
+    render(activeTab());
+  } catch (err) {
+    window._app.toast(err.message, 'error');
+    restore();
+  }
+}
+
 function updateLastCheckedDisplay() {
   const d = state.sender.lastMailboxCheckAt;
   const el = document.getElementById('last-run');
@@ -210,6 +239,15 @@ function render(tab) {
     document.getElementById('resume-btn-label').textContent = `Resume sending (${resumable.length})`;
   } else {
     resumeBtn.style.display = 'none';
+  }
+
+  const failedCount = state.contacts.filter(c => c.status === 'failed').length;
+  const retryBtn = document.getElementById('retry-failed-btn');
+  if (failedCount > 0) {
+    retryBtn.style.display = '';
+    document.getElementById('retry-failed-label').textContent = `Retry failed (${failedCount})`;
+  } else {
+    retryBtn.style.display = 'none';
   }
   const sentPct = stats.total ? Math.round(stats.sent / stats.total * 100) : 0;
   document.getElementById('stats-grid').innerHTML = `
