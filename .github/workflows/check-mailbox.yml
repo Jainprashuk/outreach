@@ -1,8 +1,9 @@
 name: Auto check mailbox
 
 on:
+  workflow_dispatch:   # allows manual trigger from GitHub Actions tab
   schedule:
-    - cron: '*/2 * * * *'   # every 30 minutes, 24/7
+    - cron: '*/5 * * * *'   # every 5 min for testing (change to */30 for production)
 
 jobs:
   check:
