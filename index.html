@@ -136,6 +136,36 @@ function resumeSending() {
   window.location.href = 'step3.html';
 }
 
+function updateLastCheckedDisplay() {
+  const d = state.sender.lastMailboxCheckAt;
+  const el = document.getElementById('last-run');
+  if (!d) { el.textContent = 'Mailbox not checked yet'; return; }
+  const mins = Math.round((Date.now() - d) / 60000);
+  el.textContent = mins < 1 ? 'Last checked: just now'
+    : mins < 60 ? `Last checked: ${mins}m ago`
+    : `Last checked: ${Math.round(mins / 60)}h ago`;
+}
+
+let silentChecking = false;
+
+async function silentCheckMailbox() {
+  if (silentChecking) return;
+  silentChecking = true;
+  try {
+    const result = await window._app.checkMailbox();
+    state.sender.lastMailboxCheckAt = result.lastCheckedAt ? new Date(result.lastCheckedAt) : new Date();
+    updateLastCheckedDisplay();
+    const parts = [];
+    if (result.bounced?.length) parts.push(`${result.bounced.length} bounce${result.bounced.length !== 1 ? 's' : ''}`);
+    if (result.replied?.length) parts.push(`${result.replied.length} repl${result.replied.length !== 1 ? 'ies' : 'y'}`);
+    if (parts.length) {
+      window._app.toast(`Found ${parts.join(' and ')}`, result.bounced?.length ? 'error' : 'success');
+      render(activeTab());
+    }
+  } catch (_) { /* silent — don't surface auto-check errors to the user */ }
+  finally { silentChecking = false; }
+}
+
 async function checkMailbox() {
   const btn = document.getElementById('check-mailbox-btn');
   const label = document.getElementById('check-mailbox-label');
@@ -145,6 +175,8 @@ async function checkMailbox() {
 
   try {
     const result = await window._app.checkMailbox();
+    state.sender.lastMailboxCheckAt = result.lastCheckedAt ? new Date(result.lastCheckedAt) : new Date();
+    updateLastCheckedDisplay();
     const parts = [];
     if (result.bounced?.length) parts.push(`${result.bounced.length} bounce${result.bounced.length !== 1 ? 's' : ''}: ${result.bounced.map(b => b.name).join(', ')}`);
     if (result.replied?.length) parts.push(`${result.replied.length} repl${result.replied.length !== 1 ? 'ies' : 'y'}: ${result.replied.map(r => r.name).join(', ')}`);
@@ -400,15 +432,33 @@ async function start() {
     document.getElementById('contacts-tbody').innerHTML = `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div></td></tr>`;
   }
 
-  // Last run time
-  document.getElementById('last-run').textContent = 'Last run: ' + new Date().toLocaleDateString('en-IN', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+  updateLastCheckedDisplay();
 
   // Sidebar email
   if (state.sender.email) document.getElementById('sb-email').textContent = state.sender.email;
 
   populateTemplateFilter();
   render('all');
+
+  // Auto-check on load if Gmail is configured and check is stale (>10 min or never run)
+  const STALE_MS = 10 * 60 * 1000;
+  const lastChecked = state.sender.lastMailboxCheckAt;
+  if (state.sender.email && (!lastChecked || Date.now() - lastChecked > STALE_MS)) {
+    setTimeout(silentCheckMailbox, 2000); // small delay so the page finishes rendering first
+  }
 }
+
+// Periodic auto-check every 15 minutes while the tab is visible
+setInterval(() => {
+  if (document.visibilityState === 'visible' && state.sender.email) silentCheckMailbox();
+}, 15 * 60 * 1000);
+
+// Also check when user returns to a tab that's been idle
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !state.sender.email) return;
+  const last = state.sender.lastMailboxCheckAt;
+  if (!last || Date.now() - last > 10 * 60 * 1000) silentCheckMailbox();
+});
 
 start();
 </script>

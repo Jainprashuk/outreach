@@ -1,0 +1,14 @@
+name: Auto check mailbox
+
+on:
+  schedule:
+    - cron: '*/30 * * * *'   # every 30 minutes, 24/7
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger mailbox check
+        run: |
+          curl -s -f -X POST ${{ secrets.VERCEL_APP_URL }}/api/check-mailbox \
+            || echo "Check returned non-2xx (non-critical, will retry next run)"

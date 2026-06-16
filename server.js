@@ -261,14 +261,30 @@ app.post('/api/bulk-send', async (req, res) => {
 // ── Check mailbox for bounces & replies ────────────────────────────────────
 // Scans the sender's Gmail INBOX + Spam via IMAP for delivery-failure (NDR)
 // messages (marking contacts 'bounced') and for replies to outreach emails
-// (marking contacts 'replied').
+// (marking contacts 'replied'). Uses lastMailboxCheckAt from Settings to only
+// scan emails that arrived since the last check (huge speed win on repeat runs).
 const BOUNCE_LOOKBACK_DAYS = 7;
 const REPLY_LOOKBACK_DAYS = 30;
+const BUFFER_MS = 5 * 60 * 1000; // 5-min overlap guards against clock skew
 
 app.post('/api/check-mailbox', requireDb, async (req, res) => {
   if (!senderConfig.email || !senderAppPassword) {
     return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
   }
+
+  const settings = await Settings.getSingleton();
+  const lastChecked = settings.lastMailboxCheckAt;
+
+  const fallbackBounce = new Date(Date.now() - BOUNCE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+  const fallbackReply  = new Date(Date.now() - REPLY_LOOKBACK_DAYS  * 24 * 60 * 60 * 1000);
+
+  // Math.max picks the more recent date → fewer emails fetched on repeat runs.
+  const bounceSince = lastChecked
+    ? new Date(Math.max(lastChecked.getTime() - BUFFER_MS, fallbackBounce.getTime()))
+    : fallbackBounce;
+  const replySince = lastChecked
+    ? new Date(Math.max(lastChecked.getTime() - BUFFER_MS, fallbackReply.getTime()))
+    : fallbackReply;
 
   const client = new ImapFlow({
     host: 'imap.gmail.com',
@@ -281,8 +297,6 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   let scanned = 0;
   const bounced = [];
   const replied = [];
-  const bounceSince = new Date(Date.now() - BOUNCE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
-  const replySince = new Date(Date.now() - REPLY_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
 
   // Candidate contacts for reply-matching: only contacts we've sent to and
   // haven't already heard back from (or had bounce) are still "awaiting reply".
@@ -362,7 +376,10 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     try { await client.logout(); } catch (_) { /* ignore */ }
   }
 
-  res.json({ ok: true, scanned, bounced, replied });
+  settings.lastMailboxCheckAt = new Date();
+  await settings.save();
+
+  res.json({ ok: true, scanned, bounced, replied, lastCheckedAt: settings.lastMailboxCheckAt });
 });
 
 // ── Status ──────────────────────────────────────────────────────────────────

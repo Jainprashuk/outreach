@@ -20,6 +20,7 @@ const settingsSchema = new mongoose.Schema({
   gmailEmail: { type: String, default: '' },
   customVariables: { type: [variableSchema], default: [] },
   resume: { type: resumeSchema, default: null },
+  lastMailboxCheckAt: { type: Date, default: null },
 }, { timestamps: true });
 
 settingsSchema.set('toJSON', {

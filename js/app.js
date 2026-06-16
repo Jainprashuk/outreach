@@ -115,6 +115,7 @@ const App = (() => {
       email: s.gmailEmail || '',
       customVariables: s.customVariables || [],
       resume: s.resume || null,
+      lastMailboxCheckAt: s.lastMailboxCheckAt ? new Date(s.lastMailboxCheckAt) : null,
     };
     return state.sender;
   };
@@ -239,6 +240,7 @@ const App = (() => {
         email: s.gmailEmail || '',
         customVariables: s.customVariables || [],
         resume: s.resume || null,
+        lastMailboxCheckAt: s.lastMailboxCheckAt ? new Date(s.lastMailboxCheckAt) : null,
       };
       return s;
     },
