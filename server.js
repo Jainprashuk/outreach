@@ -14,11 +14,29 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static(__dirname));
 
-const requireDb = (req, res, next) => {
-  if (mongoose.connection.readyState !== 1) {
-    return res.status(503).json({ error: 'Database not connected. Check MONGODB_URI_DEV/PROD in .env and restart the server.' });
+// Cached connection promise — one connection attempt shared across all concurrent requests
+// on a cold start. Resets on failure so the next request triggers a fresh attempt.
+let _dbConnecting = null;
+
+const ensureDb = async () => {
+  if (mongoose.connection.readyState === 1) return; // already connected (warm instance)
+  if (!_dbConnecting) {
+    _dbConnecting = db.connect().catch(err => {
+      _dbConnecting = null; // reset so the next request retries
+      throw err;
+    });
   }
-  next();
+  await _dbConnecting;
+};
+
+// Awaits the connection instead of returning 503 on the instant of a cold start.
+const requireDb = async (req, res, next) => {
+  try {
+    await ensureDb();
+    next();
+  } catch (err) {
+    res.status(503).json({ error: `Database not available: ${err.message}` });
+  }
 };
 
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
@@ -275,7 +293,8 @@ app.get('/api/status', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-db.connect()
+// Eagerly connect at startup for local dev (Vercel re-uses the cached promise on cold starts).
+ensureDb()
   .catch(err => console.error('❌  MongoDB connection error:', err.message))
   .finally(() => {
     app.listen(PORT, () => {

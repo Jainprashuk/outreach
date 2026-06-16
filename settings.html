@@ -66,7 +66,7 @@
         <div style="font-size:14px;font-weight:500;margin-bottom:14px;display:flex;align-items:center;gap:8px"><i class="ti ti-file-cv" style="font-size:16px;color:var(--text2)"></i> Resume</div>
         <div id="resume-empty">
           <p style="font-size:12px;color:var(--text2);margin-bottom:12px">Upload a resume (PDF or Word) to optionally attach to your outreach emails.</p>
-          <button class="btn btn-sm" onclick="document.getElementById('resume-input').click()" type="button"><i class="ti ti-upload"></i> Upload resume</button>
+          <button class="btn btn-sm" id="upload-resume-btn" onclick="document.getElementById('resume-input').click()" type="button"><i class="ti ti-upload"></i> Upload resume</button>
         </div>
         <div id="resume-current" style="display:none;align-items:center;gap:12px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius-md);padding:12px 14px">
           <i class="ti ti-file-text" style="font-size:22px;color:var(--accent)"></i>
@@ -76,7 +76,7 @@
           </div>
           <a id="resume-download" class="btn btn-xs" href="#" target="_blank" title="Download"><i class="ti ti-download"></i></a>
           <button class="btn btn-xs" onclick="document.getElementById('resume-input').click()" type="button" title="Replace"><i class="ti ti-replace"></i></button>
-          <button class="btn btn-xs" style="color:var(--red);border-color:var(--red-bg)" onclick="removeResume()" type="button" title="Remove"><i class="ti ti-trash"></i></button>
+          <button class="btn btn-xs" id="remove-resume-btn" style="color:var(--red);border-color:var(--red-bg)" onclick="removeResume()" type="button" title="Remove"><i class="ti ti-trash"></i></button>
         </div>
         <input type="file" id="resume-input" accept=".pdf,.doc,.docx" style="display:none" onchange="handleResumeUpload(this)">
       </div>
@@ -91,8 +91,7 @@
         <button class="btn btn-sm" style="border-style:dashed;margin-top:4px" onclick="addVarRow()" type="button"><i class="ti ti-plus"></i> Add variable</button>
       </div>
 
-      <button class="btn btn-primary" onclick="save()"><i class="ti ti-check"></i> Save settings</button>
-      <div id="saved-msg" style="display:none;margin-top:10px;font-size:13px;color:var(--green)"><i class="ti ti-circle-check"></i> Settings saved</div>
+      <button class="btn btn-primary" id="save-btn" onclick="save()"><i class="ti ti-check"></i> Save settings</button>
     </div>
   </div>
 </div>
@@ -142,6 +141,8 @@ function renderResume() {
 async function handleResumeUpload(input) {
   const file = input.files[0];
   if (!file) return;
+  const btn = document.getElementById('upload-resume-btn') || document.getElementById('replace-resume-btn');
+  const restore = btn ? window._app.btnLoad(btn, 'Uploading…') : null;
   try {
     await window._app.uploadResume(file);
     renderResume();
@@ -149,24 +150,34 @@ async function handleResumeUpload(input) {
   } catch (err) {
     window._app.toast(err.message, 'error');
   } finally {
+    if (restore) restore();
     input.value = '';
   }
 }
 
 async function removeResume() {
   if (!confirm('Remove your uploaded resume?')) return;
+  const btn = document.getElementById('remove-resume-btn');
+  const restore = btn ? window._app.btnLoad(btn, '…') : null;
   try {
     await window._app.deleteResume();
     renderResume();
     window._app.toast('Resume removed.', 'success');
   } catch (err) {
     window._app.toast(err.message, 'error');
+  } finally {
+    if (restore) restore();
   }
 }
 
 async function load() {
   window._app.initTheme();
   window._app.initMobileNav();
+
+  const saveBtn = document.getElementById('save-btn');
+  const formEls = document.querySelectorAll('.main input:not(#resume-input), .main textarea');
+  const restoreBtn = window._app.btnLoad(saveBtn, 'Loading…');
+  formEls.forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
 
   try {
     await window._app.loadSettings();
@@ -178,6 +189,9 @@ async function load() {
     renderResume();
   } catch (err) {
     window._app.toast('Could not load settings: ' + err.message, 'error');
+  } finally {
+    restoreBtn();
+    formEls.forEach(el => { el.disabled = false; el.style.opacity = ''; });
   }
 }
 
@@ -199,6 +213,8 @@ async function save() {
     customVariables.push({ key, value });
   }
 
+  const saveBtn = document.getElementById('save-btn');
+  const restore = window._app.btnLoad(saveBtn, 'Saving…');
   try {
     await window._app.saveSettings({
       senderName: nameEl.value.trim() || 'Your Name',
@@ -206,10 +222,12 @@ async function save() {
       gmailEmail: emailEl.value.trim(),
       customVariables,
     });
-    document.getElementById('saved-msg').style.display = 'block';
-    setTimeout(() => document.getElementById('saved-msg').style.display = 'none', 2500);
+    saveBtn.disabled = false;
+    saveBtn.innerHTML = '<i class="ti ti-circle-check"></i> Saved!';
+    setTimeout(() => restore(), 2000);
   } catch (err) {
     window._app.toast('Could not save settings: ' + err.message, 'error');
+    restore();
   }
 }
 

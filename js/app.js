@@ -414,6 +414,16 @@ const App = (() => {
       await apiFetch(`/api/templates/${key}`, { method: 'DELETE' });
       delete state.templates[key];
     },
+
+    // Puts a button into a loading state; returns a restore function.
+    // Usage: const restore = window._app.btnLoad(btn, 'Saving…');
+    //        try { ... } finally { restore(); }
+    btnLoad(btn, label) {
+      const orig = btn.innerHTML;
+      btn.disabled = true;
+      btn.innerHTML = `<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> ${label}`;
+      return () => { btn.disabled = false; btn.innerHTML = orig; };
+    },
   };
 
   // Wire up _sjwTogglePause after window._app is defined

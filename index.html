@@ -460,6 +460,38 @@ document.addEventListener('visibilitychange', () => {
   if (!last || Date.now() - last > 10 * 60 * 1000) silentCheckMailbox();
 });
 
+// ── Skeleton screens — injected synchronously so the page never flashes blank ──
+(function () {
+  const sk = (w, h, extra) =>
+    `<div class="skeleton" style="height:${h || '11px'};width:${w};${extra || ''}"></div>`;
+
+  document.getElementById('stats-grid').innerHTML = Array(6).fill(0).map(() =>
+    `<div class="stat-card">
+      ${sk('55%', '10px', 'margin-bottom:10px')}
+      ${sk('35%', '26px')}
+    </div>`
+  ).join('');
+
+  const chip = `<div class="contact-chip">
+    <div class="skeleton" style="width:32px;height:32px;border-radius:50%;flex-shrink:0"></div>
+    <div>
+      ${sk('90px', '11px', 'margin-bottom:5px')}
+      ${sk('130px', '9px')}
+    </div>
+  </div>`;
+
+  document.getElementById('contacts-tbody').innerHTML = Array(6).fill(0).map(() =>
+    `<tr style="pointer-events:none">
+      <td>${chip}</td>
+      <td>${sk('75px')}</td>
+      <td>${sk('65px')}</td>
+      <td>${sk('48px', '20px', 'border-radius:20px')}</td>
+      <td>${sk('58px', '20px', 'border-radius:20px')}</td>
+      <td>${sk('48px', '28px', 'border-radius:6px')}</td>
+    </tr>`
+  ).join('');
+})();
+
 start();
 </script>
 </body>

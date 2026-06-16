@@ -80,7 +80,7 @@
       </div>
       <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:6px">
         <button class="btn" onclick="closeTemplateModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="saveTemplate()"><i class="ti ti-check"></i> Save template</button>
+        <button class="btn btn-primary" id="save-tpl-btn" onclick="saveTemplate()"><i class="ti ti-check"></i> Save template</button>
       </div>
     </div>
   </div>
@@ -165,6 +165,7 @@ async function saveTemplate() {
     return;
   }
 
+  const restore = window._app.btnLoad(document.getElementById('save-tpl-btn'), 'Saving…');
   try {
     if (editingKey) {
       await window._app.updateTemplate(editingKey, { name, subject, body });
@@ -177,16 +178,23 @@ async function saveTemplate() {
     renderTemplates();
   } catch (err) {
     window._app.toast(err.message, 'error');
+  } finally {
+    restore();
   }
 }
 
 async function removeTemplate(key) {
   if (!confirm(`Delete the "${window._app.state.templates[key]?.name || key}" template? This cannot be undone.`)) return;
+  const card = document.querySelector(`[onclick="removeTemplate('${key}')"]`).closest('.tpl-card');
+  card.style.opacity = '0.4';
+  card.style.pointerEvents = 'none';
   try {
     await window._app.deleteTemplate(key);
     window._app.toast('Template deleted.', 'success');
     renderTemplates();
   } catch (err) {
+    card.style.opacity = '';
+    card.style.pointerEvents = '';
     window._app.toast(err.message, 'error');
   }
 }
@@ -213,6 +221,29 @@ async function start() {
 document.getElementById('tpl-modal').addEventListener('click', function(e) {
   if (e.target === this) closeTemplateModal();
 });
+
+(function () {
+  const sk = (w, h, extra) =>
+    `<div class="skeleton" style="height:${h || '10px'};width:${w};${extra || ''}"></div>`;
+  document.getElementById('tpl-list').innerHTML = Array(3).fill(0).map(() =>
+    `<div class="tpl-card">
+      <div class="tpl-card-head">
+        ${sk('150px', '14px')}
+        <div style="display:flex;gap:8px">
+          ${sk('28px', '26px', 'border-radius:6px')}
+          ${sk('28px', '26px', 'border-radius:6px')}
+        </div>
+      </div>
+      <div class="tpl-card-body">
+        ${sk('50%', '10px', 'margin-bottom:14px')}
+        ${sk('100%', '10px', 'margin-bottom:7px')}
+        ${sk('85%', '10px', 'margin-bottom:7px')}
+        ${sk('70%', '10px', 'margin-bottom:7px')}
+        ${sk('55%', '10px')}
+      </div>
+    </div>`
+  ).join('');
+})();
 
 start();
 </script>
