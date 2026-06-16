@@ -12,9 +12,8 @@ const mailer = require('./lib/mailer');
 const app = express();
 app.use(cors());
 app.use(express.json());
-app.use(express.static(__dirname)); // serves index.html etc.
+app.use(express.static(__dirname));
 
-// Guard DB-backed routes until MongoDB is connected
 const requireDb = (req, res, next) => {
   if (mongoose.connection.readyState !== 1) {
     return res.status(503).json({ error: 'Database not connected. Check MONGODB_URI_DEV/PROD in .env and restart the server.' });
@@ -39,7 +38,6 @@ app.post('/api/config', (req, res) => {
   if (!email || !appPassword) return res.status(400).json({ error: 'email and appPassword required' });
 
   const candidate = mailer.buildTransporter(email, appPassword);
-
   candidate.verify((err) => {
     if (err) {
       return res.status(400).json({ error: 'Could not connect. Check email/app password.', detail: err.message });
@@ -51,10 +49,9 @@ app.post('/api/config', (req, res) => {
   });
 });
 
-// Escapes a string for safe use inside a RegExp.
+// ── Bounce parsing ─────────────────────────────────────────────────────────
 const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-// Parses a raw RFC822 bounce/NDR message source for failed recipients + reasons.
 const parseBounces = (raw) => {
   const hits = [];
   const finalRecipientRe = /Final-Recipient:\s*rfc822;\s*<?([^\s>]+)>?/gi;
@@ -81,7 +78,6 @@ const parseBounces = (raw) => {
       hits.push({ email, reason: reasonMatch ? reasonMatch[1].trim() : 'Unknown bounce reason' });
     }
   }
-
   return hits;
 };
 
@@ -100,15 +96,13 @@ const buildSnippet = (text) => {
   }
   let snippet = kept.join('\n').trim();
   if (!snippet) return null;
-  if (snippet.length > REPLY_SNIPPET_MAX_LEN) {
-    snippet = snippet.slice(0, REPLY_SNIPPET_MAX_LEN).trim() + '…';
-  }
+  if (snippet.length > REPLY_SNIPPET_MAX_LEN) snippet = snippet.slice(0, REPLY_SNIPPET_MAX_LEN).trim() + '…';
   return snippet;
 };
 
+// tryMatchReply — uses pre-loaded lean maps; writes via findByIdAndUpdate (no doc hydration)
 const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
   const parsed = await simpleParser(raw);
-
   const fromAddr = (parsed.from?.value?.[0]?.address || '').toLowerCase();
   if (!fromAddr || /mailer-daemon|postmaster/i.test(fromAddr)) return;
 
@@ -134,38 +128,17 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
 
   if (!contact || contact.status === 'replied') return;
 
+  const repliedAt = parsed.date || new Date();
+  const replySnippet = buildSnippet(parsed.text || parsed.html || '');
+
+  // Mark in-memory to prevent double-processing in the same batch
   contact.status = 'replied';
-  contact.repliedAt = parsed.date || new Date();
-  contact.replySnippet = buildSnippet(parsed.text || parsed.html || '');
-  await contact.save();
-  replied.push({ email: contact.email, name: contact.name, repliedAt: contact.repliedAt, snippet: contact.replySnippet });
+
+  await Contact.findByIdAndUpdate(contact._id, { status: 'replied', repliedAt, replySnippet });
+  replied.push({ email: contact.email, name: contact.name, repliedAt, snippet: replySnippet });
 };
 
-// ── Send single email ──────────────────────────────────────────────────────
-app.post('/api/send', async (req, res) => {
-  if (!mailer.transporter) {
-    return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
-  }
-
-  const { to, subject, body, attachResume } = req.body;
-  if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body are required' });
-
-  try {
-    const attachments = await mailer.getResumeAttachment(attachResume);
-    const info = await mailer.transporter.sendMail({
-      from: `"${mailer.senderConfig.name}" <${mailer.senderConfig.email}>`,
-      to,
-      subject,
-      text: body,
-      ...(attachments ? { attachments } : {}),
-    });
-    res.json({ ok: true, messageId: info.messageId || null });
-  } catch (err) {
-    res.status(500).json({ error: err.message, code: err.responseCode || err.code || null });
-  }
-});
-
-// ── Check mailbox for bounces & replies ────────────────────────────────────
+// ── Check mailbox ──────────────────────────────────────────────────────────
 const BOUNCE_LOOKBACK_DAYS = 7;
 const REPLY_LOOKBACK_DAYS = 30;
 const BUFFER_MS = 5 * 60 * 1000;
@@ -175,12 +148,11 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
   }
 
-  const settings = await Settings.getSingleton();
-  const lastChecked = settings.lastMailboxCheckAt;
+  const settings = await Settings.findOne({}, { 'resume.data': 0 });
+  const lastChecked = settings?.lastMailboxCheckAt ?? null;
 
   const fallbackBounce = new Date(Date.now() - BOUNCE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const fallbackReply  = new Date(Date.now() - REPLY_LOOKBACK_DAYS  * 24 * 60 * 60 * 1000);
-
   const bounceSince = lastChecked
     ? new Date(Math.max(lastChecked.getTime() - BUFFER_MS, fallbackBounce.getTime()))
     : fallbackBounce;
@@ -189,9 +161,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     : fallbackReply;
 
   const client = new ImapFlow({
-    host: 'imap.gmail.com',
-    port: 993,
-    secure: true,
+    host: 'imap.gmail.com', port: 993, secure: true,
     auth: { user: mailer.senderConfig.email, pass: mailer.senderAppPassword },
     logger: false,
   });
@@ -200,21 +170,30 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   const bounced = [];
   const replied = [];
 
-  const sentContacts = await Contact.find({ status: 'sent' });
-  const byEmail = new Map();
+  // Pre-load ALL contacts once with a lean projection — eliminates N+1 queries in the scan loop
+  const allContacts = await Contact.find(
+    {},
+    'email name status bounceReason messageId updatedAt'
+  ).lean();
+
+  // byEmailAll: for bounce matching (any status)
+  // byEmail + byMessageId: for reply matching (sent contacts only)
+  const byEmailAll  = new Map();
+  const byEmail     = new Map();
   const byMessageId = new Map();
-  for (const c of sentContacts) {
-    byEmail.set(c.email.toLowerCase(), c);
-    if (c.messageId) byMessageId.set(c.messageId.replace(/^<|>$/g, ''), c);
+
+  for (const c of allContacts) {
+    const addr = c.email.toLowerCase();
+    byEmailAll.set(addr, c);
+    if (c.status === 'sent') {
+      byEmail.set(addr, c);
+      if (c.messageId) byMessageId.set(c.messageId.replace(/^<|>$/g, ''), c);
+    }
   }
 
   const scanMailbox = async (mailbox) => {
     let lock;
-    try {
-      lock = await client.getMailboxLock(mailbox);
-    } catch (err) {
-      return;
-    }
+    try { lock = await client.getMailboxLock(mailbox); } catch (_) { return; }
     try {
       const [reportUids, daemonUids, postmasterUids, replyUids] = await Promise.all([
         client.search({ since: bounceSince, header: { 'content-type': 'multipart/report' } }, { uid: true }),
@@ -227,23 +206,23 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
 
       for (const uid of uids) {
         const msg = await client.fetchOne(uid, { source: true }, { uid: true });
-        if (!msg || !msg.source) continue;
+        if (!msg?.source) continue;
         const raw = msg.source.toString('utf8');
         const hits = parseBounces(raw);
 
         if (hits.length > 0) {
           for (const { email, reason } of hits) {
-            const existing = await Contact.findOne({ email: new RegExp(`^${escapeRegExp(email)}$`, 'i') });
+            // O(1) lookup — no DB query
+            const existing = byEmailAll.get(email.toLowerCase());
             if (!existing) continue;
 
             if (existing.status !== 'bounced') {
-              existing.status = 'bounced';
-              existing.bounceReason = reason;
-              await existing.save();
+              existing.status = 'bounced'; // in-memory: prevents double-processing
+              await Contact.findByIdAndUpdate(existing._id, { status: 'bounced', bounceReason: reason });
               bounced.push({ email: existing.email, name: existing.name, reason });
             } else if (reason !== existing.bounceReason && reason.length > (existing.bounceReason || '').length) {
               existing.bounceReason = reason;
-              await existing.save();
+              await Contact.findByIdAndUpdate(existing._id, { bounceReason: reason });
             }
           }
           continue;
@@ -264,13 +243,30 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   } catch (err) {
     return res.status(500).json({ error: 'IMAP check failed', detail: err.message });
   } finally {
-    try { await client.logout(); } catch (_) { /* ignore */ }
+    try { await client.logout(); } catch (_) {}
   }
 
-  settings.lastMailboxCheckAt = new Date();
-  await settings.save();
+  await Settings.findOneAndUpdate({}, { lastMailboxCheckAt: new Date() });
+  res.json({ ok: true, scanned, bounced, replied, lastCheckedAt: new Date() });
+});
 
-  res.json({ ok: true, scanned, bounced, replied, lastCheckedAt: settings.lastMailboxCheckAt });
+// ── Send single email (legacy — kept for step3 fallback) ──────────────────
+app.post('/api/send', async (req, res) => {
+  if (!mailer.transporter) return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+  const { to, subject, body, attachResume } = req.body;
+  if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body are required' });
+
+  try {
+    const attachments = await mailer.getResumeAttachment(attachResume);
+    const info = await mailer.transporter.sendMail({
+      from: `"${mailer.senderConfig.name}" <${mailer.senderConfig.email}>`,
+      to, subject, text: body,
+      ...(attachments ? { attachments } : {}),
+    });
+    res.json({ ok: true, messageId: info.messageId || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message, code: err.responseCode || err.code || null });
+  }
 });
 
 // ── Status ──────────────────────────────────────────────────────────────────
@@ -279,7 +275,6 @@ app.get('/api/status', (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-
 db.connect()
   .catch(err => console.error('❌  MongoDB connection error:', err.message))
   .finally(() => {

@@ -8,14 +8,21 @@ const slugify = (str) => (str || '')
   .replace(/[^a-z0-9]+/g, '-')
   .replace(/^-+|-+$/g, '');
 
+const serialize = (doc) => {
+  const obj = { ...doc };
+  obj.id = doc._id.toString();
+  delete obj._id;
+  delete obj.__v;
+  return obj;
+};
+
 // GET /api/templates — list all templates
 router.get('/', async (req, res) => {
-  const templates = await Template.find().sort({ createdAt: 1 });
-  res.json(templates);
+  const templates = await Template.find().sort({ createdAt: 1 }).lean();
+  res.json(templates.map(serialize));
 });
 
 // POST /api/templates — create a new template
-// body: { name, subject, body }
 router.post('/', async (req, res) => {
   const { name, subject, body } = req.body;
   if (!name || !subject || !body) {
@@ -31,10 +38,10 @@ router.post('/', async (req, res) => {
   }
 
   const tpl = await Template.create({ key, name, subject, body });
-  res.status(201).json(tpl);
+  res.json(tpl);
 });
 
-// PATCH /api/templates/:key — update an existing template's name/subject/body
+// PATCH /api/templates/:key — update name/subject/body
 router.patch('/:key', async (req, res) => {
   const allowed = ['name', 'subject', 'body'];
   const update = {};
@@ -42,14 +49,14 @@ router.patch('/:key', async (req, res) => {
     if (field in req.body) update[field] = req.body[field];
   }
 
-  const tpl = await Template.findOneAndUpdate({ key: req.params.key }, update, { new: true });
+  const tpl = await Template.findOneAndUpdate({ key: req.params.key }, update, { new: true, lean: true });
   if (!tpl) return res.status(404).json({ error: 'Template not found' });
-  res.json(tpl);
+  res.json(serialize(tpl));
 });
 
 // DELETE /api/templates/:key — delete a template
 router.delete('/:key', async (req, res) => {
-  const tpl = await Template.findOneAndDelete({ key: req.params.key });
+  const tpl = await Template.findOneAndDelete({ key: req.params.key }, { lean: true });
   if (!tpl) return res.status(404).json({ error: 'Template not found' });
   res.json({ ok: true });
 });

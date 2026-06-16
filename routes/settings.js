@@ -4,7 +4,6 @@ const Settings = require('../models/Settings');
 
 const router = express.Router();
 
-// Built-in template variables — custom variable keys can't collide with these.
 const RESERVED_VARIABLES = ['name', 'company', 'role', 'sender', 'senderCompany'];
 const VARIABLE_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
@@ -16,7 +15,7 @@ const RESUME_TYPES = new Set([
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (!RESUME_TYPES.has(file.mimetype)) {
       return cb(new Error('Resume must be a PDF or Word document.'));
@@ -25,13 +24,15 @@ const upload = multer({
   },
 });
 
-// GET /api/settings — fetch sender settings (singleton)
+// GET /api/settings — fetch settings WITHOUT loading resume binary (big win)
 router.get('/', async (req, res) => {
-  const settings = await Settings.getSingleton();
+  // Exclude resume.data (up to 5MB) from the DB fetch; toJSON already strips it from output
+  let settings = await Settings.findOne({}, { 'resume.data': 0 });
+  if (!settings) settings = await Settings.getSingleton();
   res.json(settings);
 });
 
-// PUT /api/settings — update sender settings (singleton)
+// PUT /api/settings — atomic update, single DB round-trip, no binary loaded
 router.put('/', async (req, res) => {
   const allowed = ['senderName', 'senderCompany', 'gmailEmail', 'customVariables'];
   const update = {};
@@ -57,13 +58,16 @@ router.put('/', async (req, res) => {
     update.customVariables = [...seen.values()];
   }
 
-  const settings = await Settings.getSingleton();
-  Object.assign(settings, update);
-  await settings.save();
+  // findOneAndUpdate: one DB round-trip instead of load-then-save, binary excluded from result
+  const settings = await Settings.findOneAndUpdate(
+    {},
+    { $set: update },
+    { new: true, upsert: true, setDefaultsOnInsert: true, projection: { 'resume.data': 0 } }
+  );
   res.json(settings);
 });
 
-// POST /api/settings/resume — upload (or replace) the resume
+// POST /api/settings/resume — upload (needs full save, binary must be stored)
 router.post('/resume', (req, res) => {
   upload.single('resume')(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message });
@@ -82,7 +86,7 @@ router.post('/resume', (req, res) => {
   });
 });
 
-// GET /api/settings/resume — download the stored resume
+// GET /api/settings/resume — stream the binary (intentionally loads resume.data)
 router.get('/resume', async (req, res) => {
   const settings = await Settings.getSingleton();
   if (!settings.resume) return res.status(404).json({ error: 'No resume uploaded' });
@@ -92,11 +96,9 @@ router.get('/resume', async (req, res) => {
   res.send(settings.resume.data);
 });
 
-// DELETE /api/settings/resume — remove the stored resume
+// DELETE /api/settings/resume
 router.delete('/resume', async (req, res) => {
-  const settings = await Settings.getSingleton();
-  settings.resume = null;
-  await settings.save();
+  await Settings.findOneAndUpdate({}, { $unset: { resume: '' } });
   res.json({ ok: true });
 });
 

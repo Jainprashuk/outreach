@@ -38,7 +38,15 @@ async function connect() {
     console.warn(`⚠️  MONGODB_URI_${env.toUpperCase()} is not set — contacts/templates/settings API will not work.`);
     return;
   }
-  await mongoose.connect(uri);
+
+  // bufferCommands: false — fail fast instead of queuing ops when DB is not connected
+  mongoose.set('bufferCommands', false);
+
+  await mongoose.connect(uri, {
+    maxPoolSize: 5,              // keep pool small for serverless (each instance has its own)
+    serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 45000,
+  });
   console.log(`✅  Connected to MongoDB (${env} database)`);
   await seed();
 }

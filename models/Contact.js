@@ -18,6 +18,13 @@ const contactSchema = new mongoose.Schema({
   replyRead: { type: Boolean, default: false },
 }, { timestamps: true });
 
+// Indexes for common query patterns
+contactSchema.index({ createdAt: -1 });
+contactSchema.index({ status: 1, createdAt: -1 });
+contactSchema.index({ approvalStatus: 1 });
+contactSchema.index({ email: 1 });
+contactSchema.index({ messageId: 1 });
+
 contactSchema.set('toJSON', {
   transform: (doc, ret) => {
     ret.id = ret._id.toString();
