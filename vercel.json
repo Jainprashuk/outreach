@@ -10,7 +10,8 @@
           "css/**",
           "js/**",
           "sample-contacts.csv"
-        ]
+        ],
+        "maxDuration": 60
       }
     }
   ],

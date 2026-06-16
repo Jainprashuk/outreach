@@ -59,6 +59,8 @@ router.post('/:id/pause', async (req, res) => {
 });
 
 router.post('/:id/resume', async (req, res) => {
+  const CHUNK_SIZE = 10;
+  const DELAY_MS   = 1500;
   try {
     const job = await SendJob.findByIdAndUpdate(
       req.params.id,
@@ -69,10 +71,14 @@ router.post('/:id/resume', async (req, res) => {
 
     const pendingItems = job.items.filter(i => i.status === 'pending');
     if (pendingItems.length > 0) {
-      await inngest.send(pendingItems.map((item, i) => ({
-        name: 'email/single.send',
-        data: { jobId: job._id.toString(), contactId: item.contactId },
-        ts: Date.now() + i * 1500,
+      const chunks = [];
+      for (let i = 0; i < pendingItems.length; i += CHUNK_SIZE) {
+        chunks.push(pendingItems.slice(i, i + CHUNK_SIZE).map(it => it.contactId));
+      }
+      await inngest.send(chunks.map((chunk, i) => ({
+        name: 'email/chunk.send',
+        data: { jobId: job._id.toString(), contactIds: chunk },
+        ts: Date.now() + i * CHUNK_SIZE * DELAY_MS,
       })));
     } else {
       await SendJob.findByIdAndUpdate(req.params.id, { status: 'done' });

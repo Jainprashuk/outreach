@@ -47,8 +47,8 @@ app.use('/api/jobs', requireDb, require('./routes/jobs'));
 // ── Inngest handler ─────────────────────────────────────────────────────────
 const { serve } = require('inngest/express');
 const { inngest } = require('./inngest');
-const { sendEmailBatch, sendSingleEmail } = require('./inngest-fns');
-app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendSingleEmail] }));
+const { sendEmailBatch, sendEmailChunk } = require('./inngest-fns');
+app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendEmailChunk] }));
 
 // ── Configure Gmail credentials ────────────────────────────────────────────
 app.post('/api/config', (req, res) => {
