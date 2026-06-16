@@ -28,7 +28,10 @@
       "Bash(node /Users/prashukjain/Desktop/outreach/server.js)",
       "WebSearch",
       "Bash(node --check /Users/prashukjain/Desktop/outreach/server.js)",
-      "Bash(xargs kill -9)"
+      "Bash(xargs kill -9)",
+      "Bash(git -C /Users/prashukjain/Desktop/outreach log --oneline -5)",
+      "Bash(git -C /Users/prashukjain/Desktop/outreach status)",
+      "Bash(git -C /Users/prashukjain/Desktop/outreach ls-files)"
     ]
   }
 }

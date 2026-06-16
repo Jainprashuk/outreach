@@ -1,5 +1,5 @@
 const App = (() => {
-  const API_BASE = 'http://localhost:3000';
+  const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '';
 
   let state = {
     contacts: [],
