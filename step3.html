@@ -223,7 +223,7 @@ async function pollJob() {
 
       const sent = job.items.filter(i => i.status === 'sent').length;
       const failed = job.items.filter(i => i.status === 'failed').length;
-      sessionStorage.setItem('sendResult', JSON.stringify({ sent, failed, skipped: skipped.length }));
+      sessionStorage.setItem('sendResult', JSON.stringify({ sent, failed, skipped: skipped.length, jobId }));
       setTimeout(() => window.location.href = 'done.html', 1200);
     }
   } catch (_) {}

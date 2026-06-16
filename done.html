@@ -47,9 +47,10 @@
       <div class="stat-grid" style="max-width:480px;margin:0 auto 28px" id="result-stats"></div>
 
       <div style="display:flex;gap:12px;justify-content:center;flex-wrap:wrap">
+        <button class="btn btn-primary" id="retry-btn" style="display:none" onclick="retryFailed()"><i class="ti ti-refresh"></i> Retry failed emails</button>
         <a href="step1.html" class="btn"><i class="ti ti-plus"></i> Add more contacts</a>
         <a href="step2.html" class="btn" id="review-pending-btn" style="display:none"><i class="ti ti-clock"></i> Review pending</a>
-        <a href="index.html" class="btn btn-primary"><i class="ti ti-layout-dashboard"></i> Back to dashboard</a>
+        <a href="index.html" class="btn"><i class="ti ti-layout-dashboard"></i> Back to dashboard</a>
       </div>
     </div>
   </div>
@@ -59,6 +60,7 @@
 <script>
 const result = JSON.parse(sessionStorage.getItem('sendResult') || '{"sent":0,"failed":0,"skipped":0}');
 const failed = result.failed || 0;
+let retryJobId = result.jobId || null;
 
 document.getElementById('success-title').textContent = failed > 0
   ? `${result.sent} sent, ${failed} failed`
@@ -69,6 +71,33 @@ subParts.push(`${result.sent} email${result.sent !== 1 ? 's' : ''} delivered.`);
 if (failed > 0) subParts.push(`${failed} failed to send.`);
 if (result.skipped > 0) subParts.push(`${result.skipped} contact${result.skipped > 1 ? 's are' : ' is'} still pending approval.`);
 document.getElementById('success-sub').textContent = subParts.join(' ');
+
+async function retryFailed() {
+  const btn = document.getElementById('retry-btn');
+  const restore = window._app.btnLoad(btn, 'Retrying…');
+  try {
+    // If we don't have jobId from sessionStorage, fetch the latest job
+    if (!retryJobId) {
+      const r = await fetch(`${window._app.API_BASE}/api/jobs/latest`);
+      if (r.ok) { const j = await r.json(); retryJobId = j?.id || null; }
+    }
+    if (!retryJobId) { window._app.toast('Could not find the job to retry.', 'error'); restore(); return; }
+
+    const res = await fetch(`${window._app.API_BASE}/api/jobs/${retryJobId}/retry-failed`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) { window._app.toast(data.error || 'Retry failed', 'error'); restore(); return; }
+
+    if (data.retried === 0) { window._app.toast('No failed emails to retry.', 'info'); restore(); return; }
+
+    localStorage.setItem('activeJobId', retryJobId);
+    window._app._sjwStart(retryJobId);
+    btn.style.display = 'none';
+    window._app.toast(`Retrying ${data.retried} emails in background…`, 'success');
+  } catch (err) {
+    window._app.toast(err.message, 'error');
+    restore();
+  }
+}
 
 async function start() {
   window._app.initTheme();
@@ -88,6 +117,12 @@ async function start() {
     <div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${result.skipped}</div></div>
     <div class="stat-card"><div class="stat-label">Total ever sent</div><div class="stat-value">${totalSent}</div></div>
   `;
+
+  if (failed > 0) {
+    const btn = document.getElementById('retry-btn');
+    btn.style.display = '';
+    btn.innerHTML = `<i class="ti ti-refresh"></i> Retry ${failed} failed email${failed !== 1 ? 's' : ''}`;
+  }
 }
 
 start();

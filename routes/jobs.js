@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const SendJob = require('../models/SendJob');
+const Contact = require('../models/Contact');
 const { inngest } = require('../inngest');
 
 const serialize = (doc) => {
@@ -33,6 +34,58 @@ router.get('/active', async (req, res) => {
       { items: 1, status: 1, processedCount: 1, attachResume: 1, createdAt: 1 }
     ).sort({ createdAt: -1 }).lean();
     res.json(job ? serialize(job) : null);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/jobs/latest — most recent job (any status); used by done.html to find jobId
+router.get('/latest', async (req, res) => {
+  try {
+    const job = await SendJob.findOne().sort({ createdAt: -1 }).lean();
+    res.json(job ? serialize(job) : null);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/jobs/:id/retry-failed — reset failed items to pending and re-queue them
+router.post('/:id/retry-failed', async (req, res) => {
+  const CHUNK_SIZE = 10;
+  const DELAY_MS   = 1500;
+  try {
+    const job = await SendJob.findById(req.params.id);
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+
+    const failedItems = job.items.filter(i => i.status === 'failed');
+    if (failedItems.length === 0) return res.json({ ok: true, retried: 0 });
+
+    // Reset failed items back to pending in the job document
+    for (const item of failedItems) {
+      item.status = 'pending';
+      item.error = null;
+      item.processedAt = null;
+    }
+    job.status = 'processing';
+    job.processedCount = job.items.filter(i => i.status !== 'pending').length;
+    await job.save();
+
+    // Reset the corresponding contacts back to queued
+    const failedContactIds = failedItems.map(i => i.contactId);
+    await Contact.updateMany({ _id: { $in: failedContactIds } }, { $set: { status: 'queued' } });
+
+    // Re-fan-out in chunks using the new chunked approach
+    const chunks = [];
+    for (let i = 0; i < failedItems.length; i += CHUNK_SIZE) {
+      chunks.push(failedItems.slice(i, i + CHUNK_SIZE).map(it => it.contactId));
+    }
+    await inngest.send(chunks.map((chunk, i) => ({
+      name: 'email/chunk.send',
+      data: { jobId: job.id.toString(), contactIds: chunk },
+      ts: Date.now() + i * CHUNK_SIZE * DELAY_MS,
+    })));
+
+    res.json({ ok: true, retried: failedItems.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
