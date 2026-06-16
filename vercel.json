@@ -3,12 +3,20 @@
   "builds": [
     {
       "src": "server.js",
-      "use": "@vercel/node"
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": [
+          "*.html",
+          "css/**",
+          "js/**",
+          "sample-contacts.csv"
+        ]
+      }
     }
   ],
   "routes": [
     {
-      "src": "/api/(.*)",
+      "src": "/(.*)",
       "dest": "server.js"
     }
   ]
