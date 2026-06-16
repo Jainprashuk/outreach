@@ -642,3 +642,27 @@ thead th.sortable:hover { color:var(--text); }
   .stepper-bar .step-label { display: none; }
   .topbar-left p { display: none; }
 }
+
+/* ── SEND JOB WIDGET ──────────────────────────────────────────────────────── */
+#send-job-widget {
+  position: fixed; bottom: 20px; right: 20px; z-index: 500;
+  width: 270px; background: var(--bg);
+  border: 0.5px solid var(--border); border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg); overflow: hidden;
+  animation: fadeInUp .25s var(--ease);
+  transition: background-color .2s var(--ease), border-color .2s var(--ease);
+}
+#sjw-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 12px; background: var(--bg2);
+  font-size: 13px; font-weight: 500;
+  border-bottom: 0.5px solid var(--border);
+}
+#sjw-body { padding: 10px 12px; }
+#sjw-body.collapsed { display: none; }
+.btn-xs {
+  padding: 3px 7px; font-size: 11px; border-radius: 5px;
+  background: var(--bg); border: 0.5px solid var(--border);
+  color: var(--text2); cursor: pointer; line-height: 1.4;
+}
+.btn-xs:hover { background: var(--bg2); color: var(--text1); }

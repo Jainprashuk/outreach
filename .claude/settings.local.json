@@ -31,7 +31,9 @@
       "Bash(xargs kill -9)",
       "Bash(git -C /Users/prashukjain/Desktop/outreach log --oneline -5)",
       "Bash(git -C /Users/prashukjain/Desktop/outreach status)",
-      "Bash(git -C /Users/prashukjain/Desktop/outreach ls-files)"
+      "Bash(git -C /Users/prashukjain/Desktop/outreach ls-files)",
+      "Bash(node -e \"require\\('./server.js'\\)\")",
+      "Bash(kill %1)"
     ]
   }
 }

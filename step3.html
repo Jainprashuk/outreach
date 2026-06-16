@@ -62,9 +62,7 @@
     <div class="form-body" style="flex:1;overflow-y:auto">
 
       <!-- SEND SUMMARY -->
-      <div class="send-summary" id="send-summary">
-        <!-- injected -->
-      </div>
+      <div class="send-summary" id="send-summary"></div>
 
       <!-- GMAIL CREDENTIALS -->
       <div class="gmail-card" id="gmail-card">
@@ -100,13 +98,18 @@
         </label>
       </div>
 
-      <!-- SEND LOG (shown during/after send) -->
+      <!-- SEND LOG (shown after job starts) -->
       <div id="send-log" style="display:none">
         <div style="margin-bottom:12px">
           <div class="progress-label" id="progress-label">Preparing...</div>
           <div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
         </div>
         <div id="log-rows" style="border:0.5px solid var(--border);border-radius:var(--radius-lg);overflow:hidden"></div>
+        <div style="display:flex;justify-content:flex-end;margin-top:12px">
+          <button class="btn btn-sm" id="bg-btn" onclick="runInBackground()" style="display:none">
+            <i class="ti ti-arrow-minimize"></i> Run in background
+          </button>
+        </div>
       </div>
 
     </div>
@@ -126,6 +129,8 @@ const API_BASE = window._app.API_BASE;
 const approvals = JSON.parse(sessionStorage.getItem('approved') || '[]');
 const approved = approvals.filter(a => a.approvalStatus === 'approved');
 const skipped = approvals.filter(a => a.approvalStatus !== 'approved');
+let jobId = null;
+let pollInterval = null;
 let sending = false;
 
 function renderSummary() {
@@ -146,6 +151,84 @@ function emailFor(a) {
   };
 }
 
+function renderLogRows(job) {
+  const logRows = document.getElementById('log-rows');
+  const existingIds = new Set([...logRows.querySelectorAll('[data-contact-id]')].map(el => el.dataset.contactId));
+
+  job.items.forEach((item, i) => {
+    let row = logRows.querySelector(`[data-contact-id="${item.contactId}"]`);
+    if (!row) {
+      row = document.createElement('div');
+      row.dataset.contactId = item.contactId;
+      row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 14px;border-top:0.5px solid var(--border);font-size:13px;background:var(--bg)';
+      if (i === 0) row.style.borderTop = 'none';
+      row.innerHTML = `
+        ${window._app.avatarEl(item.name)}
+        <div style="flex:1">
+          <div style="font-weight:500">${item.name}</div>
+          <div style="font-size:11px;color:var(--text2)">${item.to}</div>
+        </div>
+        <span class="item-status"></span>
+      `;
+      logRows.appendChild(row);
+    }
+
+    const statusEl = row.querySelector('.item-status');
+    if (item.status === 'sent') {
+      statusEl.innerHTML = `<span style="color:var(--green)"><i class="ti ti-circle-check"></i> Sent</span>`;
+    } else if (item.status === 'failed') {
+      const detail = item.error ? item.error.slice(0, 60) : '';
+      statusEl.innerHTML = `<span style="color:var(--red)" title="${detail.replace(/"/g,'&quot;')}"><i class="ti ti-circle-x"></i> Failed</span>`;
+    } else {
+      statusEl.innerHTML = `<span style="font-size:12px;color:var(--amber)"><i class="ti ti-loader" style="animation:spin 1s linear infinite"></i> Sending</span>`;
+    }
+  });
+}
+
+function updateProgress(job) {
+  const fill = document.getElementById('progress-fill');
+  const label = document.getElementById('progress-label');
+  const total = job.items.length;
+  const done = job.items.filter(i => i.status !== 'pending').length;
+  const sent = job.items.filter(i => i.status === 'sent').length;
+  const failed = job.items.filter(i => i.status === 'failed').length;
+
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  fill.style.width = pct + '%';
+
+  if (job.status === 'done') {
+    label.textContent = failed === 0 ? `All ${sent} emails sent!` : `${sent} sent, ${failed} failed.`;
+  } else if (job.status === 'paused') {
+    label.textContent = `Paused — ${done}/${total} processed`;
+  } else if (job.status === 'cancelled') {
+    label.textContent = `Cancelled — ${done}/${total} processed`;
+  } else {
+    label.textContent = `Sending ${done + 1} of ${total}…`;
+  }
+
+  renderLogRows(job);
+}
+
+async function pollJob() {
+  try {
+    const res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
+    if (!res.ok) return;
+    const job = await res.json();
+    updateProgress(job);
+
+    if (job.status === 'done' || job.status === 'cancelled') {
+      clearInterval(pollInterval);
+      pollInterval = null;
+      localStorage.removeItem('activeJobId');
+
+      const sent = job.items.filter(i => i.status === 'sent').length;
+      const failed = job.items.filter(i => i.status === 'failed').length;
+      sessionStorage.setItem('sendResult', JSON.stringify({ sent, failed, skipped: skipped.length }));
+      setTimeout(() => window.location.href = 'done.html', 1200);
+    }
+  } catch (_) {}
+}
+
 async function startSend() {
   if (sending) return;
   const email = document.getElementById('gmail-email').value.trim();
@@ -155,18 +238,15 @@ async function startSend() {
 
   sending = true;
   document.getElementById('send-btn').disabled = true;
-  document.getElementById('send-btn').innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sending...';
+  document.getElementById('send-btn').innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Starting…';
   document.getElementById('back-btn').style.pointerEvents = 'none';
   document.getElementById('back-btn').style.opacity = '0.4';
-  document.getElementById('gmail-card').style.opacity = '0.4';
+
+  // Verify Gmail credentials
+  document.getElementById('progress-label') && (document.getElementById('send-log').style.display = 'block');
   document.getElementById('send-log').style.display = 'block';
+  document.getElementById('progress-label').textContent = 'Connecting to Gmail…';
 
-  const logRows = document.getElementById('log-rows');
-  const fill = document.getElementById('progress-fill');
-  const label = document.getElementById('progress-label');
-
-  // Connect to Gmail via the backend
-  label.textContent = 'Connecting to Gmail...';
   let configRes;
   try {
     configRes = await fetch(`${API_BASE}/api/config`, {
@@ -176,7 +256,7 @@ async function startSend() {
     });
   } catch (err) {
     resetSendUI();
-    window._app.toast(`Could not reach the backend server at ${API_BASE || window.location.origin}. Make sure it's running ("npm start").`, 'error');
+    window._app.toast(`Could not reach the backend server. Make sure it's running.`, 'error');
     return;
   }
 
@@ -187,80 +267,55 @@ async function startSend() {
     return;
   }
 
-  try {
-    await window._app.saveSettings({ gmailEmail: email });
-  } catch (err) {
-    // non-fatal — sending can continue even if saving the address fails
-  }
+  try { await window._app.saveSettings({ gmailEmail: email }); } catch (_) {}
 
   const attachResume = document.getElementById('attach-resume').checked;
 
-  let sent = 0;
-  let failed = 0;
+  // Build items array
+  const items = approved.map(a => {
+    const { subject, body } = emailFor(a);
+    return { contactId: a.id, to: a.email, name: a.name, subject, body };
+  });
 
-  for (let i = 0; i < approved.length; i++) {
-    const c = approved[i];
-    const { subject, body } = emailFor(c);
-    label.textContent = `Sending ${i + 1} of ${approved.length} — ${c.name}...`;
-    fill.style.width = Math.round((i / approved.length) * 100) + '%';
-
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:9px 14px;border-top:0.5px solid var(--border);font-size:13px;background:var(--bg)';
-    row.innerHTML = `
-      ${window._app.avatarEl(c.name)}
-      <div style="flex:1">
-        <div style="font-weight:500">${c.name}</div>
-        <div style="font-size:11px;color:var(--text2)">${c.email}</div>
-      </div>
-      <span style="font-size:12px;color:var(--amber)"><i class="ti ti-loader" style="animation:spin 1s linear infinite"></i> Sending</span>
-    `;
-    if (i === 0) row.style.borderTop = 'none';
-    logRows.appendChild(row);
-
-    let newStatus;
-    let sendData = null;
-    try {
-      const sendRes = await fetch(`${API_BASE}/api/send`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: c.email, subject, body, attachResume })
-      });
-      sendData = await sendRes.json();
-      if (!sendRes.ok) throw new Error(sendData.error || 'Send failed');
-      sent++;
-      newStatus = 'sent';
-      row.querySelector('span:last-child').innerHTML = `<span style="color:var(--green)"><i class="ti ti-circle-check"></i> Sent</span>`;
-    } catch (err) {
-      failed++;
-      newStatus = 'failed';
-      const detail = sendData?.code ? `${err.message} (${sendData.code})` : (err.message || '');
-      row.querySelector('span:last-child').innerHTML = `<span style="color:var(--red)" title="${detail.replace(/"/g,'&quot;')}"><i class="ti ti-circle-x"></i> Failed</span>`;
+  // Create job
+  document.getElementById('progress-label').textContent = 'Queuing emails…';
+  let job;
+  try {
+    const res = await fetch(`${API_BASE}/api/jobs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, attachResume })
+    });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || 'Failed to create job');
     }
-
-    try {
-      const patch = { status: newStatus };
-      if (newStatus === 'sent' && sendData) {
-        patch.messageId = sendData.messageId || null;
-        patch.sentSubject = subject;
-      }
-      await window._app.updateContact(c.id, patch);
-    } catch (err) {
-      // non-fatal — the email send result above is what matters most
-    }
-
-    // small delay between sends to avoid hitting Gmail rate limits
-    if (i < approved.length - 1) {
-      await new Promise(r => setTimeout(r, 1200));
-    }
+    job = await res.json();
+  } catch (err) {
+    resetSendUI();
+    window._app.toast(err.message, 'error');
+    return;
   }
 
-  fill.style.width = '100%';
-  label.textContent = failed === 0
-    ? `All ${sent} emails sent!`
-    : `${sent} sent, ${failed} failed.`;
+  jobId = job.id;
+  localStorage.setItem('activeJobId', jobId);
 
-  sessionStorage.setItem('sendResult', JSON.stringify({ sent, failed, skipped: skipped.length }));
-  setTimeout(() => window.location.href = 'done.html', 800);
+  // Hide gmail card, show log + "Run in background" button
+  document.getElementById('gmail-card').style.display = 'none';
+  const resumeCard = document.getElementById('resume-card');
+  if (resumeCard) resumeCard.style.display = 'none';
+  document.getElementById('send-btn').innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Sending…';
+  document.getElementById('bg-btn').style.display = '';
+
+  updateProgress(job);
+
+  // Poll every 2s
+  pollInterval = setInterval(pollJob, 2000);
+}
+
+function runInBackground() {
+  // Widget in app.js will pick up activeJobId on every page
+  window.location.href = 'index.html';
 }
 
 function resetSendUI() {
@@ -269,7 +324,6 @@ function resetSendUI() {
   document.getElementById('send-btn').innerHTML = `<i class="ti ti-send"></i> <span id="send-btn-label">Send ${approved.length} email${approved.length!==1?'s':''} now</span>`;
   document.getElementById('back-btn').style.pointerEvents = '';
   document.getElementById('back-btn').style.opacity = '';
-  document.getElementById('gmail-card').style.opacity = '';
   document.getElementById('send-log').style.display = 'none';
   document.getElementById('log-rows').innerHTML = '';
 }

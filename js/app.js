@@ -192,6 +192,132 @@ const App = (() => {
     }, duration);
   };
 
+  // ── SEND JOB WIDGET ────────────────────────────────────────────────────────
+  let _sjwJobId = null;
+  let _sjwInterval = null;
+  let _sjwCollapsed = false;
+
+  const _sjwIsStep3 = () => window.location.pathname.includes('step3');
+
+  const _sjwInjectDOM = () => {
+    if (document.getElementById('send-job-widget')) return;
+    const el = document.createElement('div');
+    el.id = 'send-job-widget';
+    el.innerHTML = `
+      <div id="sjw-header">
+        <span id="sjw-title"><i class="ti ti-send"></i> Sending emails…</span>
+        <div style="display:flex;gap:6px">
+          <button id="sjw-pause-btn" class="btn btn-xs" onclick="window._app._sjwTogglePause()"></button>
+          <button class="btn btn-xs" onclick="window._app._sjwCollapse()"><i class="ti ti-minus"></i></button>
+        </div>
+      </div>
+      <div id="sjw-body">
+        <div class="progress-bar"><div class="progress-fill" id="sjw-fill" style="width:0%"></div></div>
+        <div id="sjw-stats" style="font-size:12px;color:var(--text2);margin-top:6px"></div>
+      </div>
+    `;
+    document.body.appendChild(el);
+  };
+
+  const _sjwUpdate = (job) => {
+    const fill = document.getElementById('sjw-fill');
+    const stats = document.getElementById('sjw-stats');
+    const title = document.getElementById('sjw-title');
+    const pauseBtn = document.getElementById('sjw-pause-btn');
+    if (!fill || !stats) return;
+
+    const total = job.items.length;
+    const sent = job.items.filter(i => i.status === 'sent').length;
+    const failed = job.items.filter(i => i.status === 'failed').length;
+    const done = sent + failed;
+    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    fill.style.width = pct + '%';
+    stats.textContent = `${done}/${total} · ${failed > 0 ? failed + ' failed' : 'all good'}`;
+
+    if (job.status === 'done' || job.status === 'cancelled') {
+      if (title) title.innerHTML = `<i class="ti ti-circle-check"></i> ${sent} sent${failed ? ', ' + failed + ' failed' : ''}`;
+      if (pauseBtn) pauseBtn.style.display = 'none';
+      clearInterval(_sjwInterval);
+      _sjwInterval = null;
+      localStorage.removeItem('activeJobId');
+      setTimeout(_sjwDismiss, 10000);
+    } else if (job.status === 'paused') {
+      if (title) title.innerHTML = `<i class="ti ti-player-pause"></i> Paused`;
+      if (pauseBtn) pauseBtn.innerHTML = '<i class="ti ti-player-play"></i>';
+    } else {
+      if (title) title.innerHTML = `<i class="ti ti-send"></i> Sending emails…`;
+      if (pauseBtn) pauseBtn.innerHTML = '<i class="ti ti-player-pause"></i>';
+    }
+  };
+
+  const _sjwDismiss = () => {
+    clearInterval(_sjwInterval);
+    _sjwInterval = null;
+    _sjwJobId = null;
+    localStorage.removeItem('activeJobId');
+    const el = document.getElementById('send-job-widget');
+    if (el) el.remove();
+  };
+
+  const _sjwPoll = async () => {
+    if (!_sjwJobId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs/${_sjwJobId}`);
+      if (!res.ok) return;
+      const job = await res.json();
+      _sjwUpdate(job);
+    } catch (_) {}
+  };
+
+  const _sjwStart = (id) => {
+    _sjwJobId = id;
+    _sjwInjectDOM();
+    // Set initial pause button label
+    const pauseBtn = document.getElementById('sjw-pause-btn');
+    if (pauseBtn) pauseBtn.innerHTML = '<i class="ti ti-player-pause"></i>';
+    if (!_sjwInterval) {
+      _sjwInterval = setInterval(_sjwPoll, 3000);
+    }
+    _sjwPoll();
+  };
+
+  const _sjwCheckForActiveJob = async () => {
+    if (_sjwIsStep3()) return; // step3 has its own inline progress
+    const id = localStorage.getItem('activeJobId');
+    if (!id) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs/${id}`);
+      if (!res.ok) { localStorage.removeItem('activeJobId'); return; }
+      const job = await res.json();
+      if (job.status === 'done' || job.status === 'cancelled') {
+        localStorage.removeItem('activeJobId');
+        return;
+      }
+      _sjwStart(id);
+    } catch (_) {}
+  };
+
+  // Expose toggle functions for inline onclick handlers
+  window._app_sjwTogglePause = async () => {
+    if (!_sjwJobId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs/${_sjwJobId}`);
+      if (!res.ok) return;
+      const job = await res.json();
+      const action = job.status === 'paused' ? 'resume' : 'pause';
+      await fetch(`${API_BASE}/api/jobs/${_sjwJobId}/${action}`, { method: 'POST' });
+      _sjwPoll();
+    } catch (_) {}
+  };
+
+  // Auto-start widget check on every page load (except step3)
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', _sjwCheckForActiveJob);
+  } else {
+    setTimeout(_sjwCheckForActiveJob, 500);
+  }
+
   window._app = {
     API_BASE,
     get state() { return state; },
@@ -212,6 +338,16 @@ const App = (() => {
     toggleTheme,
     initMobileNav,
     toast,
+
+    // Widget API (used by step3.html and sjw-pause-btn onclick)
+    _sjwStart,
+    _sjwDismiss,
+    _sjwTogglePause: window._app_sjwTogglePause,
+    _sjwCollapse() {
+      _sjwCollapsed = !_sjwCollapsed;
+      const body = document.getElementById('sjw-body');
+      if (body) body.classList.toggle('collapsed', _sjwCollapsed);
+    },
 
     async createContacts(rows) {
       const created = await apiFetch('/api/contacts', { method: 'POST', body: JSON.stringify(rows) });
@@ -278,5 +414,18 @@ const App = (() => {
       await apiFetch(`/api/templates/${key}`, { method: 'DELETE' });
       delete state.templates[key];
     },
+  };
+
+  // Wire up _sjwTogglePause after window._app is defined
+  window._app._sjwTogglePause = async () => {
+    if (!_sjwJobId) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs/${_sjwJobId}`);
+      if (!res.ok) return;
+      const job = await res.json();
+      const action = job.status === 'paused' ? 'resume' : 'pause';
+      await fetch(`${API_BASE}/api/jobs/${_sjwJobId}/${action}`, { method: 'POST' });
+      _sjwPoll();
+    } catch (_) {}
   };
 })();

@@ -1,13 +1,13 @@
 require('dotenv').config();
 const express = require('express');
 const mongoose = require('mongoose');
-const nodemailer = require('nodemailer');
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const cors = require('cors');
 const db = require('./db');
 const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
+const mailer = require('./lib/mailer');
 
 const app = express();
 app.use(cors());
@@ -25,42 +25,28 @@ const requireDb = (req, res, next) => {
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));
+app.use('/api/jobs', requireDb, require('./routes/jobs'));
 
-// ── Sender state ────────────────────────────────────────────────────────────
-let transporter = null;
-let senderConfig = { email: '', name: 'Prashuk Jain' };
-let senderAppPassword = ''; // retained in memory only, for IMAP bounce checks
-
-const buildTransporter = (email, appPassword) =>
-  nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: email, pass: appPassword }
-  });
-
-// Optional: pre-configure from .env so /api/config can be skipped
-if (process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD) {
-  transporter = buildTransporter(process.env.GMAIL_EMAIL, process.env.GMAIL_APP_PASSWORD);
-  senderConfig = {
-    email: process.env.GMAIL_EMAIL,
-    name: process.env.SENDER_NAME || 'Prashuk Jain'
-  };
-  senderAppPassword = process.env.GMAIL_APP_PASSWORD;
-}
+// ── Inngest handler ─────────────────────────────────────────────────────────
+const { serve } = require('inngest/express');
+const { inngest } = require('./inngest');
+const { sendEmailBatch, sendSingleEmail } = require('./inngest-fns');
+app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendSingleEmail] }));
 
 // ── Configure Gmail credentials ────────────────────────────────────────────
 app.post('/api/config', (req, res) => {
   const { email, appPassword, name } = req.body;
   if (!email || !appPassword) return res.status(400).json({ error: 'email and appPassword required' });
 
-  const candidate = buildTransporter(email, appPassword);
+  const candidate = mailer.buildTransporter(email, appPassword);
 
   candidate.verify((err) => {
     if (err) {
       return res.status(400).json({ error: 'Could not connect. Check email/app password.', detail: err.message });
     }
-    transporter = candidate;
-    senderConfig = { email, name: name || 'Prashuk Jain' };
-    senderAppPassword = appPassword;
+    mailer.transporter = candidate;
+    mailer.senderConfig = { email, name: name || 'Prashuk Jain' };
+    mailer.senderAppPassword = appPassword;
     res.json({ ok: true, message: `Connected as ${email}` });
   });
 });
@@ -69,8 +55,6 @@ app.post('/api/config', (req, res) => {
 const escapeRegExp = (str) => str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 // Parses a raw RFC822 bounce/NDR message source for failed recipients + reasons.
-// Primary: machine-readable DSN fields (Final-Recipient / Diagnostic-Code / Status).
-// Fallback: Gmail's human-readable "wasn't delivered to ... because ..." text.
 const parseBounces = (raw) => {
   const hits = [];
   const finalRecipientRe = /Final-Recipient:\s*rfc822;\s*<?([^\s>]+)>?/gi;
@@ -78,14 +62,8 @@ const parseBounces = (raw) => {
   while ((match = finalRecipientRe.exec(raw)) !== null) {
     const email = match[1].toLowerCase();
     const tail = raw.slice(match.index, match.index + 1000);
-    // Diagnostic-Code can be folded across multiple header-continuation lines
-    // (lines starting with whitespace) — capture and join them all.
     const diagnostic = tail.match(/Diagnostic-Code:\s*(?:smtp|x-[\w-]+);\s*([^\r\n]+(?:\r?\n[ \t]+[^\r\n]+)*)/i);
     const status = tail.match(/Status:\s*([\d.]+)/i);
-    // Some MTAs (e.g. Gmail's own NoSuchUser message) repeat the SMTP code
-    // ("550-5.1.1", "550 5.1.1") at the start of each continuation-line —
-    // strip those (only on continuation lines, since enhanced status code
-    // subcodes can be multi-digit, e.g. "554 5.4.14") before joining.
     const reason = diagnostic
       ? diagnostic[1].split(/\r?\n/).map((line, i) => {
           const trimmed = line.trim();
@@ -107,8 +85,6 @@ const parseBounces = (raw) => {
   return hits;
 };
 
-// Builds a short preview of a reply's body, stopping at the first quoted-reply
-// marker (">" lines, "On ... wrote:", or "--- Original Message ---").
 const REPLY_SNIPPET_MAX_LEN = 400;
 
 const buildSnippet = (text) => {
@@ -130,13 +106,6 @@ const buildSnippet = (text) => {
   return snippet;
 };
 
-// Checks whether a raw message is a reply to one of our outreach emails, and if
-// so marks the matching contact as 'replied'. Two matching strategies:
-//  - Strong: the message's In-Reply-To/References references a Message-ID we
-//    stored when sending (works for emails sent after this feature shipped).
-//  - Fallback heuristic: From == contact's email, Subject starts with "Re:",
-//    and the message arrived after we sent to them (for older sends with no
-//    stored Message-ID).
 const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
   const parsed = await simpleParser(raw);
 
@@ -155,9 +124,6 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
 
   if (!contact) {
     const subject = (parsed.subject || '').trim();
-    // Match plain replies ("Re: ...") as well as common auto-responder
-    // prefixes (Outlook/Exchange "Automatic reply:", "Out of Office:", etc.)
-    // — these often carry useful info (e.g. "no longer employed, contact X").
     if (/^(re|automatic reply|auto-?reply|out[ -]of[ -]office)\s*:/i.test(subject)) {
       const candidate = byEmail.get(fromAddr);
       if (candidate && !candidate.messageId && parsed.date && parsed.date > candidate.updatedAt) {
@@ -175,22 +141,9 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
   replied.push({ email: contact.email, name: contact.name, repliedAt: contact.repliedAt, snippet: contact.replySnippet });
 };
 
-// Builds a nodemailer attachment for the stored resume, if requested and present.
-const getResumeAttachment = async (attachResume) => {
-  if (!attachResume) return undefined;
-  const settings = await Settings.getSingleton();
-  if (!settings.resume) return undefined;
-  return [{
-    filename: settings.resume.filename,
-    content: settings.resume.data,
-    contentType: settings.resume.contentType,
-  }];
-};
-
 // ── Send single email ──────────────────────────────────────────────────────
 app.post('/api/send', async (req, res) => {
-  if (!transporter) {
-    console.error(`❌  [send] ${new Date().toISOString()} rejected ${req.body?.to || '(no recipient)'}: Gmail not configured (transporter is null — server may have just restarted)`);
+  if (!mailer.transporter) {
     return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
   }
 
@@ -198,77 +151,27 @@ app.post('/api/send', async (req, res) => {
   if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body are required' });
 
   try {
-    const attachments = await getResumeAttachment(attachResume);
-    const info = await transporter.sendMail({
-      from: `"${senderConfig.name}" <${senderConfig.email}>`,
+    const attachments = await mailer.getResumeAttachment(attachResume);
+    const info = await mailer.transporter.sendMail({
+      from: `"${mailer.senderConfig.name}" <${mailer.senderConfig.email}>`,
       to,
       subject,
       text: body,
       ...(attachments ? { attachments } : {}),
     });
-    console.log(`✅  [send] ${new Date().toISOString()} sent to ${to} (messageId: ${info.messageId || 'n/a'})`);
     res.json({ ok: true, messageId: info.messageId || null });
   } catch (err) {
-    // SMTP errors (incl. Gmail rate/quota limits) carry responseCode/response/code —
-    // surface them so we can tell "rate limited" (e.g. 4.x.x / 550-5.4.5) apart from
-    // connection or config issues at a glance.
-    console.error(`❌  [send] ${new Date().toISOString()} failed for ${to}: ${err.message}`, {
-      code: err.code,
-      responseCode: err.responseCode,
-      response: err.response,
-      command: err.command,
-    });
     res.status(500).json({ error: err.message, code: err.responseCode || err.code || null });
   }
 });
 
-// ── Bulk send with delay ───────────────────────────────────────────────────
-// Accepts array of { to, subject, body, name }
-// Sends one every `delayMs` ms, returns a results array when complete
-app.post('/api/bulk-send', async (req, res) => {
-  if (!transporter) return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
-
-  const { contacts, delayMs = 8000, attachResume } = req.body; // default 8s between emails
-  if (!contacts || !contacts.length) return res.status(400).json({ error: 'No contacts provided' });
-
-  const results = [];
-  const attachments = await getResumeAttachment(attachResume);
-
-  for (let i = 0; i < contacts.length; i++) {
-    const c = contacts[i];
-    try {
-      await transporter.sendMail({
-        from: `"${senderConfig.name}" <${senderConfig.email}>`,
-        to: c.to,
-        subject: c.subject,
-        text: c.body,
-        ...(attachments ? { attachments } : {}),
-      });
-      results.push({ name: c.name, to: c.to, status: 'sent' });
-    } catch (err) {
-      results.push({ name: c.name, to: c.to, status: 'failed', error: err.message });
-    }
-
-    // delay between sends (skip delay after last one)
-    if (i < contacts.length - 1) {
-      await new Promise(r => setTimeout(r, delayMs));
-    }
-  }
-
-  res.json({ ok: true, results });
-});
-
 // ── Check mailbox for bounces & replies ────────────────────────────────────
-// Scans the sender's Gmail INBOX + Spam via IMAP for delivery-failure (NDR)
-// messages (marking contacts 'bounced') and for replies to outreach emails
-// (marking contacts 'replied'). Uses lastMailboxCheckAt from Settings to only
-// scan emails that arrived since the last check (huge speed win on repeat runs).
 const BOUNCE_LOOKBACK_DAYS = 7;
 const REPLY_LOOKBACK_DAYS = 30;
-const BUFFER_MS = 5 * 60 * 1000; // 5-min overlap guards against clock skew
+const BUFFER_MS = 5 * 60 * 1000;
 
 app.post('/api/check-mailbox', requireDb, async (req, res) => {
-  if (!senderConfig.email || !senderAppPassword) {
+  if (!mailer.senderConfig.email || !mailer.senderAppPassword) {
     return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
   }
 
@@ -278,7 +181,6 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   const fallbackBounce = new Date(Date.now() - BOUNCE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
   const fallbackReply  = new Date(Date.now() - REPLY_LOOKBACK_DAYS  * 24 * 60 * 60 * 1000);
 
-  // Math.max picks the more recent date → fewer emails fetched on repeat runs.
   const bounceSince = lastChecked
     ? new Date(Math.max(lastChecked.getTime() - BUFFER_MS, fallbackBounce.getTime()))
     : fallbackBounce;
@@ -290,7 +192,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     host: 'imap.gmail.com',
     port: 993,
     secure: true,
-    auth: { user: senderConfig.email, pass: senderAppPassword },
+    auth: { user: mailer.senderConfig.email, pass: mailer.senderAppPassword },
     logger: false,
   });
 
@@ -298,8 +200,6 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   const bounced = [];
   const replied = [];
 
-  // Candidate contacts for reply-matching: only contacts we've sent to and
-  // haven't already heard back from (or had bounce) are still "awaiting reply".
   const sentContacts = await Contact.find({ status: 'sent' });
   const byEmail = new Map();
   const byMessageId = new Map();
@@ -308,9 +208,6 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     if (c.messageId) byMessageId.set(c.messageId.replace(/^<|>$/g, ''), c);
   }
 
-  // Scans a single mailbox for NDR messages and replies, updating
-  // `scanned`/`bounced`/`replied`. Skips silently if the mailbox can't be
-  // opened (e.g. doesn't exist).
   const scanMailbox = async (mailbox) => {
     let lock;
     try {
@@ -319,10 +216,6 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
       return;
     }
     try {
-      // Union of several search strategies: Gmail's HEADER search for
-      // "multipart/report" misses some genuine DSNs (e.g. Office 365/Exchange
-      // bounces forwarded via postmaster@<recipient-domain>), so also catch
-      // messages from mailer-daemon (Gmail's own NDRs) or any postmaster@.
       const [reportUids, daemonUids, postmasterUids, replyUids] = await Promise.all([
         client.search({ since: bounceSince, header: { 'content-type': 'multipart/report' } }, { uid: true }),
         client.search({ since: bounceSince, from: 'mailer-daemon' }, { uid: true }),
@@ -349,13 +242,11 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
               await existing.save();
               bounced.push({ email: existing.email, name: existing.name, reason });
             } else if (reason !== existing.bounceReason && reason.length > (existing.bounceReason || '').length) {
-              // Reprocessing the same bounce message with an improved parser can
-              // recover a more complete reason than what was stored previously.
               existing.bounceReason = reason;
               await existing.save();
             }
           }
-          continue; // a DSN is never also a human reply
+          continue;
         }
 
         await tryMatchReply(raw, byMessageId, byEmail, replied);
@@ -384,7 +275,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
 
 // ── Status ──────────────────────────────────────────────────────────────────
 app.get('/api/status', (req, res) => {
-  res.json({ configured: !!transporter, email: senderConfig.email, name: senderConfig.name });
+  res.json({ configured: !!mailer.transporter, email: mailer.senderConfig.email, name: mailer.senderConfig.name });
 });
 
 const PORT = process.env.PORT || 3000;
