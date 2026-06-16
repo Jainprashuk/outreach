@@ -15,6 +15,7 @@ const contactSchema = new mongoose.Schema({
   sentSubject: { type: String, default: null },
   repliedAt: { type: Date, default: null },
   replySnippet: { type: String, default: null },
+  replyRead: { type: Boolean, default: false },
 }, { timestamps: true });
 
 contactSchema.set('toJSON', {

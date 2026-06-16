@@ -88,9 +88,9 @@
         <button class="btn btn-sm" id="clear-filters-btn" type="button">Clear filters</button>
       </div>
       <div class="table-card">
-        <table>
+        <table id="contacts-table">
           <thead>
-            <tr>
+            <tr id="contacts-thead-row">
               <th>Contact</th>
               <th>Company</th>
               <th>Template</th>
@@ -107,9 +107,27 @@
 
 </div>
 
+<!-- REPLY MODAL -->
+<div id="reply-modal-wrap" class="edit-modal-wrap" onclick="if(event.target===this)closeReplyModal()">
+  <div class="edit-modal" style="max-width:540px">
+    <div class="reply-modal-header">
+      <div id="rm-chip" class="contact-chip"></div>
+      <button class="btn btn-sm" onclick="closeReplyModal()" style="flex-shrink:0"><i class="ti ti-x"></i></button>
+    </div>
+    <div id="rm-meta" class="reply-meta"></div>
+    <div id="rm-bubble" class="reply-bubble"></div>
+    <div class="reply-modal-footer">
+      <button class="btn btn-sm" onclick="closeReplyModal()"><i class="ti ti-x"></i> Close</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/app.js"></script>
 <script>
 const { getStats, filterContacts, avatarEl, statusBadge, state } = window._app;
+
+let replySort = 'desc'; // 'desc' = newest first
+let currentReplyContactId = null;
 
 function resumeSending() {
   const resumable = state.contacts.filter(c => c.status === 'queued' && c.approvalStatus === 'approved');
@@ -145,6 +163,11 @@ async function checkMailbox() {
   }
 }
 
+function toggleSort() {
+  replySort = replySort === 'desc' ? 'asc' : 'desc';
+  render(activeTab());
+}
+
 function render(tab) {
   const stats = getStats();
 
@@ -166,6 +189,15 @@ function render(tab) {
     <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value">${stats.remaining}</div></div>
   `;
 
+  // Unread count badge on the Replied tab
+  const unreadCount = state.contacts.filter(c => c.status === 'replied' && !c.replyRead).length;
+  const repliedTabEl = document.querySelector('.nav-tab[data-tab="replied"]');
+  if (repliedTabEl) {
+    repliedTabEl.innerHTML = unreadCount > 0
+      ? `Replied <span class="tab-badge">${unreadCount}</span>`
+      : 'Replied';
+  }
+
   const tplNames = { 'intro-v2': 'Intro v2', 'follow-up': 'Follow-up', 'cold': 'Cold outreach' };
   let contacts = filterContacts(tab);
 
@@ -183,33 +215,89 @@ function render(tab) {
 
   document.getElementById('count-badge').textContent = contacts.length + ' contacts';
 
-  document.getElementById('contacts-tbody').innerHTML = contacts.map(c => `
-    <tr>
-      <td>
-        <div class="contact-chip">
-          ${avatarEl(c.name)}
-          <div>
-            <div class="name">${c.name}</div>
-            <div class="email">${c.email}</div>
+  if (tab === 'replied') {
+    // Sort by repliedAt
+    contacts = [...contacts].sort((a, b) => {
+      const da = new Date(a.repliedAt || 0), db = new Date(b.repliedAt || 0);
+      return replySort === 'desc' ? db - da : da - db;
+    });
+
+    const sortIcon = replySort === 'desc' ? 'ti-arrow-down' : 'ti-arrow-up';
+    document.getElementById('contacts-thead-row').innerHTML = `
+      <th>Contact</th>
+      <th>Company</th>
+      <th>Reply preview</th>
+      <th class="sortable" onclick="toggleSort()" title="Toggle sort order">
+        Replied <i class="ti ${sortIcon}" style="font-size:10px;color:var(--text3)"></i>
+      </th>
+      <th>Status</th>
+      <th></th>
+    `;
+
+    document.getElementById('contacts-tbody').innerHTML = contacts.map(c => {
+      const isNew = !c.replyRead;
+      const fmtDate = c.repliedAt
+        ? new Date(c.repliedAt).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })
+        : '—';
+      const raw = c.replySnippet || '';
+      const snippet = raw.length > 75 ? raw.slice(0, 75) + '…' : raw;
+      const unreadSpacer = isNew
+        ? '<span class="reply-unread-dot"></span>'
+        : '<span style="width:10px;display:inline-block;flex-shrink:0"></span>';
+      return `
+        <tr class="${isNew ? 'reply-unread-row' : ''}">
+          <td>
+            <div class="contact-chip">
+              ${unreadSpacer}
+              ${avatarEl(c.name)}
+              <div>
+                <div class="name">${c.name}</div>
+                <div class="email">${c.email}</div>
+              </div>
+            </div>
+          </td>
+          <td style="color:var(--text2)">${c.company || '—'}</td>
+          <td class="reply-snippet-cell">${snippet || '<span style="color:var(--text3)">No preview</span>'}</td>
+          <td style="font-size:12px;white-space:nowrap;color:var(--text2)">${fmtDate}</td>
+          <td>${isNew ? '<span class="badge badge-new">New</span>' : '<span class="badge badge-seen">Seen</span>'}</td>
+          <td><button class="btn btn-sm" onclick="openReplyModal('${c.id}')"><i class="ti ti-message"></i> View</button></td>
+        </tr>
+      `;
+    }).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-message-off"></i>No replies yet</div></td></tr>`;
+
+  } else {
+    document.getElementById('contacts-thead-row').innerHTML = `
+      <th>Contact</th><th>Company</th><th>Template</th><th>Status</th><th>Approval</th><th></th>
+    `;
+
+    document.getElementById('contacts-tbody').innerHTML = contacts.map(c => `
+      <tr>
+        <td>
+          <div class="contact-chip">
+            ${avatarEl(c.name)}
+            <div>
+              <div class="name">${c.name}</div>
+              <div class="email">${c.email}</div>
+            </div>
           </div>
-        </div>
-      </td>
-      <td style="color:var(--text2)">${c.company}</td>
-      <td style="color:var(--text2)">${tplNames[c.template]||c.template}</td>
-      <td>${statusBadge(c.status)}</td>
-      <td>${statusBadge(c.approvalStatus)}</td>
-      <td>
-        ${c.approvalStatus === 'pending'
-          ? `<a href="step2.html" class="btn btn-sm">Review</a>`
-          : `<button class="btn btn-sm" onclick="showDetail('${c.id}')">View</button>`
-        }
-      </td>
-    </tr>
-  `).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-inbox"></i>No contacts here yet</div></td></tr>`;
+        </td>
+        <td style="color:var(--text2)">${c.company}</td>
+        <td style="color:var(--text2)">${tplNames[c.template]||c.template}</td>
+        <td>${statusBadge(c.status)}</td>
+        <td>${statusBadge(c.approvalStatus)}</td>
+        <td>
+          ${c.approvalStatus === 'pending'
+            ? `<a href="step2.html" class="btn btn-sm">Review</a>`
+            : `<button class="btn btn-sm" onclick="showDetail('${c.id}')">View</button>`
+          }
+        </td>
+      </tr>
+    `).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-inbox"></i>No contacts here yet</div></td></tr>`;
+  }
 }
 
 document.getElementById('tabs').addEventListener('click', e => {
-  const tab = e.target.dataset.tab;
+  const tab = e.target.closest('.nav-tab')?.dataset.tab;
   if (!tab) return;
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   window._app.setTab(tab);
@@ -245,14 +333,62 @@ document.getElementById('clear-filters-btn').addEventListener('click', () => {
 function showDetail(id) {
   const c = window._app.state.contacts.find(x => x.id === id);
   if (!c) return;
+  if (c.status === 'replied') { openReplyModal(id); return; }
   let msg = `Contact: ${c.name}\nEmail: ${c.email}\nCompany: ${c.company}\nStatus: ${c.status}`;
   if (c.status === 'bounced' && c.bounceReason) msg += `\nBounce reason: ${c.bounceReason}`;
-  if (c.status === 'replied') {
-    msg += `\nReplied: ${c.repliedAt ? new Date(c.repliedAt).toLocaleString() : 'unknown date'}`;
-    if (c.replySnippet) msg += `\n\n"${c.replySnippet}"`;
-  }
   alert(msg);
 }
+
+function openReplyModal(id) {
+  const c = window._app.state.contacts.find(x => x.id === id);
+  if (!c) return;
+  currentReplyContactId = id;
+
+  document.getElementById('rm-chip').innerHTML = `
+    ${avatarEl(c.name)}
+    <div>
+      <div style="font-weight:600;font-size:15px">${c.name}</div>
+      <div style="font-size:12px;color:var(--text2)">${c.email}${c.company ? ' · ' + c.company : ''}</div>
+    </div>
+  `;
+
+  const repliedDate = c.repliedAt
+    ? new Date(c.repliedAt).toLocaleString('en-US', { month:'long', day:'numeric', year:'numeric', hour:'2-digit', minute:'2-digit' })
+    : 'Unknown date';
+  const subjectLine = c.sentSubject
+    ? `<span><i class="ti ti-mail"></i> Re: <em>${c.sentSubject.replace(/&/g,'&amp;').replace(/</g,'&lt;')}</em></span>`
+    : '';
+  document.getElementById('rm-meta').innerHTML =
+    subjectLine + `<span><i class="ti ti-calendar"></i> Replied on ${repliedDate}</span>`;
+
+  const bubble = document.getElementById('rm-bubble');
+  if (c.replySnippet) {
+    bubble.textContent = c.replySnippet;
+    bubble.classList.remove('empty');
+  } else {
+    bubble.textContent = 'No reply content was captured.';
+    bubble.classList.add('empty');
+  }
+
+  document.getElementById('reply-modal-wrap').classList.add('open');
+
+  // Auto-mark as read when opened
+  if (!c.replyRead) {
+    window._app.updateContact(id, { replyRead: true })
+      .then(() => render(activeTab()))
+      .catch(() => {});
+  }
+}
+
+function closeReplyModal() {
+  document.getElementById('reply-modal-wrap').classList.remove('open');
+  currentReplyContactId = null;
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeReplyModal();
+});
 
 async function start() {
   window._app.initTheme();

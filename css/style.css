@@ -570,6 +570,49 @@ textarea { resize: vertical; min-height: 80px; }
 @keyframes toastOut { from { opacity: 1; transform: translateX(0); } to { opacity: 0; transform: translateX(12px); } }
 @keyframes spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
 
+/* ── REPLY VIEW ── */
+.reply-modal-header {
+  display:flex; align-items:flex-start; justify-content:space-between;
+  margin-bottom:16px; gap:12px;
+}
+.reply-meta {
+  display:flex; flex-direction:column; gap:5px;
+  font-size:12px; color:var(--text2); margin-bottom:14px;
+  padding:10px 14px; background:var(--bg2); border-radius:var(--radius);
+  border:0.5px solid var(--border);
+  transition: background-color .2s var(--ease), border-color .2s var(--ease);
+}
+.reply-meta i { vertical-align:middle; margin-right:4px; font-size:13px; }
+.reply-bubble {
+  background:var(--bg2); border:0.5px solid var(--border);
+  border-radius:var(--radius-lg); padding:16px 18px;
+  font-size:13px; line-height:1.8; color:var(--text);
+  white-space:pre-wrap; word-break:break-word;
+  max-height:280px; overflow-y:auto; margin-bottom:18px;
+  transition: background-color .2s var(--ease), border-color .2s var(--ease);
+}
+.reply-bubble.empty { color:var(--text3); font-style:italic; }
+.reply-modal-footer { display:flex; justify-content:flex-end; gap:8px; }
+.badge-new { background:var(--accent-bg); color:var(--accent); font-weight:600; }
+.badge-seen { background:var(--bg3); color:var(--text3); }
+.reply-unread-dot {
+  width:8px; height:8px; border-radius:50%; background:var(--accent);
+  display:inline-block; flex-shrink:0; align-self:center; margin-right:2px;
+}
+.reply-unread-row { background:var(--accent-bg) !important; }
+.reply-snippet-cell {
+  max-width:220px; overflow:hidden; text-overflow:ellipsis;
+  white-space:nowrap; font-size:12px; color:var(--text2); font-style:italic;
+}
+.tab-badge {
+  display:inline-flex; align-items:center; justify-content:center;
+  background:var(--accent); color:#fff; border-radius:10px;
+  min-width:18px; height:16px; padding:0 5px;
+  font-size:10px; font-weight:700; margin-left:5px; vertical-align:middle;
+}
+thead th.sortable { cursor:pointer; user-select:none; }
+thead th.sortable:hover { color:var(--text); }
+
 /* ── RESPONSIVE ── */
 @media (max-width: 900px) {
   .stat-grid { grid-template-columns: 1fr 1fr; }

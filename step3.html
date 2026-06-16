@@ -233,7 +233,8 @@ async function startSend() {
     } catch (err) {
       failed++;
       newStatus = 'failed';
-      row.querySelector('span:last-child').innerHTML = `<span style="color:var(--red)" title="${(err.message||'').replace(/"/g,'&quot;')}"><i class="ti ti-circle-x"></i> Failed</span>`;
+      const detail = sendData?.code ? `${err.message} (${sendData.code})` : (err.message || '');
+      row.querySelector('span:last-child').innerHTML = `<span style="color:var(--red)" title="${detail.replace(/"/g,'&quot;')}"><i class="ti ti-circle-x"></i> Failed</span>`;
     }
 
     try {

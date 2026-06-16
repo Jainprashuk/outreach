@@ -189,7 +189,10 @@ const getResumeAttachment = async (attachResume) => {
 
 // ── Send single email ──────────────────────────────────────────────────────
 app.post('/api/send', async (req, res) => {
-  if (!transporter) return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+  if (!transporter) {
+    console.error(`❌  [send] ${new Date().toISOString()} rejected ${req.body?.to || '(no recipient)'}: Gmail not configured (transporter is null — server may have just restarted)`);
+    return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+  }
 
   const { to, subject, body, attachResume } = req.body;
   if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body are required' });
@@ -203,9 +206,19 @@ app.post('/api/send', async (req, res) => {
       text: body,
       ...(attachments ? { attachments } : {}),
     });
+    console.log(`✅  [send] ${new Date().toISOString()} sent to ${to} (messageId: ${info.messageId || 'n/a'})`);
     res.json({ ok: true, messageId: info.messageId || null });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    // SMTP errors (incl. Gmail rate/quota limits) carry responseCode/response/code —
+    // surface them so we can tell "rate limited" (e.g. 4.x.x / 550-5.4.5) apart from
+    // connection or config issues at a glance.
+    console.error(`❌  [send] ${new Date().toISOString()} failed for ${to}: ${err.message}`, {
+      code: err.code,
+      responseCode: err.responseCode,
+      response: err.response,
+      command: err.command,
+    });
+    res.status(500).json({ error: err.message, code: err.responseCode || err.code || null });
   }
 });
 
