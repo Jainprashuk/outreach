@@ -2,7 +2,7 @@ name: Auto check mailbox
 
 on:
   schedule:
-    - cron: '*/30 * * * *'   # every 30 minutes, 24/7
+    - cron: '*/2 * * * *'   # every 30 minutes, 24/7
 
 jobs:
   check:
