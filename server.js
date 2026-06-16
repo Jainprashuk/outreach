@@ -292,6 +292,13 @@ app.get('/api/status', (req, res) => {
   res.json({ configured: !!mailer.transporter, email: mailer.senderConfig.email, name: mailer.senderConfig.name });
 });
 
+// ── Global error handler — catches unhandled throws in any route ─────────────
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('[unhandled]', err.message);
+  if (!res.headersSent) res.status(500).json({ error: err.message || 'Internal server error' });
+});
+
 const PORT = process.env.PORT || 3000;
 // Eagerly connect at startup for local dev (Vercel re-uses the cached promise on cold starts).
 ensureDb()
