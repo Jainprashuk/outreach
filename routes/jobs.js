@@ -18,15 +18,17 @@ const serialize = (doc) => {
 // Create a new send job and trigger Inngest orchestrator
 router.post('/', async (req, res) => {
   try {
-    const { items, attachResume } = req.body;
+    const { items, attachResume, senderEmail, senderName, senderAppPassword } = req.body;
     if (!items || !items.length) return res.status(400).json({ error: 'No items provided' });
 
+    // Prefer credentials sent from the browser (guaranteed same-request values).
+    // Fall back to in-memory mailer state for local dev where a single process handles all requests.
     const job = await SendJob.create({
       items,
       attachResume:      !!attachResume,
-      senderEmail:       mailer.senderConfig.email || '',
-      senderName:        mailer.senderConfig.name  || '',
-      senderAppPassword: mailer.senderAppPassword  || '',
+      senderEmail:       senderEmail       || mailer.senderConfig.email || '',
+      senderName:        senderName        || mailer.senderConfig.name  || '',
+      senderAppPassword: senderAppPassword || mailer.senderAppPassword  || '',
     });
     await inngest.send({ name: 'email/batch.start', data: { jobId: job.id.toString() } });
     res.json(job.toJSON());

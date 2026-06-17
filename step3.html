@@ -277,14 +277,21 @@ async function startSend() {
     return { contactId: a.id, to: a.email, name: a.name, subject, body };
   });
 
-  // Create job
+  // Create job — include credentials so the job document has them regardless
+  // of which Vercel instance handles this request vs the Inngest worker requests.
   document.getElementById('progress-label').textContent = 'Queuing emails…';
   let job;
   try {
     const res = await fetch(`${API_BASE}/api/jobs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items, attachResume })
+      body: JSON.stringify({
+        items,
+        attachResume,
+        senderEmail:       email,
+        senderName:        window._app.state.sender.name || '',
+        senderAppPassword: pass,
+      })
     });
     if (!res.ok) {
       const err = await res.json();
