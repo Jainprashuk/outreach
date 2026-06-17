@@ -298,18 +298,8 @@ const App = (() => {
     } catch (_) {}
   };
 
-  // Expose toggle functions for inline onclick handlers
-  window._app_sjwTogglePause = async () => {
-    if (!_sjwJobId) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/jobs/${_sjwJobId}`);
-      if (!res.ok) return;
-      const job = await res.json();
-      const action = job.status === 'paused' ? 'resume' : 'pause';
-      await fetch(`${API_BASE}/api/jobs/${_sjwJobId}/${action}`, { method: 'POST' });
-      _sjwPoll();
-    } catch (_) {}
-  };
+  // Placeholder — real implementation wired up after window._app is defined below
+  window._app_sjwTogglePause = () => window._app?._sjwTogglePause();
 
   // Auto-start widget check on every page load (except step3)
   if (document.readyState === 'loading') {
@@ -439,7 +429,16 @@ const App = (() => {
       if (!res.ok) return;
       const job = await res.json();
       const action = job.status === 'paused' ? 'resume' : 'pause';
-      await fetch(`${API_BASE}/api/jobs/${_sjwJobId}/${action}`, { method: 'POST' });
+      const actionRes = await fetch(`${API_BASE}/api/jobs/${_sjwJobId}/${action}`, { method: 'POST' });
+      if (!actionRes.ok) {
+        const err = await actionRes.json();
+        if (err.error === 'credentials_missing') {
+          // Old job has no stored credentials — dismiss widget and let user go through Resume sending
+          _sjwDismiss();
+          toast('Gmail credentials expired for this job. Use the "Resume sending" button on the dashboard.', 'error', 7000);
+          return;
+        }
+      }
       _sjwPoll();
     } catch (_) {}
   };

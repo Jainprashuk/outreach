@@ -9,6 +9,8 @@ const serialize = (doc) => {
   obj.id = doc._id.toString();
   delete obj._id;
   delete obj.__v;
+  delete obj.senderAppPassword; // never expose the app password to the browser
+  obj.hasCredentials = !!(doc.senderEmail && doc.senderAppPassword);
   if (obj.items) obj.items = obj.items.map(item => { delete item._id; return item; });
   return obj;
 };
@@ -107,6 +109,16 @@ router.post('/:id/resume', async (req, res) => {
   const CHUNK_SIZE = 10;
   const DELAY_MS   = 1500;
   try {
+    // Check credentials before updating status so we don't leave a stuck 'processing' job
+    const existing = await SendJob.findById(req.params.id).lean();
+    if (!existing) return res.status(404).json({ error: 'Job not found' });
+    if (!existing.senderEmail || !existing.senderAppPassword) {
+      return res.status(400).json({
+        error: 'credentials_missing',
+        message: 'This job has no stored Gmail credentials. Use the "Resume sending" button on the dashboard to re-enter them.',
+      });
+    }
+
     const job = await SendJob.findByIdAndUpdate(
       req.params.id,
       { status: 'processing' },
