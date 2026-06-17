@@ -13,10 +13,13 @@ const itemSchema = new mongoose.Schema({
 }, { _id: false });
 
 const sendJobSchema = new mongoose.Schema({
-  items:          { type: [itemSchema], default: [] },
-  status:         { type: String, enum: ['pending', 'processing', 'paused', 'done', 'cancelled'], default: 'pending' },
-  attachResume:   { type: Boolean, default: false },
-  processedCount: { type: Number, default: 0 },
+  items:             { type: [itemSchema], default: [] },
+  status:            { type: String, enum: ['pending', 'processing', 'paused', 'done', 'cancelled'], default: 'pending' },
+  attachResume:      { type: Boolean, default: false },
+  processedCount:    { type: Number, default: 0 },
+  senderEmail:       { type: String, default: '' },
+  senderName:        { type: String, default: '' },
+  senderAppPassword: { type: String, default: '' },
 }, { timestamps: true });
 
 sendJobSchema.set('toJSON', {

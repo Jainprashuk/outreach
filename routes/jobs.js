@@ -2,6 +2,7 @@ const router = require('express').Router();
 const SendJob = require('../models/SendJob');
 const Contact = require('../models/Contact');
 const { inngest } = require('../inngest');
+const mailer = require('../lib/mailer');
 
 const serialize = (doc) => {
   const obj = { ...doc };
@@ -18,7 +19,13 @@ router.post('/', async (req, res) => {
     const { items, attachResume } = req.body;
     if (!items || !items.length) return res.status(400).json({ error: 'No items provided' });
 
-    const job = await SendJob.create({ items, attachResume: !!attachResume });
+    const job = await SendJob.create({
+      items,
+      attachResume:      !!attachResume,
+      senderEmail:       mailer.senderConfig.email || '',
+      senderName:        mailer.senderConfig.name  || '',
+      senderAppPassword: mailer.senderAppPassword  || '',
+    });
     await inngest.send({ name: 'email/batch.start', data: { jobId: job.id.toString() } });
     res.json(job.toJSON());
   } catch (err) {
@@ -49,43 +56,28 @@ router.get('/latest', async (req, res) => {
   }
 });
 
-// POST /api/jobs/:id/retry-failed — reset failed items to pending and re-queue them
+// POST /api/jobs/:id/retry-failed — reset failed contacts to queued so the user
+// can re-send them through step3 (credential entry is required there).
+// Does NOT fire Inngest — credentials must be re-entered at send time.
 router.post('/:id/retry-failed', async (req, res) => {
-  const CHUNK_SIZE = 10;
-  const DELAY_MS   = 1500;
   try {
-    const job = await SendJob.findById(req.params.id);
+    const job = await SendJob.findById(req.params.id).lean();
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
     const failedItems = job.items.filter(i => i.status === 'failed');
-    if (failedItems.length === 0) return res.json({ ok: true, retried: 0 });
+    if (failedItems.length === 0) return res.json({ ok: true, retried: 0, contacts: [] });
 
-    // Reset failed items back to pending in the job document
-    for (const item of failedItems) {
-      item.status = 'pending';
-      item.error = null;
-      item.processedAt = null;
-    }
-    job.status = 'processing';
-    job.processedCount = job.items.filter(i => i.status !== 'pending').length;
-    await job.save();
-
-    // Reset the corresponding contacts back to queued
     const failedContactIds = failedItems.map(i => i.contactId);
-    await Contact.updateMany({ _id: { $in: failedContactIds } }, { $set: { status: 'queued' } });
 
-    // Re-fan-out in chunks using the new chunked approach
-    const chunks = [];
-    for (let i = 0; i < failedItems.length; i += CHUNK_SIZE) {
-      chunks.push(failedItems.slice(i, i + CHUNK_SIZE).map(it => it.contactId));
-    }
-    await inngest.send(chunks.map((chunk, i) => ({
-      name: 'email/chunk.send',
-      data: { jobId: job.id.toString(), contactIds: chunk },
-      ts: Date.now() + i * CHUNK_SIZE * DELAY_MS,
-    })));
+    // Reset contacts: queued + approved so "Resume sending" picks them up
+    await Contact.updateMany(
+      { _id: { $in: failedContactIds } },
+      { $set: { status: 'queued', approvalStatus: 'approved' } }
+    );
 
-    res.json({ ok: true, retried: failedItems.length });
+    // Return the full contact docs so the frontend can build the approved list for step3
+    const contacts = await Contact.find({ _id: { $in: failedContactIds } }).lean();
+    res.json({ ok: true, retried: failedItems.length, contacts });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

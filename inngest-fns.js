@@ -70,22 +70,15 @@ const sendEmailChunk = inngest.createFunction(
       if (!job || job.status === 'cancelled') return;
       if (job.status === 'paused') throw new Error('Job paused — will retry');
 
-      const { senderConfig, senderAppPassword, getResumeAttachment } = mailer;
+      // Credentials stored in job at creation time; fall back to mailer (env vars)
+      const senderEmail    = job.senderEmail    || mailer.senderConfig.email;
+      const senderName     = job.senderName     || mailer.senderConfig.name;
+      const senderPassword = job.senderAppPassword || mailer.senderAppPassword;
 
-      if (!senderConfig.email || !senderAppPassword) {
-        for (const contactId of contactIds) {
-          const item = job.items.find(i => i.contactId === contactId && i.status === 'pending');
-          if (item) {
-            item.status = 'failed';
-            item.error = 'Transporter not configured — set GMAIL_EMAIL and GMAIL_APP_PASSWORD in env';
-            item.processedAt = new Date();
-          }
-          await Contact.findByIdAndUpdate(contactId, { status: 'failed' });
-        }
-        job.processedCount = job.items.filter(i => i.status !== 'pending').length;
-        if (job.items.every(i => i.status !== 'pending')) job.status = 'done';
-        await job.save();
-        return;
+      if (!senderEmail || !senderPassword) {
+        // No credentials available — throw so Inngest marks this run failed without
+        // touching item status. User must re-send through step3 to enter credentials.
+        throw new Error('No Gmail credentials stored in job. Please re-send via the dashboard → Resume sending.');
       }
 
       // One pooled transporter for the entire chunk = ONE SMTP login for all emails here
@@ -96,10 +89,10 @@ const sendEmailChunk = inngest.createFunction(
         pool: true,
         maxConnections: 1,
         maxMessages: Infinity,
-        auth: { user: senderConfig.email, pass: senderAppPassword },
+        auth: { user: senderEmail, pass: senderPassword },
       });
 
-      const attachments = await getResumeAttachment(job.attachResume);
+      const attachments = await mailer.getResumeAttachment(job.attachResume);
 
       for (const contactId of contactIds) {
         const item = job.items.find(i => i.contactId === contactId && i.status === 'pending');
@@ -107,7 +100,7 @@ const sendEmailChunk = inngest.createFunction(
 
         try {
           const info = await pooledTransporter.sendMail({
-            from: `"${senderConfig.name}" <${senderConfig.email}>`,
+            from: `"${senderName}" <${senderEmail}>`,
             to: item.to,
             subject: item.subject,
             text: item.body,

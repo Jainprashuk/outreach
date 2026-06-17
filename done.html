@@ -74,9 +74,8 @@ document.getElementById('success-sub').textContent = subParts.join(' ');
 
 async function retryFailed() {
   const btn = document.getElementById('retry-btn');
-  const restore = window._app.btnLoad(btn, 'Retrying…');
+  const restore = window._app.btnLoad(btn, 'Resetting…');
   try {
-    // If we don't have jobId from sessionStorage, fetch the latest job
     if (!retryJobId) {
       const r = await fetch(`${window._app.API_BASE}/api/jobs/latest`);
       if (r.ok) { const j = await r.json(); retryJobId = j?.id || null; }
@@ -85,14 +84,18 @@ async function retryFailed() {
 
     const res = await fetch(`${window._app.API_BASE}/api/jobs/${retryJobId}/retry-failed`, { method: 'POST' });
     const data = await res.json();
-    if (!res.ok) { window._app.toast(data.error || 'Retry failed', 'error'); restore(); return; }
-
+    if (!res.ok) { window._app.toast(data.error || 'Reset failed', 'error'); restore(); return; }
     if (data.retried === 0) { window._app.toast('No failed emails to retry.', 'info'); restore(); return; }
 
-    localStorage.setItem('activeJobId', retryJobId);
-    window._app._sjwStart(retryJobId);
-    btn.style.display = 'none';
-    window._app.toast(`Retrying ${data.retried} emails in background…`, 'success');
+    const asApproved = data.contacts.map(c => ({
+      ...c,
+      id: c._id,
+      approvalStatus: 'approved',
+      editedSubject: null,
+      editedBody: null,
+    }));
+    sessionStorage.setItem('approved', JSON.stringify(asApproved));
+    window.location.href = 'step3.html';
   } catch (err) {
     window._app.toast(err.message, 'error');
     restore();
