@@ -91,6 +91,20 @@
         <button class="btn btn-sm" style="border-style:dashed;margin-top:4px" onclick="addVarRow()" type="button"><i class="ti ti-plus"></i> Add variable</button>
       </div>
 
+      <!-- SMTP ACTIVITY -->
+      <div style="background:var(--bg);border:0.5px solid var(--border);border-radius:var(--radius-lg);padding:20px;margin-bottom:20px">
+        <div style="font-size:14px;font-weight:500;margin-bottom:14px;display:flex;align-items:center;gap:8px">
+          <i class="ti ti-mail-forward" style="font-size:16px;color:var(--text2)"></i> SMTP activity
+        </div>
+        <div style="display:flex;align-items:center;gap:16px">
+          <div>
+            <div style="font-size:28px;font-weight:600;line-height:1" id="sent-24h-count">—</div>
+            <div style="font-size:12px;color:var(--text2);margin-top:3px">emails sent in the last 24 hours</div>
+          </div>
+          <button class="btn btn-sm" id="sent-24h-refresh" onclick="loadSent24h()" type="button" style="margin-left:auto"><i class="ti ti-refresh"></i> Refresh</button>
+        </div>
+      </div>
+
       <button class="btn btn-primary" id="save-btn" onclick="save()"><i class="ti ti-check"></i> Save settings</button>
     </div>
   </div>
@@ -170,9 +184,25 @@ async function removeResume() {
   }
 }
 
+async function loadSent24h() {
+  const countEl = document.getElementById('sent-24h-count');
+  const btn = document.getElementById('sent-24h-refresh');
+  const restore = window._app.btnLoad(btn, '…');
+  try {
+    const res = await fetch(`${window._app.API_BASE}/api/jobs/stats/sent-24h`);
+    const data = await res.json();
+    countEl.textContent = data.count ?? '—';
+  } catch {
+    countEl.textContent = '—';
+  } finally {
+    restore();
+  }
+}
+
 async function load() {
   window._app.initTheme();
   window._app.initMobileNav();
+  loadSent24h();
 
   const saveBtn = document.getElementById('save-btn');
   const formEls = document.querySelectorAll('.main input:not(#resume-input), .main textarea');

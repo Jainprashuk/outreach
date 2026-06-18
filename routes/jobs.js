@@ -43,6 +43,28 @@ router.post('/', async (req, res) => {
   }
 });
 
+// GET /api/jobs/stats/sent-24h — count emails sent via SMTP in the last 24 hours
+router.get('/stats/sent-24h', async (req, res) => {
+  try {
+    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const jobs = await SendJob.find(
+      { 'items.processedAt': { $gte: since } },
+      { items: 1 }
+    ).lean();
+    let count = 0;
+    for (const job of jobs) {
+      for (const item of job.items) {
+        if (item.status === 'sent' && item.processedAt && new Date(item.processedAt) >= since) {
+          count++;
+        }
+      }
+    }
+    res.json({ count });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // IMPORTANT: /active must be defined before /:id
 router.get('/active', async (req, res) => {
   try {
