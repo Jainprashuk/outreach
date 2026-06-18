@@ -138,10 +138,35 @@
   </div>
 </div>
 
+<!-- SEND MODE PICKER (shown on retry flows where ?mode= is absent) -->
+<div class="mode-picker-wrap" id="mode-picker">
+  <div class="mode-picker">
+    <h2>Choose send mode</h2>
+    <p>How should emails be sent in this batch?</p>
+    <div class="mode-options">
+      <button class="mode-option" id="opt-sequential" onclick="pickMode('sequential')">
+        <div class="mo-icon"><i class="ti ti-send"></i></div>
+        <div class="mo-title">Sequential</div>
+        <div class="mo-desc">One email every 1.5 s, separate SMTP connection per email. Can trigger Gmail's "Too many login attempts" on larger batches.</div>
+        <span class="mo-badge warn">Risk of login errors</span>
+      </button>
+      <button class="mode-option selected" id="opt-bulk" onclick="pickMode('bulk')">
+        <div class="mo-icon"><i class="ti ti-bolt"></i></div>
+        <div class="mo-title">Bulk (fast)</div>
+        <div class="mo-desc">Single pooled SMTP connection — authenticates once and sends all emails through it. No repeated logins, no rate-limit errors.</div>
+        <span class="mo-badge">Recommended</span>
+      </button>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:18px">
+      <button class="btn btn-primary" onclick="confirmMode()"><i class="ti ti-check"></i> Continue</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/app.js"></script>
 <script>
 const API_BASE = window._app.API_BASE;
-const sendMode = new URLSearchParams(window.location.search).get('mode') || 'sequential';
+let sendMode = new URLSearchParams(window.location.search).get('mode') || null;
 const approvals = JSON.parse(sessionStorage.getItem('approved') || '[]');
 const approved = approvals.filter(a => a.approvalStatus === 'approved');
 const skipped = approvals.filter(a => a.approvalStatus !== 'approved');
@@ -365,10 +390,23 @@ function resetSendUI() {
   document.getElementById('log-rows').innerHTML = '';
 }
 
+function pickMode(mode) {
+  sendMode = mode;
+  document.getElementById('opt-sequential').classList.toggle('selected', mode === 'sequential');
+  document.getElementById('opt-bulk').classList.toggle('selected', mode === 'bulk');
+}
+
+function confirmMode() {
+  document.getElementById('mode-picker').classList.remove('open');
+  if (sendMode === 'bulk') document.getElementById('chunk-card').style.display = 'block';
+  else document.getElementById('chunk-card').style.display = 'none';
+  renderSummary();
+}
+
 async function start() {
   window._app.initTheme();
   window._app.initMobileNav();
-  document.getElementById('back-btn').href = `step2.html?mode=${sendMode}`;
+  document.getElementById('back-btn').href = `step2.html?mode=${sendMode || 'bulk'}`;
 
   if (approvals.length === 0) {
     document.getElementById('send-summary').innerHTML = '<div class="empty-state"><i class="ti ti-inbox"></i>No contacts from previous step. <a href="step1.html">Start over</a>.</div>';
@@ -382,7 +420,7 @@ async function start() {
     return;
   }
 
-  renderSummary();
+  if (sendMode) renderSummary();
 
   // Check if the server already has Gmail credentials configured (env vars).
   // If so, hide the credentials form — the worker will use the server-side credentials.
@@ -398,7 +436,11 @@ async function start() {
     document.getElementById('gmail-email').value = window._app.state.sender.email;
   }
 
-  if (sendMode === 'bulk') {
+  if (!sendMode) {
+    // Retry / re-send flow — mode wasn't in the URL, ask the user
+    sendMode = 'bulk'; // pre-select recommended
+    document.getElementById('mode-picker').classList.add('open');
+  } else if (sendMode === 'bulk') {
     document.getElementById('chunk-card').style.display = 'block';
   }
 
