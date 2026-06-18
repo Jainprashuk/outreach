@@ -62,6 +62,18 @@ const sendSingleEmail = inngest.createFunction(
       const item = job.items.find(i => i.contactId === contactId && i.status === 'pending');
       if (!item) return;
 
+      // Cooldown check — skip if this contact was sent an email within the last 2 hours
+      const contactDoc = await Contact.findById(contactId).lean();
+      if (contactDoc?.lastSentAt && (Date.now() - new Date(contactDoc.lastSentAt).getTime()) < COOLDOWN_MS) {
+        item.status = 'failed';
+        item.error = 'Cooldown — email sent within the last 2 hours. Try again later.';
+        item.processedAt = new Date();
+        job.processedCount = job.items.filter(i => i.status !== 'pending').length;
+        if (job.items.every(i => i.status !== 'pending')) job.status = 'done';
+        await job.save();
+        return;
+      }
+
       // Credentials stored in job at creation time; fall back to mailer (env vars)
       const senderEmail    = job.senderEmail    || mailer.senderConfig.email;
       const senderName     = job.senderName     || mailer.senderConfig.name;
@@ -94,6 +106,7 @@ const sendSingleEmail = inngest.createFunction(
           status: 'sent',
           messageId: info.messageId || null,
           sentSubject: item.subject,
+          lastSentAt: new Date(),
         });
       } catch (err) {
         item.status = 'failed';
@@ -109,6 +122,7 @@ const sendSingleEmail = inngest.createFunction(
   }
 );
 
+const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours between sends to the same contact
 const CHUNK_DELAY_MS = 2000;
 
 // Bulk worker: splits pending items into chunks, one fresh SMTP connection per chunk.
@@ -169,6 +183,23 @@ const sendEmailBulk = inngest.createFunction(
 
         try {
           for (const item of chunk) {
+            // Cooldown check — skip if sent within the last 2 hours
+            const contactDoc = await Contact.findById(item.contactId).lean();
+            if (contactDoc?.lastSentAt && (Date.now() - new Date(contactDoc.lastSentAt).getTime()) < COOLDOWN_MS) {
+              await SendJob.findOneAndUpdate(
+                { _id: jobId, 'items.contactId': item.contactId },
+                {
+                  $set: {
+                    'items.$.status': 'failed',
+                    'items.$.error': 'Cooldown — email sent within the last 2 hours. Try again later.',
+                    'items.$.processedAt': new Date(),
+                  },
+                  $inc: { processedCount: 1 },
+                }
+              );
+              continue;
+            }
+
             try {
               const info = await transporter.sendMail({
                 from: `"${senderName}" <${senderEmail}>`,
@@ -192,6 +223,7 @@ const sendEmailBulk = inngest.createFunction(
                 status: 'sent',
                 messageId: info.messageId || null,
                 sentSubject: item.subject,
+                lastSentAt: new Date(),
               });
             } catch (err) {
               await SendJob.findOneAndUpdate(

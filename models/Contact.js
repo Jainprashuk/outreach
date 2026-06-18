@@ -16,6 +16,7 @@ const contactSchema = new mongoose.Schema({
   repliedAt: { type: Date, default: null },
   replySnippet: { type: String, default: null },
   replyRead: { type: Boolean, default: false },
+  lastSentAt: { type: Date, default: null },
   deleted: { type: Boolean, default: false },
   deletedAt: { type: Date, default: null },
 }, { timestamps: true });
