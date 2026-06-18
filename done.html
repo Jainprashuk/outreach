@@ -59,43 +59,17 @@
 <script src="js/app.js"></script>
 <script>
 const result = JSON.parse(sessionStorage.getItem('sendResult') || '{"sent":0,"failed":0,"skipped":0}');
-const failed = result.failed || 0;
-let retryJobId = result.jobId || null;
-
-document.getElementById('success-title').textContent = failed > 0
-  ? `${result.sent} sent, ${failed} failed`
-  : `${result.sent} email${result.sent !== 1 ? 's' : ''} sent!`;
-
-const subParts = [];
-subParts.push(`${result.sent} email${result.sent !== 1 ? 's' : ''} delivered.`);
-if (failed > 0) subParts.push(`${failed} failed to send.`);
-if (result.skipped > 0) subParts.push(`${result.skipped} contact${result.skipped > 1 ? 's are' : ' is'} still pending approval.`);
-document.getElementById('success-sub').textContent = subParts.join(' ');
 
 async function retryFailed() {
   const btn = document.getElementById('retry-btn');
   const restore = window._app.btnLoad(btn, 'Resetting…');
   try {
-    if (!retryJobId) {
-      const r = await fetch(`${window._app.API_BASE}/api/jobs/latest`);
-      if (r.ok) { const j = await r.json(); retryJobId = j?.id || null; }
-    }
-    if (!retryJobId) { window._app.toast('Could not find the job to retry.', 'error'); restore(); return; }
-
-    const res = await fetch(`${window._app.API_BASE}/api/jobs/${retryJobId}/retry-failed`, { method: 'POST' });
+    const res = await fetch(`${window._app.API_BASE}/api/contacts/retry-failed`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) { window._app.toast(data.error || 'Reset failed', 'error'); restore(); return; }
     if (data.retried === 0) { window._app.toast('No failed emails to retry.', 'info'); restore(); return; }
-
-    const asApproved = data.contacts.map(c => ({
-      ...c,
-      id: c._id,
-      approvalStatus: 'approved',
-      editedSubject: null,
-      editedBody: null,
-    }));
-    sessionStorage.setItem('approved', JSON.stringify(asApproved));
-    window.location.href = 'step3.html';
+    window._app.toast(`${data.retried} contact${data.retried !== 1 ? 's' : ''} reset to queued.`, 'success');
+    btn.style.display = 'none';
   } catch (err) {
     window._app.toast(err.message, 'error');
     restore();
@@ -107,24 +81,38 @@ async function start() {
   window._app.initMobileNav();
 
   let totalSent = result.sent;
+  let failedCount = result.failed || 0;
   try {
-    await window._app.loadContacts();
+    const [, statsRes] = await Promise.all([
+      window._app.loadContacts(),
+      fetch(`${window._app.API_BASE}/api/contacts/stats`),
+    ]);
     totalSent = window._app.getStats().sent;
+    if (statsRes.ok) { const s = await statsRes.json(); failedCount = s.failed || 0; }
   } catch (err) {
-    // fall back to this batch's count if the API is unreachable
+    totalSent = result.sent;
   }
+
+  const subParts = [`${result.sent} email${result.sent !== 1 ? 's' : ''} delivered.`];
+  if (failedCount > 0) subParts.push(`${failedCount} failed to send.`);
+  if (result.skipped > 0) subParts.push(`${result.skipped} contact${result.skipped > 1 ? 's are' : ' is'} still pending approval.`);
+
+  document.getElementById('success-title').textContent = failedCount > 0
+    ? `${result.sent} sent, ${failedCount} failed`
+    : `${result.sent} email${result.sent !== 1 ? 's' : ''} sent!`;
+  document.getElementById('success-sub').textContent = subParts.join(' ');
 
   document.getElementById('result-stats').innerHTML = `
     <div class="stat-card"><div class="stat-label">Sent this batch</div><div class="stat-value green">${result.sent}</div></div>
-    ${failed > 0 ? `<div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:var(--red)">${failed}</div></div>` : ''}
+    ${failedCount > 0 ? `<div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:var(--red)">${failedCount}</div></div>` : ''}
     <div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${result.skipped}</div></div>
     <div class="stat-card"><div class="stat-label">Total ever sent</div><div class="stat-value">${totalSent}</div></div>
   `;
 
-  if (failed > 0) {
+  if (failedCount > 0) {
     const btn = document.getElementById('retry-btn');
     btn.style.display = '';
-    btn.innerHTML = `<i class="ti ti-refresh"></i> Retry ${failed} failed email${failed !== 1 ? 's' : ''}`;
+    btn.innerHTML = `<i class="ti ti-refresh"></i> Retry ${failedCount} failed email${failedCount !== 1 ? 's' : ''}`;
   }
 }
 

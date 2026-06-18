@@ -57,12 +57,28 @@ router.get('/stats', async (req, res) => {
         sent:      { $sum: { $cond: [{ $eq: ['$status', 'sent'] },      1, 0] } },
         bounced:   { $sum: { $cond: [{ $eq: ['$status', 'bounced'] },   1, 0] } },
         replied:   { $sum: { $cond: [{ $eq: ['$status', 'replied'] },   1, 0] } },
+        failed:    { $sum: { $cond: [{ $eq: ['$status', 'failed'] },    1, 0] } },
         pending:   { $sum: { $cond: [{ $eq: ['$approvalStatus', 'pending'] }, 1, 0] } },
         remaining: { $sum: { $cond: [{ $eq: ['$status', 'queued'] },    1, 0] } },
       }},
     ]);
-    const zero = { total: 0, sent: 0, bounced: 0, replied: 0, pending: 0, remaining: 0 };
-    res.json(agg ? { total: agg.total, sent: agg.sent, bounced: agg.bounced, replied: agg.replied, pending: agg.pending, remaining: agg.remaining } : zero);
+    const zero = { total: 0, sent: 0, bounced: 0, replied: 0, failed: 0, pending: 0, remaining: 0 };
+    res.json(agg ? { total: agg.total, sent: agg.sent, bounced: agg.bounced, replied: agg.replied, failed: agg.failed, pending: agg.pending, remaining: agg.remaining } : zero);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/contacts/retry-failed — reset all failed contacts to queued
+router.post('/retry-failed', async (req, res) => {
+  try {
+    const failedContacts = await Contact.find({ ...BASE_FILTER, status: 'failed' }).lean();
+    if (failedContacts.length === 0) return res.json({ ok: true, retried: 0 });
+    await Contact.updateMany(
+      { _id: { $in: failedContacts.map(c => c._id) } },
+      { $set: { status: 'queued', approvalStatus: 'approved' } }
+    );
+    res.json({ ok: true, retried: failedContacts.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
