@@ -39,6 +39,19 @@
 .s-title { font-size: 13px; font-weight: 600; line-height: 1.2; }
 .s-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
 .s-body { padding: 18px 20px; }
+#chart-tooltip {
+  display: none;
+  position: fixed;
+  z-index: 900;
+  background: var(--bg);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 9px 13px;
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+  min-width: 148px;
+  transition: opacity .08s var(--ease);
+}
 </style>
 </head>
 <body>
@@ -199,6 +212,7 @@
     </div>
   </div>
 </div>
+<div id="chart-tooltip"></div>
 <script src="js/app.js"></script>
 <script>
 const nameEl = document.getElementById('s-name');
@@ -275,61 +289,135 @@ async function removeResume() {
 }
 
 function renderChart(buckets) {
-  const svg = document.getElementById('smtp-chart');
-  const W = 480, H = 130;
-  const padL = 26, padR = 4, padT = 8, padB = 26;
+  const svgEl = document.getElementById('smtp-chart');
+  const tooltip = document.getElementById('chart-tooltip');
+  const IST = { timeZone: 'Asia/Kolkata' };
+  const fmtShort = d => d.toLocaleTimeString('en-IN', { ...IST, hour: 'numeric', hour12: true });
+  const fmtFull  = d => d.toLocaleTimeString('en-IN', { ...IST, hour: '2-digit', minute: '2-digit', hour12: true });
+
+  const W = 480, H = 145;
+  const padL = 28, padR = 6, padT = 10, padB = 28;
   const cW = W - padL - padR;
   const cH = H - padT - padB;
   const maxVal = Math.max(...buckets.map(b => b.count), 1);
-  const barSlot = cW / 24;
-  const gap = Math.max(1.5, barSlot * 0.12);
-  const barW = barSlot - gap;
+  const slot = cW / 24;
+  const gap  = Math.max(2, slot * 0.13);
+  const bw   = slot - gap;
 
   let out = '';
 
-  // Horizontal grid lines
-  for (const frac of [0.5, 1]) {
-    const y = (padT + cH * (1 - frac)).toFixed(1);
+  // Horizontal grid lines at 50 % and 100 %
+  [0.5, 1].forEach(frac => {
+    const y   = (padT + cH * (1 - frac)).toFixed(1);
     const lbl = Math.round(maxVal * frac);
-    out += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke-dasharray="3 3" style="stroke:var(--border);stroke-width:0.5"/>`;
-    out += `<text x="${(padL - 4).toFixed(1)}" y="${(+y + 3.5).toFixed(1)}" text-anchor="end" style="font-size:9px;fill:var(--text3)">${lbl}</text>`;
-  }
+    out += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke-dasharray="4 3" style="stroke:var(--border);stroke-width:0.5"/>`;
+    out += `<text x="${padL - 5}" y="${+y + 3.5}" text-anchor="end" style="font-size:9px;fill:var(--text3)">${lbl}</text>`;
+  });
 
   // Baseline
-  const baseline = (padT + cH).toFixed(1);
-  out += `<line x1="${padL}" y1="${baseline}" x2="${W - padR}" y2="${baseline}" style="stroke:var(--border-md);stroke-width:0.5"/>`;
+  out += `<line x1="${padL}" y1="${padT + cH}" x2="${W - padR}" y2="${padT + cH}" style="stroke:var(--border-md);stroke-width:0.5"/>`;
 
-  // Bars
+  // Bars + top-cap highlight
   buckets.forEach((b, i) => {
-    const x = (padL + i * barSlot + gap / 2).toFixed(1);
-    const filledH = (b.count / maxVal) * cH;
-    const drawH = b.count > 0 ? Math.max(filledH, 3) : 2;
-    const y = (padT + cH - drawH).toFixed(1);
+    const bx    = padL + i * slot + gap / 2;
+    const fh    = (b.count / maxVal) * cH;
+    const drawH = b.count > 0 ? Math.max(fh, 4) : 2;
+    const by    = padT + cH - drawH;
     const isNow = i === 23;
     const color = isNow ? 'var(--accent)' : 'var(--green)';
-    const opacity = b.count === 0 ? 0.12 : isNow ? 1 : 0.72;
-    const label = new Date(b.hour).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    out += `<rect x="${x}" y="${y}" width="${barW.toFixed(1)}" height="${drawH.toFixed(1)}" rx="2" style="fill:${color};opacity:${opacity}"><title>${b.count} email${b.count !== 1 ? 's' : ''} · ${label}</title></rect>`;
+    const op    = b.count === 0 ? 0.1 : isNow ? 0.9 : 0.65;
+
+    // Main bar
+    out += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${drawH.toFixed(1)}" rx="2" style="fill:${color};opacity:${op}"/>`;
+    // Bright 2 px cap (gives depth without SVG gradients)
+    if (b.count > 0) {
+      out += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="2" rx="1" style="fill:${color};opacity:1"/>`;
+    }
   });
 
-  // X-axis labels (every 6 hours + "now")
+  // X-axis labels at 0 h, 6 h, 12 h, 18 h, now (IST)
   [0, 6, 12, 18, 23].forEach(i => {
-    const cx = (padL + i * barSlot + barSlot / 2).toFixed(1);
-    const d = new Date(buckets[i].hour);
-    const lbl = i === 23 ? 'now' : d.toLocaleTimeString([], { hour: 'numeric', hour12: true }).replace(' ', '').toLowerCase();
-    out += `<text x="${cx}" y="${H - 4}" text-anchor="middle" style="font-size:9px;fill:${i === 23 ? 'var(--accent)' : 'var(--text3)'};font-weight:${i === 23 ? 600 : 400}">${lbl}</text>`;
+    const cx  = (padL + i * slot + slot / 2).toFixed(1);
+    const lbl = i === 23 ? 'now' : fmtShort(new Date(buckets[i].hour));
+    const col = i === 23 ? 'var(--accent)' : 'var(--text3)';
+    const fw  = i === 23 ? 600 : 400;
+    out += `<text x="${cx}" y="${H - 5}" text-anchor="middle" style="font-size:9px;fill:${col};font-weight:${fw}">${lbl}</text>`;
   });
 
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.innerHTML = out;
+  svgEl.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svgEl.innerHTML = out;
 
-  // Capacity hint: find earliest non-empty bucket
-  const hint = document.getElementById('smtp-hint');
+  // Column-highlight rect — inserted first so it renders behind bars
+  const ns = 'http://www.w3.org/2000/svg';
+  const hlRect = document.createElementNS(ns, 'rect');
+  hlRect.setAttribute('rx', '3');
+  hlRect.style.cssText = 'fill:var(--bg3);opacity:0;pointer-events:none;transition:opacity .1s';
+  svgEl.insertBefore(hlRect, svgEl.firstChild);
+
+  // Hover interaction
+  let lastIdx = -1;
+
+  svgEl.addEventListener('mousemove', e => {
+    const rect   = svgEl.getBoundingClientRect();
+    const scaleX = W / rect.width;
+    const svgX   = (e.clientX - rect.left) * scaleX;
+    const idx    = Math.floor((svgX - padL) / slot);
+
+    if (idx < 0 || idx >= 24) {
+      hlRect.style.opacity = '0';
+      tooltip.style.display = 'none';
+      lastIdx = -1;
+      return;
+    }
+
+    // Move highlight column
+    if (idx !== lastIdx) {
+      const bx = padL + idx * slot + gap / 2;
+      hlRect.setAttribute('x', bx.toFixed(1));
+      hlRect.setAttribute('y', padT);
+      hlRect.setAttribute('width', bw.toFixed(1));
+      hlRect.setAttribute('height', cH);
+      hlRect.style.opacity = '1';
+      lastIdx = idx;
+    }
+
+    // Tooltip content (IST)
+    const b         = buckets[idx];
+    const hourStart = new Date(b.hour);
+    const hourEnd   = new Date(+hourStart + 3_600_000);
+    const isNow     = idx === 23;
+    const countColor = b.count > 0 ? (isNow ? 'var(--accent)' : 'var(--green)') : 'var(--text3)';
+
+    tooltip.innerHTML = `
+      <div style="font-size:10px;color:var(--text2);margin-bottom:5px;white-space:nowrap">
+        ${fmtFull(hourStart)} – ${fmtFull(hourEnd)}${isNow ? ' <span style="color:var(--accent);font-weight:600">· now</span>' : ''}
+      </div>
+      <div style="font-size:20px;font-weight:700;line-height:1;color:${countColor}">${b.count}</div>
+      <div style="font-size:11px;color:var(--text2);margin-top:2px">email${b.count !== 1 ? 's' : ''} sent</div>
+    `;
+
+    const tw = 160;
+    const th = tooltip.offsetHeight || 70;
+    const tx = Math.max(4, Math.min(window.innerWidth - tw - 4, e.clientX - tw / 2));
+    const ty = e.clientY - th - 14;
+    tooltip.style.left    = tx + 'px';
+    tooltip.style.top     = ty + 'px';
+    tooltip.style.display = 'block';
+  });
+
+  svgEl.addEventListener('mouseleave', () => {
+    hlRect.style.opacity  = '0';
+    tooltip.style.display = 'none';
+    lastIdx = -1;
+  });
+
+  // Capacity hint
+  const hint      = document.getElementById('smtp-hint');
   const firstBusy = buckets.findIndex(b => b.count > 0);
   if (firstBusy >= 0) {
-    const expiresInHours = 24 - firstBusy;
+    const hrs = 24 - firstBusy;
     hint.style.display = 'flex';
-    hint.innerHTML = `<i class="ti ti-clock-hour-3" style="font-size:11px;color:var(--green)"></i> <span style="color:var(--green);font-weight:500">${buckets[firstBusy].count} email${buckets[firstBusy].count !== 1 ? 's' : ''}</span>&nbsp;expire in ~${expiresInHours} hr${expiresInHours !== 1 ? 's' : ''}, freeing that capacity`;
+    hint.innerHTML = `<i class="ti ti-clock-hour-3" style="font-size:11px;color:var(--green)"></i>&nbsp;<span style="color:var(--green);font-weight:500">${buckets[firstBusy].count} email${buckets[firstBusy].count !== 1 ? 's' : ''}</span>&nbsp;expire in ~${hrs} hr${hrs !== 1 ? 's' : ''} IST, freeing that capacity`;
   } else {
     hint.style.display = 'none';
   }
