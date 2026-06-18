@@ -148,26 +148,13 @@ async function retryFailed() {
   const btn = document.getElementById('retry-failed-btn');
   const restore = window._app.btnLoad(btn, 'Resetting…');
   try {
-    const jobRes = await fetch(`${window._app.API_BASE}/api/jobs/latest`);
-    if (!jobRes.ok) throw new Error('Could not find the last job');
-    const job = await jobRes.json();
-    if (!job) throw new Error('No job found');
-
-    const res = await fetch(`${window._app.API_BASE}/api/jobs/${job.id}/retry-failed`, { method: 'POST' });
+    const res = await fetch(`${window._app.API_BASE}/api/contacts/retry-failed`, { method: 'POST' });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Reset failed');
     if (data.retried === 0) { window._app.toast('No failed emails to retry.', 'info'); restore(); return; }
-
-    // Put the reset contacts into sessionStorage as approved so step3 can send them
-    const asApproved = data.contacts.map(c => ({
-      ...c,
-      id: c._id,
-      approvalStatus: 'approved',
-      editedSubject: null,
-      editedBody: null,
-    }));
-    sessionStorage.setItem('approved', JSON.stringify(asApproved));
-    window.location.href = 'step3.html';
+    window._app.toast(`${data.retried} contact${data.retried !== 1 ? 's' : ''} reset to queued.`, 'success');
+    await window._app.loadContacts();
+    renderAll();
   } catch (err) {
     window._app.toast(err.message, 'error');
     restore();
