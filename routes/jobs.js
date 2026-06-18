@@ -43,23 +43,41 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET /api/jobs/stats/sent-24h — count emails sent via SMTP in the last 24 hours
+// GET /api/jobs/stats/sent-24h — hourly send activity for the past 24 hours
 router.get('/stats/sent-24h', async (req, res) => {
   try {
-    const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const HOUR_MS = 60 * 60 * 1000;
+    const now = new Date();
+    const hourStart = new Date(now);
+    hourStart.setMinutes(0, 0, 0);
+
+    // 24 buckets: [0] = 23 hours ago, [23] = current hour
+    const since = new Date(hourStart.getTime() - 23 * HOUR_MS);
+    const buckets = Array.from({ length: 24 }, (_, i) => ({
+      hour: new Date(since.getTime() + i * HOUR_MS).toISOString(),
+      count: 0,
+    }));
+
     const jobs = await SendJob.find(
       { 'items.processedAt': { $gte: since } },
       { items: 1 }
     ).lean();
-    let count = 0;
+
+    let total = 0;
     for (const job of jobs) {
       for (const item of job.items) {
-        if (item.status === 'sent' && item.processedAt && new Date(item.processedAt) >= since) {
-          count++;
+        if (item.status === 'sent' && item.processedAt) {
+          const t = new Date(item.processedAt);
+          if (t >= since) {
+            const idx = Math.min(Math.floor((t - since) / HOUR_MS), 23);
+            buckets[idx].count++;
+            total++;
+          }
         }
       }
     }
-    res.json({ count });
+
+    res.json({ count: total, buckets });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

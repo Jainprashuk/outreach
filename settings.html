@@ -39,19 +39,6 @@
 .s-title { font-size: 13px; font-weight: 600; line-height: 1.2; }
 .s-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
 .s-body { padding: 18px 20px; }
-.s-stat-num {
-  font-size: 44px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: -2px;
-  color: var(--green);
-  transition: color .2s var(--ease);
-}
-.s-stat-label {
-  font-size: 12px;
-  color: var(--text2);
-  margin-top: 6px;
-}
 </style>
 </head>
 <body>
@@ -80,7 +67,7 @@
         <div><h1>Settings</h1><p>Account, sender, and SMTP configuration</p></div>
       </div>
     </div>
-    <div class="section" style="max-width:580px">
+    <div class="section" >
 
       <!-- SENDER INFO -->
       <div class="s-card" style="animation-delay:.04s">
@@ -183,17 +170,26 @@
       <div class="s-card" style="animation-delay:.2s">
         <div class="s-head">
           <div class="s-head-left">
-            <div class="s-icon" style="background:var(--green-bg);color:var(--green)"><i class="ti ti-mail-forward"></i></div>
+            <div class="s-icon" style="background:var(--green-bg);color:var(--green)"><i class="ti ti-chart-bar"></i></div>
             <div>
               <div class="s-title">SMTP activity</div>
-              <div class="s-sub">Emails sent in the last 24 hours</div>
+              <div class="s-sub">Hourly breakdown · past 24 hours</div>
             </div>
           </div>
-          <button class="btn btn-sm" id="sent-24h-refresh" onclick="loadSent24h()" type="button"><i class="ti ti-refresh"></i> Refresh</button>
+          <div style="display:flex;align-items:center;gap:10px">
+            <div style="text-align:right">
+              <div style="font-size:20px;font-weight:700;line-height:1;color:var(--green)" id="sent-24h-count">—</div>
+              <div style="font-size:10px;color:var(--text3);margin-top:1px">sent / 24 hrs</div>
+            </div>
+            <button class="btn btn-sm" id="sent-24h-refresh" onclick="loadSent24h()" type="button" style="flex-shrink:0"><i class="ti ti-refresh"></i></button>
+          </div>
         </div>
-        <div class="s-body" style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 20px;text-align:center">
-          <div class="s-stat-num" id="sent-24h-count">—</div>
-          <div class="s-stat-label">emails sent via SMTP in the past 24 hrs</div>
+        <div class="s-body" style="padding:16px 20px 14px">
+          <svg id="smtp-chart" width="100%" style="display:block;overflow:visible"></svg>
+          <div id="smtp-hint" style="font-size:11px;color:var(--text3);margin-top:10px;display:flex;align-items:center;gap:5px">
+            <i class="ti ti-arrow-left" style="font-size:11px"></i>
+            Oldest emails expire first — left bars free up capacity soonest
+          </div>
         </div>
       </div>
 
@@ -278,6 +274,67 @@ async function removeResume() {
   }
 }
 
+function renderChart(buckets) {
+  const svg = document.getElementById('smtp-chart');
+  const W = 480, H = 130;
+  const padL = 26, padR = 4, padT = 8, padB = 26;
+  const cW = W - padL - padR;
+  const cH = H - padT - padB;
+  const maxVal = Math.max(...buckets.map(b => b.count), 1);
+  const barSlot = cW / 24;
+  const gap = Math.max(1.5, barSlot * 0.12);
+  const barW = barSlot - gap;
+
+  let out = '';
+
+  // Horizontal grid lines
+  for (const frac of [0.5, 1]) {
+    const y = (padT + cH * (1 - frac)).toFixed(1);
+    const lbl = Math.round(maxVal * frac);
+    out += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" stroke-dasharray="3 3" style="stroke:var(--border);stroke-width:0.5"/>`;
+    out += `<text x="${(padL - 4).toFixed(1)}" y="${(+y + 3.5).toFixed(1)}" text-anchor="end" style="font-size:9px;fill:var(--text3)">${lbl}</text>`;
+  }
+
+  // Baseline
+  const baseline = (padT + cH).toFixed(1);
+  out += `<line x1="${padL}" y1="${baseline}" x2="${W - padR}" y2="${baseline}" style="stroke:var(--border-md);stroke-width:0.5"/>`;
+
+  // Bars
+  buckets.forEach((b, i) => {
+    const x = (padL + i * barSlot + gap / 2).toFixed(1);
+    const filledH = (b.count / maxVal) * cH;
+    const drawH = b.count > 0 ? Math.max(filledH, 3) : 2;
+    const y = (padT + cH - drawH).toFixed(1);
+    const isNow = i === 23;
+    const color = isNow ? 'var(--accent)' : 'var(--green)';
+    const opacity = b.count === 0 ? 0.12 : isNow ? 1 : 0.72;
+    const label = new Date(b.hour).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    out += `<rect x="${x}" y="${y}" width="${barW.toFixed(1)}" height="${drawH.toFixed(1)}" rx="2" style="fill:${color};opacity:${opacity}"><title>${b.count} email${b.count !== 1 ? 's' : ''} · ${label}</title></rect>`;
+  });
+
+  // X-axis labels (every 6 hours + "now")
+  [0, 6, 12, 18, 23].forEach(i => {
+    const cx = (padL + i * barSlot + barSlot / 2).toFixed(1);
+    const d = new Date(buckets[i].hour);
+    const lbl = i === 23 ? 'now' : d.toLocaleTimeString([], { hour: 'numeric', hour12: true }).replace(' ', '').toLowerCase();
+    out += `<text x="${cx}" y="${H - 4}" text-anchor="middle" style="font-size:9px;fill:${i === 23 ? 'var(--accent)' : 'var(--text3)'};font-weight:${i === 23 ? 600 : 400}">${lbl}</text>`;
+  });
+
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = out;
+
+  // Capacity hint: find earliest non-empty bucket
+  const hint = document.getElementById('smtp-hint');
+  const firstBusy = buckets.findIndex(b => b.count > 0);
+  if (firstBusy >= 0) {
+    const expiresInHours = 24 - firstBusy;
+    hint.style.display = 'flex';
+    hint.innerHTML = `<i class="ti ti-clock-hour-3" style="font-size:11px;color:var(--green)"></i> <span style="color:var(--green);font-weight:500">${buckets[firstBusy].count} email${buckets[firstBusy].count !== 1 ? 's' : ''}</span>&nbsp;expire in ~${expiresInHours} hr${expiresInHours !== 1 ? 's' : ''}, freeing that capacity`;
+  } else {
+    hint.style.display = 'none';
+  }
+}
+
 async function loadSent24h() {
   const countEl = document.getElementById('sent-24h-count');
   const btn = document.getElementById('sent-24h-refresh');
@@ -286,6 +343,7 @@ async function loadSent24h() {
     const res = await fetch(`${window._app.API_BASE}/api/jobs/stats/sent-24h`);
     const data = await res.json();
     countEl.textContent = data.count ?? '—';
+    if (Array.isArray(data.buckets)) renderChart(data.buckets);
   } catch {
     countEl.textContent = '—';
   } finally {
