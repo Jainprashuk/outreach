@@ -297,6 +297,15 @@ tbody td {
 tbody tr { transition: background-color .12s var(--ease); }
 tbody tr:hover { background: var(--bg2); }
 
+/* ── PAGINATION ── */
+.pagination-bar {
+  display: flex; align-items: center; gap: 10px;
+  justify-content: center; padding: 14px 0 4px;
+  font-size: 13px; color: var(--text2);
+}
+.pagination-bar button { min-width: 72px; }
+.pagination-bar .page-info { min-width: 90px; text-align: center; }
+
 /* ── BADGES ── */
 .badge {
   display: inline-flex; align-items: center; gap: 4px;
@@ -666,3 +675,46 @@ thead th.sortable:hover { color:var(--text); }
   color: var(--text2); cursor: pointer; line-height: 1.4;
 }
 .btn-xs:hover { background: var(--bg2); color: var(--text1); }
+
+/* ── SEND MODE PICKER ── */
+.mode-picker-wrap {
+  display: none; position: fixed; inset: 0;
+  background: rgba(0,0,0,.45); z-index: 400;
+  align-items: center; justify-content: center;
+  padding: 20px;
+}
+.mode-picker-wrap.open { display: flex; animation: fadeInUp .15s var(--ease); }
+.mode-picker {
+  background: var(--bg); border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  width: 520px; max-width: 100%; padding: 24px;
+  transition: background-color .2s var(--ease), border-color .2s var(--ease);
+}
+.mode-picker h2 { font-size: 16px; font-weight: 600; margin-bottom: 6px; }
+.mode-picker p { font-size: 13px; color: var(--text2); margin-bottom: 18px; }
+.mode-options { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.mode-option {
+  border: 1.5px solid var(--border); border-radius: var(--radius-lg);
+  padding: 16px; cursor: pointer; transition: border-color .15s var(--ease), background-color .15s var(--ease);
+  text-align: left;
+}
+.mode-option:hover { border-color: var(--accent); background: var(--accent-bg); }
+.mode-option.selected { border-color: var(--accent); background: var(--accent-bg); }
+.mode-option .mo-icon { font-size: 22px; color: var(--accent); margin-bottom: 8px; }
+.mode-option .mo-title { font-size: 13px; font-weight: 600; color: var(--text); margin-bottom: 4px; }
+.mode-option .mo-desc { font-size: 12px; color: var(--text2); line-height: 1.5; }
+.mode-option .mo-badge {
+  display: inline-block; margin-top: 8px;
+  background: var(--green-bg); color: var(--green);
+  border-radius: 20px; padding: 2px 8px; font-size: 11px; font-weight: 500;
+}
+.mode-option .mo-badge.warn { background: var(--amber-bg); color: var(--amber); }
+.mode-indicator {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; color: var(--text2);
+  background: var(--bg2); border: 0.5px solid var(--border);
+  border-radius: 20px; padding: 3px 10px;
+}
+@media (max-width: 480px) {
+  .mode-options { grid-template-columns: 1fr; }
+}

@@ -103,6 +103,11 @@
           <tbody id="contacts-tbody"></tbody>
         </table>
       </div>
+      <div class="pagination-bar" id="pagination-bar" style="display:none">
+        <button class="btn btn-sm" id="page-prev" onclick="changePage(-1)"><i class="ti ti-chevron-left"></i> Prev</button>
+        <span class="page-info" id="page-info"></span>
+        <button class="btn btn-sm" id="page-next" onclick="changePage(1)">Next <i class="ti ti-chevron-right"></i></button>
+      </div>
     </div>
   </div>
 
@@ -127,8 +132,10 @@
 <script>
 const { getStats, filterContacts, avatarEl, statusBadge, state } = window._app;
 
-let replySort = 'desc'; // 'desc' = newest first
+let replySort = 'desc';
 let currentReplyContactId = null;
+let currentPage = 1;
+const PAGE_SIZE = 25;
 
 function resumeSending() {
   const resumable = state.contacts.filter(c => c.status === 'queued' && c.approvalStatus === 'approved');
@@ -287,12 +294,28 @@ function render(tab) {
 
   document.getElementById('count-badge').textContent = contacts.length + ' contacts';
 
+  // ── Pagination ──────────────────────────────────────────────────────────
+  const totalPages = Math.ceil(contacts.length / PAGE_SIZE) || 1;
+  if (currentPage > totalPages) currentPage = totalPages;
+  const pagedContacts = contacts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const paginationBar = document.getElementById('pagination-bar');
+  if (totalPages > 1) {
+    paginationBar.style.display = '';
+    document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages}`;
+    document.getElementById('page-prev').disabled = currentPage === 1;
+    document.getElementById('page-next').disabled = currentPage === totalPages;
+  } else {
+    paginationBar.style.display = 'none';
+  }
+
   if (tab === 'replied') {
     // Sort by repliedAt
     contacts = [...contacts].sort((a, b) => {
       const da = new Date(a.repliedAt || 0), db = new Date(b.repliedAt || 0);
       return replySort === 'desc' ? db - da : da - db;
     });
+    const pagedReplied = contacts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
 
     const sortIcon = replySort === 'desc' ? 'ti-arrow-down' : 'ti-arrow-up';
     document.getElementById('contacts-thead-row').innerHTML = `
@@ -306,7 +329,7 @@ function render(tab) {
       <th></th>
     `;
 
-    document.getElementById('contacts-tbody').innerHTML = contacts.map(c => {
+    document.getElementById('contacts-tbody').innerHTML = pagedReplied.map(c => {
       const isNew = !c.replyRead;
       const fmtDate = c.repliedAt
         ? new Date(c.repliedAt).toLocaleString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' })
@@ -332,7 +355,10 @@ function render(tab) {
           <td class="reply-snippet-cell">${snippet || '<span style="color:var(--text3)">No preview</span>'}</td>
           <td style="font-size:12px;white-space:nowrap;color:var(--text2)">${fmtDate}</td>
           <td>${isNew ? '<span class="badge badge-new">New</span>' : '<span class="badge badge-seen">Seen</span>'}</td>
-          <td><button class="btn btn-sm" onclick="openReplyModal('${c.id}')"><i class="ti ti-message"></i> View</button></td>
+          <td style="display:flex;gap:4px;align-items:center">
+            <button class="btn btn-sm" onclick="openReplyModal('${c.id}')"><i class="ti ti-message"></i> View</button>
+            <button class="btn btn-sm" onclick="confirmDelete('${c.id}')" title="Delete contact"><i class="ti ti-trash"></i></button>
+          </td>
         </tr>
       `;
     }).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-message-off"></i>No replies yet</div></td></tr>`;
@@ -342,7 +368,16 @@ function render(tab) {
       <th>Contact</th><th>Company</th><th>Template</th><th>Status</th><th>Approval</th><th></th>
     `;
 
-    document.getElementById('contacts-tbody').innerHTML = contacts.map(c => `
+    document.getElementById('contacts-tbody').innerHTML = pagedContacts.map(c => {
+      let actionBtn;
+      if (c.status === 'failed') {
+        actionBtn = `<button class="btn btn-sm btn-primary" onclick="retriggerContact('${c.id}')"><i class="ti ti-send"></i> Re-send</button>`;
+      } else if (c.approvalStatus === 'pending') {
+        actionBtn = `<a href="step2.html" class="btn btn-sm">Review</a>`;
+      } else {
+        actionBtn = `<button class="btn btn-sm" onclick="showDetail('${c.id}')">View</button>`;
+      }
+      return `
       <tr>
         <td>
           <div class="contact-chip">
@@ -357,14 +392,38 @@ function render(tab) {
         <td style="color:var(--text2)">${tplNames[c.template]||c.template}</td>
         <td>${statusBadge(c.status)}</td>
         <td>${statusBadge(c.approvalStatus)}</td>
-        <td>
-          ${c.approvalStatus === 'pending'
-            ? `<a href="step2.html" class="btn btn-sm">Review</a>`
-            : `<button class="btn btn-sm" onclick="showDetail('${c.id}')">View</button>`
-          }
+        <td style="display:flex;gap:4px;align-items:center">
+          ${actionBtn}
+          <button class="btn btn-sm" onclick="confirmDelete('${c.id}')" title="Delete contact"><i class="ti ti-trash"></i></button>
         </td>
-      </tr>
-    `).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-inbox"></i>No contacts here yet</div></td></tr>`;
+      </tr>`;
+    }).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-inbox"></i>No contacts here yet</div></td></tr>`;
+  }
+}
+
+function changePage(delta) {
+  currentPage += delta;
+  render(activeTab());
+}
+
+function retriggerContact(id) {
+  const c = state.contacts.find(x => x.id === id);
+  if (!c) return;
+  const asApproved = [{ ...c, approvalStatus: 'approved', editedSubject: c.sentSubject || null }];
+  sessionStorage.setItem('approved', JSON.stringify(asApproved));
+  window.location.href = 'step3.html';
+}
+
+async function confirmDelete(id) {
+  const c = state.contacts.find(x => x.id === id);
+  if (!c) return;
+  if (!confirm(`Delete ${c.name} (${c.email})?\nThis will hide the contact from all views.`)) return;
+  try {
+    await window._app.deleteContact(id);
+    window._app.toast(`${c.name} deleted.`, 'success');
+    render(activeTab());
+  } catch (err) {
+    window._app.toast(err.message, 'error');
   }
 }
 
@@ -373,6 +432,7 @@ document.getElementById('tabs').addEventListener('click', e => {
   if (!tab) return;
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   window._app.setTab(tab);
+  currentPage = 1;
   render(tab);
 });
 
@@ -391,14 +451,15 @@ function populateTemplateFilter() {
   });
 }
 
-['search'].forEach(id => document.getElementById(id).addEventListener('input', () => render(activeTab())));
-['filter-status', 'filter-approval', 'filter-template'].forEach(id => document.getElementById(id).addEventListener('change', () => render(activeTab())));
+['search'].forEach(id => document.getElementById(id).addEventListener('input', () => { currentPage = 1; render(activeTab()); }));
+['filter-status', 'filter-approval', 'filter-template'].forEach(id => document.getElementById(id).addEventListener('change', () => { currentPage = 1; render(activeTab()); }));
 
 document.getElementById('clear-filters-btn').addEventListener('click', () => {
   document.getElementById('search').value = '';
   document.getElementById('filter-status').value = '';
   document.getElementById('filter-approval').value = '';
   document.getElementById('filter-template').value = '';
+  currentPage = 1;
   render(activeTab());
 });
 

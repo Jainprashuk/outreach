@@ -109,4 +109,122 @@ const sendSingleEmail = inngest.createFunction(
   }
 );
 
-module.exports = { sendEmailBatch, sendSingleEmail };
+const CHUNK_DELAY_MS = 2000;
+
+// Bulk worker: splits pending items into chunks, one fresh SMTP connection per chunk.
+// Avoids "Too many login attempts" (1 AUTH per chunk vs 1 per email in sequential).
+// Saves progress to DB after each email so the widget tracks it in real time.
+const sendEmailBulk = inngest.createFunction(
+  { id: 'send-email-bulk', triggers: { event: 'email/bulk.start' } },
+  async ({ event, step }) => {
+    const { jobId } = event.data;
+
+    await step.run('send-all', async () => {
+      await ensureDb();
+      const job = await SendJob.findById(jobId);
+      if (!job) throw new Error('Job not found: ' + jobId);
+      job.status = 'processing';
+      await job.save();
+
+      const pendingItems = job.items.filter(i => i.status === 'pending');
+      if (pendingItems.length === 0) {
+        job.status = 'done';
+        await job.save();
+        return;
+      }
+
+      const senderEmail    = job.senderEmail    || mailer.senderConfig.email;
+      const senderName     = job.senderName     || mailer.senderConfig.name;
+      const senderPassword = job.senderAppPassword || mailer.senderAppPassword;
+
+      if (!senderEmail || !senderPassword) {
+        throw new Error('No Gmail credentials stored in job. Please re-send via the dashboard → Resume sending.');
+      }
+
+      const chunkSize = (job.chunkSize && job.chunkSize > 0) ? job.chunkSize : 20;
+      const chunks = [];
+      for (let i = 0; i < pendingItems.length; i += chunkSize) {
+        chunks.push(pendingItems.slice(i, i + chunkSize));
+      }
+
+      const attachments = await mailer.getResumeAttachment(job.attachResume);
+
+      for (let ci = 0; ci < chunks.length; ci++) {
+        const chunk = chunks[ci];
+
+        // Check pause/cancel at chunk boundary
+        const current = await SendJob.findById(jobId).lean();
+        if (!current || current.status === 'cancelled' || current.status === 'paused') break;
+
+        // Fresh connection per chunk — maxMessages ensures it closes cleanly after the chunk
+        const transporter = nodemailer.createTransport({
+          host: 'smtp.gmail.com',
+          port: 465,
+          secure: true,
+          pool: true,
+          maxConnections: 1,
+          maxMessages: chunk.length,
+          auth: { user: senderEmail, pass: senderPassword },
+        });
+
+        try {
+          for (const item of chunk) {
+            try {
+              const info = await transporter.sendMail({
+                from: `"${senderName}" <${senderEmail}>`,
+                to: item.to,
+                subject: item.subject,
+                text: item.body,
+                ...(attachments ? { attachments } : {}),
+              });
+              await SendJob.findOneAndUpdate(
+                { _id: jobId, 'items.contactId': item.contactId },
+                {
+                  $set: {
+                    'items.$.status': 'sent',
+                    'items.$.messageId': info.messageId || null,
+                    'items.$.processedAt': new Date(),
+                  },
+                  $inc: { processedCount: 1 },
+                }
+              );
+              await Contact.findByIdAndUpdate(item.contactId, {
+                status: 'sent',
+                messageId: info.messageId || null,
+                sentSubject: item.subject,
+              });
+            } catch (err) {
+              await SendJob.findOneAndUpdate(
+                { _id: jobId, 'items.contactId': item.contactId },
+                {
+                  $set: {
+                    'items.$.status': 'failed',
+                    'items.$.error': err.message,
+                    'items.$.processedAt': new Date(),
+                  },
+                  $inc: { processedCount: 1 },
+                }
+              );
+              await Contact.findByIdAndUpdate(item.contactId, { status: 'failed' });
+            }
+          }
+        } finally {
+          transporter.close();
+        }
+
+        // Wait between chunks (skip delay after the last chunk)
+        if (ci < chunks.length - 1) {
+          await new Promise(r => setTimeout(r, CHUNK_DELAY_MS));
+        }
+      }
+
+      const final = await SendJob.findById(jobId);
+      if (final && final.status === 'processing') {
+        final.status = 'done';
+        await final.save();
+      }
+    });
+  }
+);
+
+module.exports = { sendEmailBatch, sendSingleEmail, sendEmailBulk };

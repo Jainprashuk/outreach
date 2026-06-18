@@ -11,13 +11,15 @@ const serialize = (doc) => {
   return obj;
 };
 
+const BASE_FILTER = { deleted: { $ne: true } };
+
 const buildFilter = (tab) => {
-  if (tab === 'sent')      return { status: 'sent' };
-  if (tab === 'bounced')   return { status: 'bounced' };
-  if (tab === 'replied')   return { status: 'replied' };
-  if (tab === 'remaining') return { status: 'queued' };
-  if (tab === 'pending')   return { approvalStatus: 'pending' };
-  return {};
+  if (tab === 'sent')      return { ...BASE_FILTER, status: 'sent' };
+  if (tab === 'bounced')   return { ...BASE_FILTER, status: 'bounced' };
+  if (tab === 'replied')   return { ...BASE_FILTER, status: 'replied' };
+  if (tab === 'remaining') return { ...BASE_FILTER, status: 'queued' };
+  if (tab === 'pending')   return { ...BASE_FILTER, approvalStatus: 'pending' };
+  return { ...BASE_FILTER };
 };
 
 // GET /api/contacts
@@ -48,6 +50,7 @@ router.get('/', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const [agg] = await Contact.aggregate([
+      { $match: BASE_FILTER },
       { $group: {
         _id: null,
         total:     { $sum: 1 },
@@ -105,6 +108,21 @@ router.patch('/', async (req, res) => {
     });
     await Contact.bulkWrite(ops, { ordered: false });
     res.json({ ok: true, count: ops.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/contacts/:id — soft-delete (sets deleted: true, hides from all queries)
+router.delete('/:id', async (req, res) => {
+  try {
+    const contact = await Contact.findByIdAndUpdate(
+      req.params.id,
+      { deleted: true, deletedAt: new Date() },
+      { new: true, lean: true }
+    );
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

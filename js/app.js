@@ -1,5 +1,6 @@
 const App = (() => {
-  const API_BASE = window.location.hostname === 'localhost' ? 'http://localhost:3000' : '';
+  const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  const API_BASE = isLocal ? 'http://localhost:3000' : '';
 
   let state = {
     contacts: [],
@@ -355,6 +356,12 @@ const App = (() => {
     // Bulk-update N contacts in a single request using bulkWrite on the server.
     async bulkUpdateContacts(updates) {
       return apiFetch('/api/contacts', { method: 'PATCH', body: JSON.stringify(updates) });
+    },
+
+    async deleteContact(id) {
+      await apiFetch(`/api/contacts/${id}`, { method: 'DELETE' });
+      const idx = state.contacts.findIndex(c => c.id === id);
+      if (idx !== -1) state.contacts.splice(idx, 1);
     },
 
     async checkMailbox() {

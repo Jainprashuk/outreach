@@ -16,6 +16,8 @@ const contactSchema = new mongoose.Schema({
   repliedAt: { type: Date, default: null },
   replySnippet: { type: String, default: null },
   replyRead: { type: Boolean, default: false },
+  deleted: { type: Boolean, default: false },
+  deletedAt: { type: Date, default: null },
 }, { timestamps: true });
 
 // Indexes for common query patterns

@@ -68,7 +68,7 @@
     </div>
 
     <div class="step-footer">
-      <a href="step1.html" class="btn"><i class="ti ti-arrow-left"></i> Back</a>
+      <a href="step1.html" class="btn" id="back-btn"><i class="ti ti-arrow-left"></i> Back</a>
       <div style="display:flex;align-items:center;gap:12px">
         <span style="font-size:12px;color:var(--text2)" id="approval-count">—</span>
         <button class="btn btn-primary" onclick="goNext()">
@@ -101,6 +101,7 @@
 
 <script src="js/app.js"></script>
 <script>
+const sendMode = new URLSearchParams(window.location.search).get('mode') || 'sequential';
 let batch = JSON.parse(sessionStorage.getItem('batch') || '[]');
 let approvals = batch.map((c, i) => ({ ...c, idx: i, approvalStatus: 'pending', editedSubject: null, editedBody: null }));
 let editingIdx = null;
@@ -199,12 +200,13 @@ async function goNext() {
   }
 
   sessionStorage.setItem('approved', JSON.stringify(approvals));
-  window.location.href = 'step3.html';
+  window.location.href = `step3.html?mode=${sendMode}`;
 }
 
 async function start() {
   window._app.initTheme();
   window._app.initMobileNav();
+  document.getElementById('back-btn').href = `step1.html?mode=${sendMode}`;
 
   if (batch.length === 0) {
     document.getElementById('cards-list').innerHTML = '<div class="empty-state"><i class="ti ti-inbox"></i>No contacts to review. <a href="step1.html">Go back and add contacts</a>.</div>';

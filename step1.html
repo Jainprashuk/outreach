@@ -107,9 +107,35 @@
   </div>
 </div>
 
+<!-- SEND MODE PICKER MODAL -->
+<div class="mode-picker-wrap" id="mode-picker">
+  <div class="mode-picker">
+    <h2>Choose send mode</h2>
+    <p>How should emails be sent in this batch?</p>
+    <div class="mode-options">
+      <button class="mode-option" id="opt-sequential" onclick="pickMode('sequential')">
+        <div class="mo-icon"><i class="ti ti-send"></i></div>
+        <div class="mo-title">Sequential</div>
+        <div class="mo-desc">One email every 1.5 s, separate SMTP connection per email. Can trigger Gmail's "Too many login attempts" on larger batches.</div>
+        <span class="mo-badge warn">Risk of login errors</span>
+      </button>
+      <button class="mode-option selected" id="opt-bulk" onclick="pickMode('bulk')">
+        <div class="mo-icon"><i class="ti ti-bolt"></i></div>
+        <div class="mo-title">Bulk (fast)</div>
+        <div class="mo-desc">Single pooled SMTP connection — authenticates once and sends all emails through it. No repeated logins, no rate-limit errors.</div>
+        <span class="mo-badge">Recommended</span>
+      </button>
+    </div>
+    <div style="display:flex;justify-content:flex-end;margin-top:18px">
+      <button class="btn btn-primary" onclick="confirmMode()"><i class="ti ti-check"></i> Continue</button>
+    </div>
+  </div>
+</div>
+
 <script src="js/app.js"></script>
 <script>
 let rowCount = 0;
+let selectedMode = 'bulk';
 let templateOptions = `
   <option value="intro-v2">Intro v2</option>
   <option value="follow-up">Follow-up</option>
@@ -231,6 +257,16 @@ function parseCSV(file) {
   reader.readAsText(file);
 }
 
+function pickMode(mode) {
+  selectedMode = mode;
+  document.getElementById('opt-sequential').classList.toggle('selected', mode === 'sequential');
+  document.getElementById('opt-bulk').classList.toggle('selected', mode === 'bulk');
+}
+
+function confirmMode() {
+  document.getElementById('mode-picker').classList.remove('open');
+}
+
 async function goNext() {
   const rows = collectRows();
   if (rows.length === 0) { window._app.toast('Please add at least one contact.', 'error'); return; }
@@ -239,7 +275,7 @@ async function goNext() {
       name: r.name, email: r.email, company: r.company, role: r.role, template: r.template
     })));
     sessionStorage.setItem('batch', JSON.stringify(created));
-    window.location.href = 'step2.html';
+    window.location.href = `step2.html?mode=${selectedMode}`;
   } catch (err) {
     window._app.toast('Could not save contacts: ' + err.message, 'error');
   }
@@ -248,6 +284,16 @@ async function goNext() {
 async function init() {
   window._app.initTheme();
   window._app.initMobileNav();
+
+  // Read mode from URL (set when coming back from step2) so the choice is preserved
+  const urlMode = new URLSearchParams(window.location.search).get('mode');
+  if (urlMode === 'bulk' || urlMode === 'sequential') {
+    selectedMode = urlMode;
+    pickMode(selectedMode);
+  } else {
+    // Fresh entry — show the mode picker
+    document.getElementById('mode-picker').classList.add('open');
+  }
 
   try {
     await window._app.loadTemplates();

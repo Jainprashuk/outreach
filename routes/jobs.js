@@ -18,8 +18,10 @@ const serialize = (doc) => {
 // Create a new send job and trigger Inngest orchestrator
 router.post('/', async (req, res) => {
   try {
-    const { items, attachResume, senderEmail, senderName, senderAppPassword } = req.body;
+    const { items, attachResume, senderEmail, senderName, senderAppPassword, sendMode, chunkSize } = req.body;
     if (!items || !items.length) return res.status(400).json({ error: 'No items provided' });
+
+    const mode = sendMode === 'bulk' ? 'bulk' : 'sequential';
 
     // Prefer credentials sent from the browser (guaranteed same-request values).
     // Fall back to in-memory mailer state for local dev where a single process handles all requests.
@@ -29,8 +31,12 @@ router.post('/', async (req, res) => {
       senderEmail:       senderEmail       || mailer.senderConfig.email || '',
       senderName:        senderName        || mailer.senderConfig.name  || '',
       senderAppPassword: senderAppPassword || mailer.senderAppPassword  || '',
+      sendMode:          mode,
+      chunkSize:         (mode === 'bulk' && Number(chunkSize) > 0) ? Number(chunkSize) : 20,
     });
-    await inngest.send({ name: 'email/batch.start', data: { jobId: job.id.toString() } });
+
+    const eventName = mode === 'bulk' ? 'email/bulk.start' : 'email/batch.start';
+    await inngest.send({ name: eventName, data: { jobId: job.id.toString() } });
     res.json(job.toJSON());
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -128,11 +134,15 @@ router.post('/:id/resume', async (req, res) => {
 
     const pendingItems = job.items.filter(i => i.status === 'pending');
     if (pendingItems.length > 0) {
-      await inngest.send(pendingItems.map((item, i) => ({
-        name: 'email/single.send',
-        data: { jobId: job._id.toString(), contactId: item.contactId },
-        ts: Date.now() + i * 1500,
-      })));
+      if (job.sendMode === 'bulk') {
+        await inngest.send({ name: 'email/bulk.start', data: { jobId: job._id.toString() } });
+      } else {
+        await inngest.send(pendingItems.map((item, i) => ({
+          name: 'email/single.send',
+          data: { jobId: job._id.toString(), contactId: item.contactId },
+          ts: Date.now() + i * 1500,
+        })));
+      }
     } else {
       await SendJob.findByIdAndUpdate(req.params.id, { status: 'done' });
       job.status = 'done';

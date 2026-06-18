@@ -43,10 +43,15 @@
       <div class="table-card">
         <table>
           <thead>
-            <tr><th>Contact</th><th>Company</th><th>Role</th><th>Template</th><th>Status</th><th>Approval</th></tr>
+            <tr><th>Contact</th><th>Company</th><th>Role</th><th>Template</th><th>Status</th><th>Approval</th><th></th></tr>
           </thead>
           <tbody id="tbody"></tbody>
         </table>
+      </div>
+      <div class="pagination-bar" id="pagination-bar" style="display:none">
+        <button class="btn btn-sm" id="page-prev" onclick="changePage(-1)"><i class="ti ti-chevron-left"></i> Prev</button>
+        <span class="page-info" id="page-info"></span>
+        <button class="btn btn-sm" id="page-next" onclick="changePage(1)">Next <i class="ti ti-chevron-right"></i></button>
       </div>
     </div>
   </div>
@@ -54,11 +59,29 @@
 <script src="js/app.js"></script>
 <script>
 const tplNames = { 'intro-v2': 'Intro v2', 'follow-up': 'Follow-up', 'cold': 'Cold outreach' };
+let currentPage = 1;
+const PAGE_SIZE = 25;
+
 function render(q) {
   const all = window._app.state.contacts;
   const filtered = q ? all.filter(c => (c.name+c.email+c.company).toLowerCase().includes(q.toLowerCase())) : all;
   document.getElementById('count-line').textContent = filtered.length + ' contacts';
-  document.getElementById('tbody').innerHTML = filtered.map(c => `
+
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
+  if (currentPage > totalPages) currentPage = totalPages;
+  const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const paginationBar = document.getElementById('pagination-bar');
+  if (totalPages > 1) {
+    paginationBar.style.display = '';
+    document.getElementById('page-info').textContent = `Page ${currentPage} of ${totalPages}`;
+    document.getElementById('page-prev').disabled = currentPage === 1;
+    document.getElementById('page-next').disabled = currentPage === totalPages;
+  } else {
+    paginationBar.style.display = 'none';
+  }
+
+  document.getElementById('tbody').innerHTML = paged.map(c => `
     <tr>
       <td><div class="contact-chip">${window._app.avatarEl(c.name)}<div><div class="name">${c.name}</div><div class="email">${c.email}</div></div></div></td>
       <td style="color:var(--text2)">${c.company}</td>
@@ -66,7 +89,27 @@ function render(q) {
       <td style="color:var(--text2)">${tplNames[c.template]||c.template}</td>
       <td>${window._app.statusBadge(c.status)}</td>
       <td>${window._app.statusBadge(c.approvalStatus)}</td>
-    </tr>`).join('') || '<tr><td colspan="6"><div class="empty-state"><i class="ti ti-users"></i>No contacts found</div></td></tr>';
+      <td><button class="btn btn-sm" onclick="confirmDelete('${c.id}')" title="Delete contact"><i class="ti ti-trash"></i></button></td>
+    </tr>`).join('') || '<tr><td colspan="7"><div class="empty-state"><i class="ti ti-users"></i>No contacts found</div></td></tr>';
+}
+
+function changePage(delta) {
+  currentPage += delta;
+  render(document.getElementById('search').value);
+}
+
+async function confirmDelete(id) {
+  const c = window._app.state.contacts.find(x => x.id === id);
+  if (!c) return;
+  if (!confirm(`Delete ${c.name} (${c.email})?\nThis will hide the contact from all views.`)) return;
+  try {
+    await window._app.deleteContact(id);
+    window._app.toast(`${c.name} deleted.`, 'success');
+    currentPage = 1;
+    render(document.getElementById('search').value);
+  } catch (err) {
+    window._app.toast(err.message, 'error');
+  }
 }
 
 async function start() {
@@ -79,7 +122,7 @@ async function start() {
     document.getElementById('tbody').innerHTML = `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div></td></tr>`;
     return;
   }
-  document.getElementById('search').addEventListener('input', e => render(e.target.value));
+  document.getElementById('search').addEventListener('input', e => { currentPage = 1; render(e.target.value); });
   render('');
 }
 
@@ -101,6 +144,7 @@ async function start() {
       <td>${sk('65px')}</td>
       <td>${sk('48px', '20px', 'border-radius:20px')}</td>
       <td>${sk('58px', '20px', 'border-radius:20px')}</td>
+      <td>${sk('28px', '28px', 'border-radius:6px')}</td>
     </tr>`
   ).join('');
   document.getElementById('count-line').textContent = 'Loading…';

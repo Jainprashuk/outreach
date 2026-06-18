@@ -20,6 +20,8 @@ const sendJobSchema = new mongoose.Schema({
   senderEmail:       { type: String, default: '' },
   senderName:        { type: String, default: '' },
   senderAppPassword: { type: String, default: '' },
+  sendMode:          { type: String, enum: ['sequential', 'bulk'], default: 'sequential' },
+  chunkSize:         { type: Number, default: 20 },
 }, { timestamps: true });
 
 sendJobSchema.set('toJSON', {
