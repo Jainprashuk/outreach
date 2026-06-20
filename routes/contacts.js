@@ -1,5 +1,6 @@
 const express = require('express');
 const Contact = require('../models/Contact');
+const SendJob = require('../models/SendJob');
 
 const router = express.Router();
 
@@ -146,6 +147,26 @@ router.patch('/', async (req, res) => {
     });
     await Contact.bulkWrite(ops, { ordered: false });
     res.json({ ok: true, count: ops.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/contacts/:id/fail-reason — look up error from SendJob items (for contacts failed before failReason was added to Contact)
+router.get('/:id/fail-reason', async (req, res) => {
+  try {
+    const contact = await Contact.findById(req.params.id, 'status failReason').lean();
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    if (contact.failReason) return res.json({ reason: contact.failReason });
+    const job = await SendJob.findOne(
+      { items: { $elemMatch: { contactId: req.params.id, status: 'failed' } } },
+      { 'items.$': 1 }
+    ).lean();
+    const reason = job?.items?.[0]?.error || null;
+    if (reason) {
+      await Contact.findByIdAndUpdate(req.params.id, { failReason: reason });
+    }
+    res.json({ reason });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
