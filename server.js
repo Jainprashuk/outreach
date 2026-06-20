@@ -30,6 +30,8 @@ const AUTH_TOKEN = AUTH_PASSWORD ? makeToken(AUTH_PASSWORD) : null;
 const requireAuth = (req, res, next) => {
   if (!AUTH_TOKEN) return next(); // no password configured → open (local dev)
   if (req.path === '/login' || req.path.startsWith('/api/inngest')) return next();
+  // Allow static assets so the login page can load its CSS/JS
+  if (/\.(css|js|woff2?|ttf|svg|ico|png|jpg|jpeg)$/.test(req.path)) return next();
 
   const raw = req.headers.cookie || '';
   const match = raw.split(';').find(c => c.trim().startsWith(AUTH_COOKIE + '='));
