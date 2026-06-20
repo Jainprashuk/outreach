@@ -101,9 +101,12 @@
 
 <script src="js/app.js"></script>
 <script>
-const sendMode = new URLSearchParams(window.location.search).get('mode') || 'sequential';
-let batch = JSON.parse(sessionStorage.getItem('batch') || '[]');
-let approvals = batch.map((c, i) => ({ ...c, idx: i, approvalStatus: 'pending', editedSubject: null, editedBody: null }));
+const _qs = new URLSearchParams(window.location.search);
+const sendMode = _qs.get('mode') || null;
+const fromContacts = _qs.get('from') === 'contacts';
+const filterIds = _qs.get('ids') ? new Set(_qs.get('ids').split(',').filter(Boolean)) : null;
+const dripRate = _qs.get('rate') || null;
+let approvals = [];
 let editingIdx = null;
 
 function tplNames() { return { 'intro-v2': 'Intro v2', 'follow-up': 'Follow-up', 'cold': 'Cold outreach' }; }
@@ -199,26 +202,42 @@ async function goNext() {
     }
   }
 
-  sessionStorage.setItem('approved', JSON.stringify(approvals));
-  window.location.href = `step3.html?mode=${sendMode}`;
+  // step3 loads approved contacts from DB directly; pass ids so it sends only the selected ones
+  const nextParams = new URLSearchParams();
+  if (sendMode) nextParams.set('mode', sendMode);
+  if (filterIds) nextParams.set('ids', [...filterIds].join(','));
+  if (dripRate) nextParams.set('rate', dripRate);
+  const nextQs = nextParams.toString();
+  window.location.href = `step3.html${nextQs ? '?' + nextQs : ''}`;
 }
 
 async function start() {
   window._app.initTheme();
   window._app.initMobileNav();
-  document.getElementById('back-btn').href = `step1.html?mode=${sendMode}`;
-
-  if (batch.length === 0) {
-    document.getElementById('cards-list').innerHTML = '<div class="empty-state"><i class="ti ti-inbox"></i>No contacts to review. <a href="step1.html">Go back and add contacts</a>.</div>';
-    return;
-  }
+  document.getElementById('back-btn').href = fromContacts ? 'contacts.html' : `step1.html${sendMode ? '?mode='+sendMode : ''}`;
 
   try {
-    await Promise.all([window._app.loadTemplates(), window._app.loadSettings()]);
+    await Promise.all([window._app.loadContacts(), window._app.loadTemplates(), window._app.loadSettings()]);
   } catch (err) {
     document.getElementById('cards-list').innerHTML = `<div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div>`;
     return;
   }
+
+  // Load pending contacts from DB — if filterIds is set (coming from contacts page), show only those
+  const pending = window._app.state.contacts.filter(c =>
+    c.approvalStatus === 'pending' && (!filterIds || filterIds.has(c.id))
+  );
+  if (pending.length === 0) {
+    document.getElementById('cards-list').innerHTML = '<div class="empty-state"><i class="ti ti-inbox"></i>No pending contacts to review. <a href="step1.html">Add contacts first</a>.</div>';
+    return;
+  }
+  approvals = pending.map((c, i) => ({
+    ...c,
+    idx: i,
+    approvalStatus: 'pending',
+    editedSubject: c.editedSubject || null,
+    editedBody: c.editedBody || null,
+  }));
 
   renderCards();
 }

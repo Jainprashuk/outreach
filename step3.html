@@ -105,6 +105,24 @@
         </div>
       </div>
 
+      <!-- DRIP RATE (drip mode only) -->
+      <div class="gmail-card" id="drip-card" style="display:none">
+        <div class="gc-head">
+          <i class="ti ti-clock gc-icon"></i>
+          <div>
+            <div class="gc-title">Drip rate</div>
+            <div class="gc-sub">How many emails to send per hour</div>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;margin-top:10px;flex-wrap:wrap">
+          <div class="form-group" style="margin:0;min-width:140px">
+            <label class="form-label">Emails per hour</label>
+            <input type="number" id="drip-rate" value="5" min="1" max="60" oninput="updateDripEstimate()">
+          </div>
+          <div id="drip-estimate" style="font-size:13px;color:var(--text2);padding-top:18px"></div>
+        </div>
+      </div>
+
       <!-- RESUME ATTACHMENT -->
       <div class="gmail-card" id="resume-card" style="display:none">
         <label style="display:flex;align-items:center;gap:10px;cursor:pointer;font-size:13px">
@@ -156,7 +174,14 @@
         <div class="mo-desc">Single pooled SMTP connection — authenticates once and sends all emails through it. No repeated logins, no rate-limit errors.</div>
         <span class="mo-badge">Recommended</span>
       </button>
+      <button class="mode-option" id="opt-drip" onclick="pickMode('drip')">
+        <div class="mo-icon"><i class="ti ti-clock"></i></div>
+        <div class="mo-title">Drip</div>
+        <div class="mo-desc">Sends emails gradually at your chosen rate (e.g. 5/hr). Runs in the background — safest for avoiding Gmail spam flags.</div>
+        <span class="mo-badge" style="background:var(--green-bg,#f0fdf4);color:var(--green,#16a34a)">Spam-safe</span>
+      </button>
     </div>
+
     <div style="display:flex;justify-content:flex-end;margin-top:18px">
       <button class="btn btn-primary" onclick="confirmMode()"><i class="ti ti-check"></i> Continue</button>
     </div>
@@ -166,27 +191,40 @@
 <script src="js/app.js"></script>
 <script>
 const API_BASE = window._app.API_BASE;
-let sendMode = new URLSearchParams(window.location.search).get('mode') || null;
-const approvals = JSON.parse(sessionStorage.getItem('approved') || '[]');
-const approved = approvals.filter(a => a.approvalStatus === 'approved');
-const skipped = approvals.filter(a => a.approvalStatus !== 'approved');
+const _qs3 = new URLSearchParams(window.location.search);
+let sendMode = _qs3.get('mode') || null;
+const _filterIds3 = _qs3.get('ids') ? new Set(_qs3.get('ids').split(',').filter(Boolean)) : null;
+const _dripRate3 = parseInt(_qs3.get('rate')) || null;
+// Contacts are loaded from DB in start() — no sessionStorage
+let approved = [];
+let pendingCount = 0;
 let jobId = null;
 let pollInterval = null;
 let sending = false;
 let serverPreconfigured = false;
 
 function renderSummary() {
-  const modeLabel = sendMode === 'bulk'
-    ? '<span class="mode-indicator"><i class="ti ti-bolt"></i> Bulk mode</span>'
-    : '<span class="mode-indicator"><i class="ti ti-send"></i> Sequential mode</span>';
+  let modeLabel;
+  if (sendMode === 'bulk') {
+    modeLabel = '<span class="mode-indicator"><i class="ti ti-bolt"></i> Bulk mode</span>';
+  } else if (sendMode === 'drip') {
+    const rate = parseInt(document.getElementById('drip-rate')?.value) || 5;
+    const hrs = approved.length > 0 ? (approved.length / rate).toFixed(1) : '—';
+    modeLabel = `<span class="mode-indicator"><i class="ti ti-clock"></i> Drip — ${rate}/hr (~${hrs}h)</span>`;
+  } else {
+    modeLabel = '<span class="mode-indicator"><i class="ti ti-send"></i> Sequential mode</span>';
+  }
   document.getElementById('send-summary').innerHTML = `
-    <div class="send-row"><span class="label">Total in this batch</span><span>${approvals.length}</span></div>
     <div class="send-row"><span class="label">Approved and ready</span><span style="color:var(--green);font-weight:500">${approved.length} contacts</span></div>
-    ${skipped.length ? `<div class="send-row"><span class="label">Pending / rejected (will be skipped)</span><span style="color:var(--amber)">${skipped.length}</span></div>` : ''}
+    ${pendingCount > 0 ? `<div class="send-row"><span class="label">Still pending approval</span><span style="color:var(--amber)">${pendingCount}</span></div>` : ''}
     <div class="send-row"><span>Emails to send</span><span style="color:var(--green);font-weight:600">${approved.length}</span></div>
     <div class="send-row"><span class="label">Send mode</span><span>${modeLabel}</span></div>
+    ${sendMode === 'drip' ? `<div class="send-row" style="color:var(--text2);font-size:12px"><span></span><span>Sends in the background. Track progress on the dashboard.</span></div>` : ''}
   `;
-  document.getElementById('send-btn-label').textContent = `Send ${approved.length} email${approved.length!==1?'s':''} now`;
+  const btnLabel = sendMode === 'drip'
+    ? `Schedule ${approved.length} email${approved.length!==1?'s':''}`
+    : `Send ${approved.length} email${approved.length!==1?'s':''} now`;
+  document.getElementById('send-btn-label').textContent = btnLabel;
 }
 
 function emailFor(a) {
@@ -267,12 +305,7 @@ async function pollJob() {
     if (job.status === 'done' || job.status === 'cancelled') {
       clearInterval(pollInterval);
       pollInterval = null;
-      localStorage.removeItem('activeJobId');
-
-      const sent = job.items.filter(i => i.status === 'sent').length;
-      const failed = job.items.filter(i => i.status === 'failed').length;
-      sessionStorage.setItem('sendResult', JSON.stringify({ sent, failed, skipped: skipped.length, jobId }));
-      setTimeout(() => window.location.href = 'done.html', 1200);
+      setTimeout(() => window.location.href = `done.html?jobId=${jobId}`, 1200);
     }
   } catch (_) {}
 }
@@ -290,7 +323,7 @@ async function startSend() {
     if (!email || !pass) { window._app.toast('Please enter your Gmail address and app password.', 'error'); return; }
   }
 
-  if (approved.length === 0) { window._app.toast('No approved contacts to send to.', 'error'); return; }
+  if (approved.length === 0) { window._app.toast('No approved contacts to send to. Go back and approve at least one.', 'error'); return; }
 
   sending = true;
   document.getElementById('send-btn').disabled = true;
@@ -324,6 +357,7 @@ async function startSend() {
   }
 
   const attachResume = document.getElementById('attach-resume').checked;
+  const ratePerHour = sendMode === 'drip' ? (parseInt(document.getElementById('drip-rate')?.value) || 5) : undefined;
 
   // Build items array
   const items = approved.map(a => {
@@ -344,7 +378,8 @@ async function startSend() {
         senderName:        window._app.state.sender.name || '',
         senderAppPassword: pass,
         sendMode,
-        chunkSize: sendMode === 'bulk' ? (parseInt(document.getElementById('chunk-size').value) || 20) : undefined,
+        chunkSize:    sendMode === 'bulk' ? (parseInt(document.getElementById('chunk-size').value) || 20) : undefined,
+        ratePerHour,
       })
     });
     if (!res.ok) {
@@ -359,7 +394,14 @@ async function startSend() {
   }
 
   jobId = job.id;
-  localStorage.setItem('activeJobId', jobId);
+
+  // Drip mode: redirect to dashboard — emails go out over hours, live log is not useful
+  if (sendMode === 'drip') {
+    const rate = ratePerHour || 5;
+    window._app.toast(`Drip started — ${approved.length} emails scheduled at ${rate}/hr. Track progress on the dashboard.`, 'success');
+    setTimeout(() => window.location.href = 'index.html', 1500);
+    return;
+  }
 
   // Hide input cards, show log + "Run in background" button
   document.getElementById('gmail-card').style.display = 'none';
@@ -383,7 +425,7 @@ function runInBackground() {
 function resetSendUI() {
   sending = false;
   document.getElementById('send-btn').disabled = false;
-  document.getElementById('send-btn').innerHTML = `<i class="ti ti-send"></i> <span id="send-btn-label">Send ${approved.length} email${approved.length!==1?'s':''} now</span>`;
+  renderSummary(); // re-renders the button label correctly
   document.getElementById('back-btn').style.pointerEvents = '';
   document.getElementById('back-btn').style.opacity = '';
   document.getElementById('send-log').style.display = 'none';
@@ -394,29 +436,57 @@ function pickMode(mode) {
   sendMode = mode;
   document.getElementById('opt-sequential').classList.toggle('selected', mode === 'sequential');
   document.getElementById('opt-bulk').classList.toggle('selected', mode === 'bulk');
+  document.getElementById('opt-drip').classList.toggle('selected', mode === 'drip');
+}
+
+function updateDripEstimate() {
+  const el = document.getElementById('drip-estimate');
+  if (!el) return;
+  const rate = parseInt(document.getElementById('drip-rate').value) || 5;
+  const count = approved.length;
+  if (count === 0) { el.textContent = ''; return; }
+  const totalMins = Math.round((count / rate) * 60);
+  const hrs = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
+  const timeStr = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+  el.textContent = `At ${rate}/hr — ${count} contacts will be sent over ~${timeStr}`;
 }
 
 function confirmMode() {
   document.getElementById('mode-picker').classList.remove('open');
-  if (sendMode === 'bulk') document.getElementById('chunk-card').style.display = 'block';
-  else document.getElementById('chunk-card').style.display = 'none';
+  document.getElementById('chunk-card').style.display = sendMode === 'bulk' ? 'block' : 'none';
+  document.getElementById('drip-card').style.display = sendMode === 'drip' ? 'block' : 'none';
+  if (sendMode === 'drip') updateDripEstimate();
   renderSummary();
 }
 
 async function start() {
   window._app.initTheme();
   window._app.initMobileNav();
-  document.getElementById('back-btn').href = `step2.html?mode=${sendMode || 'bulk'}`;
+  const backParams = new URLSearchParams();
+  if (sendMode) backParams.set('mode', sendMode);
+  if (_filterIds3) backParams.set('ids', [..._filterIds3].join(','));
+  if (_dripRate3) backParams.set('rate', _dripRate3);
+  const backQs = backParams.toString();
+  document.getElementById('back-btn').href = `step2.html${backQs ? '?' + backQs : ''}`;
 
-  if (approvals.length === 0) {
-    document.getElementById('send-summary').innerHTML = '<div class="empty-state"><i class="ti ti-inbox"></i>No contacts from previous step. <a href="step1.html">Start over</a>.</div>';
+  try {
+    await Promise.all([window._app.loadContacts(), window._app.loadTemplates(), window._app.loadSettings()]);
+  } catch (err) {
+    document.getElementById('send-summary').innerHTML = `<div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div>`;
     return;
   }
 
-  try {
-    await Promise.all([window._app.loadTemplates(), window._app.loadSettings()]);
-  } catch (err) {
-    document.getElementById('send-summary').innerHTML = `<div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div>`;
+  // Load approved+queued contacts from DB — filter to selected IDs if coming from contacts page
+  approved = window._app.state.contacts.filter(c =>
+    c.status === 'queued' && c.approvalStatus === 'approved' && (!_filterIds3 || _filterIds3.has(c.id))
+  );
+  pendingCount = window._app.state.contacts.filter(c =>
+    c.approvalStatus === 'pending' && (!_filterIds3 || _filterIds3.has(c.id))
+  ).length;
+
+  if (approved.length === 0) {
+    document.getElementById('send-summary').innerHTML = '<div class="empty-state"><i class="ti ti-inbox"></i>No approved contacts to send. <a href="step2.html">Approve contacts first</a>.</div>';
     return;
   }
 
@@ -437,11 +507,15 @@ async function start() {
   }
 
   if (!sendMode) {
-    // Retry / re-send flow — mode wasn't in the URL, ask the user
+    // Retry / re-send flow or from contacts.html — mode wasn't in the URL, ask the user
     sendMode = 'bulk'; // pre-select recommended
     document.getElementById('mode-picker').classList.add('open');
   } else if (sendMode === 'bulk') {
     document.getElementById('chunk-card').style.display = 'block';
+  } else if (sendMode === 'drip') {
+    document.getElementById('drip-card').style.display = 'block';
+    if (_dripRate3) document.getElementById('drip-rate').value = _dripRate3;
+    updateDripEstimate();
   }
 
   const resume = window._app.state.sender.resume;

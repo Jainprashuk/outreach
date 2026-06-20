@@ -8,6 +8,53 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+.upload-strip {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-lg);
+  margin-bottom: 16px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.upload-strip:hover, .upload-strip.drag-over {
+  border-color: var(--blue);
+  background: var(--blue-bg, #eff6ff);
+}
+.upload-strip .us-icon { font-size: 20px; color: var(--text2); }
+.upload-strip .us-text { flex: 1; font-size: 13px; color: var(--text2); }
+.upload-strip .us-text strong { color: var(--text1); }
+
+.cb-col { width: 36px; }
+input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
+
+.bulk-bar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: var(--sidebar-bg, #1e293b);
+  color: #fff;
+  padding: 14px 24px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  z-index: 200;
+  transform: translateY(100%);
+  transition: transform 0.2s ease;
+  box-shadow: 0 -4px 24px rgba(0,0,0,.18);
+}
+.bulk-bar.visible { transform: translateY(0); }
+.bulk-bar .bb-count { font-size: 14px; font-weight: 500; flex: 1; }
+.bulk-bar .btn { color: #fff; border-color: rgba(255,255,255,.3); }
+.bulk-bar .btn:hover { background: rgba(255,255,255,.1); }
+.bulk-bar .btn-send { background: var(--blue); border-color: var(--blue); color: #fff; }
+.bulk-bar .btn-send:hover { opacity: .9; }
+.bulk-bar .btn-del { border-color: var(--red, #ef4444); color: var(--red, #ef4444); }
+.bulk-bar .btn-del:hover { background: rgba(239,68,68,.12); }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -40,10 +87,22 @@
       </div>
     </div>
     <div class="section">
+
+      <!-- CSV upload strip -->
+      <div class="upload-strip" id="upload-strip" onclick="document.getElementById('file-input').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
+        <i class="ti ti-table-import us-icon"></i>
+        <div class="us-text"><strong>Upload CSV</strong> — drag & drop or click to browse. Columns: Name, Email, Company, Role</div>
+        <button class="btn btn-sm" style="pointer-events:none"><i class="ti ti-upload"></i> Browse</button>
+        <input type="file" id="file-input" accept=".csv" style="display:none" onchange="handleFile(this)">
+      </div>
+
       <div class="table-card">
         <table>
           <thead>
-            <tr><th>Contact</th><th>Company</th><th>Role</th><th>Template</th><th>Status</th><th>Approval</th><th></th></tr>
+            <tr>
+              <th class="cb-col"><input type="checkbox" id="select-all" class="row-cb" onchange="toggleSelectAll(this.checked)" title="Select all"></th>
+              <th>Contact</th><th>Company</th><th>Role</th><th>Template</th><th>Status</th><th>Approval</th><th></th>
+            </tr>
           </thead>
           <tbody id="tbody"></tbody>
         </table>
@@ -56,15 +115,28 @@
     </div>
   </div>
 </div>
+
+<!-- Bulk action bar -->
+<div class="bulk-bar" id="bulk-bar">
+  <span class="bb-count" id="bulk-count">0 selected</span>
+  <button class="btn btn-del" onclick="deleteSelected()"><i class="ti ti-trash"></i> Delete</button>
+  <button class="btn btn-send" onclick="sendSelected()"><i class="ti ti-send"></i> Send selected</button>
+</div>
+
 <script src="js/app.js"></script>
 <script>
 const tplNames = { 'intro-v2': 'Intro v2', 'follow-up': 'Follow-up', 'cold': 'Cold outreach' };
 let currentPage = 1;
 const PAGE_SIZE = 25;
+let selectedIds = new Set();
+
+function getFiltered(q) {
+  const all = window._app.state.contacts;
+  return q ? all.filter(c => (c.name+c.email+c.company).toLowerCase().includes(q.toLowerCase())) : all;
+}
 
 function render(q) {
-  const all = window._app.state.contacts;
-  const filtered = q ? all.filter(c => (c.name+c.email+c.company).toLowerCase().includes(q.toLowerCase())) : all;
+  const filtered = getFiltered(q);
   document.getElementById('count-line').textContent = filtered.length + ' contacts';
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
@@ -83,6 +155,7 @@ function render(q) {
 
   document.getElementById('tbody').innerHTML = paged.map(c => `
     <tr>
+      <td class="cb-col"><input type="checkbox" class="row-cb" data-id="${c.id}" ${selectedIds.has(c.id)?'checked':''} onchange="toggleRow(this)"></td>
       <td><div class="contact-chip">${window._app.avatarEl(c.name)}<div><div class="name">${c.name}</div><div class="email">${c.email}</div></div></div></td>
       <td style="color:var(--text2)">${c.company}</td>
       <td style="color:var(--text2)">${c.role}</td>
@@ -90,7 +163,47 @@ function render(q) {
       <td>${window._app.statusBadge(c.status)}</td>
       <td>${window._app.statusBadge(c.approvalStatus)}</td>
       <td><button class="btn btn-sm" onclick="confirmDelete('${c.id}')" title="Delete contact"><i class="ti ti-trash"></i></button></td>
-    </tr>`).join('') || '<tr><td colspan="7"><div class="empty-state"><i class="ti ti-users"></i>No contacts found</div></td></tr>';
+    </tr>`).join('') || `<tr><td colspan="8"><div class="empty-state"><i class="ti ti-users"></i>No contacts found</div></td></tr>`;
+
+  // Sync select-all checkbox
+  const pageIds = paged.map(c => c.id);
+  const allChecked = pageIds.length > 0 && pageIds.every(id => selectedIds.has(id));
+  document.getElementById('select-all').checked = allChecked;
+  document.getElementById('select-all').indeterminate = !allChecked && pageIds.some(id => selectedIds.has(id));
+
+  updateBulkBar();
+}
+
+function toggleRow(cb) {
+  const id = cb.dataset.id;
+  if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
+  updateBulkBar();
+  // Sync select-all state
+  const q = document.getElementById('search').value;
+  const filtered = getFiltered(q);
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
+  const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  const allChecked = paged.length > 0 && paged.every(c => selectedIds.has(c.id));
+  document.getElementById('select-all').checked = allChecked;
+  document.getElementById('select-all').indeterminate = !allChecked && paged.some(c => selectedIds.has(c.id));
+}
+
+function toggleSelectAll(checked) {
+  const q = document.getElementById('search').value;
+  const filtered = getFiltered(q);
+  const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  paged.forEach(c => { if (checked) selectedIds.add(c.id); else selectedIds.delete(c.id); });
+  document.querySelectorAll('.row-cb[data-id]').forEach(cb => {
+    cb.checked = selectedIds.has(cb.dataset.id);
+  });
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const bar = document.getElementById('bulk-bar');
+  const n = selectedIds.size;
+  document.getElementById('bulk-count').textContent = n + ' selected';
+  bar.classList.toggle('visible', n > 0);
 }
 
 function changePage(delta) {
@@ -104,12 +217,110 @@ async function confirmDelete(id) {
   if (!confirm(`Delete ${c.name} (${c.email})?\nThis will hide the contact from all views.`)) return;
   try {
     await window._app.deleteContact(id);
+    selectedIds.delete(id);
     window._app.toast(`${c.name} deleted.`, 'success');
     currentPage = 1;
     render(document.getElementById('search').value);
   } catch (err) {
     window._app.toast(err.message, 'error');
   }
+}
+
+async function deleteSelected() {
+  if (selectedIds.size === 0) return;
+  if (!confirm(`Delete ${selectedIds.size} contact${selectedIds.size!==1?'s':''}? This will hide them from all views.`)) return;
+  const ids = [...selectedIds];
+  let failed = 0;
+  for (const id of ids) {
+    try { await window._app.deleteContact(id); selectedIds.delete(id); }
+    catch { failed++; }
+  }
+  window._app.toast(failed === 0 ? `${ids.length} contact${ids.length!==1?'s':''} deleted.` : `${ids.length - failed} deleted, ${failed} failed.`, failed ? 'error' : 'success');
+  currentPage = 1;
+  render(document.getElementById('search').value);
+}
+
+async function sendSelected() {
+  if (selectedIds.size === 0) return;
+  const ids = [...selectedIds];
+  try {
+    const res = await fetch(`${window._app.API_BASE}/api/contacts/reset-for-send`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    });
+    if (!res.ok) throw new Error((await res.json()).error || 'Failed');
+    window.location.href = `step2.html?from=contacts&ids=${ids.join(',')}`;
+  } catch (err) {
+    window._app.toast('Could not queue contacts: ' + err.message, 'error');
+  }
+}
+
+// ── CSV upload ─────────────────────────────────────────────────────────────
+function handleDragOver(e) {
+  e.preventDefault();
+  document.getElementById('upload-strip').classList.add('drag-over');
+}
+function handleDragLeave(e) {
+  document.getElementById('upload-strip').classList.remove('drag-over');
+}
+function handleDrop(e) {
+  e.preventDefault();
+  document.getElementById('upload-strip').classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file) processFile(file);
+}
+function handleFile(input) {
+  const file = input.files[0];
+  if (file) processFile(file);
+  input.value = '';
+}
+
+function processFile(file) {
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    const text = e.target.result;
+    const lines = text.split('\n').filter(l => l.trim());
+    if (lines.length < 2) { window._app.toast('CSV has no data rows.', 'error'); return; }
+    const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/"/g,''));
+    const get = (row, ...keys) => {
+      for (const k of keys) {
+        const i = headers.indexOf(k);
+        if (i !== -1) return (row[i]||'').replace(/"/g,'').trim();
+      }
+      return '';
+    };
+    const rows = lines.slice(1).map(line => {
+      const row = line.split(',');
+      return {
+        name: get(row, 'name', 'full name', 'fullname'),
+        email: get(row, 'email', 'email address'),
+        company: get(row, 'company', 'organisation', 'organization'),
+        role: get(row, 'role', 'designation', 'title'),
+      };
+    }).filter(r => r.name && r.email);
+
+    if (rows.length === 0) { window._app.toast('No valid contacts found in CSV.', 'error'); return; }
+
+    try {
+      await window._app.createContacts(rows);
+      window._app.toast(`${rows.length} contact${rows.length!==1?'s':''} imported from ${file.name}.`, 'success');
+      const strip = document.getElementById('upload-strip');
+      strip.style.borderColor = 'var(--green)';
+      strip.style.background = 'var(--green-bg, #f0fdf4)';
+      // Reload contacts list
+      await window._app.loadContacts();
+      currentPage = 1;
+      render(document.getElementById('search').value);
+      setTimeout(() => {
+        strip.style.borderColor = '';
+        strip.style.background = '';
+      }, 3000);
+    } catch (err) {
+      window._app.toast('Import failed: ' + err.message, 'error');
+    }
+  };
+  reader.readAsText(file);
 }
 
 async function start() {
@@ -119,7 +330,7 @@ async function start() {
   try {
     await window._app.init();
   } catch (err) {
-    document.getElementById('tbody').innerHTML = `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div></td></tr>`;
+    document.getElementById('tbody').innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div></td></tr>`;
     return;
   }
   document.getElementById('search').addEventListener('input', e => { currentPage = 1; render(e.target.value); });
@@ -138,6 +349,7 @@ async function start() {
   </div>`;
   document.getElementById('tbody').innerHTML = Array(8).fill(0).map(() =>
     `<tr style="pointer-events:none">
+      <td></td>
       <td>${chip}</td>
       <td>${sk('80px')}</td>
       <td>${sk('70px')}</td>

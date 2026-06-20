@@ -209,7 +209,8 @@ const App = (() => {
         <span id="sjw-title"><i class="ti ti-send"></i> Sending emails…</span>
         <div style="display:flex;gap:6px">
           <button id="sjw-pause-btn" class="btn btn-xs" onclick="window._app._sjwTogglePause()"></button>
-          <button class="btn btn-xs" onclick="window._app._sjwCollapse()"><i class="ti ti-minus"></i></button>
+          <button class="btn btn-xs" onclick="window._app._sjwCollapse()" title="Minimise"><i class="ti ti-minus"></i></button>
+          <button class="btn btn-xs" onclick="window._app._sjwClose()" title="Dismiss"><i class="ti ti-x"></i></button>
         </div>
       </div>
       <div id="sjw-body">
@@ -236,29 +237,49 @@ const App = (() => {
     fill.style.width = pct + '%';
     stats.textContent = `${done}/${total} · ${failed > 0 ? failed + ' failed' : 'all good'}`;
 
-    if (job.status === 'done' || job.status === 'cancelled') {
+    // A stuck job has all items done but status still 'processing' due to a prior race condition.
+    // Detect it here, call repair in the background, and treat it as done immediately.
+    const allItemsDone = job.items.length > 0 && job.items.every(i => i.status !== 'pending');
+    const effectivelyDone = job.status === 'done' || job.status === 'cancelled' || (job.status === 'processing' && allItemsDone);
+
+    if (effectivelyDone) {
+      if (job.status === 'processing' && allItemsDone) {
+        fetch(`${API_BASE}/api/jobs/${_sjwJobId}/repair`, { method: 'POST' }).catch(() => {});
+      }
       if (title) title.innerHTML = `<i class="ti ti-circle-check"></i> ${sent} sent${failed ? ', ' + failed + ' failed' : ''}`;
       if (pauseBtn) pauseBtn.style.display = 'none';
       clearInterval(_sjwInterval);
       _sjwInterval = null;
-      localStorage.removeItem('activeJobId');
-      setTimeout(_sjwDismiss, 10000);
+      setTimeout(_sjwDismiss, 8000);
+    } else if (job.sendMode === 'drip') {
+      if (title) title.innerHTML = `<i class="ti ti-clock"></i> Drip sending…`;
+      if (pauseBtn) pauseBtn.style.display = 'none'; // individual events already scheduled
     } else if (job.status === 'paused') {
       if (title) title.innerHTML = `<i class="ti ti-player-pause"></i> Paused`;
-      if (pauseBtn) pauseBtn.innerHTML = '<i class="ti ti-player-play"></i>';
+      if (pauseBtn) { pauseBtn.style.display = ''; pauseBtn.innerHTML = '<i class="ti ti-player-play"></i>'; }
     } else {
       if (title) title.innerHTML = `<i class="ti ti-send"></i> Sending emails…`;
-      if (pauseBtn) pauseBtn.innerHTML = '<i class="ti ti-player-pause"></i>';
+      if (pauseBtn) { pauseBtn.style.display = ''; pauseBtn.innerHTML = '<i class="ti ti-player-pause"></i>'; }
     }
   };
 
+  // Natural auto-dismiss (job completed) — no dismissed marker needed, DB has the truth
   const _sjwDismiss = () => {
     clearInterval(_sjwInterval);
     _sjwInterval = null;
     _sjwJobId = null;
-    localStorage.removeItem('activeJobId');
     const el = document.getElementById('send-job-widget');
     if (el) el.remove();
+  };
+
+  // User-initiated close → cancel the job in DB so it never comes back as "active"
+  const _sjwClose = async () => {
+    const id = _sjwJobId;
+    _sjwDismiss(); // remove widget immediately
+    if (!id) return;
+    try {
+      await fetch(`${API_BASE}/api/jobs/${id}/cancel`, { method: 'POST' });
+    } catch (_) {}
   };
 
   const _sjwPoll = async () => {
@@ -272,30 +293,25 @@ const App = (() => {
   };
 
   const _sjwStart = (id) => {
+    if (_sjwJobId) return; // already tracking a job on this page
     _sjwJobId = id;
     _sjwInjectDOM();
-    // Set initial pause button label
-    const pauseBtn = document.getElementById('sjw-pause-btn');
-    if (pauseBtn) pauseBtn.innerHTML = '<i class="ti ti-player-pause"></i>';
     if (!_sjwInterval) {
       _sjwInterval = setInterval(_sjwPoll, 3000);
     }
-    _sjwPoll();
+    _sjwPoll(); // immediate first update
   };
 
+  // Use GET /api/jobs/active — DB is source of truth, no storage needed
   const _sjwCheckForActiveJob = async () => {
     if (_sjwIsStep3()) return; // step3 has its own inline progress
-    const id = localStorage.getItem('activeJobId');
-    if (!id) return;
+    if (_sjwJobId) return; // already tracking a job on this page
     try {
-      const res = await fetch(`${API_BASE}/api/jobs/${id}`);
-      if (!res.ok) { localStorage.removeItem('activeJobId'); return; }
+      const res = await fetch(`${API_BASE}/api/jobs/active`);
+      if (!res.ok) return;
       const job = await res.json();
-      if (job.status === 'done' || job.status === 'cancelled') {
-        localStorage.removeItem('activeJobId');
-        return;
-      }
-      _sjwStart(id);
+      if (!job) return;
+      _sjwStart(job.id);
     } catch (_) {}
   };
 
@@ -330,9 +346,10 @@ const App = (() => {
     initMobileNav,
     toast,
 
-    // Widget API (used by step3.html and sjw-pause-btn onclick)
+    // Widget API (used by step3.html and sjw button onclicks)
     _sjwStart,
     _sjwDismiss,
+    _sjwClose,
     _sjwTogglePause: window._app_sjwTogglePause,
     _sjwCollapse() {
       _sjwCollapsed = !_sjwCollapsed;

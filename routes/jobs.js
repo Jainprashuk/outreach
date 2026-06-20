@@ -21,7 +21,7 @@ router.post('/', async (req, res) => {
     const { items, attachResume, senderEmail, senderName, senderAppPassword, sendMode, chunkSize } = req.body;
     if (!items || !items.length) return res.status(400).json({ error: 'No items provided' });
 
-    const mode = sendMode === 'bulk' ? 'bulk' : 'sequential';
+    const mode = ['bulk', 'drip'].includes(sendMode) ? sendMode : 'sequential';
 
     // Prefer credentials sent from the browser (guaranteed same-request values).
     // Fall back to in-memory mailer state for local dev where a single process handles all requests.
@@ -33,9 +33,10 @@ router.post('/', async (req, res) => {
       senderAppPassword: senderAppPassword || mailer.senderAppPassword  || '',
       sendMode:          mode,
       chunkSize:         (mode === 'bulk' && Number(chunkSize) > 0) ? Number(chunkSize) : 20,
+      ratePerHour:       (mode === 'drip' && Number(req.body.ratePerHour) > 0) ? Number(req.body.ratePerHour) : 5,
     });
 
-    const eventName = mode === 'bulk' ? 'email/bulk.start' : 'email/batch.start';
+    const eventName = mode === 'bulk' ? 'email/bulk.start' : mode === 'drip' ? 'email/drip.start' : 'email/batch.start';
     await inngest.send({ name: eventName, data: { jobId: job.id.toString() } });
     res.json(job.toJSON());
   } catch (err) {
@@ -86,9 +87,17 @@ router.get('/stats/sent-24h', async (req, res) => {
 // IMPORTANT: /active must be defined before /:id
 router.get('/active', async (req, res) => {
   try {
+    // Auto-cancel jobs that have been stuck in pending/processing for over 24h with zero progress.
+    // These are ghost jobs where Inngest never ran (e.g. server was down when the event fired).
+    const staleThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    await SendJob.updateMany(
+      { status: { $in: ['pending', 'processing'] }, processedCount: 0, createdAt: { $lt: staleThreshold } },
+      { $set: { status: 'cancelled' } }
+    );
+
     const job = await SendJob.findOne(
       { status: { $in: ['pending', 'processing', 'paused'] } },
-      { items: 1, status: 1, processedCount: 1, attachResume: 1, createdAt: 1 }
+      { items: 1, status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1 }
     ).sort({ createdAt: -1 }).lean();
     res.json(job ? serialize(job) : null);
   } catch (err) {
@@ -128,6 +137,26 @@ router.post('/:id/retry-failed', async (req, res) => {
     // Return the full contact docs so the frontend can build the approved list for step3
     const contacts = await Contact.find({ _id: { $in: failedContactIds } }).lean();
     res.json({ ok: true, retried: failedItems.length, contacts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/jobs/:id/repair — fixes jobs stuck in 'processing' when all items are already done.
+// Called automatically by the widget when it detects this inconsistency.
+router.post('/:id/repair', async (req, res) => {
+  try {
+    const job = await SendJob.findById(req.params.id, 'status items.status').lean();
+    if (!job) return res.status(404).json({ error: 'Job not found' });
+    if (job.status !== 'processing') return res.json({ ok: true, repaired: false, status: job.status });
+    if (job.items.every(i => i.status !== 'pending')) {
+      await SendJob.findByIdAndUpdate(req.params.id, {
+        status: 'done',
+        processedCount: job.items.filter(i => i.status !== 'pending').length,
+      });
+      return res.json({ ok: true, repaired: true, status: 'done' });
+    }
+    res.json({ ok: true, repaired: false, status: 'processing' });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -176,6 +205,8 @@ router.post('/:id/resume', async (req, res) => {
     if (pendingItems.length > 0) {
       if (job.sendMode === 'bulk') {
         await inngest.send({ name: 'email/bulk.start', data: { jobId: job._id.toString() } });
+      } else if (job.sendMode === 'drip') {
+        await inngest.send({ name: 'email/drip.start', data: { jobId: job._id.toString() } });
       } else {
         await inngest.send(pendingItems.map((item, i) => ({
           name: 'email/single.send',

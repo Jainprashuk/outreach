@@ -47,6 +47,23 @@ const sendEmailBatch = inngest.createFunction(
   }
 );
 
+// Atomically mark one item on a job and check if all items are now done.
+// Using findOneAndUpdate with positional $ avoids the concurrent-save race condition
+// where multiple sendSingleEmail workers overwrite each other's item updates.
+const _atomicItemUpdate = async (jobId, contactId, fields) => {
+  await SendJob.findOneAndUpdate(
+    { _id: jobId, 'items.contactId': contactId },
+    { $set: fields, $inc: { processedCount: 1 } }
+  );
+  const latest = await SendJob.findById(jobId, 'status items.status').lean();
+  if (latest && latest.status === 'processing' && latest.items.every(i => i.status !== 'pending')) {
+    await SendJob.findByIdAndUpdate(jobId, {
+      status: 'done',
+      processedCount: latest.items.length,
+    });
+  }
+};
+
 // Worker: send one email, update Contact and SendJob in DB.
 const sendSingleEmail = inngest.createFunction(
   { id: 'send-single-email', retries: 2, triggers: { event: 'email/single.send' } },
@@ -55,22 +72,21 @@ const sendSingleEmail = inngest.createFunction(
 
     await step.run('send', async () => {
       await ensureDb();
-      const job = await SendJob.findById(jobId);
+      const job = await SendJob.findById(jobId).lean();
       if (!job || job.status === 'cancelled') return;
       if (job.status === 'paused') throw new Error('Job paused — will retry');
 
       const item = job.items.find(i => i.contactId === contactId && i.status === 'pending');
-      if (!item) return;
+      if (!item) return; // already handled by a concurrent worker or a retry
 
       // Cooldown check — skip if this contact was sent an email within the last 2 hours
       const contactDoc = await Contact.findById(contactId).lean();
       if (contactDoc?.lastSentAt && (Date.now() - new Date(contactDoc.lastSentAt).getTime()) < COOLDOWN_MS) {
-        item.status = 'failed';
-        item.error = 'Cooldown — email sent within the last 2 hours. Try again later.';
-        item.processedAt = new Date();
-        job.processedCount = job.items.filter(i => i.status !== 'pending').length;
-        if (job.items.every(i => i.status !== 'pending')) job.status = 'done';
-        await job.save();
+        await _atomicItemUpdate(jobId, contactId, {
+          'items.$.status': 'failed',
+          'items.$.error': 'Cooldown — email sent within the last 2 hours. Try again later.',
+          'items.$.processedAt': new Date(),
+        });
         return;
       }
 
@@ -99,9 +115,11 @@ const sendSingleEmail = inngest.createFunction(
           text: item.body,
           ...(attachments ? { attachments } : {}),
         });
-        item.status = 'sent';
-        item.messageId = info.messageId || null;
-        item.processedAt = new Date();
+        await _atomicItemUpdate(jobId, contactId, {
+          'items.$.status': 'sent',
+          'items.$.messageId': info.messageId || null,
+          'items.$.processedAt': new Date(),
+        });
         await Contact.findByIdAndUpdate(contactId, {
           status: 'sent',
           messageId: info.messageId || null,
@@ -109,15 +127,13 @@ const sendSingleEmail = inngest.createFunction(
           lastSentAt: new Date(),
         });
       } catch (err) {
-        item.status = 'failed';
-        item.error = err.message;
-        item.processedAt = new Date();
+        await _atomicItemUpdate(jobId, contactId, {
+          'items.$.status': 'failed',
+          'items.$.error': err.message,
+          'items.$.processedAt': new Date(),
+        });
         await Contact.findByIdAndUpdate(contactId, { status: 'failed' });
       }
-
-      job.processedCount = job.items.filter(i => i.status !== 'pending').length;
-      if (job.items.every(i => i.status !== 'pending')) job.status = 'done';
-      await job.save();
     });
   }
 );
@@ -259,4 +275,41 @@ const sendEmailBulk = inngest.createFunction(
   }
 );
 
-module.exports = { sendEmailBatch, sendSingleEmail, sendEmailBulk };
+// Drip orchestrator: fans out email/single.send events spaced by (3600000 / ratePerHour) ms.
+// Reuses sendSingleEmail worker — no new worker needed.
+const sendEmailDrip = inngest.createFunction(
+  { id: 'send-email-drip', triggers: { event: 'email/drip.start' } },
+  async ({ event, step }) => {
+    const { jobId } = event.data;
+
+    const { pendingItems, ratePerHour } = await step.run('load-items', async () => {
+      await ensureDb();
+      const job = await SendJob.findById(jobId);
+      if (!job) throw new Error('Job not found: ' + jobId);
+      job.status = 'processing';
+      await job.save();
+      return {
+        pendingItems: job.items.filter(i => i.status === 'pending').map(i => ({ contactId: i.contactId })),
+        ratePerHour: job.ratePerHour || 5,
+      };
+    });
+
+    if (pendingItems.length === 0) {
+      await step.run('mark-done-empty', async () => {
+        await ensureDb();
+        const job = await SendJob.findById(jobId);
+        if (job) { job.status = 'done'; await job.save(); }
+      });
+      return;
+    }
+
+    const delayMs = Math.round(3_600_000 / ratePerHour);
+    await step.sendEvent('fan-out-drip', pendingItems.map((item, i) => ({
+      name: 'email/single.send',
+      data: { jobId, contactId: item.contactId },
+      ts: Date.now() + i * delayMs,
+    })));
+  }
+);
+
+module.exports = { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip };

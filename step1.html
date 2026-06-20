@@ -125,6 +125,21 @@
         <div class="mo-desc">Single pooled SMTP connection — authenticates once and sends all emails through it. No repeated logins, no rate-limit errors.</div>
         <span class="mo-badge">Recommended</span>
       </button>
+      <button class="mode-option" id="opt-drip" onclick="pickMode('drip')">
+        <div class="mo-icon"><i class="ti ti-clock"></i></div>
+        <div class="mo-title">Drip</div>
+        <div class="mo-desc">Sends emails gradually at your chosen rate (e.g. 5/hr). Runs in the background — safest for avoiding Gmail spam flags.</div>
+        <span class="mo-badge" style="background:var(--green-bg,#f0fdf4);color:var(--green,#16a34a)">Spam-safe</span>
+      </button>
+    </div>
+    <div id="drip-rate-wrap" style="display:none;margin-top:16px;padding:14px;background:var(--bg2,#f8fafc);border-radius:var(--radius-lg);border:0.5px solid var(--border)">
+      <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+        <div class="form-group" style="margin:0;min-width:140px">
+          <label class="form-label">Emails per hour</label>
+          <input type="number" id="drip-rate" value="5" min="1" max="60" style="width:90px">
+        </div>
+        <div style="font-size:13px;color:var(--text2);padding-top:18px">Rate is configured here — you can adjust it before sending too.</div>
+      </div>
     </div>
     <div style="display:flex;justify-content:flex-end;margin-top:18px">
       <button class="btn btn-primary" onclick="confirmMode()"><i class="ti ti-check"></i> Continue</button>
@@ -261,6 +276,8 @@ function pickMode(mode) {
   selectedMode = mode;
   document.getElementById('opt-sequential').classList.toggle('selected', mode === 'sequential');
   document.getElementById('opt-bulk').classList.toggle('selected', mode === 'bulk');
+  document.getElementById('opt-drip').classList.toggle('selected', mode === 'drip');
+  document.getElementById('drip-rate-wrap').style.display = mode === 'drip' ? 'block' : 'none';
 }
 
 function confirmMode() {
@@ -274,8 +291,10 @@ async function goNext() {
     const created = await window._app.createContacts(rows.map(r => ({
       name: r.name, email: r.email, company: r.company, role: r.role, template: r.template
     })));
-    sessionStorage.setItem('batch', JSON.stringify(created));
-    window.location.href = `step2.html?mode=${selectedMode}`;
+    const ids = created.map(c => c.id).join(',');
+    const rate = selectedMode === 'drip' ? (parseInt(document.getElementById('drip-rate').value) || 5) : null;
+    const rateParam = rate ? `&rate=${rate}` : '';
+    window.location.href = `step2.html?mode=${selectedMode}&ids=${ids}${rateParam}`;
   } catch (err) {
     window._app.toast('Could not save contacts: ' + err.message, 'error');
   }
@@ -287,7 +306,7 @@ async function init() {
 
   // Read mode from URL (set when coming back from step2) so the choice is preserved
   const urlMode = new URLSearchParams(window.location.search).get('mode');
-  if (urlMode === 'bulk' || urlMode === 'sequential') {
+  if (urlMode === 'bulk' || urlMode === 'sequential' || urlMode === 'drip') {
     selectedMode = urlMode;
     pickMode(selectedMode);
   } else {

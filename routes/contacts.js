@@ -25,8 +25,12 @@ const buildFilter = (tab) => {
 // GET /api/contacts
 router.get('/', async (req, res) => {
   try {
-    const { tab, page, limit } = req.query;
+    const { tab, page, limit, ids } = req.query;
     const filter = buildFilter(tab);
+    if (ids) {
+      const idList = ids.split(',').filter(Boolean);
+      filter._id = { $in: idList };
+    }
     const q = Contact.find(filter).sort({ createdAt: -1 }).lean();
 
     if (page && limit) {
@@ -79,6 +83,24 @@ router.post('/retry-failed', async (req, res) => {
       { $set: { status: 'queued', approvalStatus: 'approved' } }
     );
     res.json({ ok: true, retried: failedContacts.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/contacts/reset-for-send — reset selected contacts back to queued+pending so they can flow through step2→step3
+router.post('/reset-for-send', async (req, res) => {
+  try {
+    const { ids } = req.body;
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return res.status(400).json({ error: 'Expected a non-empty ids array' });
+    }
+    await Contact.updateMany(
+      { _id: { $in: ids }, deleted: { $ne: true } },
+      { $set: { status: 'queued', approvalStatus: 'pending', editedSubject: null, editedBody: null } }
+    );
+    const contacts = await Contact.find({ _id: { $in: ids }, deleted: { $ne: true } }).lean();
+    res.json({ ok: true, contacts: contacts.map(serialize) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

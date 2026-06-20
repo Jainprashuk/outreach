@@ -58,7 +58,8 @@
 
 <script src="js/app.js"></script>
 <script>
-const result = JSON.parse(sessionStorage.getItem('sendResult') || '{"sent":0,"failed":0,"skipped":0}');
+// jobId comes from URL — no sessionStorage
+const jobId = new URLSearchParams(window.location.search).get('jobId');
 
 async function retryFailed() {
   const btn = document.getElementById('retry-btn');
@@ -80,47 +81,58 @@ async function start() {
   window._app.initTheme();
   window._app.initMobileNav();
 
-  let totalSent = result.sent;
-  let failedCount = result.failed || 0;
+  // Load job from DB and stats in parallel
+  const jobUrl = jobId
+    ? `${window._app.API_BASE}/api/jobs/${jobId}`
+    : `${window._app.API_BASE}/api/jobs/latest`;
+
+  let batchSent = 0, batchFailed = 0, totalEverSent = 0, pendingApproval = 0;
+
   try {
-    const [, statsRes] = await Promise.all([
-      window._app.loadContacts(),
+    const [jobRes, statsRes] = await Promise.all([
+      fetch(jobUrl),
       fetch(`${window._app.API_BASE}/api/contacts/stats`),
     ]);
-    totalSent = window._app.getStats().sent;
-    if (statsRes.ok) { const s = await statsRes.json(); failedCount = s.failed || 0; }
-  } catch (err) {
-    totalSent = result.sent;
-  }
 
-  const subParts = [`${result.sent} email${result.sent !== 1 ? 's' : ''} delivered.`];
-  if (failedCount > 0) subParts.push(`${failedCount} failed to send.`);
-  if (result.skipped > 0) subParts.push(`${result.skipped} contact${result.skipped > 1 ? 's are' : ' is'} still pending approval.`);
+    if (jobRes.ok) {
+      const job = await jobRes.json();
+      batchSent   = job.items.filter(i => i.status === 'sent').length;
+      batchFailed = job.items.filter(i => i.status === 'failed').length;
+    }
+    if (statsRes.ok) {
+      const s = await statsRes.json();
+      totalEverSent  = s.sent   || 0;
+      pendingApproval = s.pending || 0;
+    }
+  } catch (_) {}
 
-  document.getElementById('success-title').textContent = failedCount > 0
-    ? `${result.sent} sent, ${failedCount} failed`
-    : `${result.sent} email${result.sent !== 1 ? 's' : ''} sent!`;
+  const subParts = [`${batchSent} email${batchSent !== 1 ? 's' : ''} delivered.`];
+  if (batchFailed > 0) subParts.push(`${batchFailed} failed to send.`);
+  if (pendingApproval > 0) subParts.push(`${pendingApproval} contact${pendingApproval > 1 ? 's are' : ' is'} still pending approval.`);
+
+  document.getElementById('success-title').textContent = batchFailed > 0
+    ? `${batchSent} sent, ${batchFailed} failed`
+    : `${batchSent} email${batchSent !== 1 ? 's' : ''} sent!`;
   document.getElementById('success-sub').textContent = subParts.join(' ');
 
   document.getElementById('result-stats').innerHTML = `
-    <div class="stat-card"><div class="stat-label">Sent this batch</div><div class="stat-value green">${result.sent}</div></div>
-    ${failedCount > 0 ? `<div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:var(--red)">${failedCount}</div></div>` : ''}
-    <div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${result.skipped}</div></div>
-    <div class="stat-card"><div class="stat-label">Total ever sent</div><div class="stat-value">${totalSent}</div></div>
+    <div class="stat-card"><div class="stat-label">Sent this batch</div><div class="stat-value green">${batchSent}</div></div>
+    ${batchFailed > 0 ? `<div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:var(--red)">${batchFailed}</div></div>` : ''}
+    ${pendingApproval > 0 ? `<div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${pendingApproval}</div>` : ''}
+    <div class="stat-card"><div class="stat-label">Total ever sent</div><div class="stat-value">${totalEverSent}</div></div>
   `;
 
-  if (failedCount > 0) {
+  if (batchFailed > 0) {
     const btn = document.getElementById('retry-btn');
     btn.style.display = '';
-    btn.innerHTML = `<i class="ti ti-refresh"></i> Retry ${failedCount} failed email${failedCount !== 1 ? 's' : ''}`;
+    btn.innerHTML = `<i class="ti ti-refresh"></i> Retry ${batchFailed} failed email${batchFailed !== 1 ? 's' : ''}`;
+  }
+  if (pendingApproval > 0) {
+    document.getElementById('review-pending-btn').style.display = 'inline-flex';
   }
 }
 
 start();
-
-if (result.skipped > 0) {
-  document.getElementById('review-pending-btn').style.display = 'inline-flex';
-}
 </script>
 </body>
 </html>

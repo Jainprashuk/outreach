@@ -140,7 +140,7 @@ const PAGE_SIZE = 25;
 function resumeSending() {
   const resumable = state.contacts.filter(c => c.status === 'queued' && c.approvalStatus === 'approved');
   if (resumable.length === 0) return;
-  sessionStorage.setItem('approved', JSON.stringify(resumable));
+  // step3 loads approved contacts from DB directly
   window.location.href = 'step3.html';
 }
 
@@ -393,12 +393,16 @@ function changePage(delta) {
   render(activeTab());
 }
 
-function retriggerContact(id) {
+async function retriggerContact(id) {
   const c = state.contacts.find(x => x.id === id);
   if (!c) return;
-  const asApproved = [{ ...c, approvalStatus: 'approved', editedSubject: c.sentSubject || null }];
-  sessionStorage.setItem('approved', JSON.stringify(asApproved));
-  window.location.href = 'step3.html';
+  try {
+    // Reset this contact to queued+approved so step3 picks it up from DB
+    await window._app.updateContact(id, { status: 'queued', approvalStatus: 'approved' });
+    window.location.href = 'step3.html';
+  } catch (err) {
+    window._app.toast('Could not reset contact: ' + err.message, 'error');
+  }
 }
 
 async function confirmDelete(id) {
