@@ -11,6 +11,7 @@ const contactSchema = new mongoose.Schema({
   editedSubject: { type: String, default: null },
   editedBody: { type: String, default: null },
   bounceReason: { type: String, default: null },
+  failReason:   { type: String, default: null },
   messageId: { type: String, default: null },
   sentSubject: { type: String, default: null },
   repliedAt: { type: Date, default: null },

@@ -132,7 +132,7 @@ const sendSingleEmail = inngest.createFunction(
           'items.$.error': err.message,
           'items.$.processedAt': new Date(),
         });
-        await Contact.findByIdAndUpdate(contactId, { status: 'failed' });
+        await Contact.findByIdAndUpdate(contactId, { status: 'failed', failReason: err.message });
       }
     });
   }
@@ -253,7 +253,7 @@ const sendEmailBulk = inngest.createFunction(
                   $inc: { processedCount: 1 },
                 }
               );
-              await Contact.findByIdAndUpdate(item.contactId, { status: 'failed' });
+              await Contact.findByIdAndUpdate(item.contactId, { status: 'failed', failReason: err.message });
             }
           }
         } finally {

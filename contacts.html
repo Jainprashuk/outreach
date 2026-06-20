@@ -82,11 +82,44 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
         <div><h1>Contacts</h1><p id="count-line">—</p></div>
       </div>
       <div style="display:flex;gap:10px">
-        <input type="text" id="search" placeholder="Search name or email..." style="width:220px;max-width:100%">
         <a href="step1.html" class="btn btn-primary"><i class="ti ti-plus"></i> New entry</a>
       </div>
     </div>
     <div class="section">
+
+      <!-- tabs + filters -->
+      <div class="section-head">
+        <div class="nav-tabs" id="tabs">
+          <div class="nav-tab active" data-tab="all">All</div>
+          <div class="nav-tab" data-tab="sent">Sent</div>
+          <div class="nav-tab" data-tab="pending">Pending approval</div>
+          <div class="nav-tab" data-tab="remaining">Remaining</div>
+          <div class="nav-tab" data-tab="bounced">Bounced</div>
+          <div class="nav-tab" data-tab="replied">Replied</div>
+        </div>
+        <span class="contact-count-badge" id="count-badge">—</span>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+        <input type="text" id="search" placeholder="Search name, email or company..." style="flex:1;min-width:180px;max-width:280px">
+        <select id="filter-status" style="width:auto;min-width:140px">
+          <option value="">All statuses</option>
+          <option value="queued">Queued</option>
+          <option value="sent">Sent</option>
+          <option value="failed">Failed</option>
+          <option value="bounced">Bounced</option>
+          <option value="replied">Replied</option>
+        </select>
+        <select id="filter-approval" style="width:auto;min-width:140px">
+          <option value="">All approvals</option>
+          <option value="pending">Pending</option>
+          <option value="approved">Approved</option>
+          <option value="rejected">Rejected</option>
+        </select>
+        <select id="filter-template" style="width:auto;min-width:140px">
+          <option value="">All templates</option>
+        </select>
+        <button class="btn btn-sm" id="clear-filters-btn" type="button">Clear filters</button>
+      </div>
 
       <!-- CSV upload strip -->
       <div class="upload-strip" id="upload-strip" onclick="document.getElementById('file-input').click()" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)">
@@ -130,14 +163,34 @@ let currentPage = 1;
 const PAGE_SIZE = 25;
 let selectedIds = new Set();
 
-function getFiltered(q) {
-  const all = window._app.state.contacts;
-  return q ? all.filter(c => (c.name+c.email+c.company).toLowerCase().includes(q.toLowerCase())) : all;
+function activeTab() {
+  return document.querySelector('.nav-tab.active')?.dataset.tab || 'all';
 }
 
-function render(q) {
-  const filtered = getFiltered(q);
+function getFiltered() {
+  const tab = activeTab();
+  const { filterContacts, state } = window._app;
+  let contacts = filterContacts(tab);
+
+  const q = document.getElementById('search').value.trim().toLowerCase();
+  if (q) contacts = contacts.filter(c => (c.name + c.email + c.company).toLowerCase().includes(q));
+
+  const statusFilter = document.getElementById('filter-status').value;
+  if (statusFilter) contacts = contacts.filter(c => c.status === statusFilter);
+
+  const approvalFilter = document.getElementById('filter-approval').value;
+  if (approvalFilter) contacts = contacts.filter(c => c.approvalStatus === approvalFilter);
+
+  const templateFilter = document.getElementById('filter-template').value;
+  if (templateFilter) contacts = contacts.filter(c => c.template === templateFilter);
+
+  return contacts;
+}
+
+function render() {
+  const filtered = getFiltered();
   document.getElementById('count-line').textContent = filtered.length + ' contacts';
+  document.getElementById('count-badge').textContent = filtered.length + ' contacts';
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   if (currentPage > totalPages) currentPage = totalPages;
@@ -160,7 +213,7 @@ function render(q) {
       <td style="color:var(--text2)">${c.company}</td>
       <td style="color:var(--text2)">${c.role}</td>
       <td style="color:var(--text2)">${tplNames[c.template]||c.template}</td>
-      <td>${window._app.statusBadge(c.status)}</td>
+      <td>${c.status === 'failed' && c.failReason ? `<div>${window._app.statusBadge(c.status)}<div style="font-size:11px;color:var(--text3);margin-top:3px;max-width:180px;white-space:normal;line-height:1.3">${c.failReason}</div></div>` : window._app.statusBadge(c.status)}</td>
       <td>${window._app.statusBadge(c.approvalStatus)}</td>
       <td><button class="btn btn-sm" onclick="confirmDelete('${c.id}')" title="Delete contact"><i class="ti ti-trash"></i></button></td>
     </tr>`).join('') || `<tr><td colspan="8"><div class="empty-state"><i class="ti ti-users"></i>No contacts found</div></td></tr>`;
@@ -178,10 +231,7 @@ function toggleRow(cb) {
   const id = cb.dataset.id;
   if (cb.checked) selectedIds.add(id); else selectedIds.delete(id);
   updateBulkBar();
-  // Sync select-all state
-  const q = document.getElementById('search').value;
-  const filtered = getFiltered(q);
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
+  const filtered = getFiltered();
   const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const allChecked = paged.length > 0 && paged.every(c => selectedIds.has(c.id));
   document.getElementById('select-all').checked = allChecked;
@@ -189,8 +239,7 @@ function toggleRow(cb) {
 }
 
 function toggleSelectAll(checked) {
-  const q = document.getElementById('search').value;
-  const filtered = getFiltered(q);
+  const filtered = getFiltered();
   const paged = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   paged.forEach(c => { if (checked) selectedIds.add(c.id); else selectedIds.delete(c.id); });
   document.querySelectorAll('.row-cb[data-id]').forEach(cb => {
@@ -208,7 +257,7 @@ function updateBulkBar() {
 
 function changePage(delta) {
   currentPage += delta;
-  render(document.getElementById('search').value);
+  render();
 }
 
 async function confirmDelete(id) {
@@ -220,7 +269,7 @@ async function confirmDelete(id) {
     selectedIds.delete(id);
     window._app.toast(`${c.name} deleted.`, 'success');
     currentPage = 1;
-    render(document.getElementById('search').value);
+    render();
   } catch (err) {
     window._app.toast(err.message, 'error');
   }
@@ -237,7 +286,7 @@ async function deleteSelected() {
   }
   window._app.toast(failed === 0 ? `${ids.length} contact${ids.length!==1?'s':''} deleted.` : `${ids.length - failed} deleted, ${failed} failed.`, failed ? 'error' : 'success');
   currentPage = 1;
-  render(document.getElementById('search').value);
+  render();
 }
 
 async function sendSelected() {
@@ -311,7 +360,7 @@ function processFile(file) {
       // Reload contacts list
       await window._app.loadContacts();
       currentPage = 1;
-      render(document.getElementById('search').value);
+      render();
       setTimeout(() => {
         strip.style.borderColor = '';
         strip.style.background = '';
@@ -333,8 +382,38 @@ async function start() {
     document.getElementById('tbody').innerHTML = `<tr><td colspan="8"><div class="empty-state"><i class="ti ti-alert-triangle"></i>${err.message}</div></td></tr>`;
     return;
   }
-  document.getElementById('search').addEventListener('input', e => { currentPage = 1; render(e.target.value); });
-  render('');
+  // Populate template filter
+  const tplSel = document.getElementById('filter-template');
+  Object.keys(window._app.state.templates).forEach(key => {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = tplNames[key] || window._app.state.templates[key].name || key;
+    tplSel.appendChild(opt);
+  });
+
+  document.getElementById('tabs').addEventListener('click', e => {
+    const tab = e.target.closest('.nav-tab')?.dataset.tab;
+    if (!tab) return;
+    document.querySelectorAll('#tabs .nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
+    currentPage = 1;
+    render();
+  });
+
+  document.getElementById('search').addEventListener('input', () => { currentPage = 1; render(); });
+  ['filter-status', 'filter-approval', 'filter-template'].forEach(id =>
+    document.getElementById(id).addEventListener('change', () => { currentPage = 1; render(); })
+  );
+  document.getElementById('clear-filters-btn').addEventListener('click', () => {
+    document.getElementById('search').value = '';
+    document.getElementById('filter-status').value = '';
+    document.getElementById('filter-approval').value = '';
+    document.getElementById('filter-template').value = '';
+    document.querySelectorAll('#tabs .nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === 'all'));
+    currentPage = 1;
+    render();
+  });
+
+  render();
 }
 
 (function () {
