@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Outreach — Login</title>
+<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  body { display:flex; align-items:center; justify-content:center; min-height:100vh; background:var(--bg2); }
+  .login-card {
+    background:var(--bg);
+    border:1px solid var(--border-md);
+    border-radius:12px;
+    padding:40px 36px;
+    width:100%;
+    max-width:360px;
+    box-shadow:var(--shadow-md);
+  }
+  .login-logo { display:flex; align-items:center; gap:10px; margin-bottom:28px; justify-content:center; }
+  .login-logo-icon {
+    width:36px; height:36px; border-radius:8px;
+    background:var(--accent); color:#fff;
+    display:flex; align-items:center; justify-content:center;
+    font-size:18px; font-weight:700;
+  }
+  .login-logo-text { font-size:18px; font-weight:600; color:var(--text); }
+  .login-title { font-size:15px; font-weight:600; color:var(--text); margin-bottom:4px; text-align:center; }
+  .login-sub { font-size:13px; color:var(--text2); margin-bottom:24px; text-align:center; }
+  .login-label { font-size:12px; font-weight:500; color:var(--text2); margin-bottom:6px; display:block; }
+  .login-input {
+    width:100%; box-sizing:border-box;
+    padding:9px 12px; border:1px solid var(--border-md);
+    border-radius:7px; font-size:14px; font-family:inherit;
+    background:var(--bg2); color:var(--text);
+    outline:none; transition:border-color .15s;
+  }
+  .login-input:focus { border-color:var(--accent); }
+  .login-btn {
+    width:100%; margin-top:18px;
+    padding:10px; border:none; border-radius:7px;
+    background:var(--accent); color:#fff;
+    font-size:14px; font-weight:500; font-family:inherit;
+    cursor:pointer; transition:opacity .15s;
+  }
+  .login-btn:hover { opacity:.88; }
+  .login-error {
+    margin-top:14px; padding:10px 12px;
+    background:#fff0f0; border:1px solid #fca5a5;
+    border-radius:7px; font-size:13px; color:#b91c1c;
+    text-align:center;
+  }
+  [data-theme="dark"] .login-error { background:#3f1010; border-color:#7f1d1d; color:#fca5a5; }
+</style>
+</head>
+<body>
+<div class="login-card">
+  <div class="login-logo">
+    <div class="login-logo-icon">O</div>
+    <span class="login-logo-text">Outreach</span>
+  </div>
+  <div class="login-title">Sign in</div>
+  <div class="login-sub">Personal access only</div>
+  <form method="POST" action="/login">
+    <label class="login-label" for="pw">Password</label>
+    <input class="login-input" type="password" id="pw" name="password" autofocus autocomplete="current-password" required>
+    <button class="login-btn" type="submit">Continue</button>
+  </form>
+  <div id="err" class="login-error" style="display:none"></div>
+</div>
+<script>
+  const p = new URLSearchParams(location.search);
+  if (p.get('error')) {
+    const el = document.getElementById('err');
+    el.textContent = 'Incorrect password. Try again.';
+    el.style.display = '';
+  }
+</script>
+</body>
+</html>

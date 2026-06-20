@@ -4,6 +4,8 @@ const mongoose = require('mongoose');
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
 const cors = require('cors');
+const crypto = require('crypto');
+const path = require('path');
 const db = require('./db');
 const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
@@ -12,6 +14,62 @@ const mailer = require('./lib/mailer');
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: false }));
+
+// ── Auth ─────────────────────────────────────────────────────────────────────
+const AUTH_PASSWORD = process.env.AUTH_PASSWORD;
+const AUTH_SECRET   = process.env.AUTH_SECRET || 'outreach-default-secret';
+const AUTH_COOKIE   = 'outreach_auth';
+const COOKIE_MAX_AGE = 30 * 24 * 60 * 60; // 30 days in seconds
+
+const makeToken = (pw) =>
+  crypto.createHmac('sha256', AUTH_SECRET).update(pw).digest('hex');
+
+const AUTH_TOKEN = AUTH_PASSWORD ? makeToken(AUTH_PASSWORD) : null;
+
+const requireAuth = (req, res, next) => {
+  if (!AUTH_TOKEN) return next(); // no password configured → open (local dev)
+  if (req.path === '/login' || req.path.startsWith('/api/inngest')) return next();
+
+  const raw = req.headers.cookie || '';
+  const match = raw.split(';').find(c => c.trim().startsWith(AUTH_COOKIE + '='));
+  const token = match ? decodeURIComponent(match.trim().slice(AUTH_COOKIE.length + 1)) : '';
+
+  if (token.length === AUTH_TOKEN.length) {
+    try {
+      if (crypto.timingSafeEqual(Buffer.from(token), Buffer.from(AUTH_TOKEN))) {
+        return next();
+      }
+    } catch (_) {}
+  }
+
+  if (req.path.startsWith('/api/')) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+  res.redirect('/login');
+};
+
+app.use(requireAuth);
+
+app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, 'login.html')));
+
+app.post('/login', (req, res) => {
+  const { password } = req.body;
+  if (!AUTH_TOKEN || (password && makeToken(password) === AUTH_TOKEN)) {
+    const token = AUTH_TOKEN || '';
+    res.setHeader('Set-Cookie',
+      `${AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}; Path=/`
+    );
+    return res.redirect('/');
+  }
+  res.redirect('/login?error=1');
+});
+
+app.get('/logout', (_req, res) => {
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; HttpOnly; Max-Age=0; Path=/`);
+  res.redirect('/login');
+});
+
 app.use(express.static(__dirname));
 
 // Cached connection promise — one connection attempt shared across all concurrent requests
