@@ -61,6 +61,21 @@ const App = (() => {
     { key: 'senderCompany', desc: 'Your company' },
   ];
 
+  // Converts plain-text body to HTML for previews and sending.
+  // Supports [link text](url) syntax → clickable <a> tags.
+  const bodyToHtml = (text) => {
+    const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    const linkRe = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+    let result = '', lastIndex = 0, match;
+    while ((match = linkRe.exec(text)) !== null) {
+      result += esc(text.slice(lastIndex, match.index));
+      result += `<a href="${esc(match[2])}" target="_blank" rel="noopener noreferrer">${esc(match[1])}</a>`;
+      lastIndex = linkRe.lastIndex;
+    }
+    result += esc(text.slice(lastIndex));
+    return result.replace(/\n/g, '<br>');
+  };
+
   // Built-in + user-defined custom variables, for variable pickers.
   const allVariables = () => [
     ...BUILTIN_VARIABLES,
@@ -338,6 +353,7 @@ const App = (() => {
     avatarEl,
     statusBadge,
     renderTemplate,
+    bodyToHtml,
 
     setTab(tab) { state.currentTab = tab; },
 

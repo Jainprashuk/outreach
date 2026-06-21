@@ -6,6 +6,22 @@ const Contact = require('./models/Contact');
 const mailer = require('./lib/mailer');
 const db = require('./db');
 
+// Converts plain-text template body to HTML.
+// Supports [link text](url) markdown-style links → <a> tags.
+// Newlines → <br>. Everything else is HTML-escaped.
+function bodyToHtml(text) {
+  const esc = s => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const linkRe = /\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g;
+  let result = '', lastIndex = 0, match;
+  while ((match = linkRe.exec(text)) !== null) {
+    result += esc(text.slice(lastIndex, match.index));
+    result += `<a href="${esc(match[2])}">${esc(match[1])}</a>`;
+    lastIndex = linkRe.lastIndex;
+  }
+  result += esc(text.slice(lastIndex));
+  return result.replace(/\n/g, '<br>');
+}
+
 const ensureDb = async () => {
   const mongoose = require('mongoose');
   if (mongoose.connection.readyState !== 1) {
@@ -113,6 +129,7 @@ const sendSingleEmail = inngest.createFunction(
           to: item.to,
           subject: item.subject,
           text: item.body,
+          html: bodyToHtml(item.body),
           ...(attachments ? { attachments } : {}),
         });
         await _atomicItemUpdate(jobId, contactId, {
@@ -222,6 +239,7 @@ const sendEmailBulk = inngest.createFunction(
                 to: item.to,
                 subject: item.subject,
                 text: item.body,
+                html: bodyToHtml(item.body),
                 ...(attachments ? { attachments } : {}),
               });
               await SendJob.findOneAndUpdate(

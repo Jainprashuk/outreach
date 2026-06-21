@@ -73,6 +73,7 @@
       <div class="form-group">
         <label class="form-label">Body</label>
         <textarea id="tpl-body" style="min-height:180px" placeholder="Hi {{name}}, ..."></textarea>
+        <div style="font-size:11px;color:var(--text3);margin-top:5px">Tip: use <code style="background:var(--bg2);padding:1px 4px;border-radius:3px">[link text](https://...)</code> for clickable links</div>
       </div>
       <div class="form-group">
         <label class="form-label">Insert a variable</label>
@@ -126,7 +127,7 @@ function renderTemplates() {
       </div>
       <div class="tpl-card-body">
         <div class="tpl-subject">Subject: ${escapeHtml(tpl.subject)}</div>
-        <div class="tpl-body-text" style="margin-top:10px">${escapeHtml(tpl.body)}</div>
+        <div class="tpl-body-text" style="margin-top:10px">${window._app.bodyToHtml(tpl.body)}</div>
       </div>
     </div>
   `).join('');

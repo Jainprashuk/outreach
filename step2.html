@@ -119,7 +119,7 @@ function renderCards() {
   document.getElementById('cards-list').innerHTML = approvals.map((a, i) => {
     const { subject, body } = window._app.renderTemplate(a.template, a);
     const displaySubject = a.editedSubject || subject;
-    const displayBody = (a.editedBody || body).replace(/\n/g, '<br>');
+    const displayBody = window._app.bodyToHtml(a.editedBody || body);
     const isApproved = a.approvalStatus === 'approved';
     const isRejected = a.approvalStatus === 'rejected';
 
