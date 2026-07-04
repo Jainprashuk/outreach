@@ -21,6 +21,7 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
 .bulk-bar .bb-count { font-size: 14px; font-weight: 500; flex: 1; }
 .bulk-bar .btn-send { background: var(--blue); border-color: var(--blue); color: #fff; }
 .bulk-bar .btn-send:hover { opacity: .9; }
+th[onclick]:hover { background: var(--bg2); }
 </style>
 </head>
 <body>
@@ -156,11 +157,54 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
 <script>
 const { getStats, filterContacts, avatarEl, statusBadge, state } = window._app;
 
-let replySort = 'desc';
+let replySort = 'desc'; // kept for legacy; unified sort below
 let currentReplyContactId = null;
 let currentPage = 1;
 const PAGE_SIZE = 25;
 let selectedFollowupIds = new Set();
+
+let sortCol = 'createdAt';
+let sortDir = 'desc';
+
+function setSort(col) {
+  if (sortCol === col) {
+    sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+  } else {
+    sortCol = col;
+    sortDir = col === 'createdAt' || col === 'repliedAt' || col === 'lastSentAt' ? 'desc' : 'asc';
+  }
+  currentPage = 1;
+  render(activeTab());
+}
+
+function sortIcon(col) {
+  if (sortCol !== col) return `<i class="ti ti-arrows-sort" style="font-size:10px;opacity:.35;margin-left:3px"></i>`;
+  const icon = sortDir === 'asc' ? 'ti-arrow-up' : 'ti-arrow-down';
+  return `<i class="ti ${icon}" style="font-size:10px;color:var(--blue);margin-left:3px"></i>`;
+}
+
+function sortContacts(arr) {
+  return [...arr].sort((a, b) => {
+    let va, vb;
+    switch (sortCol) {
+      case 'name':       va = (a.name     || '').toLowerCase(); vb = (b.name     || '').toLowerCase(); break;
+      case 'company':    va = (a.company  || '').toLowerCase(); vb = (b.company  || '').toLowerCase(); break;
+      case 'template':   va = (a.template || '').toLowerCase(); vb = (b.template || '').toLowerCase(); break;
+      case 'status':     va = (a.status   || '').toLowerCase(); vb = (b.status   || '').toLowerCase(); break;
+      case 'approval':   va = (a.approvalStatus || '');         vb = (b.approvalStatus || '');         break;
+      case 'lastSentAt': va = new Date(a.lastSentAt || 0);      vb = new Date(b.lastSentAt || 0);      break;
+      case 'repliedAt':  va = new Date(a.repliedAt  || 0);      vb = new Date(b.repliedAt  || 0);      break;
+      default:           va = new Date(a.createdAt  || 0);      vb = new Date(b.createdAt  || 0);
+    }
+    if (va < vb) return sortDir === 'asc' ? -1 : 1;
+    if (va > vb) return sortDir === 'asc' ?  1 : -1;
+    return 0;
+  });
+}
+
+function th(label, col) {
+  return `<th onclick="setSort('${col}')" style="cursor:pointer;user-select:none">${label}${sortIcon(col)}</th>`;
+}
 
 function toggleFollowupRow(cb) {
   const id = cb.dataset.id;
@@ -346,7 +390,8 @@ function render(tab) {
 
   document.getElementById('count-badge').textContent = contacts.length + ' contacts';
 
-  // ── Pagination ──────────────────────────────────────────────────────────
+  // ── Sort + Pagination ───────────────────────────────────────────────────
+  contacts = sortContacts(contacts);
   const totalPages = Math.ceil(contacts.length / PAGE_SIZE) || 1;
   if (currentPage > totalPages) currentPage = totalPages;
   const pagedContacts = contacts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
@@ -362,21 +407,13 @@ function render(tab) {
   }
 
   if (tab === 'replied') {
-    // Sort by repliedAt
-    contacts = [...contacts].sort((a, b) => {
-      const da = new Date(a.repliedAt || 0), db = new Date(b.repliedAt || 0);
-      return replySort === 'desc' ? db - da : da - db;
-    });
-    const pagedReplied = contacts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+    const pagedReplied = pagedContacts;
 
-    const sortIcon = replySort === 'desc' ? 'ti-arrow-down' : 'ti-arrow-up';
     document.getElementById('contacts-thead-row').innerHTML = `
-      <th>Contact</th>
-      <th>Company</th>
+      ${th('Contact', 'name')}
+      ${th('Company', 'company')}
       <th>Reply preview</th>
-      <th class="sortable" onclick="toggleSort()" title="Toggle sort order">
-        Replied <i class="ti ${sortIcon}" style="font-size:10px;color:var(--text3)"></i>
-      </th>
+      ${th('Replied', 'repliedAt')}
       <th>Status</th>
       <th></th>
     `;
@@ -422,7 +459,11 @@ function render(tab) {
 
     document.getElementById('contacts-thead-row').innerHTML = `
       <th class="cb-col"><input type="checkbox" class="row-cb" onchange="toggleFollowupAll(this)" title="Select all"></th>
-      <th>Contact</th><th>Company</th><th>Last Sent</th><th>Status</th><th></th>
+      ${th('Contact', 'name')}
+      ${th('Company', 'company')}
+      ${th('Last Sent', 'lastSentAt')}
+      ${th('Status', 'status')}
+      <th></th>
     `;
 
     document.getElementById('contacts-tbody').innerHTML = pagedContacts.map(c => {
@@ -448,7 +489,12 @@ function render(tab) {
 
   } else {
     document.getElementById('contacts-thead-row').innerHTML = `
-      <th>Contact</th><th>Company</th><th>Template</th><th>Status</th><th>Approval</th><th></th>
+      ${th('Contact', 'name')}
+      ${th('Company', 'company')}
+      ${th('Template', 'template')}
+      ${th('Status', 'status')}
+      ${th('Approval', 'approval')}
+      <th></th>
     `;
 
     document.getElementById('contacts-tbody').innerHTML = pagedContacts.map(c => {
@@ -520,6 +566,7 @@ document.getElementById('tabs').addEventListener('click', e => {
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   window._app.setTab(tab);
   currentPage = 1;
+  sortCol = 'createdAt'; sortDir = 'desc';
   selectedFollowupIds = new Set();
   updateFollowupBulkBar();
   render(tab);
