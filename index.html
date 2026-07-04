@@ -64,10 +64,11 @@
           <div class="nav-tab" data-tab="remaining">Remaining</div>
           <div class="nav-tab" data-tab="bounced">Bounced</div>
           <div class="nav-tab" data-tab="replied">Replied</div>
+          <div class="nav-tab" data-tab="followup-due" id="followup-tab">Follow-up Due</div>
         </div>
         <span class="contact-count-badge" id="count-badge">—</span>
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
         <input type="text" id="search" placeholder="Search name, email or company..." style="flex:1;min-width:200px;max-width:320px">
         <select id="filter-status" style="width:auto;min-width:140px">
           <option value="">All statuses</option>
@@ -253,6 +254,7 @@ function render(tab) {
     <div class="stat-card"><div class="stat-label">Replied</div><div class="stat-value teal">${stats.replied}</div></div>
     <div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${stats.pending}</div></div>
     <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value">${stats.remaining}</div></div>
+    <a href="contacts.html?tab=followup-due" class="stat-card" style="text-decoration:none"><div class="stat-label">Follow-up Due</div><div class="stat-value amber">${stats.followUpDue}</div></a>
   `;
 
   // Unread count badge on the Replied tab
@@ -263,6 +265,15 @@ function render(tab) {
       ? `Replied <span class="tab-badge">${unreadCount}</span>`
       : 'Replied';
   }
+
+  // Follow-up Due badge on the tab
+  const followupTabEl = document.getElementById('followup-tab');
+  if (followupTabEl) {
+    followupTabEl.innerHTML = stats.followUpDue > 0
+      ? `Follow-up Due <span class="tab-badge">${stats.followUpDue}</span>`
+      : 'Follow-up Due';
+  }
+
 
   const tplNames = { 'intro-v2': 'Intro v2', 'follow-up': 'Follow-up', 'cold': 'Cold outreach' };
   let contacts = filterContacts(tab);

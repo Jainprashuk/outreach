@@ -1,6 +1,6 @@
 const App = (() => {
   const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-  const API_BASE = isLocal ? 'http://localhost:3000' : '';
+  const API_BASE = isLocal ? window.location.origin : '';
 
   let state = {
     contacts: [],
@@ -10,13 +10,19 @@ const App = (() => {
     batchContacts: [],
   };
 
+  const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+  const isFollowUpDue = (c) =>
+    (c.status === 'sent' || c.status === 'replied') && !c.followUpSentAt &&
+    c.lastSentAt && (Date.now() - new Date(c.lastSentAt).getTime() >= THREE_DAYS_MS);
+
   const getStats = () => ({
     total: state.contacts.length,
     sent: state.contacts.filter(c => c.status === 'sent').length,
     bounced: state.contacts.filter(c => c.status === 'bounced').length,
     replied: state.contacts.filter(c => c.status === 'replied').length,
     pending: state.contacts.filter(c => c.approvalStatus === 'pending').length,
-    remaining: state.contacts.filter(c => c.status === 'queued').length
+    remaining: state.contacts.filter(c => c.status === 'queued').length,
+    followUpDue: state.contacts.filter(isFollowUpDue).length,
   });
 
   const initials = (name) => name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -49,6 +55,7 @@ const App = (() => {
     if (tab === 'remaining') return state.contacts.filter(c => c.status === 'queued');
     if (tab === 'bounced') return state.contacts.filter(c => c.status === 'bounced');
     if (tab === 'replied') return state.contacts.filter(c => c.status === 'replied');
+    if (tab === 'followup-due') return state.contacts.filter(isFollowUpDue);
     return state.contacts;
   };
 
@@ -236,6 +243,14 @@ const App = (() => {
     document.body.appendChild(el);
   };
 
+  const _sjwFormatTime = (ms) => {
+    if (ms <= 0) return 'finishing…';
+    const totalMins = Math.round(ms / 60000);
+    const hrs = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    return hrs > 0 ? `~${hrs}h ${mins}m` : `~${mins}m`;
+  };
+
   const _sjwUpdate = (job) => {
     const fill = document.getElementById('sjw-fill');
     const stats = document.getElementById('sjw-stats');
@@ -267,7 +282,11 @@ const App = (() => {
       _sjwInterval = null;
       setTimeout(_sjwDismiss, 8000);
     } else if (job.sendMode === 'drip') {
-      if (title) title.innerHTML = `<i class="ti ti-clock"></i> Drip sending…`;
+      const remaining = job.items.filter(i => i.status === 'pending').length;
+      const delayMs = Math.round(3_600_000 / (job.ratePerHour || 5));
+      const timeLeftMs = Math.max(0, (remaining - 1) * delayMs);
+      const timeStr = _sjwFormatTime(timeLeftMs);
+      if (title) title.innerHTML = `<i class="ti ti-clock"></i> Drip — ${timeStr} left`;
       if (pauseBtn) pauseBtn.style.display = 'none'; // individual events already scheduled
     } else if (job.status === 'paused') {
       if (title) title.innerHTML = `<i class="ti ti-player-pause"></i> Paused`;
@@ -349,6 +368,7 @@ const App = (() => {
     loadSettings,
     getStats,
     filterContacts,
+    apiFetch,
     initials,
     avatarEl,
     statusBadge,
@@ -374,9 +394,9 @@ const App = (() => {
     },
 
     async createContacts(rows) {
-      const created = await apiFetch('/api/contacts', { method: 'POST', body: JSON.stringify(rows) });
-      state.contacts.unshift(...created);
-      return created;
+      const res = await apiFetch('/api/contacts', { method: 'POST', body: JSON.stringify(rows) });
+      state.contacts.unshift(...res.created);
+      return res; // { created: [...], skipped: N }
     },
 
     async updateContact(id, patch) {

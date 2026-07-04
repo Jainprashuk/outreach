@@ -14,12 +14,20 @@ const serialize = (doc) => {
 
 const BASE_FILTER = { deleted: { $ne: true } };
 
+const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+
 const buildFilter = (tab) => {
-  if (tab === 'sent')      return { ...BASE_FILTER, status: 'sent' };
-  if (tab === 'bounced')   return { ...BASE_FILTER, status: 'bounced' };
-  if (tab === 'replied')   return { ...BASE_FILTER, status: 'replied' };
-  if (tab === 'remaining') return { ...BASE_FILTER, status: 'queued' };
-  if (tab === 'pending')   return { ...BASE_FILTER, approvalStatus: 'pending' };
+  if (tab === 'sent')         return { ...BASE_FILTER, status: 'sent' };
+  if (tab === 'bounced')      return { ...BASE_FILTER, status: 'bounced' };
+  if (tab === 'replied')      return { ...BASE_FILTER, status: 'replied' };
+  if (tab === 'remaining')    return { ...BASE_FILTER, status: 'queued' };
+  if (tab === 'pending')      return { ...BASE_FILTER, approvalStatus: 'pending' };
+  if (tab === 'followup-due') return {
+    ...BASE_FILTER,
+    status: { $in: ['sent', 'replied'] },
+    followUpSentAt: null,
+    lastSentAt: { $lt: new Date(Date.now() - THREE_DAYS_MS) },
+  };
   return { ...BASE_FILTER };
 };
 
@@ -58,17 +66,22 @@ router.get('/stats', async (req, res) => {
       { $match: BASE_FILTER },
       { $group: {
         _id: null,
-        total:     { $sum: 1 },
-        sent:      { $sum: { $cond: [{ $eq: ['$status', 'sent'] },      1, 0] } },
-        bounced:   { $sum: { $cond: [{ $eq: ['$status', 'bounced'] },   1, 0] } },
-        replied:   { $sum: { $cond: [{ $eq: ['$status', 'replied'] },   1, 0] } },
-        failed:    { $sum: { $cond: [{ $eq: ['$status', 'failed'] },    1, 0] } },
-        pending:   { $sum: { $cond: [{ $eq: ['$approvalStatus', 'pending'] }, 1, 0] } },
-        remaining: { $sum: { $cond: [{ $eq: ['$status', 'queued'] },    1, 0] } },
+        total:        { $sum: 1 },
+        sent:         { $sum: { $cond: [{ $eq: ['$status', 'sent'] },      1, 0] } },
+        bounced:      { $sum: { $cond: [{ $eq: ['$status', 'bounced'] },   1, 0] } },
+        replied:      { $sum: { $cond: [{ $eq: ['$status', 'replied'] },   1, 0] } },
+        failed:       { $sum: { $cond: [{ $eq: ['$status', 'failed'] },    1, 0] } },
+        pending:      { $sum: { $cond: [{ $eq: ['$approvalStatus', 'pending'] }, 1, 0] } },
+        remaining:    { $sum: { $cond: [{ $eq: ['$status', 'queued'] },    1, 0] } },
+        followUpDue:  { $sum: { $cond: [{ $and: [
+          { $in: ['$status', ['sent', 'replied']] },
+          { $eq: [{ $ifNull: ['$followUpSentAt', null] }, null] },
+          { $lt: ['$lastSentAt', new Date(Date.now() - THREE_DAYS_MS)] },
+        ]}, 1, 0] }},
       }},
     ]);
-    const zero = { total: 0, sent: 0, bounced: 0, replied: 0, failed: 0, pending: 0, remaining: 0 };
-    res.json(agg ? { total: agg.total, sent: agg.sent, bounced: agg.bounced, replied: agg.replied, failed: agg.failed, pending: agg.pending, remaining: agg.remaining } : zero);
+    const zero = { total: 0, sent: 0, bounced: 0, replied: 0, failed: 0, pending: 0, remaining: 0, followUpDue: 0 };
+    res.json(agg ? { total: agg.total, sent: agg.sent, bounced: agg.bounced, replied: agg.replied, failed: agg.failed, pending: agg.pending, remaining: agg.remaining, followUpDue: agg.followUpDue } : zero);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -117,14 +130,39 @@ router.post('/', async (req, res) => {
     if (rows.some(r => !r.name || !r.email)) {
       return res.status(400).json({ error: 'Each contact requires name and email' });
     }
-    const created = await Contact.insertMany(rows.map(r => ({
-      name: r.name,
-      email: r.email,
-      company: r.company || '',
-      role: r.role || '',
-      template: r.template || 'intro-v2',
-    })));
-    res.status(201).json(created);
+
+    // Deduplicate within the incoming batch (keep first occurrence, case-insensitive)
+    const seen = new Set();
+    const unique = rows.filter(r => {
+      const key = r.email.trim().toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    // Find which emails already exist in the DB (non-deleted)
+    const incomingEmails = unique.map(r => r.email.trim().toLowerCase());
+    const existing = await Contact.find(
+      { email: { $in: incomingEmails }, deleted: { $ne: true } },
+      { email: 1 }
+    ).lean();
+    const existingEmails = new Set(existing.map(c => c.email.trim().toLowerCase()));
+
+    const toInsert = unique.filter(r => !existingEmails.has(r.email.trim().toLowerCase()));
+    const skippedCount = rows.length - toInsert.length;
+
+    let created = [];
+    if (toInsert.length > 0) {
+      created = await Contact.insertMany(toInsert.map(r => ({
+        name: r.name,
+        email: r.email.trim(),
+        company: r.company || '',
+        role: r.role || '',
+        template: r.template || 'intro-v2',
+      })));
+    }
+
+    res.status(201).json({ created, skipped: skippedCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

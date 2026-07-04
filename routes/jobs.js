@@ -97,7 +97,7 @@ router.get('/active', async (req, res) => {
 
     const job = await SendJob.findOne(
       { status: { $in: ['pending', 'processing', 'paused'] } },
-      { items: 1, status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1 }
+      { items: 1, status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1, ratePerHour: 1 }
     ).sort({ createdAt: -1 }).lean();
     res.json(job ? serialize(job) : null);
   } catch (err) {

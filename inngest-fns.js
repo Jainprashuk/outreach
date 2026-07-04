@@ -105,6 +105,7 @@ const sendSingleEmail = inngest.createFunction(
         });
         return;
       }
+      const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
 
       // Credentials stored in job at creation time; fall back to mailer (env vars)
       const senderEmail    = job.senderEmail    || mailer.senderConfig.email;
@@ -142,6 +143,7 @@ const sendSingleEmail = inngest.createFunction(
           messageId: info.messageId || null,
           sentSubject: item.subject,
           lastSentAt: new Date(),
+          ...(isFollowUp ? { followUpSentAt: new Date() } : {}),
         });
       } catch (err) {
         await _atomicItemUpdate(jobId, contactId, {
@@ -218,6 +220,7 @@ const sendEmailBulk = inngest.createFunction(
           for (const item of chunk) {
             // Cooldown check — skip if sent within the last 2 hours
             const contactDoc = await Contact.findById(item.contactId).lean();
+            const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
             if (contactDoc?.lastSentAt && (Date.now() - new Date(contactDoc.lastSentAt).getTime()) < COOLDOWN_MS) {
               await SendJob.findOneAndUpdate(
                 { _id: jobId, 'items.contactId': item.contactId },
@@ -258,6 +261,7 @@ const sendEmailBulk = inngest.createFunction(
                 messageId: info.messageId || null,
                 sentSubject: item.subject,
                 lastSentAt: new Date(),
+                ...(isFollowUp ? { followUpSentAt: new Date() } : {}),
               });
             } catch (err) {
               await SendJob.findOneAndUpdate(

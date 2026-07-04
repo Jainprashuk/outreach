@@ -96,10 +96,11 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
           <div class="nav-tab" data-tab="remaining">Remaining</div>
           <div class="nav-tab" data-tab="bounced">Bounced</div>
           <div class="nav-tab" data-tab="replied">Replied</div>
+          <div class="nav-tab" data-tab="followup-due" id="followup-tab">Follow-up Due</div>
         </div>
         <span class="contact-count-badge" id="count-badge">—</span>
       </div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
         <input type="text" id="search" placeholder="Search name, email or company..." style="flex:1;min-width:180px;max-width:280px">
         <select id="filter-status" style="width:auto;min-width:140px">
           <option value="">All statuses</option>
@@ -153,7 +154,7 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
 <div class="bulk-bar" id="bulk-bar">
   <span class="bb-count" id="bulk-count">0 selected</span>
   <button class="btn btn-del" onclick="deleteSelected()"><i class="ti ti-trash"></i> Delete</button>
-  <button class="btn btn-send" onclick="sendSelected()"><i class="ti ti-send"></i> Send selected</button>
+  <button class="btn btn-send" id="bulk-send-btn" onclick="sendSelected()"><i class="ti ti-send"></i> Send selected</button>
 </div>
 
 <script src="js/app.js"></script>
@@ -211,9 +212,11 @@ async function loadFailReason(id, btn) {
 }
 
 function render() {
+  const tab = activeTab();
   const filtered = getFiltered();
   document.getElementById('count-line').textContent = filtered.length + ' contacts';
   document.getElementById('count-badge').textContent = filtered.length + ' contacts';
+
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   if (currentPage > totalPages) currentPage = totalPages;
@@ -276,6 +279,13 @@ function updateBulkBar() {
   const n = selectedIds.size;
   document.getElementById('bulk-count').textContent = n + ' selected';
   bar.classList.toggle('visible', n > 0);
+  const sendBtn = document.getElementById('bulk-send-btn');
+  if (sendBtn) {
+    const isFollowupTab = activeTab() === 'followup-due';
+    sendBtn.innerHTML = isFollowupTab
+      ? '<i class="ti ti-send"></i> Send Follow-ups'
+      : '<i class="ti ti-send"></i> Send selected';
+  }
 }
 
 function changePage(delta) {
@@ -312,9 +322,15 @@ async function deleteSelected() {
   render();
 }
 
+
 async function sendSelected() {
   if (selectedIds.size === 0) return;
   const ids = [...selectedIds];
+  // On the follow-up tab, route through step1 (follow-up mode) instead of step2
+  if (activeTab() === 'followup-due') {
+    window.location.href = `step1.html?followup=1&ids=${ids.join(',')}`;
+    return;
+  }
   try {
     const res = await fetch(`${window._app.API_BASE}/api/contacts/reset-for-send`, {
       method: 'POST',
@@ -375,8 +391,9 @@ function processFile(file) {
     if (rows.length === 0) { window._app.toast('No valid contacts found in CSV.', 'error'); return; }
 
     try {
-      await window._app.createContacts(rows);
-      window._app.toast(`${rows.length} contact${rows.length!==1?'s':''} imported from ${file.name}.`, 'success');
+      const { created, skipped } = await window._app.createContacts(rows);
+      const skipMsg = skipped > 0 ? ` (${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped)` : '';
+      window._app.toast(`${created.length} contact${created.length !== 1 ? 's' : ''} imported from ${file.name}${skipMsg}.`, skipped > 0 && created.length === 0 ? 'error' : 'success');
       const strip = document.getElementById('upload-strip');
       strip.style.borderColor = 'var(--green)';
       strip.style.background = 'var(--green-bg, #f0fdf4)';
@@ -435,6 +452,12 @@ async function start() {
     currentPage = 1;
     render();
   });
+
+  // Honour ?tab= URL param (e.g. coming from dashboard "Send Follow-ups" button)
+  const urlTab = new URLSearchParams(window.location.search).get('tab');
+  if (urlTab) {
+    document.querySelectorAll('#tabs .nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === urlTab));
+  }
 
   render();
 }

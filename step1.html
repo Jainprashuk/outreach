@@ -156,6 +156,11 @@ let templateOptions = `
   <option value="follow-up">Follow-up</option>
   <option value="cold">Cold outreach</option>
 `;
+const _urlParams = new URLSearchParams(window.location.search);
+const isFollowUpMode = _urlParams.get('followup') === '1';
+const followupIds = isFollowUpMode ? _urlParams.get('ids')?.split(',').filter(Boolean) : [];
+// Map from email → original contact id, populated during init
+const followupContactMap = {};
 
 function addRow(prefill = {}) {
   rowCount++;
@@ -287,13 +292,31 @@ function confirmMode() {
 async function goNext() {
   const rows = collectRows();
   if (rows.length === 0) { window._app.toast('Please add at least one contact.', 'error'); return; }
+
+  const rate = selectedMode === 'drip' ? (parseInt(document.getElementById('drip-rate').value) || 5) : null;
+  const rateParam = rate ? `&rate=${rate}` : '';
+
+  if (isFollowUpMode) {
+    // Contacts already exist — resolve IDs from the email map, reset them, then navigate
+    const keptIds = rows.map(r => followupContactMap[r.email.toLowerCase()]).filter(Boolean);
+    if (keptIds.length === 0) { window._app.toast('No valid follow-up contacts found.', 'error'); return; }
+    try {
+      await window._app.apiFetch('/api/contacts/reset-for-send', { method: 'POST', body: JSON.stringify({ ids: keptIds }) });
+      await window._app.apiFetch('/api/contacts', { method: 'PATCH', body: JSON.stringify(keptIds.map(id => ({ id, template: 'follow-up' }))) });
+      window.location.href = `step2.html?mode=${selectedMode}&ids=${keptIds.join(',')}${rateParam}`;
+    } catch (err) {
+      window._app.toast('Could not prepare follow-up contacts: ' + err.message, 'error');
+    }
+    return;
+  }
+
   try {
-    const created = await window._app.createContacts(rows.map(r => ({
+    const { created, skipped } = await window._app.createContacts(rows.map(r => ({
       name: r.name, email: r.email, company: r.company, role: r.role, template: r.template
     })));
+    if (skipped > 0) window._app.toast(`${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped.`, 'error');
+    if (created.length === 0) { window._app.toast('All contacts already exist — nothing to send.', 'error'); return; }
     const ids = created.map(c => c.id).join(',');
-    const rate = selectedMode === 'drip' ? (parseInt(document.getElementById('drip-rate').value) || 5) : null;
-    const rateParam = rate ? `&rate=${rate}` : '';
     window.location.href = `step2.html?mode=${selectedMode}&ids=${ids}${rateParam}`;
   } catch (err) {
     window._app.toast('Could not save contacts: ' + err.message, 'error');
@@ -305,12 +328,12 @@ async function init() {
   window._app.initMobileNav();
 
   // Read mode from URL (set when coming back from step2) so the choice is preserved
-  const urlMode = new URLSearchParams(window.location.search).get('mode');
+  const urlMode = _urlParams.get('mode');
   if (urlMode === 'bulk' || urlMode === 'sequential' || urlMode === 'drip') {
     selectedMode = urlMode;
     pickMode(selectedMode);
-  } else {
-    // Fresh entry — show the mode picker
+  } else if (!isFollowUpMode) {
+    // Fresh entry — show the mode picker (skip for follow-up, user picks mode themselves)
     document.getElementById('mode-picker').classList.add('open');
   }
 
@@ -322,8 +345,31 @@ async function init() {
     // fall back to the default template options already set above
   }
 
-  // Init with one empty row
-  addRow();
+  if (isFollowUpMode && followupIds.length > 0) {
+    // Hide upload/manual-entry UI — contacts are pre-loaded from the DB
+    document.getElementById('upload-zone').style.display = 'none';
+    document.querySelector('.uz-sub')?.closest('div[style]')?.remove();
+    document.querySelector('.divider-or').style.display = 'none';
+    document.querySelector('button[onclick="addRow()"]').style.display = 'none';
+
+    // Update page title
+    document.querySelector('.topbar-left p').textContent = 'Step 1 of 3 — Review follow-up contacts';
+
+    // Fetch and pre-populate the follow-up contacts
+    try {
+      const data = await window._app.apiFetch(`/api/contacts?ids=${followupIds.join(',')}`);
+      const contacts = data.contacts || data; // handle paginated or plain array response
+      contacts.forEach(c => {
+        followupContactMap[c.email.toLowerCase()] = c.id;
+        addRow({ name: c.name, email: c.email, company: c.company, role: c.role, template: 'follow-up' });
+      });
+    } catch (err) {
+      window._app.toast('Could not load follow-up contacts: ' + err.message, 'error');
+    }
+  } else if (!isFollowUpMode) {
+    // Normal mode — init with one empty row
+    addRow();
+  }
 
   // Listen to input changes for live preview
   document.getElementById('manual-rows').addEventListener('input', updateBatchPreview);
