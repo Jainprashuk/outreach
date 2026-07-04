@@ -6,7 +6,7 @@ const contactSchema = new mongoose.Schema({
   company: { type: String, default: '' },
   role: { type: String, default: '' },
   template: { type: String, default: 'intro-v2' },
-  status: { type: String, enum: ['queued', 'sent', 'failed', 'bounced', 'replied'], default: 'queued' },
+  status: { type: String, enum: ['queued', 'sent', 'follow-up-sent', 'failed', 'bounced', 'replied'], default: 'queued' },
   approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   editedSubject: { type: String, default: null },
   editedBody: { type: String, default: null },

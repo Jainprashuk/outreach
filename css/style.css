@@ -320,6 +320,7 @@ tbody tr:hover { background: var(--bg2); }
 .badge-approved { background: var(--green-bg); color: var(--green); }
 .badge-bounced { background: var(--red-bg); color: var(--red); }
 .badge-replied { background: var(--teal-bg); color: var(--teal); }
+.badge-followup { background: var(--amber-bg); color: var(--amber); }
 
 /* ── AVATAR ── */
 .avatar {

@@ -43,8 +43,8 @@ const App = (() => {
   };
 
   const statusBadge = (status) => {
-    const map = { sent: 'badge-sent', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied' };
-    const labels = { sent: 'Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied' };
+    const map = { sent: 'badge-sent', 'follow-up-sent': 'badge-followup', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied' };
+    const labels = { sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied' };
     return `<span class="badge ${map[status] || 'badge-queued'}">${labels[status] || status}</span>`;
   };
 

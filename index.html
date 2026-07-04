@@ -421,6 +421,9 @@ function render(tab) {
 
     document.getElementById('contacts-tbody').innerHTML = pagedContacts.map(c => {
       const daysAgo = c.lastSentAt ? Math.floor((Date.now() - new Date(c.lastSentAt)) / 86400000) : '—';
+      const viewBtn = c.status === 'replied'
+        ? `<button class="btn btn-sm" onclick="openReplyModal('${c.id}')"><i class="ti ti-message"></i> View reply</button>`
+        : `<button class="btn btn-sm" onclick="showDetail('${c.id}')">View</button>`;
       return `
       <tr>
         <td class="cb-col"><input type="checkbox" class="row-cb fu-cb" data-id="${c.id}" onchange="toggleFollowupRow(this)"></td>
@@ -433,7 +436,7 @@ function render(tab) {
         <td style="color:var(--text2)">${c.company}</td>
         <td style="color:var(--text2)">${daysAgo === '—' ? '—' : daysAgo + 'd ago'}</td>
         <td>${statusBadge(c.status)}</td>
-        <td><button class="btn btn-sm" onclick="showDetail('${c.id}')">View</button></td>
+        <td style="display:flex;gap:4px;align-items:center">${viewBtn}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-check"></i>No follow-ups due</div></td></tr>`;
 

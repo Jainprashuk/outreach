@@ -263,7 +263,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   for (const c of allContacts) {
     const addr = c.email.toLowerCase();
     byEmailAll.set(addr, c);
-    if (c.status === 'sent') {
+    if (c.status === 'sent' || c.status === 'follow-up-sent') {
       byEmail.set(addr, c);
       if (c.messageId) byMessageId.set(c.messageId.replace(/^<|>$/g, ''), c);
     }

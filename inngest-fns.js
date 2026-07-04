@@ -125,12 +125,16 @@ const sendSingleEmail = inngest.createFunction(
 
       try {
         const attachments = await mailer.getResumeAttachment(job.attachResume);
+        const threadHeaders = (isFollowUp && contactDoc?.messageId)
+          ? { inReplyTo: contactDoc.messageId, references: contactDoc.messageId }
+          : {};
         const info = await transporter.sendMail({
           from: `"${senderName}" <${senderEmail}>`,
           to: item.to,
           subject: item.subject,
           text: item.body,
           html: bodyToHtml(item.body),
+          ...threadHeaders,
           ...(attachments ? { attachments } : {}),
         });
         await _atomicItemUpdate(jobId, contactId, {
@@ -139,7 +143,7 @@ const sendSingleEmail = inngest.createFunction(
           'items.$.processedAt': new Date(),
         });
         await Contact.findByIdAndUpdate(contactId, {
-          status: 'sent',
+          status: isFollowUp ? 'follow-up-sent' : 'sent',
           messageId: info.messageId || null,
           sentSubject: item.subject,
           lastSentAt: new Date(),
@@ -237,12 +241,16 @@ const sendEmailBulk = inngest.createFunction(
             }
 
             try {
+              const threadHeaders = (isFollowUp && contactDoc?.messageId)
+                ? { inReplyTo: contactDoc.messageId, references: contactDoc.messageId }
+                : {};
               const info = await transporter.sendMail({
                 from: `"${senderName}" <${senderEmail}>`,
                 to: item.to,
                 subject: item.subject,
                 text: item.body,
                 html: bodyToHtml(item.body),
+                ...threadHeaders,
                 ...(attachments ? { attachments } : {}),
               });
               await SendJob.findOneAndUpdate(
@@ -257,7 +265,7 @@ const sendEmailBulk = inngest.createFunction(
                 }
               );
               await Contact.findByIdAndUpdate(item.contactId, {
-                status: 'sent',
+                status: isFollowUp ? 'follow-up-sent' : 'sent',
                 messageId: info.messageId || null,
                 sentSubject: item.subject,
                 lastSentAt: new Date(),
