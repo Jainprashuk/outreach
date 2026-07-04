@@ -81,6 +81,7 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
           <div class="nav-tab" data-tab="followup-due" id="followup-tab">Follow-up Due</div>
           <div class="nav-tab" data-tab="closed">Closed</div>
           <div class="nav-tab" data-tab="no-openings">No Openings</div>
+          <div class="nav-tab" data-tab="in-review">In Review</div>
         </div>
         <span class="contact-count-badge" id="count-badge">—</span>
       </div>
@@ -307,6 +308,7 @@ function render(tab) {
     <a href="contacts.html?tab=followup-due" class="stat-card" style="text-decoration:none"><div class="stat-label">Follow-up Due</div><div class="stat-value amber">${stats.followUpDue}</div></a>
     <div class="stat-card"><div class="stat-label">Closed</div><div class="stat-value" style="color:#64748b">${stats.closed}</div></div>
     <div class="stat-card"><div class="stat-label">No Openings</div><div class="stat-value" style="color:#a21caf">${stats.noOpenings}</div></div>
+    <div class="stat-card"><div class="stat-label">In Review</div><div class="stat-value" style="color:#2563eb">${stats.inReview}</div></div>
   `;
 
   // Unread count badge on the Replied tab

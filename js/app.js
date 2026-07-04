@@ -25,6 +25,7 @@ const App = (() => {
     followUpDue: state.contacts.filter(isFollowUpDue).length,
     closed: state.contacts.filter(c => c.status === 'closed').length,
     noOpenings: state.contacts.filter(c => c.status === 'no-openings').length,
+    inReview: state.contacts.filter(c => c.status === 'in-review').length,
   });
 
   const initials = (name) => name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -45,8 +46,8 @@ const App = (() => {
   };
 
   const statusBadge = (status, contactId = null) => {
-    const map = { sent: 'badge-sent', 'follow-up-sent': 'badge-followup', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied', closed: 'badge-closed', 'no-openings': 'badge-noopenings' };
-    const labels = { sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied', closed: 'Closed', 'no-openings': 'No Openings' };
+    const map = { sent: 'badge-sent', 'follow-up-sent': 'badge-followup', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied', closed: 'badge-closed', 'no-openings': 'badge-noopenings', 'in-review': 'badge-inreview' };
+    const labels = { sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied', closed: 'Closed', 'no-openings': 'No Openings', 'in-review': 'In Review' };
     const dbl = contactId ? ` ondblclick="window._app.openStatusEdit(event,'${contactId}','${status}')" title="Double-click to change status" style="cursor:pointer"` : '';
     return `<span class="badge ${map[status] || 'badge-queued'}"${dbl}>${labels[status] || status}</span>`;
   };
@@ -60,6 +61,7 @@ const App = (() => {
     { value: 'failed',         label: 'Failed' },
     { value: 'closed',         label: 'Closed' },
     { value: 'no-openings',    label: 'No Openings' },
+    { value: 'in-review',      label: 'In Review' },
   ];
 
   const openStatusEdit = (event, contactId, currentStatus) => {
@@ -87,9 +89,22 @@ const App = (() => {
     });
 
     const rect = event.target.getBoundingClientRect();
+    // Start below the badge, then adjust after measuring actual dropdown size
     dropdown.style.top  = (rect.bottom + 4) + 'px';
     dropdown.style.left = rect.left + 'px';
     document.body.appendChild(dropdown);
+
+    const dd = dropdown.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    // Flip upward if not enough room below
+    if (dd.bottom > vh - 8) {
+      dropdown.style.top = (rect.top - dd.height - 4) + 'px';
+    }
+    // Shift left if overflowing right edge
+    if (dd.right > vw - 8) {
+      dropdown.style.left = Math.max(8, vw - dd.width - 8) + 'px';
+    }
 
     const close = () => dropdown.remove();
     setTimeout(() => document.addEventListener('click', close, { once: true }), 0);
@@ -105,6 +120,7 @@ const App = (() => {
     if (tab === 'followup-due')  return state.contacts.filter(isFollowUpDue);
     if (tab === 'closed')        return state.contacts.filter(c => c.status === 'closed');
     if (tab === 'no-openings')   return state.contacts.filter(c => c.status === 'no-openings');
+    if (tab === 'in-review')     return state.contacts.filter(c => c.status === 'in-review');
     return state.contacts;
   };
 
