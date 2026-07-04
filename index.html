@@ -87,6 +87,18 @@ th[onclick]:hover { background: var(--bg2); }
         </div>
         <span class="contact-count-badge" id="count-badge">—</span>
       </div>
+
+      <!-- Quick-select bar — only shown on the followup-due tab -->
+      <div id="followup-quick-select" style="display:none;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--text2);font-weight:500">Quick select:</span>
+        <button class="btn btn-xs" onclick="selectLastN(10)">Last 10</button>
+        <button class="btn btn-xs" onclick="selectLastN(25)">Last 25</button>
+        <button class="btn btn-xs" onclick="selectLastN(50)">Last 50</button>
+        <button class="btn btn-xs" onclick="selectLastN(100)">Last 100</button>
+        <button class="btn btn-xs" onclick="selectLastN(Infinity)">All</button>
+        <button class="btn btn-xs" style="color:var(--text3)" onclick="clearFollowupSelection()">Clear</button>
+      </div>
+
 <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
         <input type="text" id="search" placeholder="Search name, email or company..." style="flex:1;min-width:200px;max-width:320px">
         <select id="filter-status" style="width:auto;min-width:140px">
@@ -226,6 +238,32 @@ function updateFollowupBulkBar() {
   const n = selectedFollowupIds.size;
   document.getElementById('followup-bulk-count').textContent = n + ' selected';
   bar.classList.toggle('visible', n > 0);
+}
+
+function selectLastN(n) {
+  const all = sortContacts(filterContacts('followup-due'));
+  const toSelect = isFinite(n) ? all.slice(0, n) : all;
+  selectedFollowupIds = new Set(toSelect.map(c => c.id));
+  // Sync visible checkboxes on current page
+  document.querySelectorAll('.fu-cb[data-id]').forEach(cb => {
+    cb.checked = selectedFollowupIds.has(cb.dataset.id);
+  });
+  // Update select-all header checkbox state
+  const allCb = document.querySelector('#contacts-thead-row input[type="checkbox"]');
+  if (allCb) {
+    const paged = sortContacts(filterContacts('followup-due')).slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+    allCb.checked = paged.length > 0 && paged.every(c => selectedFollowupIds.has(c.id));
+    allCb.indeterminate = !allCb.checked && paged.some(c => selectedFollowupIds.has(c.id));
+  }
+  updateFollowupBulkBar();
+}
+
+function clearFollowupSelection() {
+  selectedFollowupIds = new Set();
+  document.querySelectorAll('.fu-cb[data-id]').forEach(cb => { cb.checked = false; });
+  const allCb = document.querySelector('#contacts-thead-row input[type="checkbox"]');
+  if (allCb) { allCb.checked = false; allCb.indeterminate = false; }
+  updateFollowupBulkBar();
 }
 
 function sendFollowUps() {
@@ -392,6 +430,9 @@ function render(tab) {
 
   document.getElementById('count-badge').textContent = contacts.length + ' contacts';
 
+  // Hide quick-select bar on non-followup tabs (shown inside the followup-due branch below)
+  if (tab !== 'followup-due') document.getElementById('followup-quick-select').style.display = 'none';
+
   // ── Sort + Pagination ───────────────────────────────────────────────────
   contacts = sortContacts(contacts);
   const totalPages = Math.ceil(contacts.length / PAGE_SIZE) || 1;
@@ -455,9 +496,7 @@ function render(tab) {
     }).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-message-off"></i>No replies yet</div></td></tr>`;
 
   } else if (tab === 'followup-due') {
-    // Clear selection when re-rendering
-    selectedFollowupIds = new Set();
-    updateFollowupBulkBar();
+    document.getElementById('followup-quick-select').style.display = 'flex';
 
     document.getElementById('contacts-thead-row').innerHTML = `
       <th class="cb-col"><input type="checkbox" class="row-cb" onchange="toggleFollowupAll(this)" title="Select all"></th>
@@ -473,9 +512,10 @@ function render(tab) {
       const viewBtn = c.status === 'replied'
         ? `<button class="btn btn-sm" onclick="openReplyModal('${c.id}')"><i class="ti ti-message"></i> View reply</button>`
         : `<button class="btn btn-sm" onclick="showDetail('${c.id}')">View</button>`;
+      const isChecked = selectedFollowupIds.has(c.id) ? 'checked' : '';
       return `
       <tr>
-        <td class="cb-col"><input type="checkbox" class="row-cb fu-cb" data-id="${c.id}" onchange="toggleFollowupRow(this)"></td>
+        <td class="cb-col"><input type="checkbox" class="row-cb fu-cb" data-id="${c.id}" ${isChecked} onchange="toggleFollowupRow(this)"></td>
         <td>
           <div class="contact-chip">
             ${avatarEl(c.name)}
@@ -488,6 +528,14 @@ function render(tab) {
         <td style="display:flex;gap:4px;align-items:center">${viewBtn}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-check"></i>No follow-ups due</div></td></tr>`;
+
+    // Sync the select-all header checkbox
+    const allCb = document.querySelector('#contacts-thead-row input[type="checkbox"]');
+    if (allCb) {
+      allCb.checked = pagedContacts.length > 0 && pagedContacts.every(c => selectedFollowupIds.has(c.id));
+      allCb.indeterminate = !allCb.checked && pagedContacts.some(c => selectedFollowupIds.has(c.id));
+    }
+    updateFollowupBulkBar();
 
   } else {
     document.getElementById('contacts-thead-row').innerHTML = `
@@ -572,6 +620,7 @@ document.getElementById('tabs').addEventListener('click', e => {
   selectedFollowupIds = new Set();
   updateFollowupBulkBar();
   render(tab);
+
 });
 
 function activeTab() {
