@@ -80,6 +80,7 @@ th[onclick]:hover { background: var(--bg2); }
           <div class="nav-tab" data-tab="bounced">Bounced</div>
           <div class="nav-tab" data-tab="replied">Replied</div>
           <div class="nav-tab" data-tab="followup-due" id="followup-tab">Follow-up Due</div>
+          <div class="nav-tab" data-tab="follow-up-sent">Follow-up Sent</div>
           <div class="nav-tab" data-tab="closed">Closed</div>
           <div class="nav-tab" data-tab="no-openings">No Openings</div>
           <div class="nav-tab" data-tab="in-review">In Review</div>
@@ -350,6 +351,7 @@ function render(tab) {
     <div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${stats.pending}</div></div>
     <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value">${stats.remaining}</div></div>
     <a href="contacts.html?tab=followup-due" class="stat-card" style="text-decoration:none"><div class="stat-label">Follow-up Due</div><div class="stat-value amber">${stats.followUpDue}</div></a>
+    <div class="stat-card"><div class="stat-label">Follow-up Sent</div><div class="stat-value" style="color:var(--amber)">${stats.followUpSent}</div></div>
     <div class="stat-card"><div class="stat-label">Closed</div><div class="stat-value" style="color:#64748b">${stats.closed}</div></div>
     <div class="stat-card"><div class="stat-label">No Openings</div><div class="stat-value" style="color:#a21caf">${stats.noOpenings}</div></div>
     <div class="stat-card"><div class="stat-label">In Review</div><div class="stat-value" style="color:#2563eb">${stats.inReview}</div></div>

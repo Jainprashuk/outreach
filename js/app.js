@@ -23,6 +23,7 @@ const App = (() => {
     pending: state.contacts.filter(c => c.approvalStatus === 'pending').length,
     remaining: state.contacts.filter(c => c.status === 'queued').length,
     followUpDue: state.contacts.filter(isFollowUpDue).length,
+    followUpSent: state.contacts.filter(c => c.status === 'follow-up-sent').length,
     closed: state.contacts.filter(c => c.status === 'closed').length,
     noOpenings: state.contacts.filter(c => c.status === 'no-openings').length,
     inReview: state.contacts.filter(c => c.status === 'in-review').length,
@@ -118,6 +119,7 @@ const App = (() => {
     if (tab === 'bounced') return state.contacts.filter(c => c.status === 'bounced');
     if (tab === 'replied') return state.contacts.filter(c => c.status === 'replied');
     if (tab === 'followup-due')  return state.contacts.filter(isFollowUpDue);
+    if (tab === 'follow-up-sent') return state.contacts.filter(c => c.status === 'follow-up-sent');
     if (tab === 'closed')        return state.contacts.filter(c => c.status === 'closed');
     if (tab === 'no-openings')   return state.contacts.filter(c => c.status === 'no-openings');
     if (tab === 'in-review')     return state.contacts.filter(c => c.status === 'in-review');
