@@ -128,10 +128,13 @@ const sendSingleEmail = inngest.createFunction(
         const threadHeaders = (isFollowUp && contactDoc?.messageId)
           ? { inReplyTo: contactDoc.messageId, references: contactDoc.messageId }
           : {};
+        const followUpSubject = isFollowUp && contactDoc?.sentSubject && !/^re:/i.test(item.subject)
+          ? `Re: ${contactDoc.sentSubject}`
+          : item.subject;
         const info = await transporter.sendMail({
           from: `"${senderName}" <${senderEmail}>`,
           to: item.to,
-          subject: item.subject,
+          subject: followUpSubject,
           text: item.body,
           html: bodyToHtml(item.body),
           ...threadHeaders,
@@ -145,7 +148,7 @@ const sendSingleEmail = inngest.createFunction(
         await Contact.findByIdAndUpdate(contactId, {
           status: isFollowUp ? 'follow-up-sent' : 'sent',
           messageId: info.messageId || null,
-          sentSubject: item.subject,
+          sentSubject: followUpSubject,
           lastSentAt: new Date(),
           ...(isFollowUp ? { followUpSentAt: new Date() } : {}),
         });
@@ -244,10 +247,13 @@ const sendEmailBulk = inngest.createFunction(
               const threadHeaders = (isFollowUp && contactDoc?.messageId)
                 ? { inReplyTo: contactDoc.messageId, references: contactDoc.messageId }
                 : {};
+              const followUpSubject = isFollowUp && contactDoc?.sentSubject && !/^re:/i.test(item.subject)
+                ? `Re: ${contactDoc.sentSubject}`
+                : item.subject;
               const info = await transporter.sendMail({
                 from: `"${senderName}" <${senderEmail}>`,
                 to: item.to,
-                subject: item.subject,
+                subject: followUpSubject,
                 text: item.body,
                 html: bodyToHtml(item.body),
                 ...threadHeaders,
@@ -267,7 +273,7 @@ const sendEmailBulk = inngest.createFunction(
               await Contact.findByIdAndUpdate(item.contactId, {
                 status: isFollowUp ? 'follow-up-sent' : 'sent',
                 messageId: info.messageId || null,
-                sentSubject: item.subject,
+                sentSubject: followUpSubject,
                 lastSentAt: new Date(),
                 ...(isFollowUp ? { followUpSentAt: new Date() } : {}),
               });

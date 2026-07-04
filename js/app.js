@@ -163,7 +163,8 @@ const App = (() => {
         .replace(/{{company}}/g, contact.company)
         .replace(/{{role}}/g, contact.role)
         .replace(/{{sender}}/g, state.sender.name)
-        .replace(/{{senderCompany}}/g, state.sender.company);
+        .replace(/{{senderCompany}}/g, state.sender.company)
+        .replace(/{{sentSubject}}/g, contact.sentSubject || '');
       (state.sender.customVariables || []).forEach(v => {
         out = out.replace(new RegExp(`{{${v.key}}}`, 'g'), v.value || '');
       });

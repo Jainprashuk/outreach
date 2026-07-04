@@ -12,7 +12,7 @@ const DEFAULT_TEMPLATES = [
   {
     key: 'follow-up',
     name: 'Follow-up',
-    subject: 'Following up — {{sender}}',
+    subject: 'Re: {{sentSubject}}',
     body: `Hi {{name}},\n\nJust circling back on my previous note. I understand you're busy, but I believe what we're working on at {{senderCompany}} could genuinely add value to {{company}}.\n\nHappy to keep it brief — even 10 minutes would be great.\n\nBest,\n{{sender}}`
   },
   {
@@ -27,6 +27,11 @@ async function seed() {
   for (const tpl of DEFAULT_TEMPLATES) {
     await Template.updateOne({ key: tpl.key }, { $setOnInsert: tpl }, { upsert: true });
   }
+  // Migrate follow-up template subject to threading-compatible format
+  await Template.updateOne(
+    { key: 'follow-up', subject: { $ne: 'Re: {{sentSubject}}' } },
+    { $set: { subject: 'Re: {{sentSubject}}' } }
+  );
   await Settings.getSingleton();
 }
 
