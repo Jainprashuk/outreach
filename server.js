@@ -365,13 +365,18 @@ app.use((err, req, res, next) => {
   if (!res.headersSent) res.status(500).json({ error: err.message || 'Internal server error' });
 });
 
-const PORT = process.env.PORT || 3000;
-// Eagerly connect at startup for local dev (Vercel re-uses the cached promise on cold starts).
-ensureDb()
-  .catch(err => console.error('❌  MongoDB connection error:', err.message))
-  .finally(() => {
-    app.listen(PORT, () => {
-      console.log(`\n✅  Outreach server running at http://localhost:${PORT}`);
-      console.log(`   Open http://localhost:${PORT} in your browser\n`);
+// Export for Vercel (serverless). On Vercel, ensureDb() is called lazily per-request via the
+// middleware above; the listen block below only runs in local dev.
+module.exports = app;
+
+if (require.main === module) {
+  const PORT = process.env.PORT || 3000;
+  ensureDb()
+    .catch(err => console.error('❌  MongoDB connection error:', err.message))
+    .finally(() => {
+      app.listen(PORT, () => {
+        console.log(`\n✅  Outreach server running at http://localhost:${PORT}`);
+        console.log(`   Open http://localhost:${PORT} in your browser\n`);
+      });
     });
-  });
+}
