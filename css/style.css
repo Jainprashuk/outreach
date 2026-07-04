@@ -320,7 +320,28 @@ tbody tr:hover { background: var(--bg2); }
 .badge-approved { background: var(--green-bg); color: var(--green); }
 .badge-bounced { background: var(--red-bg); color: var(--red); }
 .badge-replied { background: var(--teal-bg); color: var(--teal); }
-.badge-followup { background: var(--amber-bg); color: var(--amber); }
+.badge-followup    { background: var(--amber-bg); color: var(--amber); }
+.badge-closed      { background: #f1f5f9; color: #64748b; }
+.badge-noopenings  { background: #fdf2f8; color: #a21caf; }
+
+.status-edit-dropdown {
+  position: fixed;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 24px rgba(0,0,0,.14);
+  z-index: 2000;
+  min-width: 150px;
+  overflow: hidden;
+}
+.status-edit-option {
+  padding: 9px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--text1);
+}
+.status-edit-option:hover  { background: var(--bg2); }
+.status-edit-option.active { font-weight: 600; color: var(--blue); }
 
 /* ── AVATAR ── */
 .avatar {

@@ -97,6 +97,8 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
           <div class="nav-tab" data-tab="bounced">Bounced</div>
           <div class="nav-tab" data-tab="replied">Replied</div>
           <div class="nav-tab" data-tab="followup-due" id="followup-tab">Follow-up Due</div>
+          <div class="nav-tab" data-tab="closed">Closed</div>
+          <div class="nav-tab" data-tab="no-openings">No Openings</div>
         </div>
         <span class="contact-count-badge" id="count-badge">—</span>
       </div>
@@ -189,9 +191,9 @@ function getFiltered() {
 }
 
 function renderStatusCell(c) {
-  if (c.status !== 'failed') return window._app.statusBadge(c.status);
-  if (c.failReason) return `<div>${window._app.statusBadge(c.status)}<div style="font-size:11px;color:var(--text3);margin-top:3px;max-width:180px;white-space:normal;line-height:1.3">${c.failReason}</div></div>`;
-  return `<div>${window._app.statusBadge(c.status)}<button class="btn btn-sm" style="margin-top:4px;font-size:11px;padding:2px 7px" onclick="loadFailReason('${c.id}', this)">Why?</button></div>`;
+  if (c.status !== 'failed') return window._app.statusBadge(c.status, c.id);
+  if (c.failReason) return `<div>${window._app.statusBadge(c.status, c.id)}<div style="font-size:11px;color:var(--text3);margin-top:3px;max-width:180px;white-space:normal;line-height:1.3">${c.failReason}</div></div>`;
+  return `<div>${window._app.statusBadge(c.status, c.id)}<button class="btn btn-sm" style="margin-top:4px;font-size:11px;padding:2px 7px" onclick="loadFailReason('${c.id}', this)">Why?</button></div>`;
 }
 
 async function loadFailReason(id, btn) {
@@ -488,6 +490,8 @@ async function start() {
 })();
 
 start();
+
+document.addEventListener('contactupdated', () => render());
 </script>
 </body>
 </html>

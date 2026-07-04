@@ -23,6 +23,8 @@ const App = (() => {
     pending: state.contacts.filter(c => c.approvalStatus === 'pending').length,
     remaining: state.contacts.filter(c => c.status === 'queued').length,
     followUpDue: state.contacts.filter(isFollowUpDue).length,
+    closed: state.contacts.filter(c => c.status === 'closed').length,
+    noOpenings: state.contacts.filter(c => c.status === 'no-openings').length,
   });
 
   const initials = (name) => name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase();
@@ -42,10 +44,55 @@ const App = (() => {
     return `<div class="avatar" style="background:${bg};color:${fg}">${initials(name)}</div>`;
   };
 
-  const statusBadge = (status) => {
-    const map = { sent: 'badge-sent', 'follow-up-sent': 'badge-followup', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied' };
-    const labels = { sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied' };
-    return `<span class="badge ${map[status] || 'badge-queued'}">${labels[status] || status}</span>`;
+  const statusBadge = (status, contactId = null) => {
+    const map = { sent: 'badge-sent', 'follow-up-sent': 'badge-followup', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied', closed: 'badge-closed', 'no-openings': 'badge-noopenings' };
+    const labels = { sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied', closed: 'Closed', 'no-openings': 'No Openings' };
+    const dbl = contactId ? ` ondblclick="window._app.openStatusEdit(event,'${contactId}','${status}')" title="Double-click to change status" style="cursor:pointer"` : '';
+    return `<span class="badge ${map[status] || 'badge-queued'}"${dbl}>${labels[status] || status}</span>`;
+  };
+
+  const STATUS_OPTIONS = [
+    { value: 'queued',         label: 'Queued' },
+    { value: 'sent',           label: 'Sent' },
+    { value: 'follow-up-sent', label: 'Follow-up Sent' },
+    { value: 'replied',        label: 'Replied' },
+    { value: 'bounced',        label: 'Bounced' },
+    { value: 'failed',         label: 'Failed' },
+    { value: 'closed',         label: 'Closed' },
+    { value: 'no-openings',    label: 'No Openings' },
+  ];
+
+  const openStatusEdit = (event, contactId, currentStatus) => {
+    event.stopPropagation();
+    document.querySelectorAll('.status-edit-dropdown').forEach(el => el.remove());
+
+    const dropdown = document.createElement('div');
+    dropdown.className = 'status-edit-dropdown';
+    STATUS_OPTIONS.forEach(opt => {
+      const item = document.createElement('div');
+      item.className = 'status-edit-option' + (opt.value === currentStatus ? ' active' : '');
+      item.textContent = opt.label;
+      item.addEventListener('mousedown', async (e) => {
+        e.preventDefault();
+        dropdown.remove();
+        if (opt.value === currentStatus) return;
+        try {
+          await updateContact(contactId, { status: opt.value });
+          document.dispatchEvent(new CustomEvent('contactupdated'));
+        } catch (err) {
+          toast('Could not update status: ' + err.message, 'error');
+        }
+      });
+      dropdown.appendChild(item);
+    });
+
+    const rect = event.target.getBoundingClientRect();
+    dropdown.style.top  = (rect.bottom + 4) + 'px';
+    dropdown.style.left = rect.left + 'px';
+    document.body.appendChild(dropdown);
+
+    const close = () => dropdown.remove();
+    setTimeout(() => document.addEventListener('click', close, { once: true }), 0);
   };
 
   const filterContacts = (tab) => {
@@ -55,7 +102,9 @@ const App = (() => {
     if (tab === 'remaining') return state.contacts.filter(c => c.status === 'queued');
     if (tab === 'bounced') return state.contacts.filter(c => c.status === 'bounced');
     if (tab === 'replied') return state.contacts.filter(c => c.status === 'replied');
-    if (tab === 'followup-due') return state.contacts.filter(isFollowUpDue);
+    if (tab === 'followup-due')  return state.contacts.filter(isFollowUpDue);
+    if (tab === 'closed')        return state.contacts.filter(c => c.status === 'closed');
+    if (tab === 'no-openings')   return state.contacts.filter(c => c.status === 'no-openings');
     return state.contacts;
   };
 
@@ -368,6 +417,7 @@ const App = (() => {
     loadSettings,
     getStats,
     filterContacts,
+    openStatusEdit,
     apiFetch,
     initials,
     avatarEl,

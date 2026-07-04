@@ -79,6 +79,8 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
           <div class="nav-tab" data-tab="bounced">Bounced</div>
           <div class="nav-tab" data-tab="replied">Replied</div>
           <div class="nav-tab" data-tab="followup-due" id="followup-tab">Follow-up Due</div>
+          <div class="nav-tab" data-tab="closed">Closed</div>
+          <div class="nav-tab" data-tab="no-openings">No Openings</div>
         </div>
         <span class="contact-count-badge" id="count-badge">—</span>
       </div>
@@ -303,6 +305,8 @@ function render(tab) {
     <div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${stats.pending}</div></div>
     <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value">${stats.remaining}</div></div>
     <a href="contacts.html?tab=followup-due" class="stat-card" style="text-decoration:none"><div class="stat-label">Follow-up Due</div><div class="stat-value amber">${stats.followUpDue}</div></a>
+    <div class="stat-card"><div class="stat-label">Closed</div><div class="stat-value" style="color:#64748b">${stats.closed}</div></div>
+    <div class="stat-card"><div class="stat-label">No Openings</div><div class="stat-value" style="color:#a21caf">${stats.noOpenings}</div></div>
   `;
 
   // Unread count badge on the Replied tab
@@ -435,7 +439,7 @@ function render(tab) {
         </td>
         <td style="color:var(--text2)">${c.company}</td>
         <td style="color:var(--text2)">${daysAgo === '—' ? '—' : daysAgo + 'd ago'}</td>
-        <td>${statusBadge(c.status)}</td>
+        <td>${statusBadge(c.status, c.id)}</td>
         <td style="display:flex;gap:4px;align-items:center">${viewBtn}</td>
       </tr>`;
     }).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-check"></i>No follow-ups due</div></td></tr>`;
@@ -467,7 +471,7 @@ function render(tab) {
         </td>
         <td style="color:var(--text2)">${c.company}</td>
         <td style="color:var(--text2)">${tplNames[c.template]||c.template}</td>
-        <td>${statusBadge(c.status)}</td>
+        <td>${statusBadge(c.status, c.id)}</td>
         <td>${statusBadge(c.approvalStatus)}</td>
         <td style="display:flex;gap:4px;align-items:center">
           ${actionBtn}
@@ -677,6 +681,8 @@ document.addEventListener('visibilitychange', () => {
 })();
 
 start();
+
+document.addEventListener('contactupdated', () => render(activeTab()));
 </script>
 </body>
 </html>

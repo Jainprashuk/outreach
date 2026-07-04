@@ -28,6 +28,8 @@ const buildFilter = (tab) => {
     followUpSentAt: null,
     lastSentAt: { $lt: new Date(Date.now() - THREE_DAYS_MS) },
   };
+  if (tab === 'closed')      return { ...BASE_FILTER, status: 'closed' };
+  if (tab === 'no-openings') return { ...BASE_FILTER, status: 'no-openings' };
   return { ...BASE_FILTER };
 };
 
@@ -78,10 +80,12 @@ router.get('/stats', async (req, res) => {
           { $eq: [{ $ifNull: ['$followUpSentAt', null] }, null] },
           { $lt: ['$lastSentAt', new Date(Date.now() - THREE_DAYS_MS)] },
         ]}, 1, 0] }},
+        closed:      { $sum: { $cond: [{ $eq: ['$status', 'closed'] },      1, 0] } },
+        noOpenings:  { $sum: { $cond: [{ $eq: ['$status', 'no-openings'] }, 1, 0] } },
       }},
     ]);
-    const zero = { total: 0, sent: 0, bounced: 0, replied: 0, failed: 0, pending: 0, remaining: 0, followUpDue: 0 };
-    res.json(agg ? { total: agg.total, sent: agg.sent, bounced: agg.bounced, replied: agg.replied, failed: agg.failed, pending: agg.pending, remaining: agg.remaining, followUpDue: agg.followUpDue } : zero);
+    const zero = { total: 0, sent: 0, bounced: 0, replied: 0, failed: 0, pending: 0, remaining: 0, followUpDue: 0, closed: 0, noOpenings: 0 };
+    res.json(agg ? { total: agg.total, sent: agg.sent, bounced: agg.bounced, replied: agg.replied, failed: agg.failed, pending: agg.pending, remaining: agg.remaining, followUpDue: agg.followUpDue, closed: agg.closed, noOpenings: agg.noOpenings } : zero);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
