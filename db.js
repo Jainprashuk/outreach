@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const Template = require('./models/Template');
 const Settings = require('./models/Settings');
+const Contact = require('./models/Contact');
 
 const DEFAULT_TEMPLATES = [
   {
@@ -22,6 +23,67 @@ const DEFAULT_TEMPLATES = [
     body: `Hi {{name}},\n\nCold email, I know — but I'll keep it short. We help companies like {{company}} with [value proposition]. Given your role as {{role}}, I thought this might be relevant.\n\nOpen to a quick chat?\n\n{{sender}}`
   }
 ];
+
+async function backfillStatusHistory() {
+  const contacts = await Contact.find({
+    $or: [{ statusHistory: { $exists: false } }, { statusHistory: { $size: 0 } }],
+  }).lean();
+
+  if (contacts.length === 0) return;
+
+  const ops = contacts.map(c => {
+    const history = [];
+
+    // Every contact started queued when created
+    history.push({ status: 'queued', changedAt: c.createdAt, note: 'Contact created' });
+
+    // Initial email sent
+    if (c.lastSentAt || c.sentSubject || c.messageId) {
+      // If follow-up was also sent, lastSentAt was overwritten — original send time is unknown
+      const sentAt = c.followUpSentAt
+        ? new Date(new Date(c.followUpSentAt).getTime() - 1000) // place just before follow-up
+        : (c.lastSentAt || c.updatedAt);
+      history.push({ status: 'sent', changedAt: sentAt, note: c.followUpSentAt ? 'Email sent (approx.)' : 'Email sent' });
+    }
+
+    // Follow-up sent
+    if (c.followUpSentAt) {
+      history.push({ status: 'follow-up-sent', changedAt: c.followUpSentAt, note: 'Follow-up email sent' });
+    }
+
+    // Bounce
+    if (c.status === 'bounced') {
+      history.push({ status: 'bounced', changedAt: c.updatedAt, note: c.bounceReason || 'Bounce detected' });
+    }
+
+    // Failed
+    if (c.status === 'failed') {
+      history.push({ status: 'failed', changedAt: c.updatedAt, note: c.failReason || 'Send failed' });
+    }
+
+    // Reply
+    if (c.repliedAt) {
+      history.push({ status: 'replied', changedAt: c.repliedAt, note: 'Reply received' });
+    }
+
+    // Manual statuses — use updatedAt as best approximation
+    if (['closed', 'no-openings', 'in-review'].includes(c.status)) {
+      history.push({ status: c.status, changedAt: c.updatedAt, note: 'Status set' });
+    }
+
+    history.sort((a, b) => new Date(a.changedAt) - new Date(b.changedAt));
+
+    return {
+      updateOne: {
+        filter: { _id: c._id, $or: [{ statusHistory: { $exists: false } }, { statusHistory: { $size: 0 } }] },
+        update: { $set: { statusHistory: history } },
+      },
+    };
+  });
+
+  const result = await Contact.bulkWrite(ops, { ordered: false });
+  console.log(`✅  Backfilled status history for ${result.modifiedCount} contacts`);
+}
 
 async function seed() {
   for (const tpl of DEFAULT_TEMPLATES) {
@@ -54,6 +116,7 @@ async function connect() {
   });
   console.log(`✅  Connected to MongoDB (${env} database)`);
   await seed();
+  await backfillStatusHistory();
 }
 
 module.exports = { connect };

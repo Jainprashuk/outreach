@@ -119,7 +119,10 @@ router.post('/reset-for-send', async (req, res) => {
     }
     await Contact.updateMany(
       { _id: { $in: ids }, deleted: { $ne: true } },
-      { $set: { status: 'queued', approvalStatus: 'pending', editedSubject: null, editedBody: null } }
+      {
+        $set: { status: 'queued', approvalStatus: 'pending', editedSubject: null, editedBody: null },
+        $push: { statusHistory: { status: 'queued', changedAt: new Date(), note: 'Reset for sending' } },
+      }
     );
     const contacts = await Contact.find({ _id: { $in: ids }, deleted: { $ne: true } }).lean();
     res.json({ ok: true, contacts: contacts.map(serialize) });
@@ -241,7 +244,11 @@ router.patch('/:id', async (req, res) => {
     for (const key of allowed) {
       if (key in req.body) update[key] = req.body[key];
     }
-    const contact = await Contact.findByIdAndUpdate(req.params.id, update, { new: true, lean: true });
+    const op = { $set: update };
+    if (update.status) {
+      op.$push = { statusHistory: { status: update.status, changedAt: new Date(), note: 'Manual status change' } };
+    }
+    const contact = await Contact.findByIdAndUpdate(req.params.id, op, { new: true, lean: true });
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     res.json(serialize(contact));
   } catch (err) {

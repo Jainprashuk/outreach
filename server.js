@@ -212,7 +212,10 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
   // Mark in-memory to prevent double-processing in the same batch
   contact.status = 'replied';
 
-  await Contact.findByIdAndUpdate(contact._id, { status: 'replied', repliedAt, replySnippet });
+  await Contact.findByIdAndUpdate(contact._id, {
+    $set: { status: 'replied', repliedAt, replySnippet },
+    $push: { statusHistory: { status: 'replied', changedAt: repliedAt, note: 'Reply received' } },
+  });
   replied.push({ email: contact.email, name: contact.name, repliedAt, snippet: replySnippet });
 };
 
@@ -296,7 +299,10 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
 
             if (existing.status !== 'bounced') {
               existing.status = 'bounced'; // in-memory: prevents double-processing
-              await Contact.findByIdAndUpdate(existing._id, { status: 'bounced', bounceReason: reason });
+              await Contact.findByIdAndUpdate(existing._id, {
+                $set: { status: 'bounced', bounceReason: reason },
+                $push: { statusHistory: { status: 'bounced', changedAt: new Date(), note: reason || 'Bounce detected' } },
+              });
               bounced.push({ email: existing.email, name: existing.name, reason });
             } else if (reason !== existing.bounceReason && reason.length > (existing.bounceReason || '').length) {
               existing.bounceReason = reason;

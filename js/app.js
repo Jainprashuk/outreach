@@ -46,11 +46,59 @@ const App = (() => {
     return `<div class="avatar" style="background:${bg};color:${fg}">${initials(name)}</div>`;
   };
 
+  const STATUS_LABELS = { sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied', closed: 'Closed', 'no-openings': 'No Openings', 'in-review': 'In Review' };
+
   const statusBadge = (status, contactId = null) => {
     const map = { sent: 'badge-sent', 'follow-up-sent': 'badge-followup', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied', closed: 'badge-closed', 'no-openings': 'badge-noopenings', 'in-review': 'badge-inreview' };
-    const labels = { sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied', closed: 'Closed', 'no-openings': 'No Openings', 'in-review': 'In Review' };
-    const dbl = contactId ? ` ondblclick="window._app.openStatusEdit(event,'${contactId}','${status}')" title="Double-click to change status" style="cursor:pointer"` : '';
-    return `<span class="badge ${map[status] || 'badge-queued'}"${dbl}>${labels[status] || status}</span>`;
+    const dbl = contactId ? ` ondblclick="window._app.openStatusEdit(event,'${contactId}','${status}')"` : '';
+    const hover = contactId ? ` onmouseenter="window._app.showStatusHistory(event,'${contactId}')" onmouseleave="window._app.hideStatusHistory()"` : '';
+    const cursor = contactId ? ' style="cursor:pointer"' : '';
+    const title = contactId ? ' title="Hover: history · Double-click: change"' : '';
+    return `<span class="badge ${map[status] || 'badge-queued'}"${dbl}${hover}${cursor}${title}>${STATUS_LABELS[status] || status}</span>`;
+  };
+
+  let _historyHideTimer = null;
+
+  const showStatusHistory = (event, contactId) => {
+    clearTimeout(_historyHideTimer);
+    document.querySelectorAll('.status-history-popup').forEach(el => el.remove());
+
+    const contact = state.contacts.find(c => c.id === contactId);
+    if (!contact) return;
+
+    const history = contact.statusHistory || [];
+    const fmtDate = (d) => new Date(d).toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    const rows = history.length
+      ? [...history].reverse().map(h => `
+          <div class="sh-row">
+            <span class="badge ${({sent:'badge-sent','follow-up-sent':'badge-followup',failed:'badge-rejected',queued:'badge-queued',bounced:'badge-bounced',replied:'badge-replied',closed:'badge-closed','no-openings':'badge-noopenings','in-review':'badge-inreview'})[h.status]||'badge-queued'}" style="font-size:10px">${STATUS_LABELS[h.status]||h.status}</span>
+            <span class="sh-date">${fmtDate(h.changedAt)}</span>
+            ${h.note ? `<span class="sh-note">${h.note}</span>` : ''}
+          </div>`)
+        .join('')
+      : `<div style="color:var(--text3);font-size:12px;padding:4px 0">No history recorded yet</div>`;
+
+    const popup = document.createElement('div');
+    popup.className = 'status-history-popup';
+    popup.innerHTML = `<div class="sh-title">Status History</div>${rows}`;
+    popup.addEventListener('mouseenter', () => clearTimeout(_historyHideTimer));
+    popup.addEventListener('mouseleave', () => { _historyHideTimer = setTimeout(() => popup.remove(), 150); });
+
+    const rect = event.target.getBoundingClientRect();
+    popup.style.top  = (rect.bottom + 6) + 'px';
+    popup.style.left = rect.left + 'px';
+    document.body.appendChild(popup);
+
+    const dd = popup.getBoundingClientRect();
+    if (dd.bottom > window.innerHeight - 8) popup.style.top = (rect.top - dd.height - 6) + 'px';
+    if (dd.right  > window.innerWidth  - 8) popup.style.left = Math.max(8, window.innerWidth - dd.width - 8) + 'px';
+  };
+
+  const hideStatusHistory = () => {
+    _historyHideTimer = setTimeout(() => {
+      document.querySelectorAll('.status-history-popup').forEach(el => el.remove());
+    }, 150);
   };
 
   const STATUS_OPTIONS = [
@@ -437,6 +485,8 @@ const App = (() => {
     getStats,
     filterContacts,
     openStatusEdit,
+    showStatusHistory,
+    hideStatusHistory,
     apiFetch,
     initials,
     avatarEl,

@@ -19,6 +19,11 @@ const contactSchema = new mongoose.Schema({
   replyRead: { type: Boolean, default: false },
   lastSentAt: { type: Date, default: null },
   followUpSentAt: { type: Date, default: null },
+  statusHistory: [{
+    status:    { type: String },
+    changedAt: { type: Date, default: Date.now },
+    note:      { type: String, default: '' },
+  }],
   deleted: { type: Boolean, default: false },
   deletedAt: { type: Date, default: null },
 }, { timestamps: true });

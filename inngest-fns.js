@@ -145,12 +145,16 @@ const sendSingleEmail = inngest.createFunction(
           'items.$.messageId': info.messageId || null,
           'items.$.processedAt': new Date(),
         });
+        const newStatus = isFollowUp ? 'follow-up-sent' : 'sent';
         await Contact.findByIdAndUpdate(contactId, {
-          status: isFollowUp ? 'follow-up-sent' : 'sent',
-          messageId: info.messageId || null,
-          sentSubject: followUpSubject,
-          lastSentAt: new Date(),
-          ...(isFollowUp ? { followUpSentAt: new Date() } : {}),
+          $set: {
+            status: newStatus,
+            messageId: info.messageId || null,
+            sentSubject: followUpSubject,
+            lastSentAt: new Date(),
+            ...(isFollowUp ? { followUpSentAt: new Date() } : {}),
+          },
+          $push: { statusHistory: { status: newStatus, changedAt: new Date(), note: isFollowUp ? 'Follow-up email sent' : 'Email sent' } },
         });
       } catch (err) {
         await _atomicItemUpdate(jobId, contactId, {
@@ -158,7 +162,10 @@ const sendSingleEmail = inngest.createFunction(
           'items.$.error': err.message,
           'items.$.processedAt': new Date(),
         });
-        await Contact.findByIdAndUpdate(contactId, { status: 'failed', failReason: err.message });
+        await Contact.findByIdAndUpdate(contactId, {
+          $set: { status: 'failed', failReason: err.message },
+          $push: { statusHistory: { status: 'failed', changedAt: new Date(), note: err.message } },
+        });
       }
     });
   }
@@ -270,12 +277,16 @@ const sendEmailBulk = inngest.createFunction(
                   $inc: { processedCount: 1 },
                 }
               );
+              const newStatus = isFollowUp ? 'follow-up-sent' : 'sent';
               await Contact.findByIdAndUpdate(item.contactId, {
-                status: isFollowUp ? 'follow-up-sent' : 'sent',
-                messageId: info.messageId || null,
-                sentSubject: followUpSubject,
-                lastSentAt: new Date(),
-                ...(isFollowUp ? { followUpSentAt: new Date() } : {}),
+                $set: {
+                  status: newStatus,
+                  messageId: info.messageId || null,
+                  sentSubject: followUpSubject,
+                  lastSentAt: new Date(),
+                  ...(isFollowUp ? { followUpSentAt: new Date() } : {}),
+                },
+                $push: { statusHistory: { status: newStatus, changedAt: new Date(), note: isFollowUp ? 'Follow-up email sent' : 'Email sent' } },
               });
             } catch (err) {
               await SendJob.findOneAndUpdate(
@@ -289,7 +300,10 @@ const sendEmailBulk = inngest.createFunction(
                   $inc: { processedCount: 1 },
                 }
               );
-              await Contact.findByIdAndUpdate(item.contactId, { status: 'failed', failReason: err.message });
+              await Contact.findByIdAndUpdate(item.contactId, {
+                $set: { status: 'failed', failReason: err.message },
+                $push: { statusHistory: { status: 'failed', changedAt: new Date(), note: err.message } },
+              });
             }
           }
         } finally {
