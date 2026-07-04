@@ -8,6 +8,20 @@
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
+.bulk-bar {
+  position: fixed; bottom: 0; left: 0; right: 0;
+  background: var(--sidebar-bg, #1e293b); color: #fff;
+  padding: 14px 24px; display: flex; align-items: center; gap: 16px;
+  z-index: 200; transform: translateY(100%); transition: transform 0.2s ease;
+  box-shadow: 0 -4px 24px rgba(0,0,0,.18);
+}
+.bulk-bar.visible { transform: translateY(0); }
+.bulk-bar .bb-count { font-size: 14px; font-weight: 500; flex: 1; }
+.bulk-bar .btn-send { background: var(--blue); border-color: var(--blue); color: #fff; }
+.bulk-bar .btn-send:hover { opacity: .9; }
+</style>
 </head>
 <body>
 <div class="app-shell">
@@ -114,6 +128,12 @@
 
 </div>
 
+<!-- Follow-up bulk bar (visible only when contacts are selected on the followup-due tab) -->
+<div class="bulk-bar" id="followup-bulk-bar">
+  <span class="bb-count" id="followup-bulk-count">0 selected</span>
+  <button class="btn btn-send" onclick="sendFollowUps()"><i class="ti ti-send"></i> Send Follow-ups</button>
+</div>
+
 <!-- REPLY MODAL -->
 <div id="reply-modal-wrap" class="edit-modal-wrap" onclick="if(event.target===this)closeReplyModal()">
   <div class="edit-modal" style="max-width:540px">
@@ -137,6 +157,34 @@ let replySort = 'desc';
 let currentReplyContactId = null;
 let currentPage = 1;
 const PAGE_SIZE = 25;
+let selectedFollowupIds = new Set();
+
+function toggleFollowupRow(cb) {
+  const id = cb.dataset.id;
+  if (cb.checked) selectedFollowupIds.add(id); else selectedFollowupIds.delete(id);
+  updateFollowupBulkBar();
+}
+
+function toggleFollowupAll(cb) {
+  const contacts = filterContacts('followup-due');
+  const paged = contacts.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+  paged.forEach(c => { if (cb.checked) selectedFollowupIds.add(c.id); else selectedFollowupIds.delete(c.id); });
+  document.querySelectorAll('.fu-cb[data-id]').forEach(r => { r.checked = selectedFollowupIds.has(r.dataset.id); });
+  updateFollowupBulkBar();
+}
+
+function updateFollowupBulkBar() {
+  const bar = document.getElementById('followup-bulk-bar');
+  const n = selectedFollowupIds.size;
+  document.getElementById('followup-bulk-count').textContent = n + ' selected';
+  bar.classList.toggle('visible', n > 0);
+}
+
+function sendFollowUps() {
+  if (selectedFollowupIds.size === 0) return;
+  const ids = [...selectedFollowupIds].join(',');
+  window.location.href = `step1.html?followup=1&ids=${ids}`;
+}
 
 function resumeSending() {
   const resumable = state.contacts.filter(c => c.status === 'queued' && c.approvalStatus === 'approved');
@@ -361,6 +409,34 @@ function render(tab) {
       `;
     }).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-message-off"></i>No replies yet</div></td></tr>`;
 
+  } else if (tab === 'followup-due') {
+    // Clear selection when re-rendering
+    selectedFollowupIds = new Set();
+    updateFollowupBulkBar();
+
+    document.getElementById('contacts-thead-row').innerHTML = `
+      <th class="cb-col"><input type="checkbox" class="row-cb" onchange="toggleFollowupAll(this)" title="Select all"></th>
+      <th>Contact</th><th>Company</th><th>Last Sent</th><th>Status</th><th></th>
+    `;
+
+    document.getElementById('contacts-tbody').innerHTML = pagedContacts.map(c => {
+      const daysAgo = c.lastSentAt ? Math.floor((Date.now() - new Date(c.lastSentAt)) / 86400000) : '—';
+      return `
+      <tr>
+        <td class="cb-col"><input type="checkbox" class="row-cb fu-cb" data-id="${c.id}" onchange="toggleFollowupRow(this)"></td>
+        <td>
+          <div class="contact-chip">
+            ${avatarEl(c.name)}
+            <div><div class="name">${c.name}</div><div class="email">${c.email}</div></div>
+          </div>
+        </td>
+        <td style="color:var(--text2)">${c.company}</td>
+        <td style="color:var(--text2)">${daysAgo === '—' ? '—' : daysAgo + 'd ago'}</td>
+        <td>${statusBadge(c.status)}</td>
+        <td><button class="btn btn-sm" onclick="showDetail('${c.id}')">View</button></td>
+      </tr>`;
+    }).join('') || `<tr><td colspan="6"><div class="empty-state"><i class="ti ti-check"></i>No follow-ups due</div></td></tr>`;
+
   } else {
     document.getElementById('contacts-thead-row').innerHTML = `
       <th>Contact</th><th>Company</th><th>Template</th><th>Status</th><th>Approval</th><th></th>
@@ -435,6 +511,8 @@ document.getElementById('tabs').addEventListener('click', e => {
   document.querySelectorAll('.nav-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tab));
   window._app.setTab(tab);
   currentPage = 1;
+  selectedFollowupIds = new Set();
+  updateFollowupBulkBar();
   render(tab);
 });
 
