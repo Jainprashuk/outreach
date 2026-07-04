@@ -77,7 +77,7 @@ const App = (() => {
         dropdown.remove();
         if (opt.value === currentStatus) return;
         try {
-          await updateContact(contactId, { status: opt.value });
+          await window._app.updateContact(contactId, { status: opt.value });
           document.dispatchEvent(new CustomEvent('contactupdated'));
         } catch (err) {
           toast('Could not update status: ' + err.message, 'error');
