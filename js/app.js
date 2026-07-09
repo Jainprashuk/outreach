@@ -20,6 +20,7 @@ const App = (() => {
     sent: state.contacts.filter(c => c.status === 'sent').length,
     bounced: state.contacts.filter(c => c.status === 'bounced').length,
     replied: state.contacts.filter(c => c.status === 'replied').length,
+    followUpReplied: state.contacts.filter(c => c.status === 'follow-up-replied').length,
     pending: state.contacts.filter(c => c.approvalStatus === 'pending').length,
     remaining: state.contacts.filter(c => c.status === 'queued').length,
     followUpDue: state.contacts.filter(isFollowUpDue).length,
@@ -46,10 +47,10 @@ const App = (() => {
     return `<div class="avatar" style="background:${bg};color:${fg}">${initials(name)}</div>`;
   };
 
-  const STATUS_LABELS = { sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied', closed: 'Closed', 'no-openings': 'No Openings', 'in-review': 'In Review' };
+  const STATUS_LABELS = { sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending', queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced', replied: 'Replied', 'follow-up-replied': 'Replied after Follow-up', closed: 'Closed', 'no-openings': 'No Openings', 'in-review': 'In Review' };
 
   const statusBadge = (status, contactId = null) => {
-    const map = { sent: 'badge-sent', 'follow-up-sent': 'badge-followup', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied', closed: 'badge-closed', 'no-openings': 'badge-noopenings', 'in-review': 'badge-inreview' };
+    const map = { sent: 'badge-sent', 'follow-up-sent': 'badge-followup', failed: 'badge-rejected', pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved', rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied', 'follow-up-replied': 'badge-replied', closed: 'badge-closed', 'no-openings': 'badge-noopenings', 'in-review': 'badge-inreview' };
     const dbl = contactId ? ` ondblclick="window._app.openStatusEdit(event,'${contactId}','${status}')"` : '';
     const hover = contactId ? ` onmouseenter="window._app.showStatusHistory(event,'${contactId}')" onmouseleave="window._app.hideStatusHistory()"` : '';
     const cursor = contactId ? ' style="cursor:pointer"' : '';
@@ -72,7 +73,7 @@ const App = (() => {
     const rows = history.length
       ? [...history].reverse().map(h => `
           <div class="sh-row">
-            <span class="badge ${({sent:'badge-sent','follow-up-sent':'badge-followup',failed:'badge-rejected',queued:'badge-queued',bounced:'badge-bounced',replied:'badge-replied',closed:'badge-closed','no-openings':'badge-noopenings','in-review':'badge-inreview'})[h.status]||'badge-queued'}" style="font-size:10px">${STATUS_LABELS[h.status]||h.status}</span>
+            <span class="badge ${({sent:'badge-sent','follow-up-sent':'badge-followup',failed:'badge-rejected',queued:'badge-queued',bounced:'badge-bounced',replied:'badge-replied','follow-up-replied':'badge-replied',closed:'badge-closed','no-openings':'badge-noopenings','in-review':'badge-inreview'})[h.status]||'badge-queued'}" style="font-size:10px">${STATUS_LABELS[h.status]||h.status}</span>
             <span class="sh-date">${fmtDate(h.changedAt)}</span>
             ${h.note ? `<span class="sh-note">${h.note}</span>` : ''}
           </div>`)
@@ -106,6 +107,7 @@ const App = (() => {
     { value: 'sent',           label: 'Sent' },
     { value: 'follow-up-sent', label: 'Follow-up Sent' },
     { value: 'replied',        label: 'Replied' },
+    { value: 'follow-up-replied', label: 'Replied after Follow-up' },
     { value: 'bounced',        label: 'Bounced' },
     { value: 'failed',         label: 'Failed' },
     { value: 'closed',         label: 'Closed' },
@@ -168,6 +170,7 @@ const App = (() => {
     if (tab === 'replied') return state.contacts.filter(c => c.status === 'replied');
     if (tab === 'followup-due')  return state.contacts.filter(isFollowUpDue);
     if (tab === 'follow-up-sent') return state.contacts.filter(c => c.status === 'follow-up-sent');
+    if (tab === 'follow-up-replied') return state.contacts.filter(c => c.status === 'follow-up-replied');
     if (tab === 'closed')        return state.contacts.filter(c => c.status === 'closed');
     if (tab === 'no-openings')   return state.contacts.filter(c => c.status === 'no-openings');
     if (tab === 'in-review')     return state.contacts.filter(c => c.status === 'in-review');

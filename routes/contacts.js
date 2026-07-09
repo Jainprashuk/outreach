@@ -29,6 +29,7 @@ const buildFilter = (tab) => {
     lastSentAt: { $lt: new Date(Date.now() - THREE_DAYS_MS) },
   };
   if (tab === 'follow-up-sent') return { ...BASE_FILTER, status: 'follow-up-sent' };
+  if (tab === 'follow-up-replied') return { ...BASE_FILTER, status: 'follow-up-replied' };
   if (tab === 'closed')         return { ...BASE_FILTER, status: 'closed' };
   if (tab === 'no-openings') return { ...BASE_FILTER, status: 'no-openings' };
   if (tab === 'in-review')   return { ...BASE_FILTER, status: 'in-review' };
@@ -74,6 +75,7 @@ router.get('/stats', async (req, res) => {
         sent:         { $sum: { $cond: [{ $eq: ['$status', 'sent'] },      1, 0] } },
         bounced:      { $sum: { $cond: [{ $eq: ['$status', 'bounced'] },   1, 0] } },
         replied:      { $sum: { $cond: [{ $eq: ['$status', 'replied'] },   1, 0] } },
+        followUpReplied: { $sum: { $cond: [{ $eq: ['$status', 'follow-up-replied'] }, 1, 0] } },
         failed:       { $sum: { $cond: [{ $eq: ['$status', 'failed'] },    1, 0] } },
         pending:      { $sum: { $cond: [{ $eq: ['$approvalStatus', 'pending'] }, 1, 0] } },
         remaining:    { $sum: { $cond: [{ $eq: ['$status', 'queued'] },    1, 0] } },
@@ -88,8 +90,8 @@ router.get('/stats', async (req, res) => {
         inReview:    { $sum: { $cond: [{ $eq: ['$status', 'in-review'] },   1, 0] } },
       }},
     ]);
-    const zero = { total: 0, sent: 0, bounced: 0, replied: 0, failed: 0, pending: 0, remaining: 0, followUpDue: 0, followUpSent: 0, closed: 0, noOpenings: 0, inReview: 0 };
-    res.json(agg ? { total: agg.total, sent: agg.sent, bounced: agg.bounced, replied: agg.replied, failed: agg.failed, pending: agg.pending, remaining: agg.remaining, followUpDue: agg.followUpDue, followUpSent: agg.followUpSent, closed: agg.closed, noOpenings: agg.noOpenings, inReview: agg.inReview } : zero);
+    const zero = { total: 0, sent: 0, bounced: 0, replied: 0, followUpReplied: 0, failed: 0, pending: 0, remaining: 0, followUpDue: 0, followUpSent: 0, closed: 0, noOpenings: 0, inReview: 0 };
+    res.json(agg ? { total: agg.total, sent: agg.sent, bounced: agg.bounced, replied: agg.replied, followUpReplied: agg.followUpReplied, failed: agg.failed, pending: agg.pending, remaining: agg.remaining, followUpDue: agg.followUpDue, followUpSent: agg.followUpSent, closed: agg.closed, noOpenings: agg.noOpenings, inReview: agg.inReview } : zero);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

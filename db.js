@@ -85,6 +85,41 @@ async function backfillStatusHistory() {
   console.log(`✅  Backfilled status history for ${result.modifiedCount} contacts`);
 }
 
+// Derives lastSentAt/followUpSentAt from statusHistory for legacy contacts that predate
+// these fields being written (they're plain missing keys, not null — MongoDB comparison
+// operators like $lt never match a missing field, so these contacts silently vanish from
+// the followup-due filter no matter how stale they are).
+async function backfillSendTimestamps() {
+  const contacts = await Contact.find({ lastSentAt: { $exists: false } }).lean();
+
+  if (contacts.length === 0) return;
+
+  const ops = [];
+  for (const c of contacts) {
+    const history = c.statusHistory || [];
+    const lastSent = [...history].reverse().find(h => h.status === 'sent' || h.status === 'follow-up-sent');
+    if (!lastSent) continue; // never actually sent — nothing to backfill
+
+    const set = { lastSentAt: lastSent.changedAt };
+    if (c.followUpSentAt === undefined) {
+      const followUp = [...history].reverse().find(h => h.status === 'follow-up-sent');
+      if (followUp) set.followUpSentAt = followUp.changedAt;
+    }
+
+    ops.push({
+      updateOne: {
+        filter: { _id: c._id, lastSentAt: { $exists: false } },
+        update: { $set: set },
+      },
+    });
+  }
+
+  if (ops.length === 0) return;
+
+  const result = await Contact.bulkWrite(ops, { ordered: false });
+  console.log(`✅  Backfilled send timestamps for ${result.modifiedCount} contacts`);
+}
+
 async function seed() {
   for (const tpl of DEFAULT_TEMPLATES) {
     await Template.updateOne({ key: tpl.key }, { $setOnInsert: tpl }, { upsert: true });
@@ -117,6 +152,7 @@ async function connect() {
   console.log(`✅  Connected to MongoDB (${env} database)`);
   await seed();
   await backfillStatusHistory();
+  await backfillSendTimestamps();
 }
 
 module.exports = { connect };

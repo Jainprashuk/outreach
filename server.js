@@ -204,17 +204,20 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
     }
   }
 
-  if (!contact || contact.status === 'replied') return;
+  if (!contact || ['replied', 'follow-up-replied'].includes(contact.status)) return;
 
   const repliedAt = parsed.date || new Date();
   const replySnippet = buildSnippet(parsed.text || parsed.html || '');
+  // A reply that comes in after we already sent a follow-up is tracked separately from a
+  // reply to the initial email, so it doesn't get treated as still needing a first follow-up.
+  const newStatus = contact.status === 'follow-up-sent' ? 'follow-up-replied' : 'replied';
 
   // Mark in-memory to prevent double-processing in the same batch
-  contact.status = 'replied';
+  contact.status = newStatus;
 
   await Contact.findByIdAndUpdate(contact._id, {
-    $set: { status: 'replied', repliedAt, replySnippet },
-    $push: { statusHistory: { status: 'replied', changedAt: repliedAt, note: 'Reply received' } },
+    $set: { status: newStatus, repliedAt, replySnippet },
+    $push: { statusHistory: { status: newStatus, changedAt: repliedAt, note: newStatus === 'follow-up-replied' ? 'Reply received after follow-up' : 'Reply received' } },
   });
   replied.push({ email: contact.email, name: contact.name, repliedAt, snippet: replySnippet });
 };

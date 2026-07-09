@@ -81,6 +81,7 @@ th[onclick]:hover { background: var(--bg2); }
           <div class="nav-tab" data-tab="replied">Replied</div>
           <div class="nav-tab" data-tab="followup-due" id="followup-tab">Follow-up Due</div>
           <div class="nav-tab" data-tab="follow-up-sent">Follow-up Sent</div>
+          <div class="nav-tab" data-tab="follow-up-replied">Replied after Follow-up</div>
           <div class="nav-tab" data-tab="closed">Closed</div>
           <div class="nav-tab" data-tab="no-openings">No Openings</div>
           <div class="nav-tab" data-tab="in-review">In Review</div>
@@ -653,7 +654,7 @@ document.getElementById('clear-filters-btn').addEventListener('click', () => {
 function showDetail(id) {
   const c = window._app.state.contacts.find(x => x.id === id);
   if (!c) return;
-  if (c.status === 'replied') { openReplyModal(id); return; }
+  if (c.status === 'replied' || c.status === 'follow-up-replied') { openReplyModal(id); return; }
   let msg = `Contact: ${c.name}\nEmail: ${c.email}\nCompany: ${c.company}\nStatus: ${c.status}`;
   if (c.status === 'bounced' && c.bounceReason) msg += `\nBounce reason: ${c.bounceReason}`;
   alert(msg);
