@@ -487,7 +487,7 @@ function render(tab) {
           <td style="color:var(--text2)">${c.company || '—'}</td>
           <td class="reply-snippet-cell">${snippet || '<span style="color:var(--text3)">No preview</span>'}</td>
           <td style="font-size:12px;white-space:nowrap;color:var(--text2)">${fmtDate}</td>
-          <td>${isNew ? '<span class="badge badge-new">New</span>' : '<span class="badge badge-seen">Seen</span>'}</td>
+          <td style="display:flex;gap:4px;align-items:center;flex-wrap:wrap">${statusBadge(c.status, c.id)}${isNew ? '<span class="badge badge-new">New</span>' : ''}</td>
           <td style="display:flex;gap:4px;align-items:center">
             <button class="btn btn-sm" onclick="openReplyModal('${c.id}')"><i class="ti ti-message"></i> View</button>
             <button class="btn btn-sm" onclick="confirmDelete('${c.id}')" title="Delete contact"><i class="ti ti-trash"></i></button>

@@ -120,6 +120,37 @@ async function backfillSendTimestamps() {
   console.log(`✅  Backfilled send timestamps for ${result.modifiedCount} contacts`);
 }
 
+// One-time reclassification: contacts stuck at status 'replied' from before the
+// 'follow-up-replied' status existed, whose reply actually came in after a follow-up
+// was already sent. Without this they'd stay mislabeled forever (nothing else touches
+// old statusHistory/status once written).
+async function backfillFollowUpReplied() {
+  const contacts = await Contact.find({
+    status: 'replied',
+    followUpSentAt: { $ne: null },
+  }).lean();
+
+  const ops = [];
+  for (const c of contacts) {
+    if (!c.repliedAt || new Date(c.repliedAt) <= new Date(c.followUpSentAt)) continue;
+
+    ops.push({
+      updateOne: {
+        filter: { _id: c._id, status: 'replied' },
+        update: {
+          $set: { status: 'follow-up-replied' },
+          $push: { statusHistory: { status: 'follow-up-replied', changedAt: new Date(), note: 'Reclassified: reply was after follow-up (migration)' } },
+        },
+      },
+    });
+  }
+
+  if (ops.length === 0) return;
+
+  const result = await Contact.bulkWrite(ops, { ordered: false });
+  console.log(`✅  Reclassified ${result.modifiedCount} contacts as follow-up-replied`);
+}
+
 async function seed() {
   for (const tpl of DEFAULT_TEMPLATES) {
     await Template.updateOne({ key: tpl.key }, { $setOnInsert: tpl }, { upsert: true });
@@ -153,6 +184,7 @@ async function connect() {
   await seed();
   await backfillStatusHistory();
   await backfillSendTimestamps();
+  await backfillFollowUpReplied();
 }
 
 module.exports = { connect };
