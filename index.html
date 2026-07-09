@@ -381,18 +381,11 @@ function render(tab) {
   } else {
     retryBtn.style.display = 'none';
   }
-  const sentPct = stats.total ? Math.round(stats.sent / stats.total * 100) : 0;
   document.getElementById('stats-grid').innerHTML = `
     <div class="stat-card"><div class="stat-label">Total contacts</div><div class="stat-value">${stats.total}</div></div>
-    <div class="stat-card"><div class="stat-label">Sent</div><div class="stat-value green">${stats.sent}</div><div class="stat-sub">${sentPct}% of total</div></div>
+    <div class="stat-card"><div class="stat-label">Sent</div><div class="stat-value green">${stats.sent}</div></div>
     <div class="stat-card"><div class="stat-label">Bounced</div><div class="stat-value red">${stats.bounced}</div></div>
-    <div class="stat-card"><div class="stat-label">Replied</div><div class="stat-value teal">${stats.replied}</div></div>
-    <div class="stat-card"><div class="stat-label">Pending approval</div><div class="stat-value amber">${stats.pending}</div></div>
-    <div class="stat-card"><div class="stat-label">Remaining</div><div class="stat-value">${stats.remaining}</div></div>
     <a href="contacts.html?tab=followup-due" class="stat-card" style="text-decoration:none"><div class="stat-label">Follow-up Due</div><div class="stat-value amber">${stats.followUpDue}</div></a>
-    <div class="stat-card"><div class="stat-label">Follow-up Sent</div><div class="stat-value" style="color:var(--amber)">${stats.followUpSent}</div></div>
-    <div class="stat-card"><div class="stat-label">Closed</div><div class="stat-value" style="color:#64748b">${stats.closed}</div></div>
-    <div class="stat-card"><div class="stat-label">No Openings</div><div class="stat-value" style="color:#a21caf">${stats.noOpenings}</div></div>
     <div class="stat-card"><div class="stat-label">In Review</div><div class="stat-value" style="color:#2563eb">${stats.inReview}</div></div>
   `;
 
