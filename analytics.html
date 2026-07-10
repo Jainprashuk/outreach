@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Outreach — Analytics</title>
+<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<link rel="stylesheet" href="css/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── Analytics-specific layout (all colors come from theme tokens) ── */
+.an-grid { display: grid; gap: 14px; }
+.an-cards-2 { grid-template-columns: 1fr 1fr; }
+.an-card {
+  background: var(--bg); border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-sm);
+  overflow: hidden; animation: fadeInUp .35s var(--ease) both;
+  transition: background-color .2s var(--ease), border-color .2s var(--ease);
+}
+.an-card-head { padding: 14px 18px 0; }
+.an-card-title { font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.an-card-title i { font-size: 16px; color: var(--text3); }
+.an-card-sub { font-size: 11px; color: var(--text2); margin-top: 2px; }
+.an-card-body { padding: 16px 18px 18px; }
+
+/* KPI tiles */
+.kpi-value { font-size: 27px; font-weight: 600; letter-spacing: -.02em; line-height: 1.05; }
+.kpi-delta { font-size: 11px; margin-top: 4px; display: inline-flex; align-items: center; gap: 3px; }
+.kpi-delta.up { color: var(--green); }
+.kpi-delta.down { color: var(--red); }
+.kpi-delta.flat { color: var(--text3); }
+
+/* Horizontal bar rows (funnel / status / template / company) */
+.hbar-row { margin-bottom: 11px; }
+.hbar-row:last-child { margin-bottom: 0; }
+.hbar-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 5px; font-size: 12px; }
+.hbar-label { color: var(--text); font-weight: 500; display: flex; align-items: center; gap: 7px; min-width: 0; }
+.hbar-label .dot { width: 9px; height: 9px; border-radius: 3px; flex-shrink: 0; }
+.hbar-val { color: var(--text2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hbar-val b { color: var(--text); font-weight: 600; }
+.hbar-track { height: 8px; background: var(--bg3); border-radius: 6px; overflow: hidden; }
+.hbar-fill { height: 100%; border-radius: 6px; transition: width .6s var(--ease); }
+
+/* Data tables */
+.an-table { width: 100%; border-collapse: collapse; min-width: 0; }
+.an-table th { text-align: left; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); font-weight: 600; padding: 0 10px 8px; }
+.an-table th.num, .an-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.an-table td { padding: 8px 10px; border-top: 0.5px solid var(--border); font-size: 13px; vertical-align: middle; }
+.an-table tr:first-child td { border-top: none; }
+.mini-track { height: 6px; background: var(--bg3); border-radius: 4px; overflow: hidden; width: 90px; margin-left: auto; }
+.mini-fill { height: 100%; border-radius: 4px; background: var(--accent); }
+
+/* Legend */
+.an-legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 12px; }
+.an-legend .lg { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
+.an-legend .lg .sw { width: 11px; height: 11px; border-radius: 3px; }
+
+/* Insight callouts */
+.insight { display: flex; gap: 11px; padding: 13px 15px; border-radius: var(--radius); background: var(--bg2); border: 0.5px solid var(--border); }
+.insight i { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
+.insight .in-title { font-size: 12px; font-weight: 600; margin-bottom: 2px; }
+.insight .in-text { font-size: 12px; color: var(--text2); line-height: 1.5; }
+
+/* Chart tooltip (shared pattern with settings) */
+#chart-tooltip {
+  display: none; position: fixed; z-index: 900;
+  background: var(--bg); border: 0.5px solid var(--border);
+  border-radius: var(--radius); padding: 9px 13px; box-shadow: var(--shadow-md);
+  pointer-events: none; min-width: 150px;
+}
+.an-empty { text-align: center; color: var(--text2); font-size: 13px; padding: 30px 10px; }
+.an-empty i { font-size: 26px; display: block; margin-bottom: 8px; color: var(--text3); }
+
+@media (max-width: 820px) { .an-cards-2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="sidebar-logo-icon"><i class="ti ti-send"></i></div>
+      <span class="sidebar-logo-text">Outreach</span>
+    </div>
+    <a href="index.html" class="nav-item"><i class="ti ti-layout-dashboard"></i> Dashboard</a>
+    <a href="contacts.html" class="nav-item"><i class="ti ti-users"></i> Contacts</a>
+    <a href="templates.html" class="nav-item"><i class="ti ti-file-text"></i> Templates</a>
+    <a href="analytics.html" class="nav-item active"><i class="ti ti-chart-histogram"></i> Analytics</a>
+    <div class="nav-section-label">Account</div>
+    <a href="settings.html" class="nav-item"><i class="ti ti-settings"></i> Settings</a>
+    <div class="sidebar-bottom">
+      <button class="theme-toggle" data-theme-toggle type="button">
+        <span class="tt-icon"><i class="ti ti-sun"></i><i class="ti ti-moon"></i>Appearance</span>
+        <i class="ti ti-chevron-right" style="font-size:12px"></i>      </button>
+      <a href="/logout" style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2);text-decoration:none;padding:6px 0;margin-top:4px" onmouseover="this.style.color='var(--text)'" onmouseout="this.style.color='var(--text2)'"><i class="ti ti-logout" style="font-size:14px"></i>Sign out</a>
+    </div>
+  </aside>
+
+  <div class="main">
+    <div class="topbar">
+      <div class="topbar-left">
+        <button class="mobile-menu-btn" data-mobile-menu-toggle type="button" aria-label="Menu"><i class="ti ti-menu-2"></i></button>
+        <div><h1>Analytics</h1><p id="an-subtitle">Loading insights…</p></div>
+      </div>
+      <div style="display:flex;gap:10px">
+        <button class="btn btn-sm" id="an-refresh" onclick="loadAnalytics()" type="button"><i class="ti ti-refresh"></i> Refresh</button>
+      </div>
+    </div>
+
+    <div class="section" style="flex:1">
+
+      <!-- KPI ROW -->
+      <div class="stat-grid" id="kpi-grid" style="padding:0 0 4px;margin-bottom:14px"></div>
+
+      <!-- FUNNEL + STATUS -->
+      <div class="an-grid an-cards-2" style="margin-bottom:14px">
+        <div class="an-card" style="animation-delay:.04s">
+          <div class="an-card-head">
+            <div class="an-card-title"><i class="ti ti-filter"></i> Outreach funnel</div>
+            <div class="an-card-sub">How contacts progress from added → replied</div>
+          </div>
+          <div class="an-card-body" id="funnel-body"></div>
+        </div>
+        <div class="an-card" style="animation-delay:.08s">
+          <div class="an-card-head">
+            <div class="an-card-title"><i class="ti ti-chart-pie"></i> Status breakdown</div>
+            <div class="an-card-sub">Distribution across every contact state</div>
+          </div>
+          <div class="an-card-body" id="status-body"></div>
+        </div>
+      </div>
+
+      <!-- ACTIVITY OVER TIME -->
+      <div class="an-card" style="margin-bottom:14px;animation-delay:.12s">
+        <div class="an-card-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+          <div>
+            <div class="an-card-title"><i class="ti ti-timeline"></i> Activity over time</div>
+            <div class="an-card-sub">Emails sent vs. replies received · last 30 days</div>
+          </div>
+          <div id="range-toggle" style="display:flex;gap:2px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:2px">
+            <button class="btn btn-xs range-btn active" data-days="30" type="button">30d</button>
+            <button class="btn btn-xs range-btn" data-days="90" type="button">90d</button>
+          </div>
+        </div>
+        <div class="an-card-body">
+          <svg id="ts-chart" width="100%" style="display:block;overflow:visible"></svg>
+          <div class="an-legend" id="ts-legend"></div>
+        </div>
+      </div>
+
+      <!-- REPLY TIME + TEMPLATE PERF -->
+      <div class="an-grid an-cards-2" style="margin-bottom:14px">
+        <div class="an-card" style="animation-delay:.16s">
+          <div class="an-card-head">
+            <div class="an-card-title"><i class="ti ti-clock-hour-4"></i> Response speed</div>
+            <div class="an-card-sub">How long contacts take to reply after a send</div>
+          </div>
+          <div class="an-card-body"><svg id="rt-chart" width="100%" style="display:block;overflow:visible"></svg></div>
+        </div>
+        <div class="an-card" style="animation-delay:.2s">
+          <div class="an-card-head">
+            <div class="an-card-title"><i class="ti ti-template"></i> Template performance</div>
+            <div class="an-card-sub">Reply rate by template · best first</div>
+          </div>
+          <div class="an-card-body" id="tpl-body"></div>
+        </div>
+      </div>
+
+      <!-- COMPANIES + INSIGHTS -->
+      <div class="an-grid an-cards-2" style="margin-bottom:14px">
+        <div class="an-card" style="animation-delay:.24s">
+          <div class="an-card-head">
+            <div class="an-card-title"><i class="ti ti-building"></i> Top companies</div>
+            <div class="an-card-sub">Most-contacted organisations & their reply rate</div>
+          </div>
+          <div class="an-card-body" id="company-body"></div>
+        </div>
+        <div class="an-card" style="animation-delay:.28s">
+          <div class="an-card-head">
+            <div class="an-card-title"><i class="ti ti-bulb"></i> Insights</div>
+            <div class="an-card-sub">Automatically surfaced from your data</div>
+          </div>
+          <div class="an-card-body an-grid" id="insights-body" style="gap:10px"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<div id="chart-tooltip"></div>
+<script src="js/app.js"></script>
+<script>
+// ── Status metadata: label + theme color token (reserved status palette + labels) ──
+const STATUS_META = {
+  queued:              { label: 'Queued',                 c: '--blue' },
+  sent:                { label: 'Sent',                   c: '--green' },
+  'follow-up-sent':    { label: 'Follow-up Sent',         c: '--amber' },
+  replied:             { label: 'Replied',                c: '--teal' },
+  'follow-up-replied': { label: 'Replied after Follow-up',c: '--teal' },
+  bounced:             { label: 'Bounced',                c: '--red' },
+  failed:              { label: 'Failed',                 c: '--red' },
+  closed:              { label: 'Closed',                 c: '--slate' },
+  'no-openings':       { label: 'No Openings',            c: '--purple' },
+  'in-review':         { label: 'In Review',              c: '--indigo' },
+};
+const EMAILED = new Set(['sent','follow-up-sent','replied','follow-up-replied','bounced','closed','no-openings','in-review']);
+const REPLIED = new Set(['replied','follow-up-replied']);
+const cvar = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const pct = (n, d) => d > 0 ? Math.round((n / d) * 1000) / 10 : 0;
+const dayKey = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
+
+let CONTACTS = [];
+let currentRange = 30;
+
+// ── Derived metrics ────────────────────────────────────────────────────────
+function computeMetrics(contacts) {
+  const total = contacts.length;
+  const emailed = contacts.filter(c => c.lastSentAt || EMAILED.has(c.status));
+  const sentCount = emailed.length;
+  const replied = contacts.filter(c => REPLIED.has(c.status) || c.repliedAt);
+  const followUpsSent = contacts.filter(c => c.followUpSentAt || c.status === 'follow-up-sent' || c.status === 'follow-up-replied');
+  const followUpReplied = contacts.filter(c => c.status === 'follow-up-replied');
+  const bounced = contacts.filter(c => c.status === 'bounced');
+  const inReview = contacts.filter(c => c.status === 'in-review');
+  const closed = contacts.filter(c => c.status === 'closed');
+  return {
+    total, sentCount,
+    repliedCount: replied.length,
+    followUpsSentCount: followUpsSent.length,
+    followUpRepliedCount: followUpReplied.length,
+    bouncedCount: bounced.length,
+    inReviewCount: inReview.length,
+    closedCount: closed.length,
+    replyRate: pct(replied.length, sentCount),
+    bounceRate: pct(bounced.length, sentCount),
+    followUpReplyRate: pct(followUpReplied.length, followUpsSent.length),
+  };
+}
+
+// ── KPI tiles ──────────────────────────────────────────────────────────────
+function renderKpis(m) {
+  const tiles = [
+    { label: 'Total contacts', value: m.total, sub: `${m.sentCount} emailed` },
+    { label: 'Emails sent',    value: m.sentCount, sub: `${m.followUpsSentCount} follow-ups`, color: '' },
+    { label: 'Reply rate',     value: m.replyRate + '%', sub: `${m.repliedCount} replies`, color: 'green' },
+    { label: 'Bounce rate',    value: m.bounceRate + '%', sub: `${m.bouncedCount} bounced`, color: m.bounceRate > 5 ? 'red' : '' },
+    { label: 'In review',      value: m.inReviewCount, sub: `${m.closedCount} closed`, color: 'teal' },
+  ];
+  document.getElementById('kpi-grid').innerHTML = tiles.map(t => `
+    <div class="stat-card">
+      <div class="stat-label">${t.label}</div>
+      <div class="kpi-value stat-value ${t.color||''}">${t.value}</div>
+      <div class="stat-sub">${t.sub}</div>
+    </div>`).join('');
+}
+
+// ── Funnel (single-hue sequential) ───────────────────────────────────────────
+function renderFunnel(m) {
+  const steps = [
+    { label: 'Contacts added', n: m.total },
+    { label: 'Emailed',        n: m.sentCount },
+    { label: 'Replied',        n: m.repliedCount },
+    { label: 'Follow-ups sent',n: m.followUpsSentCount },
+    { label: 'Replied after follow-up', n: m.followUpRepliedCount },
+  ];
+  const max = steps[0].n || 1;
+  const accent = cvar('--accent');
+  document.getElementById('funnel-body').innerHTML = steps.map((s, i) => {
+    const w = Math.max(2, pct(s.n, max));
+    const prev = i > 0 ? steps[i-1].n : null;
+    const conv = prev ? ` · ${pct(s.n, prev)}% of prev` : '';
+    const op = 1 - i * 0.15;
+    return `<div class="hbar-row">
+      <div class="hbar-top">
+        <span class="hbar-label">${s.label}</span>
+        <span class="hbar-val"><b>${s.n.toLocaleString()}</b> <span style="color:var(--text3)">${pct(s.n,max)}%${conv}</span></span>
+      </div>
+      <div class="hbar-track"><div class="hbar-fill" style="width:${w}%;background:${accent};opacity:${op.toFixed(2)}"></div></div>
+    </div>`;
+  }).join('');
+}
+
+// ── Status breakdown (reserved status palette + labels) ──────────────────────
+function renderStatus(contacts) {
+  const counts = {};
+  contacts.forEach(c => { counts[c.status] = (counts[c.status]||0) + 1; });
+  const rows = Object.entries(counts).sort((a,b) => b[1]-a[1]);
+  const total = contacts.length || 1;
+  document.getElementById('status-body').innerHTML = rows.map(([status, n]) => {
+    const meta = STATUS_META[status] || { label: status, c: '--slate' };
+    const col = cvar(meta.c);
+    return `<div class="hbar-row">
+      <div class="hbar-top">
+        <span class="hbar-label"><span class="dot" style="background:${col}"></span>${meta.label}</span>
+        <span class="hbar-val"><b>${n.toLocaleString()}</b> <span style="color:var(--text3)">${pct(n,total)}%</span></span>
+      </div>
+      <div class="hbar-track"><div class="hbar-fill" style="width:${Math.max(2,pct(n,total))}%;background:${col};opacity:.85"></div></div>
+    </div>`;
+  }).join('') || `<div class="an-empty"><i class="ti ti-inbox"></i>No contacts yet</div>`;
+}
+
+// ── Build daily series for sent + replies from statusHistory ─────────────────
+function buildDailySeries(contacts, days) {
+  const today = dayKey(Date.now());
+  const start = today - (days - 1) * 86400000;
+  const sent = new Map(), rep = new Map();
+  contacts.forEach(c => {
+    const hist = c.statusHistory || [];
+    let sawSend = false, sawReply = false;
+    hist.forEach(h => {
+      const k = dayKey(h.changedAt);
+      if (k < start || k > today) return;
+      if (h.status === 'sent' || h.status === 'follow-up-sent') { sent.set(k, (sent.get(k)||0)+1); sawSend = true; }
+      if (h.status === 'replied' || h.status === 'follow-up-replied') { rep.set(k, (rep.get(k)||0)+1); sawReply = true; }
+    });
+    // Fallback for contacts whose history predates status tracking
+    if (!sawSend && c.lastSentAt) { const k = dayKey(c.lastSentAt); if (k>=start && k<=today) sent.set(k,(sent.get(k)||0)+1); }
+    if (!sawReply && c.repliedAt) { const k = dayKey(c.repliedAt); if (k>=start && k<=today) rep.set(k,(rep.get(k)||0)+1); }
+  });
+  const out = [];
+  for (let k = start; k <= today; k += 86400000) out.push({ day: k, sent: sent.get(k)||0, replied: rep.get(k)||0 });
+  return out;
+}
+
+// ── Time-series: 2-series area/line with hover crosshair (validated pair) ────
+function renderTimeSeries(series) {
+  const svg = document.getElementById('ts-chart');
+  const tip = document.getElementById('chart-tooltip');
+  const c1 = cvar('--chart-1'), c2 = cvar('--chart-2');
+  const W = 720, H = 210, padL = 30, padR = 12, padT = 12, padB = 26;
+  const cW = W - padL - padR, cH = H - padT - padB;
+  const n = series.length;
+  const maxV = Math.max(1, ...series.map(d => Math.max(d.sent, d.replied)));
+  const x = i => padL + (n <= 1 ? cW/2 : (i/(n-1)) * cW);
+  const y = v => padT + cH - (v/maxV) * cH;
+  const fmtDay = k => new Date(k).toLocaleDateString('en-US', { month:'short', day:'numeric' });
+
+  const line = (key) => series.map((d,i) => `${i===0?'M':'L'}${x(i).toFixed(1)},${y(d[key]).toFixed(1)}`).join(' ');
+  const area = (key) => `M${x(0).toFixed(1)},${(padT+cH).toFixed(1)} ` +
+    series.map((d,i) => `L${x(i).toFixed(1)},${y(d[key]).toFixed(1)}`).join(' ') +
+    ` L${x(n-1).toFixed(1)},${(padT+cH).toFixed(1)} Z`;
+
+  let out = `<defs>
+    <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${c1}" stop-opacity="0.22"/><stop offset="100%" stop-color="${c1}" stop-opacity="0"/></linearGradient>
+    <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${c2}" stop-opacity="0.20"/><stop offset="100%" stop-color="${c2}" stop-opacity="0"/></linearGradient>
+  </defs>`;
+  // Grid + y labels (recessive)
+  [0, 0.5, 1].forEach(f => {
+    const yy = (padT + cH*(1-f)).toFixed(1);
+    out += `<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" style="stroke:var(--chart-grid);stroke-width:1"/>`;
+    out += `<text x="${padL-6}" y="${+yy+3.5}" text-anchor="end" style="font-size:9px;fill:var(--text3)">${Math.round(maxV*f)}</text>`;
+  });
+  // Areas then lines (2px), sent under replied
+  out += `<path d="${area('sent')}" fill="url(#g1)"/>`;
+  out += `<path d="${area('replied')}" fill="url(#g2)"/>`;
+  out += `<path d="${line('sent')}" fill="none" stroke="${c1}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  out += `<path d="${line('replied')}" fill="none" stroke="${c2}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  // x labels (~5 ticks)
+  const ticks = Math.min(n, 5);
+  for (let t = 0; t < ticks; t++) {
+    const i = Math.round(t*(n-1)/(ticks-1||1));
+    out += `<text x="${x(i).toFixed(1)}" y="${H-6}" text-anchor="middle" style="font-size:9px;fill:var(--text3)">${fmtDay(series[i].day)}</text>`;
+  }
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = out;
+
+  // Hover crosshair + markers
+  const ns = 'http://www.w3.org/2000/svg';
+  const vline = document.createElementNS(ns,'line');
+  vline.style.cssText = 'stroke:var(--border-md);stroke-width:1;opacity:0;pointer-events:none';
+  const m1 = document.createElementNS(ns,'circle'); m1.setAttribute('r','4'); m1.setAttribute('fill',c1); m1.setAttribute('stroke','var(--bg)'); m1.setAttribute('stroke-width','2'); m1.style.opacity='0';
+  const m2 = document.createElementNS(ns,'circle'); m2.setAttribute('r','4'); m2.setAttribute('fill',c2); m2.setAttribute('stroke','var(--bg)'); m2.setAttribute('stroke-width','2'); m2.style.opacity='0';
+  svg.append(vline, m1, m2);
+
+  svg.addEventListener('mousemove', e => {
+    const r = svg.getBoundingClientRect();
+    const sx = (e.clientX - r.left) * (W / r.width);
+    let i = Math.round((sx - padL) / (cW / (n-1||1)));
+    i = Math.max(0, Math.min(n-1, i));
+    const d = series[i];
+    const px = x(i);
+    vline.setAttribute('x1',px); vline.setAttribute('x2',px); vline.setAttribute('y1',padT); vline.setAttribute('y2',padT+cH); vline.style.opacity='1';
+    m1.setAttribute('cx',px); m1.setAttribute('cy',y(d.sent)); m1.style.opacity='1';
+    m2.setAttribute('cx',px); m2.setAttribute('cy',y(d.replied)); m2.style.opacity='1';
+    tip.innerHTML = `<div style="font-size:10px;color:var(--text2);margin-bottom:5px">${new Date(d.day).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:2px"><span style="width:9px;height:9px;border-radius:3px;background:${c1}"></span>Sent <b style="margin-left:auto">${d.sent}</b></div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px"><span style="width:9px;height:9px;border-radius:3px;background:${c2}"></span>Replies <b style="margin-left:auto">${d.replied}</b></div>`;
+    const tw = 160, th = tip.offsetHeight || 70;
+    tip.style.left = Math.max(4, Math.min(window.innerWidth - tw - 4, e.clientX - tw/2)) + 'px';
+    tip.style.top = (e.clientY - th - 14) + 'px';
+    tip.style.display = 'block';
+  });
+  svg.addEventListener('mouseleave', () => { vline.style.opacity='0'; m1.style.opacity='0'; m2.style.opacity='0'; tip.style.display='none'; });
+
+  document.getElementById('ts-legend').innerHTML = `
+    <span class="lg"><span class="sw" style="background:${c1}"></span>Emails sent</span>
+    <span class="lg"><span class="sw" style="background:${c2}"></span>Replies received</span>`;
+}
+
+// ── Response-speed histogram (single hue) ────────────────────────────────────
+function renderReplyTime(contacts) {
+  const buckets = [
+    { label: '< 1h', min: 0, max: 1, n: 0 },
+    { label: '1–6h', min: 1, max: 6, n: 0 },
+    { label: '6–24h', min: 6, max: 24, n: 0 },
+    { label: '1–3d', min: 24, max: 72, n: 0 },
+    { label: '3–7d', min: 72, max: 168, n: 0 },
+    { label: '> 7d', min: 168, max: Infinity, n: 0 },
+  ];
+  let counted = 0;
+  contacts.forEach(c => {
+    if (!c.repliedAt) return;
+    const rt = new Date(c.repliedAt).getTime();
+    // last send at or before the reply
+    let sendT = null;
+    (c.statusHistory||[]).forEach(h => {
+      if ((h.status==='sent'||h.status==='follow-up-sent')) {
+        const t = new Date(h.changedAt).getTime();
+        if (t <= rt && (sendT===null || t > sendT)) sendT = t;
+      }
+    });
+    if (sendT === null && c.lastSentAt) sendT = new Date(c.lastSentAt).getTime();
+    if (sendT === null) return;
+    const hrs = (rt - sendT) / 3600000;
+    if (hrs < 0) return;
+    const b = buckets.find(b => hrs >= b.min && hrs < b.max);
+    if (b) { b.n++; counted++; }
+  });
+
+  const svg = document.getElementById('rt-chart');
+  if (counted === 0) { svg.outerHTML = `<div class="an-empty" id="rt-chart"><i class="ti ti-clock-off"></i>No replies to measure yet</div>`; return; }
+  const tip = document.getElementById('chart-tooltip');
+  const accent = cvar('--accent');
+  const W = 340, H = 190, padL = 8, padR = 8, padT = 14, padB = 26;
+  const cW = W - padL - padR, cH = H - padT - padB;
+  const maxV = Math.max(1, ...buckets.map(b => b.n));
+  const slot = cW / buckets.length, bw = slot * 0.62;
+  let out = '';
+  buckets.forEach((b, i) => {
+    const h = b.n > 0 ? Math.max(3, (b.n/maxV)*cH) : 2;
+    const bx = padL + i*slot + (slot-bw)/2, by = padT + cH - h;
+    out += `<rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${bw.toFixed(1)}" height="${h.toFixed(1)}" rx="4" style="fill:${accent};opacity:${b.n?0.85:0.15}"/>`;
+    if (b.n>0) out += `<text x="${(bx+bw/2).toFixed(1)}" y="${(by-5).toFixed(1)}" text-anchor="middle" style="font-size:10px;font-weight:600;fill:var(--text)">${b.n}</text>`;
+    out += `<text x="${(bx+bw/2).toFixed(1)}" y="${H-8}" text-anchor="middle" style="font-size:9px;fill:var(--text3)">${b.label}</text>`;
+  });
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = out;
+}
+
+// ── Template performance (single measure: reply rate) ────────────────────────
+function renderTemplates(contacts) {
+  const tpls = window._app.state.templates || {};
+  const map = {};
+  contacts.forEach(c => {
+    if (!(c.lastSentAt || EMAILED.has(c.status))) return;
+    const key = c.template || '—';
+    map[key] = map[key] || { sent: 0, replied: 0 };
+    map[key].sent++;
+    if (REPLIED.has(c.status) || c.repliedAt) map[key].replied++;
+  });
+  const rows = Object.entries(map).map(([k,v]) => ({
+    name: tpls[k]?.name || k, sent: v.sent, replied: v.replied, rate: pct(v.replied, v.sent)
+  })).sort((a,b) => b.rate - a.rate);
+  if (!rows.length) { document.getElementById('tpl-body').innerHTML = `<div class="an-empty"><i class="ti ti-template-off"></i>No sends yet</div>`; return; }
+  const accent = cvar('--accent');
+  document.getElementById('tpl-body').innerHTML = `<table class="an-table">
+    <thead><tr><th>Template</th><th class="num">Sent</th><th class="num">Replies</th><th class="num" style="width:120px">Reply rate</th></tr></thead>
+    <tbody>${rows.map(r => `<tr>
+      <td style="font-weight:500">${r.name}</td>
+      <td class="num" style="color:var(--text2)">${r.sent}</td>
+      <td class="num" style="color:var(--text2)">${r.replied}</td>
+      <td class="num"><div style="display:flex;align-items:center;gap:8px;justify-content:flex-end"><b>${r.rate}%</b><div class="mini-track"><div class="mini-fill" style="width:${Math.min(100,r.rate)}%;background:${accent}"></div></div></div></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+// ── Top companies ────────────────────────────────────────────────────────────
+function renderCompanies(contacts) {
+  const map = {};
+  contacts.forEach(c => {
+    const co = (c.company || '').trim(); if (!co) return;
+    map[co] = map[co] || { total: 0, replied: 0 };
+    map[co].total++;
+    if (REPLIED.has(c.status) || c.repliedAt) map[co].replied++;
+  });
+  const rows = Object.entries(map).map(([co,v]) => ({ co, total: v.total, replied: v.replied, rate: pct(v.replied, v.total) }))
+    .sort((a,b) => b.total - a.total).slice(0, 8);
+  if (!rows.length) { document.getElementById('company-body').innerHTML = `<div class="an-empty"><i class="ti ti-building-off"></i>No company data</div>`; return; }
+  const teal = cvar('--teal');
+  document.getElementById('company-body').innerHTML = `<table class="an-table">
+    <thead><tr><th>Company</th><th class="num">Contacts</th><th class="num">Replied</th><th class="num">Rate</th></tr></thead>
+    <tbody>${rows.map(r => `<tr>
+      <td style="font-weight:500;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.co}</td>
+      <td class="num" style="color:var(--text2)">${r.total}</td>
+      <td class="num" style="color:var(--text2)">${r.replied}</td>
+      <td class="num"><b style="color:${r.rate>0?teal:'var(--text3)'}">${r.rate}%</b></td>
+    </tr>`).join('')}</tbody></table>`;
+}
+
+// ── Auto insights ────────────────────────────────────────────────────────────
+function renderInsights(contacts, m) {
+  const items = [];
+  // Best template
+  const tpls = window._app.state.templates || {};
+  const tmap = {};
+  contacts.forEach(c => {
+    if (!(c.lastSentAt || EMAILED.has(c.status))) return;
+    const k = c.template || '—'; tmap[k] = tmap[k] || { s:0, r:0 };
+    tmap[k].s++; if (REPLIED.has(c.status)||c.repliedAt) tmap[k].r++;
+  });
+  const best = Object.entries(tmap).filter(([,v]) => v.s >= 5).map(([k,v]) => ({ name: tpls[k]?.name||k, rate: pct(v.r,v.s) })).sort((a,b)=>b.rate-a.rate)[0];
+  if (best) items.push({ i:'ti-trophy', c:'--green', t:'Best template', x:`<b>${best.name}</b> leads with a ${best.rate}% reply rate.` });
+
+  // Median response time
+  const rts = [];
+  contacts.forEach(c => {
+    if (!c.repliedAt) return;
+    let sendT = null;
+    (c.statusHistory||[]).forEach(h => { if (h.status==='sent'||h.status==='follow-up-sent'){ const t=new Date(h.changedAt).getTime(); const rt=new Date(c.repliedAt).getTime(); if (t<=rt && (sendT===null||t>sendT)) sendT=t; }});
+    if (sendT===null && c.lastSentAt) sendT = new Date(c.lastSentAt).getTime();
+    if (sendT!==null) { const h=(new Date(c.repliedAt).getTime()-sendT)/3600000; if (h>=0) rts.push(h); }
+  });
+  if (rts.length) {
+    rts.sort((a,b)=>a-b); const med = rts[Math.floor(rts.length/2)];
+    const disp = med < 24 ? `${Math.round(med)} hour${Math.round(med)!==1?'s':''}` : `${(med/24).toFixed(1)} days`;
+    items.push({ i:'ti-clock-bolt', c:'--indigo', t:'Typical response time', x:`Half of replies arrive within <b>${disp}</b> of sending.` });
+  }
+
+  // Best weekday for replies
+  const wd = [0,0,0,0,0,0,0];
+  contacts.forEach(c => { if (c.repliedAt) wd[new Date(c.repliedAt).getDay()]++; });
+  const wdMax = Math.max(...wd);
+  if (wdMax > 0) {
+    const names = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    items.push({ i:'ti-calendar-star', c:'--amber', t:'Peak reply day', x:`<b>${names[wd.indexOf(wdMax)]}</b> brings the most replies.` });
+  }
+
+  // Follow-up effectiveness
+  if (m.followUpsSentCount >= 3) {
+    items.push({ i:'ti-repeat', c:'--teal', t:'Follow-up impact', x:`${m.followUpReplyRate}% of follow-ups earned a reply (${m.followUpRepliedCount} of ${m.followUpsSentCount}).` });
+  }
+
+  // Overall benchmark
+  const verdict = m.replyRate >= 15 ? 'well above' : m.replyRate >= 5 ? 'around' : 'below';
+  items.push({ i:'ti-target-arrow', c: m.replyRate>=5?'--green':'--red', t:'Overall reply rate', x:`Your ${m.replyRate}% reply rate is <b>${verdict}</b> the ~5% cold-email benchmark.` });
+
+  document.getElementById('insights-body').innerHTML = items.map(it =>
+    `<div class="insight"><i class="ti ${it.i}" style="color:var(${it.c})"></i><div><div class="in-title">${it.t}</div><div class="in-text">${it.x}</div></div></div>`
+  ).join('');
+}
+
+// ── Orchestration ────────────────────────────────────────────────────────────
+function renderAll() {
+  const m = computeMetrics(CONTACTS);
+  document.getElementById('an-subtitle').textContent =
+    `${m.total.toLocaleString()} contacts · ${m.sentCount.toLocaleString()} emailed · ${m.repliedCount.toLocaleString()} replies`;
+  renderKpis(m);
+  renderFunnel(m);
+  renderStatus(CONTACTS);
+  renderTimeSeries(buildDailySeries(CONTACTS, currentRange));
+  renderReplyTime(CONTACTS);
+  renderTemplates(CONTACTS);
+  renderCompanies(CONTACTS);
+  renderInsights(CONTACTS, m);
+}
+
+async function loadAnalytics() {
+  const btn = document.getElementById('an-refresh');
+  const old = btn.innerHTML; btn.disabled = true; btn.innerHTML = '<i class="ti ti-loader-2" style="animation:spin 1s linear infinite"></i> Loading';
+  try {
+    await Promise.all([window._app.loadContacts(), window._app.loadTemplates()]);
+    CONTACTS = window._app.state.contacts;
+    renderAll();
+  } catch (err) {
+    window._app.toast('Could not load analytics: ' + err.message, 'error');
+    document.getElementById('an-subtitle').textContent = 'Failed to load';
+  } finally {
+    btn.disabled = false; btn.innerHTML = old;
+  }
+}
+
+// Range toggle
+document.getElementById('range-toggle').addEventListener('click', (e) => {
+  const b = e.target.closest('.range-btn'); if (!b) return;
+  currentRange = parseInt(b.dataset.days, 10);
+  document.querySelectorAll('.range-btn').forEach(x => x.classList.toggle('active', x === b));
+  if (CONTACTS.length) renderTimeSeries(buildDailySeries(CONTACTS, currentRange));
+});
+// Re-render on theme change so chart colors re-resolve from tokens
+document.querySelectorAll('[data-theme-toggle]').forEach(btn =>
+  btn.addEventListener('click', () => setTimeout(() => { if (CONTACTS.length) renderAll(); }, 30)));
+
+window._app.initTheme();
+window._app.initMobileNav();
+loadAnalytics();
+</script>
+</body>
+</html>
