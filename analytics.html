@@ -26,10 +26,6 @@
 
 /* KPI tiles */
 .kpi-value { font-size: 27px; font-weight: 600; letter-spacing: -.02em; line-height: 1.05; }
-.kpi-delta { font-size: 11px; margin-top: 4px; display: inline-flex; align-items: center; gap: 3px; }
-.kpi-delta.up { color: var(--green); }
-.kpi-delta.down { color: var(--red); }
-.kpi-delta.flat { color: var(--text3); }
 
 /* Horizontal bar rows (funnel / status / template / company) */
 .hbar-row { margin-bottom: 11px; }
@@ -61,6 +57,10 @@
 .insight i { font-size: 18px; flex-shrink: 0; margin-top: 1px; }
 .insight .in-title { font-size: 12px; font-weight: 600; margin-bottom: 2px; }
 .insight .in-text { font-size: 12px; color: var(--text2); line-height: 1.5; }
+
+/* Small segmented toggle */
+.seg-toggle { display: flex; gap: 2px; background: var(--bg2); border: 0.5px solid var(--border); border-radius: var(--radius); padding: 2px; }
+.seg-toggle .btn-xs.active { background: var(--bg); color: var(--text); box-shadow: var(--shadow-sm); border-color: var(--border-md); }
 
 /* Chart tooltip (shared pattern with settings) */
 #chart-tooltip {
@@ -117,14 +117,20 @@
         <div class="an-card" style="animation-delay:.04s">
           <div class="an-card-head">
             <div class="an-card-title"><i class="ti ti-filter"></i> Outreach funnel</div>
-            <div class="an-card-sub">How contacts progress from added → replied</div>
+            <div class="an-card-sub">Every stage a contact has ever reached (history-based)</div>
           </div>
           <div class="an-card-body" id="funnel-body"></div>
         </div>
         <div class="an-card" style="animation-delay:.08s">
-          <div class="an-card-head">
-            <div class="an-card-title"><i class="ti ti-chart-pie"></i> Status breakdown</div>
-            <div class="an-card-sub">Distribution across every contact state</div>
+          <div class="an-card-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
+            <div>
+              <div class="an-card-title"><i class="ti ti-chart-pie"></i> Status breakdown</div>
+              <div class="an-card-sub" id="status-sub">Where every contact sits right now</div>
+            </div>
+            <div class="seg-toggle" id="status-toggle">
+              <button class="btn btn-xs status-mode-btn active" data-mode="current" type="button">Current</button>
+              <button class="btn btn-xs status-mode-btn" data-mode="ever" type="button">Ever reached</button>
+            </div>
           </div>
           <div class="an-card-body" id="status-body"></div>
         </div>
@@ -135,9 +141,9 @@
         <div class="an-card-head" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px">
           <div>
             <div class="an-card-title"><i class="ti ti-timeline"></i> Activity over time</div>
-            <div class="an-card-sub">Emails sent vs. replies received · last 30 days</div>
+            <div class="an-card-sub">Send events vs. replies received (from status history)</div>
           </div>
-          <div id="range-toggle" style="display:flex;gap:2px;background:var(--bg2);border:0.5px solid var(--border);border-radius:var(--radius);padding:2px">
+          <div class="seg-toggle" id="range-toggle">
             <button class="btn btn-xs range-btn active" data-days="30" type="button">30d</button>
             <button class="btn btn-xs range-btn" data-days="90" type="button">90d</button>
           </div>
@@ -153,35 +159,65 @@
         <div class="an-card" style="animation-delay:.16s">
           <div class="an-card-head">
             <div class="an-card-title"><i class="ti ti-clock-hour-4"></i> Response speed</div>
-            <div class="an-card-sub">How long contacts take to reply after a send</div>
+            <div class="an-card-sub" id="rt-sub">Time from a send to the reply it earned</div>
           </div>
           <div class="an-card-body"><svg id="rt-chart" width="100%" style="display:block;overflow:visible"></svg></div>
         </div>
         <div class="an-card" style="animation-delay:.2s">
           <div class="an-card-head">
             <div class="an-card-title"><i class="ti ti-template"></i> Template performance</div>
-            <div class="an-card-sub">Reply rate by template · best first</div>
+            <div class="an-card-sub">Reply rate by template (counts contacts that ever replied)</div>
           </div>
           <div class="an-card-body" id="tpl-body"></div>
         </div>
       </div>
 
-      <!-- COMPANIES + INSIGHTS -->
+      <!-- REPLY JOURNEY + WEEKDAY PATTERN -->
       <div class="an-grid an-cards-2" style="margin-bottom:14px">
         <div class="an-card" style="animation-delay:.24s">
+          <div class="an-card-head">
+            <div class="an-card-title"><i class="ti ti-route"></i> Reply journey</div>
+            <div class="an-card-sub">What happened to contacts after they replied</div>
+          </div>
+          <div class="an-card-body" id="journey-body"></div>
+        </div>
+        <div class="an-card" style="animation-delay:.28s">
+          <div class="an-card-head">
+            <div class="an-card-title"><i class="ti ti-calendar-week"></i> Weekly rhythm</div>
+            <div class="an-card-sub">Sends vs. replies by day of week</div>
+          </div>
+          <div class="an-card-body">
+            <svg id="wd-chart" width="100%" style="display:block;overflow:visible"></svg>
+            <div class="an-legend" id="wd-legend"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- COMPANIES + FOLLOW-UPS -->
+      <div class="an-grid an-cards-2" style="margin-bottom:14px">
+        <div class="an-card" style="animation-delay:.32s">
           <div class="an-card-head">
             <div class="an-card-title"><i class="ti ti-building"></i> Top companies</div>
             <div class="an-card-sub">Most-contacted organisations & their reply rate</div>
           </div>
           <div class="an-card-body" id="company-body"></div>
         </div>
-        <div class="an-card" style="animation-delay:.28s">
+        <div class="an-card" style="animation-delay:.36s">
           <div class="an-card-head">
-            <div class="an-card-title"><i class="ti ti-bulb"></i> Insights</div>
-            <div class="an-card-sub">Automatically surfaced from your data</div>
+            <div class="an-card-title"><i class="ti ti-repeat"></i> Follow-up effectiveness</div>
+            <div class="an-card-sub">Replies earned before vs. after a follow-up</div>
           </div>
-          <div class="an-card-body an-grid" id="insights-body" style="gap:10px"></div>
+          <div class="an-card-body" id="fu-body"></div>
         </div>
+      </div>
+
+      <!-- INSIGHTS (full width) -->
+      <div class="an-card" style="margin-bottom:14px;animation-delay:.4s">
+        <div class="an-card-head">
+          <div class="an-card-title"><i class="ti ti-bulb"></i> Insights</div>
+          <div class="an-card-sub">Automatically surfaced from your full status history</div>
+        </div>
+        <div class="an-card-body an-grid an-cards-2" id="insights-body" style="gap:10px"></div>
       </div>
 
     </div>
@@ -191,7 +227,7 @@
 <div id="chart-tooltip"></div>
 <script src="js/app.js"></script>
 <script>
-// ── Status metadata: label + theme color token (reserved status palette + labels) ──
+// ── Status metadata: label + theme color token ──
 const STATUS_META = {
   queued:              { label: 'Queued',                 c: '--blue' },
   sent:                { label: 'Sent',                   c: '--green' },
@@ -205,47 +241,101 @@ const STATUS_META = {
   'in-review':         { label: 'In Review',              c: '--indigo' },
 };
 const EMAILED = new Set(['sent','follow-up-sent','replied','follow-up-replied','bounced','closed','no-openings','in-review']);
-const REPLIED = new Set(['replied','follow-up-replied']);
 const cvar = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const pct = (n, d) => d > 0 ? Math.round((n / d) * 1000) / 10 : 0;
 const dayKey = (d) => { const x = new Date(d); x.setHours(0,0,0,0); return x.getTime(); };
+const fmtDur = (hrs) => {
+  if (hrs < 1) return `${Math.max(1, Math.round(hrs * 60))} min`;
+  if (hrs < 48) return `${Math.round(hrs * 10) / 10} hr${hrs >= 1.05 ? 's' : ''}`;
+  return `${(hrs / 24).toFixed(1)} days`;
+};
 
-let CONTACTS = [];
+let CONTACTS = [];   // raw contacts
+let A = [];          // analyzed contacts
 let currentRange = 30;
+let statusMode = 'current';
 
-// ── Derived metrics ────────────────────────────────────────────────────────
-function computeMetrics(contacts) {
-  const total = contacts.length;
-  const emailed = contacts.filter(c => c.lastSentAt || EMAILED.has(c.status));
-  const sentCount = emailed.length;
-  const replied = contacts.filter(c => REPLIED.has(c.status) || c.repliedAt);
-  const followUpsSent = contacts.filter(c => c.followUpSentAt || c.status === 'follow-up-sent' || c.status === 'follow-up-replied');
-  const followUpReplied = contacts.filter(c => c.status === 'follow-up-replied');
-  const bounced = contacts.filter(c => c.status === 'bounced');
-  const inReview = contacts.filter(c => c.status === 'in-review');
-  const closed = contacts.filter(c => c.status === 'closed');
+// ── Per-contact event analysis from statusHistory (the heart of the fix) ─────
+// Current status is a *resting place*; history tells us everything the contact
+// ever went through, even if it later moved to in-review / closed / etc.
+function analyze(c) {
+  const hist = (c.statusHistory || []).map(h => ({ s: h.status, t: new Date(h.changedAt).getTime() }))
+    .filter(h => Number.isFinite(h.t)).sort((a, b) => a.t - b.t);
+  const ever = new Set(hist.map(h => h.s)); ever.add(c.status);
+
+  const sends   = hist.filter(h => h.s === 'sent' || h.s === 'follow-up-sent');
+  const replies = hist.filter(h => h.s === 'replied' || h.s === 'follow-up-replied');
+  // Fallbacks for docs whose history predates tracking
+  if (!sends.length && c.lastSentAt) sends.push({ s: 'sent', t: new Date(c.lastSentAt).getTime() });
+  if (!replies.length && c.repliedAt) replies.push({ s: 'replied', t: new Date(c.repliedAt).getTime() });
+
+  const fuSends = sends.filter(s => s.s === 'follow-up-sent');
+  const firstFuT = fuSends.length ? fuSends[0].t
+    : (c.followUpSentAt ? new Date(c.followUpSentAt).getTime() : null);
+
+  const everSent     = sends.length > 0 || EMAILED.has(c.status) || ever.has('sent');
+  const everReplied  = replies.length > 0;
+  const everFollowUp = firstFuT !== null || ever.has('follow-up-sent') || ever.has('follow-up-replied');
+  const everBounced  = ever.has('bounced');
+
+  // Reply timing: pair each reply with the latest send that happened before it.
+  // Pairs where no send precedes the reply (legacy ordering glitches) are skipped —
+  // this is what produced the bogus "0 hours" median before.
+  const pairs = [];
+  replies.forEach(r => {
+    let sendT = null;
+    sends.forEach(s => { if (s.t <= r.t && (sendT === null || s.t > sendT)) sendT = s.t; });
+    if (sendT !== null) {
+      const hrs = (r.t - sendT) / 3600000;
+      if (hrs >= 0 && hrs < 24 * 90) pairs.push(hrs); // cap at 90d to drop garbage timestamps
+    }
+  });
+
+  // Did the (first) reply come after a follow-up was sent?
+  const firstReplyT = replies.length ? replies[0].t : null;
+  const repliedAfterFu = ever.has('follow-up-replied') ||
+    (firstFuT !== null && firstReplyT !== null && firstReplyT > firstFuT);
+
   return {
-    total, sentCount,
-    repliedCount: replied.length,
-    followUpsSentCount: followUpsSent.length,
-    followUpRepliedCount: followUpReplied.length,
-    bouncedCount: bounced.length,
-    inReviewCount: inReview.length,
-    closedCount: closed.length,
-    replyRate: pct(replied.length, sentCount),
-    bounceRate: pct(bounced.length, sentCount),
-    followUpReplyRate: pct(followUpReplied.length, followUpsSent.length),
+    c, ever, sends, replies, pairs,
+    everSent, everReplied, everFollowUp, everBounced,
+    repliedAfterFu,
+    repliedBeforeFu: everReplied && !repliedAfterFu,
+    firstReplyT,
+    outcome: c.status, // where they rest today
+  };
+}
+
+// ── Aggregate metrics (ever-based) ───────────────────────────────────────────
+function computeMetrics() {
+  const total = A.length;
+  const sent = A.filter(a => a.everSent);
+  const replied = A.filter(a => a.everReplied);
+  const fu = A.filter(a => a.everFollowUp);
+  const bounced = A.filter(a => a.everBounced);
+  const afterFu = A.filter(a => a.repliedAfterFu);
+  const inReview = A.filter(a => a.ever.has('in-review'));
+  const closed = A.filter(a => a.ever.has('closed'));
+  const queuedNow = A.filter(a => a.c.status === 'queued');
+  return {
+    total, sentCount: sent.length, repliedCount: replied.length,
+    fuCount: fu.length, bouncedCount: bounced.length,
+    afterFuCount: afterFu.length, beforeFuCount: replied.length - afterFu.length,
+    inReviewEver: inReview.length, closedEver: closed.length,
+    queuedNow: queuedNow.length,
+    replyRate: pct(replied.length, sent.length),
+    bounceRate: pct(bounced.length, sent.length),
   };
 }
 
 // ── KPI tiles ──────────────────────────────────────────────────────────────
 function renderKpis(m) {
   const tiles = [
-    { label: 'Total contacts', value: m.total, sub: `${m.sentCount} emailed` },
-    { label: 'Emails sent',    value: m.sentCount, sub: `${m.followUpsSentCount} follow-ups`, color: '' },
-    { label: 'Reply rate',     value: m.replyRate + '%', sub: `${m.repliedCount} replies`, color: 'green' },
-    { label: 'Bounce rate',    value: m.bounceRate + '%', sub: `${m.bouncedCount} bounced`, color: m.bounceRate > 5 ? 'red' : '' },
-    { label: 'In review',      value: m.inReviewCount, sub: `${m.closedCount} closed`, color: 'teal' },
+    { label: 'Total contacts', value: m.total.toLocaleString(), sub: `${m.queuedNow} still queued` },
+    { label: 'Contacts emailed', value: m.sentCount.toLocaleString(), sub: `${m.fuCount} got a follow-up` },
+    { label: 'Ever replied', value: m.repliedCount, sub: `${m.replyRate}% of emailed`, color: 'green' },
+    { label: 'Bounce rate', value: m.bounceRate + '%', sub: `${m.bouncedCount} ever bounced`, color: m.bounceRate > 10 ? 'red' : '' },
+    { label: 'Advanced', value: m.inReviewEver + m.closedEver, sub: `${m.inReviewEver} in review · ${m.closedEver} closed`, color: 'teal' },
   ];
   document.getElementById('kpi-grid').innerHTML = tiles.map(t => `
     <div class="stat-card">
@@ -255,14 +345,14 @@ function renderKpis(m) {
     </div>`).join('');
 }
 
-// ── Funnel (single-hue sequential) ───────────────────────────────────────────
+// ── Funnel — stages ever reached ────────────────────────────────────────────
 function renderFunnel(m) {
   const steps = [
     { label: 'Contacts added', n: m.total },
-    { label: 'Emailed',        n: m.sentCount },
-    { label: 'Replied',        n: m.repliedCount },
-    { label: 'Follow-ups sent',n: m.followUpsSentCount },
-    { label: 'Replied after follow-up', n: m.followUpRepliedCount },
+    { label: 'Emailed', n: m.sentCount },
+    { label: 'Replied (ever)', n: m.repliedCount },
+    { label: 'Moved to review', n: m.inReviewEver },
+    { label: 'Closed', n: m.closedEver },
   ];
   const max = steps[0].n || 1;
   const accent = cvar('--accent');
@@ -281,54 +371,58 @@ function renderFunnel(m) {
   }).join('');
 }
 
-// ── Status breakdown (reserved status palette + labels) ──────────────────────
-function renderStatus(contacts) {
-  const counts = {};
-  contacts.forEach(c => { counts[c.status] = (counts[c.status]||0) + 1; });
-  const rows = Object.entries(counts).sort((a,b) => b[1]-a[1]);
-  const total = contacts.length || 1;
-  document.getElementById('status-body').innerHTML = rows.map(([status, n]) => {
-    const meta = STATUS_META[status] || { label: status, c: '--slate' };
+// ── Status breakdown: Current vs Ever-reached toggle ─────────────────────────
+function renderStatus() {
+  const total = A.length || 1;
+  let rows;
+  if (statusMode === 'current') {
+    const counts = {};
+    A.forEach(a => { counts[a.c.status] = (counts[a.c.status]||0) + 1; });
+    rows = Object.entries(counts).map(([s, n]) => ({ s, n, d: total }));
+    document.getElementById('status-sub').textContent = 'Where every contact sits right now';
+  } else {
+    // Ever-reached: a contact counts toward every status it has ever passed through
+    rows = Object.keys(STATUS_META).map(s => ({
+      s, n: A.filter(a => a.ever.has(s)).length, d: total,
+    })).filter(r => r.n > 0);
+    document.getElementById('status-sub').textContent = 'Contacts that ever passed through each status — one contact can count in several';
+  }
+  rows.sort((a, b) => b.n - a.n);
+  document.getElementById('status-body').innerHTML = rows.map(({ s, n, d }) => {
+    const meta = STATUS_META[s] || { label: s, c: '--slate' };
     const col = cvar(meta.c);
+    const nowN = statusMode === 'ever' ? A.filter(a => a.c.status === s).length : null;
+    const nowStr = nowN !== null && nowN !== n ? ` · now: ${nowN}` : '';
     return `<div class="hbar-row">
       <div class="hbar-top">
         <span class="hbar-label"><span class="dot" style="background:${col}"></span>${meta.label}</span>
-        <span class="hbar-val"><b>${n.toLocaleString()}</b> <span style="color:var(--text3)">${pct(n,total)}%</span></span>
+        <span class="hbar-val"><b>${n.toLocaleString()}</b> <span style="color:var(--text3)">${pct(n,d)}%${nowStr}</span></span>
       </div>
-      <div class="hbar-track"><div class="hbar-fill" style="width:${Math.max(2,pct(n,total))}%;background:${col};opacity:.85"></div></div>
+      <div class="hbar-track"><div class="hbar-fill" style="width:${Math.max(2,pct(n,d))}%;background:${col};opacity:.85"></div></div>
     </div>`;
   }).join('') || `<div class="an-empty"><i class="ti ti-inbox"></i>No contacts yet</div>`;
 }
 
-// ── Build daily series for sent + replies from statusHistory ─────────────────
-function buildDailySeries(contacts, days) {
+// ── Daily series from history events ─────────────────────────────────────────
+function buildDailySeries(days) {
   const today = dayKey(Date.now());
   const start = today - (days - 1) * 86400000;
   const sent = new Map(), rep = new Map();
-  contacts.forEach(c => {
-    const hist = c.statusHistory || [];
-    let sawSend = false, sawReply = false;
-    hist.forEach(h => {
-      const k = dayKey(h.changedAt);
-      if (k < start || k > today) return;
-      if (h.status === 'sent' || h.status === 'follow-up-sent') { sent.set(k, (sent.get(k)||0)+1); sawSend = true; }
-      if (h.status === 'replied' || h.status === 'follow-up-replied') { rep.set(k, (rep.get(k)||0)+1); sawReply = true; }
-    });
-    // Fallback for contacts whose history predates status tracking
-    if (!sawSend && c.lastSentAt) { const k = dayKey(c.lastSentAt); if (k>=start && k<=today) sent.set(k,(sent.get(k)||0)+1); }
-    if (!sawReply && c.repliedAt) { const k = dayKey(c.repliedAt); if (k>=start && k<=today) rep.set(k,(rep.get(k)||0)+1); }
+  A.forEach(a => {
+    a.sends.forEach(s => { const k = dayKey(s.t); if (k >= start && k <= today) sent.set(k, (sent.get(k)||0)+1); });
+    a.replies.forEach(r => { const k = dayKey(r.t); if (k >= start && k <= today) rep.set(k, (rep.get(k)||0)+1); });
   });
   const out = [];
   for (let k = start; k <= today; k += 86400000) out.push({ day: k, sent: sent.get(k)||0, replied: rep.get(k)||0 });
   return out;
 }
 
-// ── Time-series: 2-series area/line with hover crosshair (validated pair) ────
+// ── Time-series chart (validated 2-hue pair) ────────────────────────────────
 function renderTimeSeries(series) {
   const svg = document.getElementById('ts-chart');
   const tip = document.getElementById('chart-tooltip');
   const c1 = cvar('--chart-1'), c2 = cvar('--chart-2');
-  const W = 720, H = 210, padL = 30, padR = 12, padT = 12, padB = 26;
+  const W = 720, H = 210, padL = 32, padR = 12, padT = 12, padB = 26;
   const cW = W - padL - padR, cH = H - padT - padB;
   const n = series.length;
   const maxV = Math.max(1, ...series.map(d => Math.max(d.sent, d.replied)));
@@ -345,18 +439,15 @@ function renderTimeSeries(series) {
     <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${c1}" stop-opacity="0.22"/><stop offset="100%" stop-color="${c1}" stop-opacity="0"/></linearGradient>
     <linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="${c2}" stop-opacity="0.20"/><stop offset="100%" stop-color="${c2}" stop-opacity="0"/></linearGradient>
   </defs>`;
-  // Grid + y labels (recessive)
   [0, 0.5, 1].forEach(f => {
     const yy = (padT + cH*(1-f)).toFixed(1);
     out += `<line x1="${padL}" y1="${yy}" x2="${W-padR}" y2="${yy}" style="stroke:var(--chart-grid);stroke-width:1"/>`;
     out += `<text x="${padL-6}" y="${+yy+3.5}" text-anchor="end" style="font-size:9px;fill:var(--text3)">${Math.round(maxV*f)}</text>`;
   });
-  // Areas then lines (2px), sent under replied
   out += `<path d="${area('sent')}" fill="url(#g1)"/>`;
   out += `<path d="${area('replied')}" fill="url(#g2)"/>`;
   out += `<path d="${line('sent')}" fill="none" stroke="${c1}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
   out += `<path d="${line('replied')}" fill="none" stroke="${c2}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
-  // x labels (~5 ticks)
   const ticks = Math.min(n, 5);
   for (let t = 0; t < ticks; t++) {
     const i = Math.round(t*(n-1)/(ticks-1||1));
@@ -365,7 +456,6 @@ function renderTimeSeries(series) {
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
   svg.innerHTML = out;
 
-  // Hover crosshair + markers
   const ns = 'http://www.w3.org/2000/svg';
   const vline = document.createElementNS(ns,'line');
   vline.style.cssText = 'stroke:var(--border-md);stroke-width:1;opacity:0;pointer-events:none';
@@ -384,7 +474,7 @@ function renderTimeSeries(series) {
     m1.setAttribute('cx',px); m1.setAttribute('cy',y(d.sent)); m1.style.opacity='1';
     m2.setAttribute('cx',px); m2.setAttribute('cy',y(d.replied)); m2.style.opacity='1';
     tip.innerHTML = `<div style="font-size:10px;color:var(--text2);margin-bottom:5px">${new Date(d.day).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'})}</div>
-      <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:2px"><span style="width:9px;height:9px;border-radius:3px;background:${c1}"></span>Sent <b style="margin-left:auto">${d.sent}</b></div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:12px;margin-bottom:2px"><span style="width:9px;height:9px;border-radius:3px;background:${c1}"></span>Sends <b style="margin-left:auto">${d.sent}</b></div>
       <div style="display:flex;align-items:center;gap:6px;font-size:12px"><span style="width:9px;height:9px;border-radius:3px;background:${c2}"></span>Replies <b style="margin-left:auto">${d.replied}</b></div>`;
     const tw = 160, th = tip.offsetHeight || 70;
     tip.style.left = Math.max(4, Math.min(window.innerWidth - tw - 4, e.clientX - tw/2)) + 'px';
@@ -394,12 +484,21 @@ function renderTimeSeries(series) {
   svg.addEventListener('mouseleave', () => { vline.style.opacity='0'; m1.style.opacity='0'; m2.style.opacity='0'; tip.style.display='none'; });
 
   document.getElementById('ts-legend').innerHTML = `
-    <span class="lg"><span class="sw" style="background:${c1}"></span>Emails sent</span>
+    <span class="lg"><span class="sw" style="background:${c1}"></span>Send events (incl. follow-ups)</span>
     <span class="lg"><span class="sw" style="background:${c2}"></span>Replies received</span>`;
 }
 
-// ── Response-speed histogram (single hue) ────────────────────────────────────
-function renderReplyTime(contacts) {
+// ── Response-speed histogram (correctly paired send→reply) ───────────────────
+function renderReplyTime() {
+  const allPairs = A.flatMap(a => a.pairs);
+  const holder = document.getElementById('rt-chart');
+  if (!allPairs.length) { holder.outerHTML = `<div class="an-empty" id="rt-chart"><i class="ti ti-clock-off"></i>No measurable replies yet</div>`; return; }
+
+  const sorted = [...allPairs].sort((a,b) => a-b);
+  const median = sorted[Math.floor(sorted.length/2)];
+  document.getElementById('rt-sub').textContent =
+    `Median ${fmtDur(median)} across ${allPairs.length} measurable replies`;
+
   const buckets = [
     { label: '< 1h', min: 0, max: 1, n: 0 },
     { label: '1–6h', min: 1, max: 6, n: 0 },
@@ -408,31 +507,10 @@ function renderReplyTime(contacts) {
     { label: '3–7d', min: 72, max: 168, n: 0 },
     { label: '> 7d', min: 168, max: Infinity, n: 0 },
   ];
-  let counted = 0;
-  contacts.forEach(c => {
-    if (!c.repliedAt) return;
-    const rt = new Date(c.repliedAt).getTime();
-    // last send at or before the reply
-    let sendT = null;
-    (c.statusHistory||[]).forEach(h => {
-      if ((h.status==='sent'||h.status==='follow-up-sent')) {
-        const t = new Date(h.changedAt).getTime();
-        if (t <= rt && (sendT===null || t > sendT)) sendT = t;
-      }
-    });
-    if (sendT === null && c.lastSentAt) sendT = new Date(c.lastSentAt).getTime();
-    if (sendT === null) return;
-    const hrs = (rt - sendT) / 3600000;
-    if (hrs < 0) return;
-    const b = buckets.find(b => hrs >= b.min && hrs < b.max);
-    if (b) { b.n++; counted++; }
-  });
+  allPairs.forEach(h => { const b = buckets.find(b => h >= b.min && h < b.max); if (b) b.n++; });
 
-  const svg = document.getElementById('rt-chart');
-  if (counted === 0) { svg.outerHTML = `<div class="an-empty" id="rt-chart"><i class="ti ti-clock-off"></i>No replies to measure yet</div>`; return; }
-  const tip = document.getElementById('chart-tooltip');
   const accent = cvar('--accent');
-  const W = 340, H = 190, padL = 8, padR = 8, padT = 14, padB = 26;
+  const W = 340, H = 190, padL = 8, padR = 8, padT = 16, padB = 26;
   const cW = W - padL - padR, cH = H - padT - padB;
   const maxV = Math.max(1, ...buckets.map(b => b.n));
   const slot = cW / buckets.length, bw = slot * 0.62;
@@ -444,20 +522,20 @@ function renderReplyTime(contacts) {
     if (b.n>0) out += `<text x="${(bx+bw/2).toFixed(1)}" y="${(by-5).toFixed(1)}" text-anchor="middle" style="font-size:10px;font-weight:600;fill:var(--text)">${b.n}</text>`;
     out += `<text x="${(bx+bw/2).toFixed(1)}" y="${H-8}" text-anchor="middle" style="font-size:9px;fill:var(--text3)">${b.label}</text>`;
   });
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.innerHTML = out;
+  holder.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  holder.innerHTML = out;
 }
 
-// ── Template performance (single measure: reply rate) ────────────────────────
-function renderTemplates(contacts) {
+// ── Template performance (ever replied) ──────────────────────────────────────
+function renderTemplates() {
   const tpls = window._app.state.templates || {};
   const map = {};
-  contacts.forEach(c => {
-    if (!(c.lastSentAt || EMAILED.has(c.status))) return;
-    const key = c.template || '—';
+  A.forEach(a => {
+    if (!a.everSent) return;
+    const key = a.c.template || '—';
     map[key] = map[key] || { sent: 0, replied: 0 };
     map[key].sent++;
-    if (REPLIED.has(c.status) || c.repliedAt) map[key].replied++;
+    if (a.everReplied) map[key].replied++;
   });
   const rows = Object.entries(map).map(([k,v]) => ({
     name: tpls[k]?.name || k, sent: v.sent, replied: v.replied, rate: pct(v.replied, v.sent)
@@ -465,7 +543,7 @@ function renderTemplates(contacts) {
   if (!rows.length) { document.getElementById('tpl-body').innerHTML = `<div class="an-empty"><i class="ti ti-template-off"></i>No sends yet</div>`; return; }
   const accent = cvar('--accent');
   document.getElementById('tpl-body').innerHTML = `<table class="an-table">
-    <thead><tr><th>Template</th><th class="num">Sent</th><th class="num">Replies</th><th class="num" style="width:120px">Reply rate</th></tr></thead>
+    <thead><tr><th>Template</th><th class="num">Contacts</th><th class="num">Replied</th><th class="num" style="width:120px">Reply rate</th></tr></thead>
     <tbody>${rows.map(r => `<tr>
       <td style="font-weight:500">${r.name}</td>
       <td class="num" style="color:var(--text2)">${r.sent}</td>
@@ -474,14 +552,70 @@ function renderTemplates(contacts) {
     </tr>`).join('')}</tbody></table>`;
 }
 
-// ── Top companies ────────────────────────────────────────────────────────────
-function renderCompanies(contacts) {
+// ── Reply journey: where repliers ended up ───────────────────────────────────
+function renderJourney(m) {
+  const repliers = A.filter(a => a.everReplied);
+  if (!repliers.length) { document.getElementById('journey-body').innerHTML = `<div class="an-empty"><i class="ti ti-route-off"></i>No replies yet</div>`; return; }
+  const dest = {};
+  repliers.forEach(a => { dest[a.outcome] = (dest[a.outcome]||0) + 1; });
+  const rows = Object.entries(dest).sort((a,b) => b[1]-a[1]);
+  const total = repliers.length;
+  document.getElementById('journey-body').innerHTML =
+    `<div style="font-size:12px;color:var(--text2);margin-bottom:12px">${total} contacts have replied at least once. They currently sit at:</div>` +
+    rows.map(([s, n]) => {
+      const meta = STATUS_META[s] || { label: s, c: '--slate' };
+      const col = cvar(meta.c);
+      return `<div class="hbar-row">
+        <div class="hbar-top">
+          <span class="hbar-label"><span class="dot" style="background:${col}"></span>${meta.label}</span>
+          <span class="hbar-val"><b>${n}</b> <span style="color:var(--text3)">${pct(n,total)}%</span></span>
+        </div>
+        <div class="hbar-track"><div class="hbar-fill" style="width:${Math.max(2,pct(n,total))}%;background:${col};opacity:.85"></div></div>
+      </div>`;
+    }).join('');
+}
+
+// ── Weekly rhythm: grouped sends/replies by weekday ──────────────────────────
+function renderWeekday() {
+  const c1 = cvar('--chart-1'), c2 = cvar('--chart-2');
+  const days = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  const sends = [0,0,0,0,0,0,0], reps = [0,0,0,0,0,0,0];
+  const idx = t => (new Date(t).getDay() + 6) % 7; // Mon=0
+  A.forEach(a => {
+    a.sends.forEach(s => sends[idx(s.t)]++);
+    a.replies.forEach(r => reps[idx(r.t)]++);
+  });
+  const maxS = Math.max(1, ...sends), maxR = Math.max(1, ...reps);
+  const svg = document.getElementById('wd-chart');
+  const W = 340, H = 190, padL = 8, padR = 8, padT = 16, padB = 26;
+  const cW = W - padL - padR, cH = H - padT - padB;
+  const slot = cW / 7, bw = slot * 0.3;
+  let out = '';
+  days.forEach((d, i) => {
+    // sends bar (left, scaled to its own max), replies bar (right, own max) — grouped, 2px gap
+    const hS = sends[i] > 0 ? Math.max(3, (sends[i]/maxS)*cH) : 2;
+    const hR = reps[i] > 0 ? Math.max(3, (reps[i]/maxR)*cH) : 2;
+    const x0 = padL + i*slot + (slot - bw*2 - 2)/2;
+    out += `<rect x="${x0.toFixed(1)}" y="${(padT+cH-hS).toFixed(1)}" width="${bw.toFixed(1)}" height="${hS.toFixed(1)}" rx="3" style="fill:${c1};opacity:${sends[i]?0.85:0.15}"/>`;
+    out += `<rect x="${(x0+bw+2).toFixed(1)}" y="${(padT+cH-hR).toFixed(1)}" width="${bw.toFixed(1)}" height="${hR.toFixed(1)}" rx="3" style="fill:${c2};opacity:${reps[i]?0.85:0.15}"/>`;
+    if (reps[i] > 0) out += `<text x="${(x0+bw+2+bw/2).toFixed(1)}" y="${(padT+cH-hR-4).toFixed(1)}" text-anchor="middle" style="font-size:9px;font-weight:600;fill:var(--text)">${reps[i]}</text>`;
+    out += `<text x="${(padL+i*slot+slot/2).toFixed(1)}" y="${H-8}" text-anchor="middle" style="font-size:9px;fill:var(--text3)">${d}</text>`;
+  });
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  svg.innerHTML = out;
+  document.getElementById('wd-legend').innerHTML = `
+    <span class="lg"><span class="sw" style="background:${c1}"></span>Sends (scaled to own max)</span>
+    <span class="lg"><span class="sw" style="background:${c2}"></span>Replies (labeled)</span>`;
+}
+
+// ── Top companies (ever replied) ─────────────────────────────────────────────
+function renderCompanies() {
   const map = {};
-  contacts.forEach(c => {
-    const co = (c.company || '').trim(); if (!co) return;
+  A.forEach(a => {
+    const co = (a.c.company || '').trim(); if (!co) return;
     map[co] = map[co] || { total: 0, replied: 0 };
     map[co].total++;
-    if (REPLIED.has(c.status) || c.repliedAt) map[co].replied++;
+    if (a.everReplied) map[co].replied++;
   });
   const rows = Object.entries(map).map(([co,v]) => ({ co, total: v.total, replied: v.replied, rate: pct(v.replied, v.total) }))
     .sort((a,b) => b.total - a.total).slice(0, 8);
@@ -497,52 +631,120 @@ function renderCompanies(contacts) {
     </tr>`).join('')}</tbody></table>`;
 }
 
-// ── Auto insights ────────────────────────────────────────────────────────────
-function renderInsights(contacts, m) {
+// ── Follow-up effectiveness card ─────────────────────────────────────────────
+function renderFollowUps(m) {
+  const el = document.getElementById('fu-body');
+  if (!m.fuCount) { el.innerHTML = `<div class="an-empty"><i class="ti ti-repeat-off"></i>No follow-ups sent yet</div>`; return; }
+  const noFuSent = m.sentCount - m.fuCount; // contacts emailed but never followed up
+  const initialReplies = m.beforeFuCount;   // replied without needing a follow-up
+  const fuReplies = m.afterFuCount;         // replied only after a follow-up
+  const fuReplyRate = pct(fuReplies, m.fuCount);
+  const teal = cvar('--teal'), amber = cvar('--amber');
+  const rowsHtml = [
+    { label: 'Replied to first email', n: initialReplies, d: m.sentCount, col: teal },
+    { label: 'Replied after a follow-up', n: fuReplies, d: m.fuCount, col: amber },
+  ].map(r => `<div class="hbar-row">
+      <div class="hbar-top">
+        <span class="hbar-label"><span class="dot" style="background:${r.col}"></span>${r.label}</span>
+        <span class="hbar-val"><b>${r.n}</b> <span style="color:var(--text3)">${pct(r.n,r.d)}% of ${r.d.toLocaleString()}</span></span>
+      </div>
+      <div class="hbar-track"><div class="hbar-fill" style="width:${Math.max(2,pct(r.n,r.d))}%;background:${r.col};opacity:.85"></div></div>
+    </div>`).join('');
+  const share = m.repliedCount ? pct(fuReplies, m.repliedCount) : 0;
+  el.innerHTML = rowsHtml + `
+    <div style="margin-top:14px;padding:11px 13px;border-radius:var(--radius);background:var(--bg2);border:0.5px solid var(--border);font-size:12px;color:var(--text2);line-height:1.55">
+      <b style="color:var(--text)">${fuReplies}</b> of your <b style="color:var(--text)">${m.repliedCount}</b> total replies (${share}%) only came after a follow-up —
+      ${fuReplies > 0 ? 'these are replies you would have missed without following up.' : 'follow-ups haven’t converted anyone yet.'}
+    </div>`;
+}
+
+// ── Insights (expanded, all history-based) ───────────────────────────────────
+function renderInsights(m) {
   const items = [];
-  // Best template
   const tpls = window._app.state.templates || {};
+
+  // 1. Best template (min 20 sends)
   const tmap = {};
-  contacts.forEach(c => {
-    if (!(c.lastSentAt || EMAILED.has(c.status))) return;
-    const k = c.template || '—'; tmap[k] = tmap[k] || { s:0, r:0 };
-    tmap[k].s++; if (REPLIED.has(c.status)||c.repliedAt) tmap[k].r++;
-  });
-  const best = Object.entries(tmap).filter(([,v]) => v.s >= 5).map(([k,v]) => ({ name: tpls[k]?.name||k, rate: pct(v.r,v.s) })).sort((a,b)=>b.rate-a.rate)[0];
-  if (best) items.push({ i:'ti-trophy', c:'--green', t:'Best template', x:`<b>${best.name}</b> leads with a ${best.rate}% reply rate.` });
-
-  // Median response time
-  const rts = [];
-  contacts.forEach(c => {
-    if (!c.repliedAt) return;
-    let sendT = null;
-    (c.statusHistory||[]).forEach(h => { if (h.status==='sent'||h.status==='follow-up-sent'){ const t=new Date(h.changedAt).getTime(); const rt=new Date(c.repliedAt).getTime(); if (t<=rt && (sendT===null||t>sendT)) sendT=t; }});
-    if (sendT===null && c.lastSentAt) sendT = new Date(c.lastSentAt).getTime();
-    if (sendT!==null) { const h=(new Date(c.repliedAt).getTime()-sendT)/3600000; if (h>=0) rts.push(h); }
-  });
-  if (rts.length) {
-    rts.sort((a,b)=>a-b); const med = rts[Math.floor(rts.length/2)];
-    const disp = med < 24 ? `${Math.round(med)} hour${Math.round(med)!==1?'s':''}` : `${(med/24).toFixed(1)} days`;
-    items.push({ i:'ti-clock-bolt', c:'--indigo', t:'Typical response time', x:`Half of replies arrive within <b>${disp}</b> of sending.` });
+  A.forEach(a => { if (!a.everSent) return; const k = a.c.template||'—'; tmap[k]=tmap[k]||{s:0,r:0}; tmap[k].s++; if (a.everReplied) tmap[k].r++; });
+  const ranked = Object.entries(tmap).filter(([,v]) => v.s >= 20).map(([k,v]) => ({ name: tpls[k]?.name||k, rate: pct(v.r,v.s), s: v.s })).sort((a,b)=>b.rate-a.rate);
+  if (ranked.length >= 2) {
+    items.push({ i:'ti-trophy', c:'--green', t:'Best template',
+      x:`<b>${ranked[0].name}</b> (${ranked[0].rate}%) out-performs <b>${ranked[ranked.length-1].name}</b> (${ranked[ranked.length-1].rate}%) — consider shifting volume to it.` });
+  } else if (ranked.length === 1) {
+    items.push({ i:'ti-trophy', c:'--green', t:'Template baseline', x:`<b>${ranked[0].name}</b> converts at ${ranked[0].rate}% over ${ranked[0].s} sends.` });
   }
 
-  // Best weekday for replies
-  const wd = [0,0,0,0,0,0,0];
-  contacts.forEach(c => { if (c.repliedAt) wd[new Date(c.repliedAt).getDay()]++; });
+  // 2. Response speed (median + share within 24h)
+  const allPairs = A.flatMap(a => a.pairs).sort((a,b)=>a-b);
+  if (allPairs.length >= 5) {
+    const med = allPairs[Math.floor(allPairs.length/2)];
+    const within24 = pct(allPairs.filter(h => h <= 24).length, allPairs.length);
+    items.push({ i:'ti-clock-bolt', c:'--indigo', t:'Response speed',
+      x:`Median reply lands in <b>${fmtDur(med)}</b>; ${within24}% arrive within 24 hours. If no reply after ~3 days, it likely isn't coming — follow up then.` });
+  }
+
+  // 3. Peak reply day & hour
+  const wd = [0,0,0,0,0,0,0], hr = new Array(24).fill(0);
+  A.forEach(a => a.replies.forEach(r => { const d = new Date(r.t); wd[d.getDay()]++; hr[d.getHours()]++; }));
   const wdMax = Math.max(...wd);
-  if (wdMax > 0) {
+  if (wdMax > 2) {
     const names = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
-    items.push({ i:'ti-calendar-star', c:'--amber', t:'Peak reply day', x:`<b>${names[wd.indexOf(wdMax)]}</b> brings the most replies.` });
+    const hMax = hr.indexOf(Math.max(...hr));
+    const hLabel = `${((hMax+11)%12)+1}${hMax<12?'am':'pm'}`;
+    items.push({ i:'ti-calendar-star', c:'--amber', t:'When replies come',
+      x:`<b>${names[wd.indexOf(wdMax)]}</b> is your biggest reply day, peaking around <b>${hLabel}</b>. Time sends so you land near the top of Monday-morning inboxes.` });
   }
 
-  // Follow-up effectiveness
-  if (m.followUpsSentCount >= 3) {
-    items.push({ i:'ti-repeat', c:'--teal', t:'Follow-up impact', x:`${m.followUpReplyRate}% of follow-ups earned a reply (${m.followUpRepliedCount} of ${m.followUpsSentCount}).` });
+  // 4. Follow-up rescue
+  if (m.fuCount >= 10) {
+    const share = m.repliedCount ? pct(m.afterFuCount, m.repliedCount) : 0;
+    items.push({ i:'ti-repeat', c:'--teal', t:'Follow-up impact',
+      x:`Follow-ups recovered <b>${m.afterFuCount}</b> replies (${share}% of all replies) that the first email didn't get. Reply rate on follow-ups: ${pct(m.afterFuCount, m.fuCount)}%.` });
   }
 
-  // Overall benchmark
+  // 5. Momentum: last 7 days vs previous 7
+  const now = Date.now(), wk = 7*86400000;
+  const inWin = (t, from, to) => t >= from && t < to;
+  let s1=0,s2=0,r1=0,r2=0;
+  A.forEach(a => {
+    a.sends.forEach(s => { if (inWin(s.t, now-wk, now)) s1++; else if (inWin(s.t, now-2*wk, now-wk)) s2++; });
+    a.replies.forEach(r => { if (inWin(r.t, now-wk, now)) r1++; else if (inWin(r.t, now-2*wk, now-wk)) r2++; });
+  });
+  if (s1 + s2 > 0) {
+    const dir = s1 > s2 ? 'up' : s1 < s2 ? 'down' : 'flat';
+    items.push({ i: dir==='up'?'ti-trending-up':dir==='down'?'ti-trending-down':'ti-minus', c: dir==='down'?'--amber':'--green', t:'This week vs last',
+      x:`Sends: <b>${s1}</b> vs ${s2} · replies: <b>${r1}</b> vs ${r2}. ${dir==='down'?'Volume is dropping — queued contacts are waiting.':dir==='up'?'Volume is growing — keep the cadence.':'Steady cadence.'}` });
+  }
+
+  // 6. Bounce health
+  if (m.sentCount >= 50) {
+    const level = m.bounceRate > 20 ? 'critical' : m.bounceRate > 10 ? 'high' : 'healthy';
+    items.push({ i: level==='healthy'?'ti-shield-check':'ti-alert-triangle', c: level==='healthy'?'--green':'--red', t:'List quality',
+      x: level==='healthy'
+        ? `Bounce rate is <b>${m.bounceRate}%</b> — your list quality is fine.`
+        : `Bounce rate is <b>${m.bounceRate}%</b> (${m.bouncedCount} addresses) — that's ${level}. Verify emails before sending; high bounces hurt Gmail deliverability for ALL your mail.` });
+  }
+
+  // 7. Pipeline conversion
+  if (m.repliedCount >= 5) {
+    const adv = A.filter(a => a.everReplied && (a.ever.has('in-review') || a.ever.has('closed'))).length;
+    items.push({ i:'ti-target-arrow', c:'--indigo', t:'Reply → pipeline conversion',
+      x:`<b>${adv}</b> of ${m.repliedCount} repliers (${pct(adv, m.repliedCount)}%) progressed to review or closed. ${m.repliedCount-adv > 0 ? `${m.repliedCount-adv} replies may still need a next step.` : ''}` });
+  }
+
+  // 8. Waiting follow-ups + queued
+  const due = A.filter(a => (a.c.status === 'sent' || a.c.status === 'replied') && !a.c.followUpSentAt && a.c.lastSentAt && (now - new Date(a.c.lastSentAt).getTime()) > 3*86400000).length;
+  if (due > 0 || m.queuedNow > 0) {
+    const parts = [];
+    if (due > 0) parts.push(`<b>${due}</b> contacts are due a follow-up`);
+    if (m.queuedNow > 0) parts.push(`<b>${m.queuedNow}</b> are queued and never emailed`);
+    items.push({ i:'ti-hourglass-high', c:'--amber', t:'Waiting on you', x: parts.join(' · ') + '.' });
+  }
+
+  // 9. Benchmark
   const verdict = m.replyRate >= 15 ? 'well above' : m.replyRate >= 5 ? 'around' : 'below';
-  items.push({ i:'ti-target-arrow', c: m.replyRate>=5?'--green':'--red', t:'Overall reply rate', x:`Your ${m.replyRate}% reply rate is <b>${verdict}</b> the ~5% cold-email benchmark.` });
+  items.push({ i:'ti-gauge', c: m.replyRate>=5?'--green':'--red', t:'Overall reply rate',
+    x:`<b>${m.replyRate}%</b> of emailed contacts have ever replied — ${verdict} the ~5% cold-email benchmark.${m.replyRate<5?' Tighter targeting and shorter emails usually move this most.':''}` });
 
   document.getElementById('insights-body').innerHTML = items.map(it =>
     `<div class="insight"><i class="ti ${it.i}" style="color:var(${it.c})"></i><div><div class="in-title">${it.t}</div><div class="in-text">${it.x}</div></div></div>`
@@ -551,17 +753,20 @@ function renderInsights(contacts, m) {
 
 // ── Orchestration ────────────────────────────────────────────────────────────
 function renderAll() {
-  const m = computeMetrics(CONTACTS);
+  const m = computeMetrics();
   document.getElementById('an-subtitle').textContent =
-    `${m.total.toLocaleString()} contacts · ${m.sentCount.toLocaleString()} emailed · ${m.repliedCount.toLocaleString()} replies`;
+    `${m.total.toLocaleString()} contacts · ${m.sentCount.toLocaleString()} emailed · ${m.repliedCount.toLocaleString()} ever replied`;
   renderKpis(m);
   renderFunnel(m);
-  renderStatus(CONTACTS);
-  renderTimeSeries(buildDailySeries(CONTACTS, currentRange));
-  renderReplyTime(CONTACTS);
-  renderTemplates(CONTACTS);
-  renderCompanies(CONTACTS);
-  renderInsights(CONTACTS, m);
+  renderStatus();
+  renderTimeSeries(buildDailySeries(currentRange));
+  renderReplyTime();
+  renderTemplates();
+  renderJourney(m);
+  renderWeekday();
+  renderCompanies();
+  renderFollowUps(m);
+  renderInsights(m);
 }
 
 async function loadAnalytics() {
@@ -570,6 +775,7 @@ async function loadAnalytics() {
   try {
     await Promise.all([window._app.loadContacts(), window._app.loadTemplates()]);
     CONTACTS = window._app.state.contacts;
+    A = CONTACTS.map(analyze);
     renderAll();
   } catch (err) {
     window._app.toast('Could not load analytics: ' + err.message, 'error');
@@ -584,11 +790,18 @@ document.getElementById('range-toggle').addEventListener('click', (e) => {
   const b = e.target.closest('.range-btn'); if (!b) return;
   currentRange = parseInt(b.dataset.days, 10);
   document.querySelectorAll('.range-btn').forEach(x => x.classList.toggle('active', x === b));
-  if (CONTACTS.length) renderTimeSeries(buildDailySeries(CONTACTS, currentRange));
+  if (A.length) renderTimeSeries(buildDailySeries(currentRange));
+});
+// Status mode toggle
+document.getElementById('status-toggle').addEventListener('click', (e) => {
+  const b = e.target.closest('.status-mode-btn'); if (!b) return;
+  statusMode = b.dataset.mode;
+  document.querySelectorAll('.status-mode-btn').forEach(x => x.classList.toggle('active', x === b));
+  if (A.length) renderStatus();
 });
 // Re-render on theme change so chart colors re-resolve from tokens
 document.querySelectorAll('[data-theme-toggle]').forEach(btn =>
-  btn.addEventListener('click', () => setTimeout(() => { if (CONTACTS.length) renderAll(); }, 30)));
+  btn.addEventListener('click', () => setTimeout(() => { if (A.length) renderAll(); }, 30)));
 
 window._app.initTheme();
 window._app.initMobileNav();
