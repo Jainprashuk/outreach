@@ -1,0 +1,126 @@
+// Port of the event-based analytics derivations from analytics.html.
+// All metrics count what contacts EVER passed through (statusHistory), not just
+// their current resting status.
+import type { Contact } from './api';
+
+export const STATUS_META: Record<string, { label: string; c: string }> = {
+  queued: { label: 'Queued', c: '--blue' },
+  sent: { label: 'Sent', c: '--green' },
+  'follow-up-sent': { label: 'Follow-up Sent', c: '--amber' },
+  replied: { label: 'Replied', c: '--teal' },
+  'follow-up-replied': { label: 'Replied after Follow-up', c: '--teal' },
+  bounced: { label: 'Bounced', c: '--red' },
+  failed: { label: 'Failed', c: '--red' },
+  closed: { label: 'Closed', c: '--slate' },
+  'no-openings': { label: 'No Openings', c: '--purple' },
+  'in-review': { label: 'In Review', c: '--indigo' },
+};
+
+export const EMAILED = new Set(['sent', 'follow-up-sent', 'replied', 'follow-up-replied', 'bounced', 'closed', 'no-openings', 'in-review']);
+
+export const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : 0);
+export const dayKey = (d: string | number | Date) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x.getTime(); };
+export const fmtDur = (hrs: number) => {
+  if (hrs < 1) return `${Math.max(1, Math.round(hrs * 60))} min`;
+  if (hrs < 48) return `${Math.round(hrs * 10) / 10} hr${hrs >= 1.05 ? 's' : ''}`;
+  return `${(hrs / 24).toFixed(1)} days`;
+};
+
+export interface Analyzed {
+  c: Contact;
+  ever: Set<string>;
+  sends: Array<{ s: string; t: number }>;
+  replies: Array<{ s: string; t: number }>;
+  pairs: number[];
+  everSent: boolean;
+  everReplied: boolean;
+  everFollowUp: boolean;
+  everBounced: boolean;
+  repliedAfterFu: boolean;
+  outcome: string;
+}
+
+export function analyze(c: Contact): Analyzed {
+  const hist = (c.statusHistory || [])
+    .map(h => ({ s: h.status, t: new Date(h.changedAt).getTime() }))
+    .filter(h => Number.isFinite(h.t)).sort((a, b) => a.t - b.t);
+  const ever = new Set(hist.map(h => h.s)); ever.add(c.status);
+
+  const sends = hist.filter(h => h.s === 'sent' || h.s === 'follow-up-sent');
+  const replies = hist.filter(h => h.s === 'replied' || h.s === 'follow-up-replied');
+  if (!sends.length && c.lastSentAt) sends.push({ s: 'sent', t: new Date(c.lastSentAt).getTime() });
+  if (!replies.length && c.repliedAt) replies.push({ s: 'replied', t: new Date(c.repliedAt).getTime() });
+
+  const fuSends = sends.filter(s => s.s === 'follow-up-sent');
+  const firstFuT = fuSends.length ? fuSends[0].t : (c.followUpSentAt ? new Date(c.followUpSentAt).getTime() : null);
+
+  // Pair each reply with the latest send before it; skip corrupt orderings, cap 90d.
+  const pairs: number[] = [];
+  replies.forEach(r => {
+    let sendT: number | null = null;
+    sends.forEach(s => { if (s.t <= r.t && (sendT === null || s.t > sendT)) sendT = s.t; });
+    if (sendT !== null) {
+      const hrs = (r.t - sendT) / 3600000;
+      if (hrs >= 0 && hrs < 24 * 90) pairs.push(hrs);
+    }
+  });
+
+  const firstReplyT = replies.length ? replies[0].t : null;
+  const repliedAfterFu = ever.has('follow-up-replied') ||
+    (firstFuT !== null && firstReplyT !== null && firstReplyT > firstFuT);
+
+  return {
+    c, ever, sends, replies, pairs,
+    everSent: sends.length > 0 || EMAILED.has(c.status) || ever.has('sent'),
+    everReplied: replies.length > 0,
+    everFollowUp: firstFuT !== null || ever.has('follow-up-sent') || ever.has('follow-up-replied'),
+    everBounced: ever.has('bounced'),
+    repliedAfterFu,
+    outcome: c.status,
+  };
+}
+
+export interface Metrics {
+  total: number; sentCount: number; repliedCount: number;
+  fuCount: number; bouncedCount: number;
+  afterFuCount: number; beforeFuCount: number;
+  inReviewEver: number; closedEver: number; queuedNow: number;
+  replyRate: number; bounceRate: number;
+}
+
+export function computeMetrics(A: Analyzed[]): Metrics {
+  const sent = A.filter(a => a.everSent);
+  const replied = A.filter(a => a.everReplied);
+  const fu = A.filter(a => a.everFollowUp);
+  const bounced = A.filter(a => a.everBounced);
+  const afterFu = A.filter(a => a.repliedAfterFu);
+  return {
+    total: A.length,
+    sentCount: sent.length,
+    repliedCount: replied.length,
+    fuCount: fu.length,
+    bouncedCount: bounced.length,
+    afterFuCount: afterFu.length,
+    beforeFuCount: replied.length - afterFu.length,
+    inReviewEver: A.filter(a => a.ever.has('in-review')).length,
+    closedEver: A.filter(a => a.ever.has('closed')).length,
+    queuedNow: A.filter(a => a.c.status === 'queued').length,
+    replyRate: pct(replied.length, sent.length),
+    bounceRate: pct(bounced.length, sent.length),
+  };
+}
+
+export function buildDailySeries(A: Analyzed[], days: number) {
+  const today = dayKey(Date.now());
+  const start = today - (days - 1) * 86400000;
+  const sent = new Map<number, number>(), rep = new Map<number, number>();
+  A.forEach(a => {
+    a.sends.forEach(s => { const k = dayKey(s.t); if (k >= start && k <= today) sent.set(k, (sent.get(k) || 0) + 1); });
+    a.replies.forEach(r => { const k = dayKey(r.t); if (k >= start && k <= today) rep.set(k, (rep.get(k) || 0) + 1); });
+  });
+  const out: Array<{ day: number; sent: number; replied: number }> = [];
+  for (let k = start; k <= today; k += 86400000) out.push({ day: k, sent: sent.get(k) || 0, replied: rep.get(k) || 0 });
+  return out;
+}
+
+export const cvar = (v: string) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();

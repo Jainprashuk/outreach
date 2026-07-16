@@ -72,6 +72,17 @@ app.get('/logout', (_req, res) => {
   res.redirect('/login');
 });
 
+// ── UI toggle: remembered preference for the React UI (see client/) ─────────
+// Only the exact root path redirects — deep links to either UI always work.
+app.get('/', (req, res, next) => {
+  if ((req.headers.cookie || '').includes('outreach_ui=react')) return res.redirect('/app/');
+  next();
+});
+
+// React SPA (Vite build) — served behind the same requireAuth as everything else.
+app.use('/app', express.static(path.join(__dirname, 'client/dist')));
+app.get('/app/*', (_req, res) => res.sendFile(path.join(__dirname, 'client/dist/index.html')));
+
 app.use(express.static(__dirname));
 
 // Cached connection promise — one connection attempt shared across all concurrent requests

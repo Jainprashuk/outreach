@@ -9,6 +9,7 @@
           "*.html",
           "css/**",
           "js/**",
+          "client/dist/**",
           "sample-contacts.csv"
         ],
         "maxDuration": 60

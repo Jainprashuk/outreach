@@ -5,7 +5,9 @@
   "description": "Backend server for the Outreach email campaign tool (Gmail sending via nodemailer)",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "cd client && npm install && npm run build",
+    "dev:client": "cd client && npm run dev"
   },
   "dependencies": {
     "cors": "^2.8.5",
