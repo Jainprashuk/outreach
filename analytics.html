@@ -350,7 +350,7 @@ function renderFunnel(m) {
   const steps = [
     { label: 'Contacts added', n: m.total },
     { label: 'Emailed', n: m.sentCount },
-    { label: 'Replied (ever)', n: m.repliedCount },
+    { label: 'Replied (ever)', n: m.repliedCount, sub: `${m.beforeFuCount} on first email · ${m.afterFuCount} after follow-up` },
     { label: 'Moved to review', n: m.inReviewEver },
     { label: 'Closed', n: m.closedEver },
   ];
@@ -367,6 +367,7 @@ function renderFunnel(m) {
         <span class="hbar-val"><b>${s.n.toLocaleString()}</b> <span style="color:var(--text3)">${pct(s.n,max)}%${conv}</span></span>
       </div>
       <div class="hbar-track"><div class="hbar-fill" style="width:${w}%;background:${accent};opacity:${op.toFixed(2)}"></div></div>
+      ${s.sub ? `<div style="font-size:.72rem;color:var(--text3);margin-top:2px">${s.sub}</div>` : ''}
     </div>`;
   }).join('');
 }
