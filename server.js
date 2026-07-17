@@ -81,7 +81,13 @@ app.get('/', (req, res, next) => {
 
 // React SPA (Vite build) — served behind the same requireAuth as everything else.
 app.use('/app', express.static(path.join(__dirname, 'client/dist')));
-app.get('/app/*', (_req, res) => res.sendFile(path.join(__dirname, 'client/dist/index.html')));
+app.get('/app/*', (req, res, next) => {
+  // Only client-side routes fall back to index.html. A request that looks like a
+  // file (has an extension) but wasn't served above is a genuinely missing asset —
+  // let it 404 instead of returning index.html with a text/html MIME type.
+  if (/\.\w+$/.test(req.path)) return next();
+  res.sendFile(path.join(__dirname, 'client/dist/index.html'));
+});
 
 app.use(express.static(__dirname));
 
