@@ -6,7 +6,19 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   base: '/app/',
-  build: { outDir: 'dist' },
+  build: {
+    outDir: 'dist',
+    // Stable, non-hashed filenames so index.html always references assets that
+    // exist — immune to CDN caching index.html separately from the hashed bundle
+    // (which caused 404s / MIME errors on Vercel).
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/app.js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: 'assets/app.[ext]',
+      },
+    },
+  },
   server: {
     port: 5173,
     proxy: {
