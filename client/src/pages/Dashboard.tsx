@@ -6,7 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import ReplyModal from '../components/ReplyModal';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
-import { resetForSendApi, retryFailedApi, type Contact } from '../lib/api';
+import { retryFailedApi, type Contact } from '../lib/api';
 
 const PAGE_SIZE = 25;
 
@@ -408,10 +408,11 @@ export default function Dashboard() {
                     <td style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
                       {c.status === 'failed'
                         ? <button className="btn btn-sm btn-primary" onClick={async () => {
+                            // Match classic retriggerContact: re-queue as approved (keep edits) → step3
                             try {
-                              await resetForSendApi([c.id]);
-                              navigate(`/send/step2?from=contacts&ids=${c.id}`);
-                            } catch (err: any) { toast(err.message, 'error'); }
+                              await app.updateContact(c.id, { status: 'queued', approvalStatus: 'approved' });
+                              navigate('/send/step3');
+                            } catch (err: any) { toast('Could not reset contact: ' + err.message, 'error'); }
                           }} type="button"><i className="ti ti-send" /> Re-send</button>
                         : c.approvalStatus === 'pending'
                           ? <Link to="/send/step2" className="btn btn-sm">Review</Link>

@@ -29,27 +29,26 @@ export default function Step2() {
   const [editSubject, setEditSubject] = useState('');
   const [editBody, setEditBody] = useState('');
 
+  // Load THIS page's own fresh data and seed approvals from the result — mirrors
+  // step2.html, which always loadContacts() then filters. Seeding from the shared
+  // context would use stale data (e.g. after reset-for-send on the previous step).
   useEffect(() => {
     (async () => {
       try {
-        await app.init();
+        const [contacts] = await Promise.all([
+          app.loadContacts(), app.loadTemplates(), app.loadSettings(),
+        ]);
+        const pending = contacts.filter(c =>
+          c.approvalStatus === 'pending' && (!filterIds || filterIds.has(c.id)),
+        );
+        setApprovals(pending.map(c => ({ ...c, localApproval: 'pending' as ApprovalStatus })));
       } catch (err: any) {
         setError(err.message);
-        return;
       } finally {
         setLoaded(true);
       }
     })();
   }, []);
-
-  // Seed approvals once data is loaded (mirrors classic: pending contacts, optionally filtered)
-  useEffect(() => {
-    if (!app.loaded || approvals.length) return;
-    const pending = app.contacts.filter(c =>
-      c.approvalStatus === 'pending' && (!filterIds || filterIds.has(c.id)),
-    );
-    setApprovals(pending.map(c => ({ ...c, localApproval: 'pending' as ApprovalStatus })));
-  }, [app.loaded]);
 
   const approvedCount = approvals.filter(a => a.localApproval === 'approved').length;
 
