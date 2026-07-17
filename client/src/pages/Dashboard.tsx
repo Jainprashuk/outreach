@@ -199,11 +199,11 @@ export default function Dashboard() {
   const fuAllChecked = isFuTab && paged.length > 0 && paged.every(c => selectedFu.has(c.id));
 
   const kpis = [
-    { label: 'Total contacts', value: stats.total, cls: '' },
-    { label: 'Sent', value: stats.sent, cls: 'green' },
-    { label: 'Bounced', value: stats.bounced, cls: 'red' },
-    { label: 'Follow-up Due', value: stats.followUpDue, cls: 'amber', link: true },
-    { label: 'In Review', value: stats.inReview, cls: '', style: { color: '#2563eb' } },
+    { label: 'Total contacts', value: stats.total, cls: '', icon: 'ti-users', ico: '' },
+    { label: 'Sent', value: stats.sent, cls: 'green', icon: 'ti-send', ico: 'green' },
+    { label: 'Bounced', value: stats.bounced, cls: 'red', icon: 'ti-alert-triangle', ico: 'red' },
+    { label: 'Follow-up Due', value: stats.followUpDue, cls: 'amber', link: true, icon: 'ti-clock-hour-4', ico: 'amber' },
+    { label: 'In Review', value: stats.inReview, cls: '', style: { color: '#2563eb' }, icon: 'ti-eye', ico: 'teal' },
   ];
 
   return (
@@ -229,11 +229,13 @@ export default function Dashboard() {
         {kpis.map(k => k.link ? (
           <a key={k.label} href="#" className="stat-card" style={{ textDecoration: 'none' }}
             onClick={e => { e.preventDefault(); setTab('followup-due'); setPage(1); }}>
+            <div className={`kpi-ico ${k.ico}`}><i className={`ti ${k.icon}`} /></div>
             <div className="stat-label">{k.label}</div>
             {busy ? <Skeleton w="42%" h={28} style={{ marginTop: 2 }} /> : <div className={`stat-value ${k.cls}`}>{k.value}</div>}
           </a>
         ) : (
           <div key={k.label} className="stat-card">
+            <div className={`kpi-ico ${k.ico}`}><i className={`ti ${k.icon}`} /></div>
             <div className="stat-label">{k.label}</div>
             {busy ? <Skeleton w="42%" h={28} style={{ marginTop: 2 }} /> : <div className={`stat-value ${k.cls}`} style={k.style}>{k.value}</div>}
           </div>
