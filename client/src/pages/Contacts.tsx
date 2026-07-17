@@ -7,6 +7,7 @@ import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { API_BASE, resetForSendApi, type Contact } from '../lib/api';
 import { parseCsvText, readFileText } from '../lib/csv';
+import { SkeletonRows } from '../components/Skeleton';
 
 const PAGE_SIZE = 25;
 
@@ -33,12 +34,15 @@ export default function Contacts() {
   const [dragOver, setDragOver] = useState(false);
   const [importOk, setImportOk] = useState(false);
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(!app.loaded);
   const fileRef = useRef<HTMLInputElement>(null);
   const [failReasons, setFailReasons] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    app.init().catch(err => setError(err.message));
+    app.init().catch(err => setError(err.message)).finally(() => setLoading(false));
   }, []);
+
+  const busy = loading && app.contacts.length === 0;
 
   const filtered = useMemo(() => {
     let list = app.filterContacts(tab);
@@ -218,7 +222,9 @@ export default function Contacts() {
             </tr>
           </thead>
           <tbody>
-            {error ? (
+            {busy ? (
+              <SkeletonRows rows={8} cols={8} chipCol={1} />
+            ) : error ? (
               <tr><td colSpan={8}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
             ) : paged.length === 0 ? (
               <tr><td colSpan={8}><div className="empty-state"><i className="ti ti-users" />No contacts found</div></td></tr>

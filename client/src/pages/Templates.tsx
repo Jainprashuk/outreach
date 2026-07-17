@@ -5,6 +5,7 @@ import VariablePills from '../components/VariablePills';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { bodyToHtml } from '../lib/format';
+import { CardSkeleton } from '../components/Skeleton';
 
 export default function Templates() {
   const app = useApp();
@@ -19,9 +20,11 @@ export default function Templates() {
   const subjectRef = useRef<HTMLInputElement>(null);
   const bodyRef = useRef<HTMLTextAreaElement>(null);
   const lastFocused = useRef<'subject' | 'body'>('body');
+  const [loading, setLoading] = useState(Object.keys(app.templates).length === 0);
 
   useEffect(() => {
-    Promise.all([app.loadTemplates(), app.loadSettings()]).catch(err => setError(err.message));
+    Promise.all([app.loadTemplates(), app.loadSettings()])
+      .catch(err => setError(err.message)).finally(() => setLoading(false));
   }, []);
 
   const openModal = (key?: string) => {
@@ -98,7 +101,9 @@ export default function Templates() {
         </div>
       </div>
 
-      {error ? (
+      {loading && entries.length === 0 ? (
+        <>{Array.from({ length: 3 }).map((_, i) => <CardSkeleton key={i} />)}</>
+      ) : error ? (
         <div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div>
       ) : entries.length === 0 ? (
         <div className="empty-state"><i className="ti ti-file-text" />No templates yet — create your first one.</div>

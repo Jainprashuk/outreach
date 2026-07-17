@@ -325,3 +325,72 @@ a:focus-visible, button:focus-visible, .nav-item:focus-visible, .nav-tab:focus-v
 .stat-card:focus-visible, .btn:focus-visible {
   outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 9px;
 }
+
+/* ── Detail polish ─────────────────────────────────────────────────────────── */
+
+/* Gentle content fade on route mount (opacity only — safe under the sticky topbar) */
+@keyframes contentIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+.section, .form-body, .success-screen { animation: contentIn .26s var(--ease) both; }
+
+/* Skeleton shimmer — smoother, theme-aware, and inert inside tables */
+.skeleton {
+  background: linear-gradient(100deg,
+    color-mix(in srgb, var(--text) 6%, var(--bg)) 30%,
+    color-mix(in srgb, var(--text) 11%, var(--bg)) 50%,
+    color-mix(in srgb, var(--text) 6%, var(--bg)) 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s ease-in-out infinite;
+}
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+.skeleton-tr td { border-top-color: var(--border); }
+.skeleton-tr:hover { background: transparent !important; }
+
+/* Custom select chevron (native arrow removed for a consistent look both themes) */
+select {
+  appearance: none; -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239298a6' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'><path d='M6 9l6 6 6-6'/></svg>");
+  background-repeat: no-repeat; background-position: right 10px center;
+  padding-right: 32px;
+}
+
+/* Disabled affordances */
+.btn:disabled { opacity: .55; cursor: not-allowed; box-shadow: none; transform: none; }
+.btn:disabled:hover { background: var(--bg); transform: none; }
+input:disabled, select:disabled, textarea:disabled { opacity: .55; cursor: not-allowed; }
+
+/* Empty states — softer, more intentional */
+.empty-state { color: var(--text3); }
+.empty-state i { opacity: .7; }
+.empty-state a { color: var(--accent); font-weight: 550; }
+
+/* Hide the tab-strip scrollbar (it scrolls, but the bar is visual noise) */
+.nav-tabs { scrollbar-width: none; }
+.nav-tabs::-webkit-scrollbar { height: 0; width: 0; }
+
+/* Smoother table interactions + click affordance on sortable headers */
+tbody tr { transition: background-color .12s var(--ease); }
+thead th[style*="cursor"]:hover { color: var(--text); }
+.contact-chip .name, .badge, .btn { transition: color .12s var(--ease), background-color .12s var(--ease); }
+
+/* Count badge / pagination alignment nicety */
+.pagination-bar { padding-top: 16px; }
+
+/* Reply snippet legibility */
+.reply-snippet-cell { color: var(--text2); }
+
+/* Toast icon color already semantic; tighten layout */
+.toast .toast-msg { line-height: 1.5; }
+
+/* Modal close button + inputs breathing room */
+.edit-modal .form-group { margin-bottom: 15px; }
+
+/* Segmented toggles feel like real controls */
+.seg-toggle .btn-xs { color: var(--text2); border: none; background: transparent; box-shadow: none; }
+.seg-toggle .btn-xs:hover { color: var(--text); background: transparent; }
+
+/* Analytics insight icons sit in a tinted chip for polish */
+.insight i { width: 30px; height: 30px; display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 9px; background: color-mix(in srgb, currentColor 12%, transparent); font-size: 16px; margin-top: 0; }
+
+/* Avatar in skeleton state shouldn't show initials ring */
+.skeleton-tr .skeleton { box-shadow: none; }

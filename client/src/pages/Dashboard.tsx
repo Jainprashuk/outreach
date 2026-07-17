@@ -7,6 +7,7 @@ import ReplyModal from '../components/ReplyModal';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { retryFailedApi, type Contact } from '../lib/api';
+import { Skeleton, SkeletonRows } from '../components/Skeleton';
 
 const PAGE_SIZE = 25;
 
@@ -39,9 +40,13 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const silentChecking = useRef(false);
 
+  const [loading, setLoading] = useState(!app.loaded);
+
   useEffect(() => {
-    app.init().catch(err => setError(err.message));
+    app.init().catch(err => setError(err.message)).finally(() => setLoading(false));
   }, []);
+
+  const busy = loading && app.contacts.length === 0;
 
   // Auto mailbox check: on load if stale, every 15 min, and on tab re-focus (same as classic)
   useEffect(() => {
@@ -225,12 +230,12 @@ export default function Dashboard() {
           <a key={k.label} href="#" className="stat-card" style={{ textDecoration: 'none' }}
             onClick={e => { e.preventDefault(); setTab('followup-due'); setPage(1); }}>
             <div className="stat-label">{k.label}</div>
-            <div className={`stat-value ${k.cls}`}>{k.value}</div>
+            {busy ? <Skeleton w="42%" h={28} style={{ marginTop: 2 }} /> : <div className={`stat-value ${k.cls}`}>{k.value}</div>}
           </a>
         ) : (
           <div key={k.label} className="stat-card">
             <div className="stat-label">{k.label}</div>
-            <div className={`stat-value ${k.cls}`} style={k.style}>{k.value}</div>
+            {busy ? <Skeleton w="42%" h={28} style={{ marginTop: 2 }} /> : <div className={`stat-value ${k.cls}`} style={k.style}>{k.value}</div>}
           </div>
         ))}
       </div>
@@ -295,7 +300,8 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {error ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
+                {busy ? <SkeletonRows rows={8} cols={6} chipCol={0} />
+                : error ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
                 : paged.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-message-off" />No replies yet</div></td></tr>
                 : paged.map(c => {
                   const isNew = !c.replyRead;
@@ -353,7 +359,8 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {paged.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-check" />No follow-ups due</div></td></tr>
+                {busy ? <SkeletonRows rows={8} cols={6} chipCol={1} />
+                : paged.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-check" />No follow-ups due</div></td></tr>
                 : paged.map(c => {
                   const daysAgo = c.lastSentAt ? Math.floor((Date.now() - new Date(c.lastSentAt).getTime()) / 86400000) : null;
                   return (
@@ -391,7 +398,8 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {error ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
+                {busy ? <SkeletonRows rows={8} cols={6} chipCol={0} />
+                : error ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
                 : paged.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-users" />No contacts found</div></td></tr>
                 : paged.map(c => (
                   <tr key={c.id}>
