@@ -58,8 +58,8 @@ export default function Contacts() {
   const safePage = Math.min(page, totalPages);
   const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  const allChecked = paged.length > 0 && paged.every(c => selected.has(c.id));
-  const someChecked = paged.some(c => selected.has(c.id));
+  const allChecked = filtered.length > 0 && filtered.every(c => selected.has(c.id));
+  const someChecked = filtered.some(c => selected.has(c.id));
 
   const resetPage = () => setPage(1);
 
@@ -74,7 +74,7 @@ export default function Contacts() {
   const toggleAll = (checked: boolean) => {
     setSelected(prev => {
       const next = new Set(prev);
-      paged.forEach(c => { if (checked) next.add(c.id); else next.delete(c.id); });
+      filtered.forEach(c => { if (checked) next.add(c.id); else next.delete(c.id); });
       return next;
     });
   };
