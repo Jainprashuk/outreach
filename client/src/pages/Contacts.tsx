@@ -106,6 +106,18 @@ export default function Contacts() {
     setPage(1);
   };
 
+  const changeTemplateSelected = async (template: string) => {
+    if (!template || selected.size === 0) return;
+    const ids = [...selected];
+    try {
+      await app.bulkUpdateContacts(ids.map(id => ({ id, template })));
+      await app.loadContacts();
+      toast(`Template updated for ${ids.length} contact${ids.length !== 1 ? 's' : ''}.`, 'success');
+    } catch (err: any) {
+      toast('Could not update template: ' + err.message, 'error');
+    }
+  };
+
   const sendSelected = async () => {
     if (selected.size === 0) return;
     const ids = [...selected];
@@ -153,8 +165,8 @@ export default function Contacts() {
 
   return (
     <Layout title="Contacts" subtitle={`${filtered.length} contacts`} actions={
-      <a href="#" className="btn btn-primary" onClick={(e) => { e.preventDefault(); navigate('/send/step1'); }}>
-        <i className="ti ti-plus" /> New entry
+      <a href="#" className="btn btn-primary" onClick={(e) => { e.preventDefault(); navigate('/add-contacts'); }}>
+        <i className="ti ti-user-plus" /> Add contacts
       </a>
     }>
       <div className="section-head">
@@ -282,6 +294,14 @@ export default function Contacts() {
 
       <div className={`bulk-bar${selected.size > 0 ? ' visible' : ''}`}>
         <span className="bb-count">{selected.size} selected</span>
+        <select value="" onChange={e => { changeTemplateSelected(e.target.value); e.target.value = ''; }}
+          style={{ width: 'auto', minWidth: 150 }} title="Change template for selected contacts">
+          <option value="">Change template…</option>
+          {(Object.keys(app.templates).length
+            ? Object.entries(app.templates).map(([key, tpl]) => ({ key, name: tpl.name }))
+            : [{ key: 'intro-v2', name: 'Intro v2' }, { key: 'follow-up', name: 'Follow-up' }, { key: 'cold', name: 'Cold outreach' }]
+          ).map(t => <option key={t.key} value={t.key}>{t.name}</option>)}
+        </select>
         <button className="btn btn-del" onClick={deleteSelected} type="button"><i className="ti ti-trash" /> Delete</button>
         <button className="btn btn-send" onClick={sendSelected} type="button">
           <i className="ti ti-send" /> {tab === 'followup-due' ? 'Send Follow-ups' : 'Send selected'}

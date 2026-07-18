@@ -1,6 +1,7 @@
 import { Route, Routes } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
+import AddContacts from './pages/AddContacts';
 import Templates from './pages/Templates';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
@@ -14,6 +15,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Dashboard />} />
       <Route path="/contacts" element={<Contacts />} />
+      <Route path="/add-contacts" element={<AddContacts />} />
       <Route path="/templates" element={<Templates />} />
       <Route path="/analytics" element={<Analytics />} />
       <Route path="/settings" element={<Settings />} />
