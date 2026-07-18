@@ -343,3 +343,39 @@ tbody tr:hover { background: color-mix(in srgb, var(--accent) 5%, transparent); 
 /* ── Accessibility ─────────────────────────────────────────────────────────── */
 a:focus-visible, button:focus-visible, .nav-item:focus-visible, .nav-tab:focus-visible,
 .stat-card:focus-visible, .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 9px; }
+
+/* ── Responsive ────────────────────────────────────────────────────────────────
+   The Aurora rules above redefine .sidebar / .topbar / .stepper-bar with no media
+   query, so they out-cascade the mobile rules in the shared base stylesheet (which
+   loads first). Re-assert the responsive behaviour here so it wins on small screens. */
+@media (max-width: 900px) {
+  .stat-grid { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 700px) {
+  /* Off-canvas sidebar (base sets position:fixed in a media query, but Aurora's
+     un-queried `.sidebar { position: relative }` overrode it — restore it here). */
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; z-index: 300;
+    width: min(280px, 82vw);
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-lg);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-backdrop.open { display: block; opacity: 1; }
+  .mobile-menu-btn { display: inline-flex; }
+
+  .topbar { padding: 13px 16px; flex-wrap: wrap; gap: 10px; }
+  .topbar-left h1 { font-size: 16px; }
+  .stepper-bar { padding: 14px 16px; }
+  .section { padding: 16px; }
+}
+
+@media (max-width: 480px) {
+  .stat-grid { grid-template-columns: 1fr; }
+  /* Let the send-job widget span the viewport instead of overflowing off-screen. */
+  #send-job-widget { width: auto; left: 12px; right: 12px; bottom: 12px; }
+  /* Keep primary-action buttons in the topbar from overflowing the row. */
+  .topbar { padding: 11px 14px; }
+  .topbar-left p { display: none; }
+}
