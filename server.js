@@ -27,23 +27,43 @@ const makeToken = (pw) =>
 
 const AUTH_TOKEN = AUTH_PASSWORD ? makeToken(AUTH_PASSWORD) : null;
 
+// ── Separate "share" credential — a public read-only export view ─────────────
+// Independent of the owner password: lets the owner hand out a link + this
+// password so outsiders can use the Export tab (and nothing else).
+const EXPORT_PASSWORD = process.env.EXPORT_PASSWORD;
+const EXPORT_COOKIE   = 'outreach_share';
+// Namespaced so it never collides with the owner token even if secrets match.
+const EXPORT_TOKEN = EXPORT_PASSWORD ? makeToken('share:' + EXPORT_PASSWORD) : null;
+
+// Read a cookie value from the raw header and constant-time compare to a token.
+const cookieMatches = (req, name, expected) => {
+  if (!expected) return false;
+  const raw = req.headers.cookie || '';
+  const match = raw.split(';').find(c => c.trim().startsWith(name + '='));
+  const token = match ? decodeURIComponent(match.trim().slice(name.length + 1)) : '';
+  if (token.length !== expected.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(token), Buffer.from(expected));
+  } catch (_) {
+    return false;
+  }
+};
+
+const isOwner = (req) => cookieMatches(req, AUTH_COOKIE, AUTH_TOKEN);
+const isShare = (req) => cookieMatches(req, EXPORT_COOKIE, EXPORT_TOKEN);
+
 const requireAuth = (req, res, next) => {
   if (!AUTH_TOKEN) return next(); // no password configured → open (local dev)
   if (req.path === '/login' || req.path.startsWith('/api/inngest')) return next();
+  // The React SPA shell is public so share/unauthenticated visitors can load it;
+  // the client renders "Not authorised" for owner-only pages and all owner DATA
+  // endpoints below stay gated. The share API self-guards.
+  if (req.path === '/app' || req.path.startsWith('/app/')) return next();
+  if (req.path.startsWith('/api/share')) return next();
   // Allow static assets so the login page can load its CSS/JS
   if (/\.(css|js|woff2?|ttf|svg|ico|png|jpg|jpeg)$/.test(req.path)) return next();
 
-  const raw = req.headers.cookie || '';
-  const match = raw.split(';').find(c => c.trim().startsWith(AUTH_COOKIE + '='));
-  const token = match ? decodeURIComponent(match.trim().slice(AUTH_COOKIE.length + 1)) : '';
-
-  if (token.length === AUTH_TOKEN.length) {
-    try {
-      if (crypto.timingSafeEqual(Buffer.from(token), Buffer.from(AUTH_TOKEN))) {
-        return next();
-      }
-    } catch (_) {}
-  }
+  if (isOwner(req)) return next();
 
   if (req.path.startsWith('/api/')) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -115,6 +135,51 @@ const requireDb = async (req, res, next) => {
     res.status(503).json({ error: `Database not available: ${err.message}` });
   }
 };
+
+// ── Public share (read-only export) ──────────────────────────────────────────
+// Owner is always allowed; otherwise a valid share cookie is required.
+const requireShareAuth = (req, res, next) => {
+  if (isOwner(req) || isShare(req)) return next();
+  if (!EXPORT_TOKEN) return res.status(503).json({ error: 'Sharing not configured' });
+  return res.status(401).json({ error: 'Unauthorized' });
+};
+
+app.get('/api/share/session', (req, res) => {
+  res.json({ owner: isOwner(req), share: isShare(req) });
+});
+
+app.post('/api/share/login', (req, res) => {
+  const { password } = req.body;
+  if (EXPORT_TOKEN && password && makeToken('share:' + password) === EXPORT_TOKEN) {
+    res.setHeader('Set-Cookie',
+      `${EXPORT_COOKIE}=${encodeURIComponent(EXPORT_TOKEN)}; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}; Path=/`
+    );
+    return res.json({ ok: true });
+  }
+  res.status(401).json({ error: 'Invalid password' });
+});
+
+app.get('/api/share/contacts', requireDb, requireShareAuth, async (_req, res) => {
+  try {
+    const docs = await Contact.find({ deleted: { $ne: true } })
+      .select('name email company role status repliedAt lastSentAt')
+      .sort({ createdAt: -1 })
+      .lean();
+    // Return only non-sensitive fields; derive booleans so dates never ship.
+    const contacts = docs.map(c => ({
+      name: c.name,
+      email: c.email,
+      company: c.company || '',
+      role: c.role || '',
+      status: c.status,
+      replied: !!c.repliedAt || c.status === 'replied' || c.status === 'follow-up-replied',
+      delivered: !!c.lastSentAt && c.status !== 'bounced' && c.status !== 'failed',
+    }));
+    res.json({ contacts });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
