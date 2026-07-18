@@ -33,6 +33,9 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
       <NavLink to="/add-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-user-plus" /> Add Contacts
       </NavLink>
+      <NavLink to="/export-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-file-export" /> Export Contacts
+      </NavLink>
       <NavLink to="/templates" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-file-text" /> Templates
       </NavLink>
