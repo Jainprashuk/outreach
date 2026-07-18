@@ -158,7 +158,7 @@ router.post('/', async (req, res) => {
     const existing = await Contact.find(
       { email: { $in: incomingEmails }, deleted: { $ne: true } },
       { email: 1 }
-    ).lean();
+    ).collation({ locale: 'en', strength: 2 }).lean();
     const existingEmails = new Set(existing.map(c => c.email.trim().toLowerCase()));
 
     const toInsert = unique.filter(r => !existingEmails.has(r.email.trim().toLowerCase()));
@@ -168,7 +168,7 @@ router.post('/', async (req, res) => {
     if (toInsert.length > 0) {
       created = await Contact.insertMany(toInsert.map(r => ({
         name: r.name,
-        email: r.email.trim(),
+        email: r.email.trim().toLowerCase(),
         company: r.company || '',
         role: r.role || '',
         template: r.template || 'intro-v2',

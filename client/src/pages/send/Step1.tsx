@@ -98,8 +98,8 @@ export default function Step1() {
       const { created, skipped } = await app.createContacts(validRows.map(r => ({
         name: r.name.trim(), email: r.email.trim(), company: r.company.trim(), role: r.role.trim(), template: r.template,
       })));
-      if (skipped > 0) toast(`${skipped} duplicate${skipped !== 1 ? 's' : ''} skipped.`, 'error');
-      if (created.length === 0) { toast('All contacts already exist — nothing to send.', 'error'); return; }
+      if (created.length === 0) { toast('All contacts already exist — nothing added.', 'error'); return; }
+      toast(`${created.length} added${skipped > 0 ? `, ${skipped} skipped (duplicate)` : ''}.`, 'success');
       navigate(`/send/step2?mode=${mode}&ids=${created.map(c => c.id).join(',')}${rateParam}`);
     } catch (err: any) {
       toast('Could not save contacts: ' + err.message, 'error');
