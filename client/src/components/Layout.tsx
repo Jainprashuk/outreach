@@ -26,36 +26,28 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
         <div className="sidebar-logo-icon"><i className="ti ti-send" /></div>
         <span className="sidebar-logo-text">Outreach</span>
       </div>
-      {owner && (
-        <>
-          <NavLink to="/" end className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-            <i className="ti ti-layout-dashboard" /> Dashboard
-          </NavLink>
-          <NavLink to="/contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-            <i className="ti ti-users" /> Contacts
-          </NavLink>
-          <NavLink to="/add-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-            <i className="ti ti-user-plus" /> Add Contacts
-          </NavLink>
-        </>
-      )}
+      <NavLink to="/" end className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-layout-dashboard" /> Dashboard
+      </NavLink>
+      <NavLink to="/contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-users" /> Contacts
+      </NavLink>
+      <NavLink to="/add-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-user-plus" /> Add Contacts
+      </NavLink>
       <NavLink to="/export-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-file-export" /> Export Contacts
       </NavLink>
-      {owner && (
-        <>
-          <NavLink to="/templates" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-            <i className="ti ti-file-text" /> Templates
-          </NavLink>
-          <NavLink to="/analytics" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-            <i className="ti ti-chart-histogram" /> Analytics
-          </NavLink>
-          <div className="nav-section-label">Account</div>
-          <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-            <i className="ti ti-settings" /> Settings
-          </NavLink>
-        </>
-      )}
+      <NavLink to="/templates" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-file-text" /> Templates
+      </NavLink>
+      <NavLink to="/analytics" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-chart-histogram" /> Analytics
+      </NavLink>
+      <div className="nav-section-label">Account</div>
+      <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-settings" /> Settings
+      </NavLink>
       <div className="sidebar-bottom">
         <button className="theme-toggle" type="button" onClick={toggleTheme}>
           <span className="tt-icon"><i className="ti ti-sun" /><i className="ti ti-moon" />Appearance</span>
