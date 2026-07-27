@@ -1,6 +1,7 @@
 const express = require('express');
 const Contact = require('../models/Contact');
 const SendJob = require('../models/SendJob');
+const { COOLDOWN_LABEL, inCooldown, cooldownRemaining } = require('../lib/cooldown');
 
 const router = express.Router();
 
@@ -119,15 +120,33 @@ router.post('/reset-for-send', async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'Expected a non-empty ids array' });
     }
-    await Contact.updateMany(
-      { _id: { $in: ids }, deleted: { $ne: true } },
-      {
-        $set: { status: 'queued', approvalStatus: 'pending', editedSubject: null, editedBody: null },
-        $push: { statusHistory: { status: 'queued', changedAt: new Date(), note: 'Reset for sending' } },
-      }
-    );
-    const contacts = await Contact.find({ _id: { $in: ids }, deleted: { $ne: true } }).lean();
-    res.json({ ok: true, contacts: contacts.map(serialize) });
+    // Contacts emailed inside the cooldown window are left completely alone —
+    // they keep their real status instead of being parked at `queued`.
+    const all = await Contact.find({ _id: { $in: ids }, deleted: { $ne: true } }).lean();
+    const skipped = all.filter(c => inCooldown(c));
+    const skippedIds = new Set(skipped.map(c => String(c._id)));
+    const eligibleIds = all.filter(c => !skippedIds.has(String(c._id))).map(c => c._id);
+
+    if (eligibleIds.length > 0) {
+      await Contact.updateMany(
+        { _id: { $in: eligibleIds } },
+        {
+          $set: { status: 'queued', approvalStatus: 'pending', editedSubject: null, editedBody: null },
+          $push: { statusHistory: { status: 'queued', changedAt: new Date(), note: 'Reset for sending' } },
+        }
+      );
+    }
+
+    const contacts = await Contact.find({ _id: { $in: eligibleIds } }).lean();
+    res.json({
+      ok: true,
+      contacts: contacts.map(serialize),
+      cooldownLabel: COOLDOWN_LABEL,
+      skipped: skipped.map(c => ({
+        id: String(c._id), name: c.name, email: c.email, status: c.status,
+        lastSentAt: c.lastSentAt, remainingMs: cooldownRemaining(c),
+      })),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -6,7 +6,7 @@ const itemSchema = new mongoose.Schema({
   name:      { type: String, required: true },
   subject:   { type: String, required: true },
   body:      { type: String, required: true },
-  status:    { type: String, enum: ['pending', 'sent', 'failed'], default: 'pending' },
+  status:    { type: String, enum: ['pending', 'sent', 'failed', 'skipped'], default: 'pending' },
   messageId: { type: String, default: null },
   error:     { type: String, default: null },
   processedAt: { type: Date, default: null },

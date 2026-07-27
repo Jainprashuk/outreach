@@ -4,7 +4,19 @@ const { inngest } = require('./inngest');
 const SendJob = require('./models/SendJob');
 const Contact = require('./models/Contact');
 const mailer = require('./lib/mailer');
+const { COOLDOWN_ERROR, COOLDOWN_LABEL, inCooldown, priorStatus } = require('./lib/cooldown');
 const db = require('./db');
+
+// A send was skipped for cooldown: make sure the contact isn't left parked at
+// `queued` by the "Reset for sending" that preceded the job.
+async function restoreAfterCooldownSkip(contactDoc) {
+  if (!contactDoc || contactDoc.status !== 'queued') return;
+  const status = priorStatus(contactDoc);
+  await Contact.findByIdAndUpdate(contactDoc._id, {
+    $set: { status, approvalStatus: 'approved' },
+    $push: { statusHistory: { status, changedAt: new Date(), note: `Send skipped — already emailed within the last ${COOLDOWN_LABEL}; status restored` } },
+  });
+}
 
 // Converts plain-text template body to HTML.
 // Supports [link text](url) markdown-style links → <a> tags.
@@ -95,14 +107,15 @@ const sendSingleEmail = inngest.createFunction(
       const item = job.items.find(i => i.contactId === contactId && i.status === 'pending');
       if (!item) return; // already handled by a concurrent worker or a retry
 
-      // Cooldown check — skip if this contact was sent an email within the last 2 hours
+      // Cooldown check — skip if this contact was emailed inside the cooldown window
       const contactDoc = await Contact.findById(contactId).lean();
-      if (contactDoc?.lastSentAt && (Date.now() - new Date(contactDoc.lastSentAt).getTime()) < COOLDOWN_MS) {
+      if (inCooldown(contactDoc)) {
         await _atomicItemUpdate(jobId, contactId, {
-          'items.$.status': 'failed',
-          'items.$.error': 'Cooldown — email sent within the last 2 hours. Try again later.',
+          'items.$.status': 'skipped',
+          'items.$.error': COOLDOWN_ERROR,
           'items.$.processedAt': new Date(),
         });
+        await restoreAfterCooldownSkip(contactDoc);
         return;
       }
       const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
@@ -171,7 +184,6 @@ const sendSingleEmail = inngest.createFunction(
   }
 );
 
-const COOLDOWN_MS = 2 * 60 * 60 * 1000; // 2 hours between sends to the same contact
 const CHUNK_DELAY_MS = 2000;
 
 // Bulk worker: splits pending items into chunks, one fresh SMTP connection per chunk.
@@ -232,21 +244,22 @@ const sendEmailBulk = inngest.createFunction(
 
         try {
           for (const item of chunk) {
-            // Cooldown check — skip if sent within the last 2 hours
+            // Cooldown check — skip if emailed inside the cooldown window
             const contactDoc = await Contact.findById(item.contactId).lean();
             const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
-            if (contactDoc?.lastSentAt && (Date.now() - new Date(contactDoc.lastSentAt).getTime()) < COOLDOWN_MS) {
+            if (inCooldown(contactDoc)) {
               await SendJob.findOneAndUpdate(
                 { _id: jobId, 'items.contactId': item.contactId },
                 {
                   $set: {
-                    'items.$.status': 'failed',
-                    'items.$.error': 'Cooldown — email sent within the last 2 hours. Try again later.',
+                    'items.$.status': 'skipped',
+                    'items.$.error': COOLDOWN_ERROR,
                     'items.$.processedAt': new Date(),
                   },
                   $inc: { processedCount: 1 },
                 }
               );
+              await restoreAfterCooldownSkip(contactDoc);
               continue;
             }
 
