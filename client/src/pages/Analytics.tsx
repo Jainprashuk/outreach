@@ -4,8 +4,9 @@ import Layout from '../components/Layout';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import {
-  analyze, buildDailySeries, computeMetrics, cvar, dayKey, fmtDur, pct,
-  STATUS_META, type Analyzed, type Metrics,
+  ACTIVITY_META, ACTIVITY_WINDOWS, analyze, buildActivityEvents, buildDailySeries,
+  computeMetrics, countActivity, cvar, dayKey, fmtAgo, fmtDur, pct,
+  STATUS_META, type ActivityWindowKey, type Analyzed, type Metrics,
 } from '../lib/analytics';
 
 // ── Small building blocks ────────────────────────────────────────────────────
@@ -198,6 +199,130 @@ function WeekdayChart({ A }: { A: Analyzed[] }) {
         <span className="lg"><span className="sw" style={{ background: c2 }} />Replies (labeled)</span>
       </div>
     </>
+  );
+}
+
+// ── Recent activity (counts per event type across time windows) ──────────────
+function ActivitySection({ A }: { A: Analyzed[] }) {
+  const [now, setNow] = useState(() => Date.now());
+  const [win, setWin] = useState<ActivityWindowKey>('24h');
+
+  // Windows are relative to "now", so keep it ticking while the page is open.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(id);
+  }, []);
+
+  const events = useMemo(() => buildActivityEvents(A), [A]);
+  const cols = useMemo(
+    () => ACTIVITY_WINDOWS.map(w => ({ ...w, counts: countActivity(events, w.ms, now) })),
+    [events, now],
+  );
+
+  const activeWin = ACTIVITY_WINDOWS.find(w => w.key === win)!;
+  const feed = useMemo(() => {
+    const from = now - activeWin.ms;
+    const known = new Set(ACTIVITY_META.map(m => m.type));
+    return events.filter(e => e.t >= from && e.t <= now && known.has(e.type)).slice(0, 40);
+  }, [events, now, activeWin]);
+
+  const rows = ACTIVITY_META.filter(m => cols.some(col => col.counts[m.type] > 0));
+  const totalIn = (key: ActivityWindowKey) => {
+    const col = cols.find(c => c.key === key)!;
+    return ACTIVITY_META.reduce((s, m) => s + col.counts[m.type], 0);
+  };
+  const label = (type: string) => ACTIVITY_META.find(m => m.type === type)!;
+
+  return (
+    <div className="an-card" style={{ marginBottom: 14, animationDelay: '.02s' }}>
+      <div className="an-card-head" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+        <div>
+          <div className="an-card-title"><i className="ti ti-activity" /> Recent activity</div>
+          <div className="an-card-sub">
+            What happened in the last hour, 6 hours, day, week and month — added, sent, replied, bounced and every other status change
+          </div>
+        </div>
+        <div className="seg-toggle">
+          {ACTIVITY_WINDOWS.map(w => (
+            <button key={w.key} className={`btn btn-xs${win === w.key ? ' active' : ''}`}
+              onClick={() => setWin(w.key)} type="button" title={`Show the feed for the last ${w.label}`}>
+              {w.key}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="an-card-body">
+        {/* Window summary tiles */}
+        <div className="stat-grid" style={{ padding: 0, marginBottom: 14 }}>
+          {cols.map(col => (
+            <div className="stat-card" key={col.key} style={{ cursor: 'pointer', outline: win === col.key ? '1.5px solid var(--accent)' : undefined }}
+              onClick={() => setWin(col.key)}>
+              <div className="stat-label">Last {col.label}</div>
+              <div className="kpi-value stat-value">{totalIn(col.key).toLocaleString()}</div>
+              <div className="stat-sub">
+                {col.counts.added} added · {col.counts.sent + col.counts['follow-up-sent']} sent · {col.counts.replied + col.counts['follow-up-replied']} replied
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Full matrix: event type × window */}
+        <div style={{ overflowX: 'auto' }}>
+          <table className="an-table">
+            <thead>
+              <tr>
+                <th>Activity</th>
+                {ACTIVITY_WINDOWS.map(w => (
+                  <th key={w.key} className="num" style={win === w.key ? { color: 'var(--text)' } : undefined}>{w.label}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr><td colSpan={ACTIVITY_WINDOWS.length + 1}><div className="an-empty"><i className="ti ti-zzz" />No activity in the last 30 days</div></td></tr>
+              ) : rows.map(m => (
+                <tr key={m.type}>
+                  <td style={{ fontWeight: 500 }}>
+                    <span className="dot" style={{ background: cvar(m.c), marginRight: 7 }} />{m.label}
+                  </td>
+                  {cols.map(col => (
+                    <td key={col.key} className="num"
+                      style={{ color: col.counts[m.type] ? 'var(--text)' : 'var(--text3)', fontWeight: win === col.key && col.counts[m.type] ? 600 : 400 }}>
+                      {col.counts[m.type] || '—'}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Event feed for the selected window */}
+        <div style={{ marginTop: 16 }}>
+          <div className="an-card-sub" style={{ marginBottom: 8 }}>
+            Event log — last {activeWin.label}{feed.length === 40 ? ' (most recent 40)' : ''}
+          </div>
+          {feed.length === 0 ? (
+            <div className="an-empty"><i className="ti ti-history-off" />Nothing happened in the last {activeWin.label}</div>
+          ) : (
+            <div className="activity-feed">
+              {feed.map((e, i) => {
+                const meta = label(e.type);
+                return (
+                  <div className="af-row" key={`${e.c.id}-${e.type}-${e.t}-${i}`}>
+                    <i className={`ti ${meta.icon}`} style={{ color: cvar(meta.c) }} />
+                    <span className="af-what">{meta.label}</span>
+                    <span className="af-who">{e.c.name}{e.c.company ? ` · ${e.c.company}` : ''}</span>
+                    <span className="af-when">{fmtAgo(e.t, now)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -394,6 +519,8 @@ export default function Analytics() {
           </div>
         ))}
       </div>
+
+      <ActivitySection A={A} />
 
       <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
         <Card title="Outreach funnel" icon="ti-filter" sub="Every stage a contact has ever reached (history-based)" delay=".04s">

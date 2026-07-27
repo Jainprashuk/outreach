@@ -124,3 +124,79 @@ export function buildDailySeries(A: Analyzed[], days: number) {
 }
 
 export const cvar = (v: string) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+
+// ── Recent activity ──────────────────────────────────────────────────────────
+// Every dated thing that happened to a contact, flattened into one event stream
+// so we can count "what happened in the last hour / 6h / day / week / month".
+
+export const ACTIVITY_WINDOWS = [
+  { key: '1h', label: '1 hour', ms: 3600000 },
+  { key: '6h', label: '6 hours', ms: 6 * 3600000 },
+  { key: '24h', label: '24 hours', ms: 24 * 3600000 },
+  { key: '7d', label: '7 days', ms: 7 * 86400000 },
+  { key: '30d', label: '30 days', ms: 30 * 86400000 },
+] as const;
+
+export type ActivityWindowKey = typeof ACTIVITY_WINDOWS[number]['key'];
+
+// 'added' is synthetic (contact creation); the rest mirror contact statuses.
+export const ACTIVITY_META: Array<{ type: string; label: string; c: string; icon: string }> = [
+  { type: 'added', label: 'Contacts added', c: '--blue', icon: 'ti-user-plus' },
+  { type: 'sent', label: 'Emails sent', c: '--green', icon: 'ti-send' },
+  { type: 'follow-up-sent', label: 'Follow-ups sent', c: '--amber', icon: 'ti-repeat' },
+  { type: 'replied', label: 'Replies received', c: '--teal', icon: 'ti-message-reply' },
+  { type: 'follow-up-replied', label: 'Replies after follow-up', c: '--teal', icon: 'ti-message-2-share' },
+  { type: 'bounced', label: 'Bounced', c: '--red', icon: 'ti-mail-x' },
+  { type: 'failed', label: 'Failed', c: '--red', icon: 'ti-alert-triangle' },
+  { type: 'in-review', label: 'Moved to in review', c: '--indigo', icon: 'ti-eye' },
+  { type: 'closed', label: 'Closed', c: '--slate', icon: 'ti-circle-check' },
+  { type: 'no-openings', label: 'No openings', c: '--purple', icon: 'ti-door-off' },
+  { type: 'queued', label: 'Queued for sending', c: '--blue', icon: 'ti-clock' },
+];
+
+export interface ActivityEvent { t: number; type: string; c: Contact; note?: string; }
+
+export function buildActivityEvents(A: Analyzed[]): ActivityEvent[] {
+  const out: ActivityEvent[] = [];
+  A.forEach(a => {
+    const c = a.c;
+    const created = new Date(c.createdAt).getTime();
+    if (Number.isFinite(created)) out.push({ t: created, type: 'added', c });
+
+    const hist = (c.statusHistory || [])
+      .map(h => ({ t: new Date(h.changedAt).getTime(), s: h.status, note: h.note }))
+      .filter(h => Number.isFinite(h.t));
+
+    if (hist.length) {
+      hist.forEach(h => out.push({ t: h.t, type: h.s, c, note: h.note }));
+    } else if (c.status !== 'queued') {
+      // No history recorded (older contacts) — fall back to the timestamps we have.
+      const fallback = c.status === 'replied' || c.status === 'follow-up-replied'
+        ? c.repliedAt
+        : c.status === 'follow-up-sent' ? c.followUpSentAt : (c.lastSentAt || c.updatedAt);
+      const t = new Date(fallback || c.updatedAt).getTime();
+      if (Number.isFinite(t)) out.push({ t, type: c.status, c });
+    }
+  });
+  return out.sort((x, y) => y.t - x.t);
+}
+
+/** Counts per activity type inside `ms` before `now` (only known types are kept). */
+export function countActivity(events: ActivityEvent[], ms: number, now = Date.now()) {
+  const from = now - ms;
+  const counts: Record<string, number> = {};
+  ACTIVITY_META.forEach(m => { counts[m.type] = 0; });
+  events.forEach(e => {
+    if (e.t >= from && e.t <= now && e.type in counts) counts[e.type]++;
+  });
+  return counts;
+}
+
+export const fmtAgo = (t: number, now = Date.now()) => {
+  const s = Math.max(0, (now - t) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d ago`;
+  return new Date(t).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+};

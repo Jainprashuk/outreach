@@ -115,3 +115,13 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
 .an-empty { text-align: center; color: var(--text2); font-size: 13px; padding: 30px 10px; }
 .an-empty i { font-size: 26px; display: block; margin-bottom: 8px; color: var(--text3); }
 @media (max-width: 820px) { .an-cards-2 { grid-template-columns: 1fr; } }
+
+/* Recent activity feed */
+.an-table td .dot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; vertical-align: middle; }
+.activity-feed { border: 0.5px solid var(--border); border-radius: var(--radius); overflow: hidden; max-height: 340px; overflow-y: auto; }
+.af-row { display: flex; align-items: center; gap: 10px; padding: 9px 12px; font-size: 12.5px; border-top: 0.5px solid var(--border); background: var(--bg2); }
+.af-row:first-child { border-top: none; }
+.af-row i { font-size: 15px; flex-shrink: 0; }
+.af-what { font-weight: 500; color: var(--text); white-space: nowrap; }
+.af-who { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.af-when { margin-left: auto; color: var(--text3); white-space: nowrap; font-variant-numeric: tabular-nums; }
