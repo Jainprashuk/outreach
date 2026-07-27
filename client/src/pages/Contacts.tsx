@@ -71,6 +71,12 @@ export default function Contacts() {
     });
   };
 
+  // Quick-select the first N contacts of the current filtered list (replaces the
+  // current selection so counts stay predictable across pages).
+  const selectFirst = (n: number) => {
+    setSelected(new Set(filtered.slice(0, n).map(c => c.id)));
+  };
+
   const toggleAll = (checked: boolean) => {
     setSelected(prev => {
       const next = new Set(prev);
@@ -219,6 +225,21 @@ export default function Contacts() {
         <button className="btn btn-sm" style={{ pointerEvents: 'none' }} type="button"><i className="ti ti-upload" /> Browse</button>
         <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }}
           onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ''; }} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '14px 0 10px' }}>
+        <span style={{ fontSize: 12, color: 'var(--text3)' }}>Quick select:</span>
+        {[50, 100, 200, 500].map(n => (
+          <button key={n} className="btn btn-sm" type="button" disabled={filtered.length === 0}
+            onClick={() => selectFirst(n)}
+            title={`Select the first ${n} contacts in this view`}>
+            First {n}
+          </button>
+        ))}
+        <button className="btn btn-sm" type="button" disabled={filtered.length === 0}
+          onClick={() => toggleAll(true)}>All ({filtered.length})</button>
+        <button className="btn btn-sm" type="button" disabled={selected.size === 0}
+          onClick={() => setSelected(new Set())}>Clear selection</button>
       </div>
 
       <div className="table-card">
