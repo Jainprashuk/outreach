@@ -113,7 +113,8 @@ export default function SendJobWidget() {
   const total = job.items.length;
   const sent = job.items.filter(i => i.status === 'sent').length;
   const failed = job.items.filter(i => i.status === 'failed').length;
-  const done = sent + failed;
+  const skipped = job.items.filter(i => i.status === 'skipped').length;
+  const done = sent + failed + skipped;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
   const allItemsDone = total > 0 && job.items.every(i => i.status !== 'pending');
   const effectivelyDone = job.status === 'done' || job.status === 'cancelled' || (job.status === 'processing' && allItemsDone);
@@ -122,7 +123,7 @@ export default function SendJobWidget() {
   let showPause = false;
   let pauseIcon = 'ti-player-pause';
   if (effectivelyDone) {
-    title = <><i className="ti ti-circle-check" /> {sent} sent{failed ? `, ${failed} failed` : ''}</>;
+    title = <><i className="ti ti-circle-check" /> {sent} sent{failed ? `, ${failed} failed` : ''}{skipped ? `, ${skipped} skipped` : ''}</>;
   } else if (job.sendMode === 'drip') {
     const remaining = job.items.filter(i => i.status === 'pending').length;
     const delayMs = Math.round(3_600_000 / (job.ratePerHour || 5));

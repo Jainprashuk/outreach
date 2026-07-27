@@ -177,9 +177,11 @@ export default function Step3() {
   const done = job ? job.items.filter(i => i.status !== 'pending').length : 0;
   const sent = job ? job.items.filter(i => i.status === 'sent').length : 0;
   const failed = job ? job.items.filter(i => i.status === 'failed').length : 0;
+  const skipped = job ? job.items.filter(i => i.status === 'skipped').length : 0;
   const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  const tail = [failed ? `${failed} failed` : '', skipped ? `${skipped} skipped` : ''].filter(Boolean).join(', ');
   const progressLabel = !job ? (sending ? 'Connecting to Gmail…' : '')
-    : job.status === 'done' ? (failed === 0 ? `All ${sent} emails sent!` : `${sent} sent, ${failed} failed.`)
+    : job.status === 'done' ? (tail ? `${sent} sent, ${tail}.` : `All ${sent} emails sent!`)
     : job.status === 'paused' ? `Paused — ${done}/${total} processed`
     : job.status === 'cancelled' ? `Cancelled — ${done}/${total} processed`
     : done >= total ? 'Finishing up…'
@@ -311,6 +313,8 @@ export default function Step3() {
                       <span style={{ color: 'var(--green)' }}><i className="ti ti-circle-check" /> Sent</span>
                     ) : item.status === 'failed' ? (
                       <span style={{ color: 'var(--red)' }} title={(item.error || '').slice(0, 60)}><i className="ti ti-circle-x" /> Failed</span>
+                    ) : item.status === 'skipped' ? (
+                      <span style={{ color: 'var(--text3)' }} title={item.error || 'Skipped'}><i className="ti ti-player-skip-forward" /> Skipped</span>
                     ) : (
                       <span style={{ fontSize: 12, color: 'var(--amber)' }}><i className="ti ti-loader" style={{ animation: 'spin 1s linear infinite' }} /> Sending</span>
                     )}

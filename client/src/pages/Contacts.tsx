@@ -132,8 +132,16 @@ export default function Contacts() {
       return;
     }
     try {
-      await resetForSendApi(ids);
-      navigate(`/send/step2?from=contacts&ids=${ids.join(',')}`);
+      const { contacts, skipped, cooldownLabel } = await resetForSendApi(ids);
+      if (skipped.length > 0) {
+        toast(
+          `${skipped.length} contact${skipped.length !== 1 ? 's were' : ' was'} skipped — already emailed in the last ${cooldownLabel}. Their status is unchanged.`,
+          contacts.length === 0 ? 'error' : 'info',
+        );
+        await app.loadContacts();
+      }
+      if (contacts.length === 0) return;
+      navigate(`/send/step2?from=contacts&ids=${contacts.map(c => c.id).join(',')}`);
     } catch (err: any) {
       toast('Could not queue contacts: ' + err.message, 'error');
     }

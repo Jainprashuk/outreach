@@ -11,6 +11,7 @@ export default function Done() {
 
   const [batchSent, setBatchSent] = useState(0);
   const [batchFailed, setBatchFailed] = useState(0);
+  const [batchSkipped, setBatchSkipped] = useState(0);
   const [totalEverSent, setTotalEverSent] = useState(0);
   const [pendingApproval, setPendingApproval] = useState(0);
   const [retryHidden, setRetryHidden] = useState(false);
@@ -28,6 +29,7 @@ export default function Done() {
           const job = await jobRes.json();
           setBatchSent(job.items.filter((i: any) => i.status === 'sent').length);
           setBatchFailed(job.items.filter((i: any) => i.status === 'failed').length);
+          setBatchSkipped(job.items.filter((i: any) => i.status === 'skipped').length);
         }
         if (statsRes.ok) {
           const s = await statsRes.json();
@@ -54,6 +56,7 @@ export default function Done() {
 
   const subParts = [`${batchSent} email${batchSent !== 1 ? 's' : ''} delivered.`];
   if (batchFailed > 0) subParts.push(`${batchFailed} failed to send.`);
+  if (batchSkipped > 0) subParts.push(`${batchSkipped} skipped — already emailed recently, their status was left unchanged.`);
   if (pendingApproval > 0) subParts.push(`${pendingApproval} contact${pendingApproval > 1 ? 's are' : ' is'} still pending approval.`);
 
   return (
@@ -70,6 +73,7 @@ export default function Done() {
         <div className="stat-grid" style={{ maxWidth: 480, margin: '0 auto 28px' }}>
           <div className="stat-card"><div className="stat-label">Sent this batch</div><div className="stat-value green">{batchSent}</div></div>
           {batchFailed > 0 && <div className="stat-card"><div className="stat-label">Failed</div><div className="stat-value" style={{ color: 'var(--red)' }}>{batchFailed}</div></div>}
+          {batchSkipped > 0 && <div className="stat-card"><div className="stat-label">Skipped (cooldown)</div><div className="stat-value" style={{ color: 'var(--text3)' }}>{batchSkipped}</div></div>}
           {pendingApproval > 0 && <div className="stat-card"><div className="stat-label">Pending approval</div><div className="stat-value amber">{pendingApproval}</div></div>}
           <div className="stat-card"><div className="stat-label">Total ever sent</div><div className="stat-value">{totalEverSent}</div></div>
         </div>

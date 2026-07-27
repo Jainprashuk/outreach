@@ -85,9 +85,14 @@ export default function Step1() {
       const keptIds = validRows.map(r => followupMap.current[r.email.trim().toLowerCase()]).filter(Boolean);
       if (keptIds.length === 0) { toast('No valid follow-up contacts found.', 'error'); return; }
       try {
-        await resetForSendApi(keptIds);
-        await bulkUpdateContactsApi(keptIds.map(id => ({ id, template: 'follow-up' })));
-        navigate(`/send/step2?mode=${mode}&ids=${keptIds.join(',')}${rateParam}`);
+        const { contacts, skipped, cooldownLabel } = await resetForSendApi(keptIds);
+        if (skipped.length > 0) {
+          toast(`${skipped.length} skipped — already emailed in the last ${cooldownLabel}.`, contacts.length === 0 ? 'error' : 'info');
+        }
+        if (contacts.length === 0) return;
+        const sendIds = contacts.map(c => c.id);
+        await bulkUpdateContactsApi(sendIds.map(id => ({ id, template: 'follow-up' })));
+        navigate(`/send/step2?mode=${mode}&ids=${sendIds.join(',')}${rateParam}`);
       } catch (err: any) {
         toast('Could not prepare follow-up contacts: ' + err.message, 'error');
       }

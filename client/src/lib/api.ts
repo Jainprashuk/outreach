@@ -67,7 +67,7 @@ export interface JobItem {
   name: string;
   subject: string;
   body: string;
-  status: 'pending' | 'sent' | 'failed';
+  status: 'pending' | 'sent' | 'failed' | 'skipped';
   error?: string;
   messageId?: string | null;
   processedAt?: string;
@@ -125,8 +125,21 @@ export const updateTemplateApi = (key: string, patch: Partial<Template>) =>
 export const deleteTemplateApi = (key: string) =>
   apiFetch<void>(`/api/templates/${key}`, { method: 'DELETE' });
 
+export interface CooldownSkip {
+  id: string; name: string; email: string; status: ContactStatus;
+  lastSentAt: string | null; remainingMs: number;
+}
+
+export interface ResetForSendResult {
+  ok: boolean;
+  contacts: Contact[];
+  cooldownLabel: string;
+  /** Contacts left untouched because they were emailed inside the cooldown window. */
+  skipped: CooldownSkip[];
+}
+
 export const resetForSendApi = (ids: string[]) =>
-  apiFetch<any>('/api/contacts/reset-for-send', { method: 'POST', body: JSON.stringify({ ids }) });
+  apiFetch<ResetForSendResult>('/api/contacts/reset-for-send', { method: 'POST', body: JSON.stringify({ ids }) });
 
 export const retryFailedApi = () =>
   apiFetch<{ retried: number }>('/api/contacts/retry-failed', { method: 'POST' });
