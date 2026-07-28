@@ -5,7 +5,7 @@ const contactSchema = new mongoose.Schema({
   email: { type: String, required: true },
   company: { type: String, default: '' },
   role: { type: String, default: '' },
-  template: { type: String, default: 'intro-v2' },
+  template: { type: String, default: '' },
   status: { type: String, enum: ['queued', 'sent', 'follow-up-sent', 'failed', 'bounced', 'replied', 'follow-up-replied', 'closed', 'no-openings', 'in-review'], default: 'queued' },
   approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   editedSubject: { type: String, default: null },

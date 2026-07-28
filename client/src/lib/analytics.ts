@@ -140,9 +140,10 @@ export const ACTIVITY_WINDOWS = [
 export type ActivityWindowKey = typeof ACTIVITY_WINDOWS[number]['key'];
 
 // 'added' is synthetic (contact creation); the rest mirror contact statuses.
-export const ACTIVITY_META: Array<{ type: string; label: string; c: string; icon: string }> = [
+export const ACTIVITY_META: Array<{ type: string; label: string; c: string; icon: string; derived?: boolean }> = [
   { type: 'added', label: 'Contacts added', c: '--blue', icon: 'ti-user-plus' },
   { type: 'sent', label: 'Emails sent', c: '--green', icon: 'ti-send' },
+  { type: 'delivered', label: 'Successfully delivered (no bounce)', c: '--green', icon: 'ti-mail-check', derived: true },
   { type: 'follow-up-sent', label: 'Follow-ups sent', c: '--amber', icon: 'ti-repeat' },
   { type: 'replied', label: 'Replies received', c: '--teal', icon: 'ti-message-reply' },
   { type: 'follow-up-replied', label: 'Replies after follow-up', c: '--teal', icon: 'ti-message-2-share' },
@@ -154,7 +155,11 @@ export const ACTIVITY_META: Array<{ type: string; label: string; c: string; icon
   { type: 'queued', label: 'Queued for sending', c: '--blue', icon: 'ti-clock' },
 ];
 
-export interface ActivityEvent { t: number; type: string; c: Contact; note?: string; }
+export interface ActivityEvent {
+  t: number; type: string; c: Contact; note?: string;
+  /** Derived tally (e.g. `delivered`) — counted in the matrix, hidden from the event log. */
+  countOnly?: boolean;
+}
 
 export function buildActivityEvents(A: Analyzed[]): ActivityEvent[] {
   const out: ActivityEvent[] = [];
@@ -176,6 +181,12 @@ export function buildActivityEvents(A: Analyzed[]): ActivityEvent[] {
         : c.status === 'follow-up-sent' ? c.followUpSentAt : (c.lastSentAt || c.updatedAt);
       const t = new Date(fallback || c.updatedAt).getTime();
       if (Number.isFinite(t)) out.push({ t, type: c.status, c });
+    }
+
+    // Every send that never came back as a bounce counts as delivered. Bounces
+    // land minutes-to-hours later, so a very recent send can still flip.
+    if (!a.everBounced) {
+      a.sends.forEach(s => out.push({ t: s.t, type: 'delivered', c, countOnly: true }));
     }
   });
   return out.sort((x, y) => y.t - x.t);

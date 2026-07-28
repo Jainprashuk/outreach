@@ -223,13 +223,13 @@ function ActivitySection({ A }: { A: Analyzed[] }) {
   const feed = useMemo(() => {
     const from = now - activeWin.ms;
     const known = new Set(ACTIVITY_META.map(m => m.type));
-    return events.filter(e => e.t >= from && e.t <= now && known.has(e.type)).slice(0, 40);
+    return events.filter(e => !e.countOnly && e.t >= from && e.t <= now && known.has(e.type)).slice(0, 40);
   }, [events, now, activeWin]);
 
   const rows = ACTIVITY_META.filter(m => cols.some(col => col.counts[m.type] > 0));
   const totalIn = (key: ActivityWindowKey) => {
     const col = cols.find(c => c.key === key)!;
-    return ACTIVITY_META.reduce((s, m) => s + col.counts[m.type], 0);
+    return ACTIVITY_META.reduce((s, m) => s + (m.derived ? 0 : col.counts[m.type]), 0);
   };
   const label = (type: string) => ACTIVITY_META.find(m => m.type === type)!;
 
@@ -261,7 +261,7 @@ function ActivitySection({ A }: { A: Analyzed[] }) {
               <div className="stat-label">Last {col.label}</div>
               <div className="kpi-value stat-value">{totalIn(col.key).toLocaleString()}</div>
               <div className="stat-sub">
-                {col.counts.added} added · {col.counts.sent + col.counts['follow-up-sent']} sent · {col.counts.replied + col.counts['follow-up-replied']} replied
+                {col.counts.added} added · {col.counts.sent + col.counts['follow-up-sent']} sent · {col.counts.delivered} delivered · {col.counts.replied + col.counts['follow-up-replied']} replied
               </div>
             </div>
           ))}

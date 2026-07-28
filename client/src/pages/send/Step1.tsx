@@ -11,7 +11,7 @@ import { parseCsvText, readFileText } from '../../lib/csv';
 
 interface Row { name: string; email: string; company: string; role: string; template: string; }
 
-const emptyRow = (template = 'intro-v2'): Row => ({ name: '', email: '', company: '', role: '', template });
+const emptyRow = (template = ''): Row => ({ name: '', email: '', company: '', role: '', template });
 
 export default function Step1() {
   const app = useApp();
@@ -39,7 +39,7 @@ export default function Step1() {
         setPickerOpen(true);
       }
 
-      try { await app.loadTemplates(); } catch { /* fall back to defaults */ }
+      try { await app.loadTemplates(); } catch { /* select shows the empty state */ }
 
       if (isFollowUpMode && followupIds.length > 0) {
         try {
@@ -61,9 +61,9 @@ export default function Step1() {
     })();
   }, []);
 
-  const templateOptions = Object.keys(app.templates).length
-    ? Object.entries(app.templates).map(([key, tpl]) => ({ key, name: tpl.name }))
-    : [{ key: 'intro-v2', name: 'Intro v2' }, { key: 'follow-up', name: 'Follow-up' }, { key: 'cold', name: 'Cold outreach' }];
+  // Whatever templates you have — no built-in defaults.
+  const templateOptions = Object.entries(app.templates).map(([key, tpl]) => ({ key, name: tpl.name }));
+  const defaultTpl = templateOptions[0]?.key || '';
 
   const setRow = (i: number, patch: Partial<Row>) =>
     setRows(rs => rs.map((r, j) => (j === i ? { ...r, ...patch } : r)));
@@ -73,7 +73,7 @@ export default function Step1() {
   const handleFile = async (file: File) => {
     const text = await readFileText(file);
     const parsed = parseCsvText(text);
-    setRows(rs => [...rs, ...parsed.map(p => ({ ...p, template: 'intro-v2' }))]);
+    setRows(rs => [...rs, ...parsed.map(p => ({ ...p, template: defaultTpl }))]);
     setImportedInfo(`${parsed.length} contacts imported from ${file.name}`);
   };
 
@@ -101,7 +101,7 @@ export default function Step1() {
 
     try {
       const { created, skipped } = await app.createContacts(validRows.map(r => ({
-        name: r.name.trim(), email: r.email.trim(), company: r.company.trim(), role: r.role.trim(), template: r.template,
+        name: r.name.trim(), email: r.email.trim(), company: r.company.trim(), role: r.role.trim(), template: r.template || defaultTpl,
       })));
       if (created.length === 0) { toast('All contacts already exist — nothing added.', 'error'); return; }
       toast(`${created.length} added${skipped > 0 ? `, ${skipped} skipped (duplicate)` : ''}.`, 'success');
@@ -167,7 +167,8 @@ export default function Step1() {
               </div>
               <div className="form-group full">
                 <label className="form-label">Template</label>
-                <select value={r.template} onChange={e => setRow(i, { template: e.target.value })}>
+                <select value={r.template || defaultTpl} onChange={e => setRow(i, { template: e.target.value })}>
+                  {templateOptions.length === 0 && <option value="">No templates — create one first</option>}
                   {templateOptions.map(t => <option key={t.key} value={t.key}>{t.name}</option>)}
                 </select>
               </div>

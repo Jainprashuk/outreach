@@ -326,10 +326,9 @@ export default function Contacts() {
         <select value="" onChange={e => { changeTemplateSelected(e.target.value); e.target.value = ''; }}
           style={{ width: 'auto', minWidth: 150 }} title="Change template for selected contacts">
           <option value="">Change template…</option>
-          {(Object.keys(app.templates).length
-            ? Object.entries(app.templates).map(([key, tpl]) => ({ key, name: tpl.name }))
-            : [{ key: 'intro-v2', name: 'Intro v2' }, { key: 'follow-up', name: 'Follow-up' }, { key: 'cold', name: 'Cold outreach' }]
-          ).map(t => <option key={t.key} value={t.key}>{t.name}</option>)}
+          {Object.entries(app.templates).map(([key, tpl]) => (
+            <option key={key} value={key}>{tpl.name}</option>
+          ))}
         </select>
         <button className="btn btn-del" onClick={deleteSelected} type="button"><i className="ti ti-trash" /> Delete</button>
         <button className="btn btn-send" onClick={sendSelected} type="button">

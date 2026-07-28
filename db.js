@@ -1,28 +1,6 @@
 const mongoose = require('mongoose');
-const Template = require('./models/Template');
 const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
-
-const DEFAULT_TEMPLATES = [
-  {
-    key: 'intro-v2',
-    name: 'Intro v2',
-    subject: 'Quick intro — {{sender}} from {{senderCompany}}',
-    body: `Hi {{name}},\n\nI came across {{company}} and was genuinely impressed by what you're building. I'd love to connect for a quick 15-minute call to explore if there's a mutual fit.\n\nWould next week work for you?\n\nBest,\n{{sender}}`
-  },
-  {
-    key: 'follow-up',
-    name: 'Follow-up',
-    subject: 'Re: {{sentSubject}}',
-    body: `Hi {{name}},\n\nJust circling back on my previous note. I understand you're busy, but I believe what we're working on at {{senderCompany}} could genuinely add value to {{company}}.\n\nHappy to keep it brief — even 10 minutes would be great.\n\nBest,\n{{sender}}`
-  },
-  {
-    key: 'cold',
-    name: 'Cold outreach',
-    subject: 'A thought on {{company}}',
-    body: `Hi {{name}},\n\nCold email, I know — but I'll keep it short. We help companies like {{company}} with [value proposition]. Given your role as {{role}}, I thought this might be relevant.\n\nOpen to a quick chat?\n\n{{sender}}`
-  }
-];
 
 async function backfillStatusHistory() {
   const contacts = await Contact.find({
@@ -151,15 +129,8 @@ async function backfillFollowUpReplied() {
   console.log(`✅  Reclassified ${result.modifiedCount} contacts as follow-up-replied`);
 }
 
+// No template seeding — templates are yours to create in the Templates page.
 async function seed() {
-  for (const tpl of DEFAULT_TEMPLATES) {
-    await Template.updateOne({ key: tpl.key }, { $setOnInsert: tpl }, { upsert: true });
-  }
-  // Migrate follow-up template subject to threading-compatible format
-  await Template.updateOne(
-    { key: 'follow-up', subject: { $ne: 'Re: {{sentSubject}}' } },
-    { $set: { subject: 'Re: {{sentSubject}}' } }
-  );
   await Settings.getSingleton();
 }
 

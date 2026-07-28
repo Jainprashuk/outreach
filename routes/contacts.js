@@ -190,7 +190,7 @@ router.post('/', async (req, res) => {
         email: r.email.trim().toLowerCase(),
         company: r.company || '',
         role: r.role || '',
-        template: r.template || 'intro-v2',
+        template: r.template || '',
       })));
     }
 
