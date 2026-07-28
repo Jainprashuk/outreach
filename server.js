@@ -214,11 +214,18 @@ app.post('/api/smtp-debug', async (req, res) => {
       debug: true,
     });
 
+    // rich:true reproduces the worker's exact payload shape (display name + HTML part),
+    // isolating "Vercel + app content" — the one combination not yet tested.
+    const rich = !!req.body.rich;
+    const body = req.body.body || "Hi Prashuk,\n\nI'm a developer and I built a small tool called BugTracker — it auto-captures JavaScript errors and API failures from a frontend app and shows them live.\n\nHave a look: {{link}}\n\nYour Name";
+    const toHtml = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>');
+
     const info = await transporter.sendMail({
-      from: process.env.GMAIL_EMAIL,
+      from: rich ? `"${process.env.SENDER_NAME || 'Your Name'}" <${process.env.GMAIL_EMAIL}>` : process.env.GMAIL_EMAIL,
       to,
-      subject: `vercel-smtp-debug ${new Date().toISOString()}`,
-      text: 'Plain text delivery test sent from the Vercel deployment.',
+      subject: rich ? "quick one about test's frontend" : `vercel-smtp-debug ${new Date().toISOString()}`,
+      text: rich ? body : 'Plain text delivery test sent from the Vercel deployment.',
+      ...(rich ? { html: toHtml(body) } : {}),
     });
 
     res.json({
