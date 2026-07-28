@@ -1,0 +1,28 @@
+name: SMTP delivery test (datacenter IP)
+
+# Manual only. Sends one plain-text email from a GitHub Actions runner (Azure IP)
+# to determine whether Gmail suppression applies to datacenter IPs generally or to
+# Vercel's range specifically. Delete once the deliverability question is settled.
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        description: Recipient address
+        required: true
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install nodemailer dotenv
+      - name: Report runner egress IP
+        run: curl -s https://api.ipify.org && echo
+      - name: Send test email
+        env:
+          SMTP_DEBUG_EMAIL: ${{ secrets.SMTP_DEBUG_EMAIL }}
+          SMTP_DEBUG_PASSWORD: ${{ secrets.SMTP_DEBUG_PASSWORD }}
+        run: node smtp-debug.js "${{ github.event.inputs.to }}"

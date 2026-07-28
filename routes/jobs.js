@@ -37,7 +37,15 @@ router.post('/', async (req, res) => {
     });
 
     const eventName = mode === 'bulk' ? 'email/bulk.start' : mode === 'drip' ? 'email/drip.start' : 'email/batch.start';
-    await inngest.send({ name: eventName, data: { jobId: job.id.toString() } });
+    try {
+      await inngest.send({ name: eventName, data: { jobId: job.id.toString() } });
+    } catch (err) {
+      // The job row already exists but nothing will ever process it (bad/missing event key,
+      // Inngest unreachable). Cancel it so /active doesn't hand this ghost to the widget,
+      // which would then sit at "Sending emails…" forever.
+      await SendJob.findByIdAndUpdate(job.id, { status: 'cancelled' });
+      return res.status(502).json({ error: `Could not queue the send: ${err.message}` });
+    }
     res.json(job.toJSON());
   } catch (err) {
     res.status(500).json({ error: err.message });

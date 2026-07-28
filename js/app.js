@@ -384,7 +384,7 @@ const App = (() => {
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
     fill.style.width = pct + '%';
-    stats.textContent = `${done}/${total} · ${failed > 0 ? failed + ' failed' : 'all good'}`;
+    stats.textContent = `${done}/${total} · ${failed > 0 ? failed + ' failed' : done > 0 ? 'all good' : 'starting…'}`;
 
     // A stuck job has all items done but status still 'processing' due to a prior race condition.
     // Detect it here, call repair in the background, and treat it as done immediately.

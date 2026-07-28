@@ -192,6 +192,50 @@ const { inngest } = require('./inngest');
 const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip } = require('./inngest-fns');
 app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip] }));
 
+// ── TEMPORARY: SMTP delivery diagnostic ────────────────────────────────────
+// Sends one plain-text email from the deployment itself and returns the full SMTP
+// transcript, so we can see Gmail's actual response from this IP rather than infer it.
+// Delete this route once the deliverability question is settled.
+app.post('/api/smtp-debug', async (req, res) => {
+  const to = req.body.to;
+  if (!to) return res.status(400).json({ error: 'to required' });
+
+  const lines = [];
+  const capture = (level) => (...args) => lines.push(`[${level}] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}`);
+
+  try {
+    const nodemailer = require('nodemailer');
+    const transporter = nodemailer.createTransport({
+      host: 'smtp.gmail.com',
+      port: 465,
+      secure: true,
+      auth: { user: process.env.GMAIL_EMAIL, pass: process.env.GMAIL_APP_PASSWORD },
+      logger: { debug: capture('debug'), info: capture('info'), warn: capture('warn'), error: capture('error') },
+      debug: true,
+    });
+
+    const info = await transporter.sendMail({
+      from: process.env.GMAIL_EMAIL,
+      to,
+      subject: `vercel-smtp-debug ${new Date().toISOString()}`,
+      text: 'Plain text delivery test sent from the Vercel deployment.',
+    });
+
+    res.json({
+      sentFrom: 'vercel',
+      outboundIp: req.headers['x-vercel-forwarded-for'] ? 'see egress note' : undefined,
+      accepted: info.accepted,
+      rejected: info.rejected,
+      response: info.response,
+      messageId: info.messageId,
+      search: `rfc822msgid:${String(info.messageId).replace(/[<>]/g, '')} in:anywhere`,
+      transcript: lines,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message, code: err.code, response: err.response, transcript: lines });
+  }
+});
+
 // ── Configure Gmail credentials ────────────────────────────────────────────
 app.post('/api/config', (req, res) => {
   const { email, appPassword, name } = req.body;
