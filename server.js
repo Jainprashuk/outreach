@@ -192,57 +192,6 @@ const { inngest } = require('./inngest');
 const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip } = require('./inngest-fns');
 app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip] }));
 
-// ── TEMPORARY: SMTP delivery diagnostic ────────────────────────────────────
-// Sends one plain-text email from the deployment itself and returns the full SMTP
-// transcript, so we can see Gmail's actual response from this IP rather than infer it.
-// Delete this route once the deliverability question is settled.
-app.post('/api/smtp-debug', async (req, res) => {
-  const to = req.body.to;
-  if (!to) return res.status(400).json({ error: 'to required' });
-
-  const lines = [];
-  const capture = (level) => (...args) => lines.push(`[${level}] ${args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ')}`);
-
-  try {
-    const nodemailer = require('nodemailer');
-    const transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: { user: process.env.GMAIL_EMAIL, pass: process.env.GMAIL_APP_PASSWORD },
-      logger: { debug: capture('debug'), info: capture('info'), warn: capture('warn'), error: capture('error') },
-      debug: true,
-    });
-
-    // rich:true reproduces the worker's exact payload shape (display name + HTML part),
-    // isolating "Vercel + app content" — the one combination not yet tested.
-    const rich = !!req.body.rich;
-    const body = req.body.body || "Hi Prashuk,\n\nI'm a developer and I built a small tool called BugTracker — it auto-captures JavaScript errors and API failures from a frontend app and shows them live.\n\nHave a look: {{link}}\n\nYour Name";
-    const toHtml = t => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/\n/g, '<br>');
-
-    const info = await transporter.sendMail({
-      from: rich ? `"${process.env.SENDER_NAME || 'Your Name'}" <${process.env.GMAIL_EMAIL}>` : process.env.GMAIL_EMAIL,
-      to,
-      subject: rich ? "quick one about test's frontend" : `vercel-smtp-debug ${new Date().toISOString()}`,
-      text: rich ? body : 'Plain text delivery test sent from the Vercel deployment.',
-      ...(rich ? { html: toHtml(body) } : {}),
-    });
-
-    res.json({
-      sentFrom: 'vercel',
-      outboundIp: req.headers['x-vercel-forwarded-for'] ? 'see egress note' : undefined,
-      accepted: info.accepted,
-      rejected: info.rejected,
-      response: info.response,
-      messageId: info.messageId,
-      search: `rfc822msgid:${String(info.messageId).replace(/[<>]/g, '')} in:anywhere`,
-      transcript: lines,
-    });
-  } catch (err) {
-    res.status(500).json({ error: err.message, code: err.code, response: err.response, transcript: lines });
-  }
-});
-
 // ── Configure Gmail credentials ────────────────────────────────────────────
 app.post('/api/config', (req, res) => {
   const { email, appPassword, name } = req.body;
