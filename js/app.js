@@ -335,32 +335,17 @@ const App = (() => {
   };
 
   // ── SEND JOB WIDGET ────────────────────────────────────────────────────────
-  let _sjwJobId = null;
+  // Tracks EVERY in-flight job. Overlapping drips/batches all run concurrently,
+  // so showing only the newest hid the others while they were still sending.
+  const SJW_MAX_CARDS = 4;
+  const SJW_DISMISS_MS = 8000;
+
+  const _sjwJobs = new Map();          // id -> job doc (includes recently finished)
+  const _sjwDismissTimers = new Map(); // id -> timeout retiring a finished card
   let _sjwInterval = null;
   let _sjwCollapsed = false;
 
   const _sjwIsStep3 = () => window.location.pathname.includes('step3');
-
-  const _sjwInjectDOM = () => {
-    if (document.getElementById('send-job-widget')) return;
-    const el = document.createElement('div');
-    el.id = 'send-job-widget';
-    el.innerHTML = `
-      <div id="sjw-header">
-        <span id="sjw-title"><i class="ti ti-send"></i> Sending emails…</span>
-        <div style="display:flex;gap:6px">
-          <button id="sjw-pause-btn" class="btn btn-xs" onclick="window._app._sjwTogglePause()"></button>
-          <button class="btn btn-xs" onclick="window._app._sjwCollapse()" title="Minimise"><i class="ti ti-minus"></i></button>
-          <button class="btn btn-xs" onclick="window._app._sjwClose()" title="Dismiss"><i class="ti ti-x"></i></button>
-        </div>
-      </div>
-      <div id="sjw-body">
-        <div class="progress-bar"><div class="progress-fill" id="sjw-fill" style="width:0%"></div></div>
-        <div id="sjw-stats" style="font-size:12px;color:var(--text2);margin-top:6px"></div>
-      </div>
-    `;
-    document.body.appendChild(el);
-  };
 
   const _sjwFormatTime = (ms) => {
     if (ms <= 0) return 'finishing…';
@@ -370,106 +355,135 @@ const App = (() => {
     return hrs > 0 ? `~${hrs}h ${mins}m` : `~${mins}m`;
   };
 
-  const _sjwUpdate = (job) => {
-    const fill = document.getElementById('sjw-fill');
-    const stats = document.getElementById('sjw-stats');
-    const title = document.getElementById('sjw-title');
-    const pauseBtn = document.getElementById('sjw-pause-btn');
-    if (!fill || !stats) return;
-
-    const total = job.items.length;
-    const sent = job.items.filter(i => i.status === 'sent').length;
-    const failed = job.items.filter(i => i.status === 'failed').length;
-    const done = sent + failed;
-    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-
-    fill.style.width = pct + '%';
-    stats.textContent = `${done}/${total} · ${failed > 0 ? failed + ' failed' : done > 0 ? 'all good' : 'starting…'}`;
-
-    // A stuck job has all items done but status still 'processing' due to a prior race condition.
-    // Detect it here, call repair in the background, and treat it as done immediately.
+  const _sjwEffectivelyDone = (job) => {
     const allItemsDone = job.items.length > 0 && job.items.every(i => i.status !== 'pending');
-    const effectivelyDone = job.status === 'done' || job.status === 'cancelled' || (job.status === 'processing' && allItemsDone);
+    return job.status === 'done' || job.status === 'cancelled' || (job.status === 'processing' && allItemsDone);
+  };
 
-    if (effectivelyDone) {
-      if (job.status === 'processing' && allItemsDone) {
-        fetch(`${API_BASE}/api/jobs/${_sjwJobId}/repair`, { method: 'POST' }).catch(() => {});
-      }
-      if (title) title.innerHTML = `<i class="ti ti-circle-check"></i> ${sent} sent${failed ? ', ' + failed + ' failed' : ''}`;
-      if (pauseBtn) pauseBtn.style.display = 'none';
-      clearInterval(_sjwInterval);
-      _sjwInterval = null;
-      setTimeout(_sjwDismiss, 8000);
+  const _sjwCardHtml = (job) => {
+    const total   = job.items.length;
+    const sent    = job.items.filter(i => i.status === 'sent').length;
+    const failed  = job.items.filter(i => i.status === 'failed').length;
+    const skipped = job.items.filter(i => i.status === 'skipped').length;
+    const done    = sent + failed + skipped;
+    const pct     = total > 0 ? Math.round((done / total) * 100) : 0;
+
+    let title, pauseBtn = '';
+    if (_sjwEffectivelyDone(job)) {
+      title = `<i class="ti ti-circle-check"></i> ${sent} sent${failed ? ', ' + failed + ' failed' : ''}${skipped ? ', ' + skipped + ' skipped' : ''}`;
     } else if (job.sendMode === 'drip') {
       const remaining = job.items.filter(i => i.status === 'pending').length;
-      const delayMs = Math.round(3_600_000 / (job.ratePerHour || 5));
-      const timeLeftMs = Math.max(0, (remaining - 1) * delayMs);
-      const timeStr = _sjwFormatTime(timeLeftMs);
-      if (title) title.innerHTML = `<i class="ti ti-clock"></i> Drip — ${timeStr} left`;
-      if (pauseBtn) pauseBtn.style.display = 'none'; // individual events already scheduled
+      const delayMs = Math.round(3600000 / (job.ratePerHour || 5));
+      title = `<i class="ti ti-clock"></i> Drip ${total} · ${_sjwFormatTime(Math.max(0, (remaining - 1) * delayMs))} left`;
     } else if (job.status === 'paused') {
-      if (title) title.innerHTML = `<i class="ti ti-player-pause"></i> Paused`;
-      if (pauseBtn) { pauseBtn.style.display = ''; pauseBtn.innerHTML = '<i class="ti ti-player-play"></i>'; }
+      title = `<i class="ti ti-player-pause"></i> Paused`;
+      pauseBtn = `<button class="btn btn-xs" onclick="window._app._sjwTogglePause('${job.id}')"><i class="ti ti-player-play"></i></button>`;
     } else {
-      if (title) title.innerHTML = `<i class="ti ti-send"></i> Sending emails…`;
-      if (pauseBtn) { pauseBtn.style.display = ''; pauseBtn.innerHTML = '<i class="ti ti-player-pause"></i>'; }
+      title = `<i class="ti ti-send"></i> Sending ${total} email${total > 1 ? 's' : ''}…`;
+      pauseBtn = `<button class="btn btn-xs" onclick="window._app._sjwTogglePause('${job.id}')"><i class="ti ti-player-pause"></i></button>`;
     }
+
+    const stats = `${done}/${total} · ${failed > 0 ? failed + ' failed' : done > 0 ? 'all good' : 'starting…'}`;
+
+    return `
+      <div class="sjw-card" data-job-id="${job.id}">
+        <div class="sjw-header">
+          <span>${title}</span>
+          <div style="display:flex;gap:6px">
+            ${pauseBtn}
+            <button class="btn btn-xs" onclick="window._app._sjwCollapse()" title="Minimise"><i class="ti ti-minus"></i></button>
+            <button class="btn btn-xs" onclick="window._app._sjwClose('${job.id}')" title="Cancel job"><i class="ti ti-x"></i></button>
+          </div>
+        </div>
+        <div class="sjw-body${_sjwCollapsed ? ' collapsed' : ''}">
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+          <div style="font-size:12px;color:var(--text2);margin-top:6px">${stats}</div>
+        </div>
+      </div>`;
   };
 
-  // Natural auto-dismiss (job completed) — no dismissed marker needed, DB has the truth
-  const _sjwDismiss = () => {
-    clearInterval(_sjwInterval);
-    _sjwInterval = null;
-    _sjwJobId = null;
-    const el = document.getElementById('send-job-widget');
-    if (el) el.remove();
+  const _sjwRender = () => {
+    let el = document.getElementById('send-job-widget');
+    if (_sjwJobs.size === 0) { if (el) el.remove(); return; }
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'send-job-widget';
+      document.body.appendChild(el);
+    }
+    const jobs = [..._sjwJobs.values()].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+    const visible = jobs.slice(0, SJW_MAX_CARDS);
+    const hidden = jobs.length - visible.length;
+    el.innerHTML =
+      (hidden > 0 ? `<div class="sjw-more">+${hidden} more job${hidden > 1 ? 's' : ''} running</div>` : '') +
+      visible.map(_sjwCardHtml).join('');
   };
 
-  // User-initiated close → cancel the job in DB so it never comes back as "active"
-  const _sjwClose = async () => {
-    const id = _sjwJobId;
-    _sjwDismiss(); // remove widget immediately
+  const _sjwForget = (id) => {
+    const t = _sjwDismissTimers.get(id);
+    if (t) { clearTimeout(t); _sjwDismissTimers.delete(id); }
+    _sjwJobs.delete(id);
+    _sjwRender();
+  };
+
+  // A job that dropped off /active-all has finished. Fetch its final state once so
+  // the card shows the outcome, then retire it.
+  const _sjwFinalize = async (id) => {
+    if (_sjwDismissTimers.has(id)) return; // already retiring
+    _sjwDismissTimers.set(id, setTimeout(() => _sjwForget(id), SJW_DISMISS_MS));
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs/${id}`);
+      if (!res.ok) return;
+      const job = await res.json();
+      _sjwJobs.set(id, job);
+      _sjwRender();
+      if (job.status === 'processing' && job.items.every(i => i.status !== 'pending')) {
+        fetch(`${API_BASE}/api/jobs/${id}/repair`, { method: 'POST' }).catch(() => {});
+      }
+    } catch (_) {}
+  };
+
+  const _sjwPoll = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/jobs/active-all`);
+      if (!res.ok) return;
+      const active = await res.json();
+      const activeIds = new Set(active.map(j => j.id));
+      for (const id of [..._sjwJobs.keys()]) {
+        if (!activeIds.has(id)) _sjwFinalize(id);
+      }
+      active.forEach(j => _sjwJobs.set(j.id, j));
+      _sjwRender();
+    } catch (_) {}
+  };
+
+  // User-initiated close → cancel that job so it never comes back as "active"
+  const _sjwClose = async (id) => {
     if (!id) return;
+    _sjwForget(id);
     try {
       await fetch(`${API_BASE}/api/jobs/${id}/cancel`, { method: 'POST' });
     } catch (_) {}
   };
 
-  const _sjwPoll = async () => {
-    if (!_sjwJobId) return;
-    try {
-      const res = await fetch(`${API_BASE}/api/jobs/${_sjwJobId}`);
-      if (!res.ok) return;
-      const job = await res.json();
-      _sjwUpdate(job);
-    } catch (_) {}
+  // Clear every card without cancelling anything (used on credential errors)
+  const _sjwDismiss = () => {
+    _sjwDismissTimers.forEach(t => clearTimeout(t));
+    _sjwDismissTimers.clear();
+    _sjwJobs.clear();
+    _sjwRender();
   };
 
-  const _sjwStart = (id) => {
-    if (_sjwJobId) return; // already tracking a job on this page
-    _sjwJobId = id;
-    _sjwInjectDOM();
-    if (!_sjwInterval) {
-      _sjwInterval = setInterval(_sjwPoll, 3000);
-    }
-    _sjwPoll(); // immediate first update
-  };
+  // Kept for callers that know a job id up front — polling picks it up either way.
+  const _sjwStart = (_id) => { _sjwPoll(); };
 
-  // Use GET /api/jobs/active — DB is source of truth, no storage needed
-  const _sjwCheckForActiveJob = async () => {
+  const _sjwCheckForActiveJob = () => {
     if (_sjwIsStep3()) return; // step3 has its own inline progress
-    if (_sjwJobId) return; // already tracking a job on this page
-    try {
-      const res = await fetch(`${API_BASE}/api/jobs/active`);
-      if (!res.ok) return;
-      const job = await res.json();
-      if (!job) return;
-      _sjwStart(job.id);
-    } catch (_) {}
+    _sjwPoll();
+    if (!_sjwInterval) _sjwInterval = setInterval(_sjwPoll, 3000);
   };
 
   // Placeholder — real implementation wired up after window._app is defined below
-  window._app_sjwTogglePause = () => window._app?._sjwTogglePause();
+  window._app_sjwTogglePause = (id) => window._app?._sjwTogglePause(id);
 
   // Auto-start widget check on every page load (except step3)
   if (document.readyState === 'loading') {
@@ -511,8 +525,8 @@ const App = (() => {
     _sjwTogglePause: window._app_sjwTogglePause,
     _sjwCollapse() {
       _sjwCollapsed = !_sjwCollapsed;
-      const body = document.getElementById('sjw-body');
-      if (body) body.classList.toggle('collapsed', _sjwCollapsed);
+      document.querySelectorAll('#send-job-widget .sjw-body')
+        .forEach(body => body.classList.toggle('collapsed', _sjwCollapsed));
     },
 
     async createContacts(rows) {
@@ -604,14 +618,14 @@ const App = (() => {
   };
 
   // Wire up _sjwTogglePause after window._app is defined
-  window._app._sjwTogglePause = async () => {
-    if (!_sjwJobId) return;
+  window._app._sjwTogglePause = async (id) => {
+    if (!id) return;
     try {
-      const res = await fetch(`${API_BASE}/api/jobs/${_sjwJobId}`);
+      const res = await fetch(`${API_BASE}/api/jobs/${id}`);
       if (!res.ok) return;
       const job = await res.json();
       const action = job.status === 'paused' ? 'resume' : 'pause';
-      const actionRes = await fetch(`${API_BASE}/api/jobs/${_sjwJobId}/${action}`, { method: 'POST' });
+      const actionRes = await fetch(`${API_BASE}/api/jobs/${id}/${action}`, { method: 'POST' });
       if (!actionRes.ok) {
         const err = await actionRes.json();
         if (err.error === 'credentials_missing') {

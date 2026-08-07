@@ -773,22 +773,32 @@ thead th.sortable:hover { color:var(--text); }
 }
 
 /* ── SEND JOB WIDGET ──────────────────────────────────────────────────────── */
+/* Container is a stack: overlapping drips/batches each get their own card. */
 #send-job-widget {
   position: fixed; bottom: 20px; right: 20px; z-index: 500;
-  width: 270px; background: var(--bg);
+  width: 270px; display: flex; flex-direction: column-reverse; gap: 8px;
+  max-height: calc(100vh - 40px); overflow-y: auto;
+}
+.sjw-card {
+  background: var(--bg);
   border: 0.5px solid var(--border); border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg); overflow: hidden;
+  box-shadow: var(--shadow-lg); overflow: hidden; flex: none;
   animation: fadeInUp .25s var(--ease);
   transition: background-color .2s var(--ease), border-color .2s var(--ease);
 }
-#sjw-header {
+.sjw-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 12px; background: var(--bg2);
   font-size: 13px; font-weight: 500;
   border-bottom: 0.5px solid var(--border);
 }
-#sjw-body { padding: 10px 12px; }
-#sjw-body.collapsed { display: none; }
+.sjw-header > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sjw-body { padding: 10px 12px; }
+.sjw-body.collapsed { display: none; }
+.sjw-more {
+  text-align: center; font-size: 11px; color: var(--text2);
+  padding: 4px 0;
+}
 .btn-xs {
   padding: 3px 7px; font-size: 11px; border-radius: 5px;
   background: var(--bg); border: 0.5px solid var(--border);

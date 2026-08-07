@@ -92,22 +92,46 @@ router.get('/stats/sent-24h', async (req, res) => {
   }
 });
 
-// IMPORTANT: /active must be defined before /:id
+const ACTIVE_STATUSES = ['pending', 'processing', 'paused'];
+const ACTIVE_PROJECTION = { items: 1, status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1, ratePerHour: 1 };
+
+// Auto-cancel jobs stuck in pending/processing for over 24h with zero progress.
+// These are ghost jobs where Inngest never ran (e.g. server was down when the event fired).
+const cancelStaleJobs = () => {
+  const staleThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  return SendJob.updateMany(
+    { status: { $in: ['pending', 'processing'] }, processedCount: 0, createdAt: { $lt: staleThreshold } },
+    { $set: { status: 'cancelled' } }
+  );
+};
+
+// IMPORTANT: /active and /active-all must be defined before /:id
 router.get('/active', async (req, res) => {
   try {
-    // Auto-cancel jobs that have been stuck in pending/processing for over 24h with zero progress.
-    // These are ghost jobs where Inngest never ran (e.g. server was down when the event fired).
-    const staleThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
-    await SendJob.updateMany(
-      { status: { $in: ['pending', 'processing'] }, processedCount: 0, createdAt: { $lt: staleThreshold } },
-      { $set: { status: 'cancelled' } }
-    );
+    await cancelStaleJobs();
 
     const job = await SendJob.findOne(
-      { status: { $in: ['pending', 'processing', 'paused'] } },
-      { items: 1, status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1, ratePerHour: 1 }
+      { status: { $in: ACTIVE_STATUSES } },
+      ACTIVE_PROJECTION
     ).sort({ createdAt: -1 }).lean();
     res.json(job ? serialize(job) : null);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/jobs/active-all — every in-flight job, newest first.
+// Overlapping drips/batches all run concurrently, so the widget needs the full
+// set; /active only ever surfaced the newest, hiding the others while they sent.
+router.get('/active-all', async (req, res) => {
+  try {
+    await cancelStaleJobs();
+
+    const jobs = await SendJob.find(
+      { status: { $in: ACTIVE_STATUSES } },
+      ACTIVE_PROJECTION
+    ).sort({ createdAt: -1 }).limit(20).lean();
+    res.json(jobs.map(serialize));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
