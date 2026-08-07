@@ -75,9 +75,12 @@ export interface JobItem {
 
 export interface SendJob {
   id: string;
-  status: 'queued' | 'processing' | 'paused' | 'done' | 'cancelled';
+  // 'pending' is what the SendJob schema actually stores before the orchestrator
+  // picks the job up; 'queued' was never a real value.
+  status: 'pending' | 'processing' | 'paused' | 'done' | 'cancelled';
   sendMode?: 'sequential' | 'bulk' | 'drip' | null;
   ratePerHour?: number;
+  createdAt: string;
   items: JobItem[];
 }
 
