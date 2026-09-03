@@ -29,6 +29,9 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
       <NavLink to="/" end className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-layout-dashboard" /> Dashboard
       </NavLink>
+      <NavLink to="/leads" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-target-arrow" /> Leads
+      </NavLink>
       <NavLink to="/contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-users" /> Contacts
       </NavLink>

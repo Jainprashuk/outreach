@@ -2,6 +2,7 @@ import { type ReactNode } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
+import Leads from './pages/Leads';
 import AddContacts from './pages/AddContacts';
 import ExportContacts from './pages/ExportContacts';
 import Templates from './pages/Templates';
@@ -36,6 +37,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={owner(<Dashboard />)} />
+      <Route path="/leads" element={owner(<Leads />)} />
       <Route path="/contacts" element={owner(<Contacts />)} />
       <Route path="/add-contacts" element={owner(<AddContacts />)} />
       <Route path="/export-contacts" element={<ExportContacts />} />

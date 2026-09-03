@@ -185,6 +185,7 @@ app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));
 app.use('/api/jobs', requireDb, require('./routes/jobs'));
+app.use('/api/leads', requireDb, require('./routes/leads'));
 
 // ── Inngest handler ─────────────────────────────────────────────────────────
 const { serve } = require('inngest/express');

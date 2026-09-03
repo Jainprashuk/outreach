@@ -2,6 +2,7 @@ const express = require('express');
 const Contact = require('../models/Contact');
 const SendJob = require('../models/SendJob');
 const { COOLDOWN_LABEL, inCooldown, cooldownRemaining } = require('../lib/cooldown');
+const { importContacts } = require('../lib/contactImport');
 
 const router = express.Router();
 
@@ -163,38 +164,11 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Each contact requires name and email' });
     }
 
-    // Deduplicate within the incoming batch (keep first occurrence, case-insensitive)
-    const seen = new Set();
-    const unique = rows.filter(r => {
-      const key = r.email.trim().toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
+    // Dedupe + insert live in lib/contactImport.js so /api/leads/move-to-outreach
+    // applies exactly the same rules.
+    const { created } = await importContacts(rows);
 
-    // Find which emails already exist in the DB (non-deleted)
-    const incomingEmails = unique.map(r => r.email.trim().toLowerCase());
-    const existing = await Contact.find(
-      { email: { $in: incomingEmails }, deleted: { $ne: true } },
-      { email: 1 }
-    ).collation({ locale: 'en', strength: 2 }).lean();
-    const existingEmails = new Set(existing.map(c => c.email.trim().toLowerCase()));
-
-    const toInsert = unique.filter(r => !existingEmails.has(r.email.trim().toLowerCase()));
-    const skippedCount = rows.length - toInsert.length;
-
-    let created = [];
-    if (toInsert.length > 0) {
-      created = await Contact.insertMany(toInsert.map(r => ({
-        name: r.name,
-        email: r.email.trim().toLowerCase(),
-        company: r.company || '',
-        role: r.role || '',
-        template: r.template || '',
-      })));
-    }
-
-    res.status(201).json({ created, skipped: skippedCount });
+    res.status(201).json({ created, skipped: rows.length - created.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

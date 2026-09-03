@@ -1,0 +1,1335 @@
+{
+  "_readme": [
+    "Rebuilt after every `jl poll` and `jl harvest`. Do not hand-edit:",
+    "data/leads.json is the source of truth and this is derived from it.",
+    "",
+    "last_run_leads = the leads that were NEW in the run described by",
+    "`last_run`. all_leads = everything in the store. Both are sorted",
+    "best-fit first, so hard rejects (fit_score -999) sink to the bottom."
+  ],
+  "updated_at": 1788447880,
+  "last_run": {
+    "at": 1788447400,
+    "at_local": "2026-09-03 20:26:40",
+    "source": "scroll",
+    "new": 6,
+    "seen": 65,
+    "searches": 4,
+    "backfilled": true
+  },
+  "last_run_leads": [
+    {
+      "author_name": "BIJAYA KRUSHNA ROUT",
+      "author_url": "https://www.linkedin.com/in/bijayasap",
+      "company": null,
+      "emails": [
+        "hr@seereon.co.in"
+      ],
+      "fit_score": 14,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/bijayasap/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "PsyBE Labs",
+      "author_url": "https://www.linkedin.com/company/psybeworld",
+      "company": null,
+      "emails": [
+        "reach@psybelabs.world"
+      ],
+      "fit_score": 12,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/company/psybeworld/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Deepak Sharma",
+      "author_url": "https://www.linkedin.com/in/depaksharma",
+      "company": null,
+      "emails": [],
+      "fit_score": 10,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/gejqvTEB",
+        "https://lnkd.in/gA86xWn3"
+      ],
+      "post_url": "https://www.linkedin.com/in/depaksharma/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "US Staffing, Bench Sales, IT Recruiters, Hotlist, C2C, W2, Vendor, Onboarding, Healthcare Recruiter",
+      "author_url": null,
+      "company": null,
+      "emails": [
+        "gurudeepthi.g@cliff-services.com"
+      ],
+      "fit_score": 7,
+      "hiring": true,
+      "links": [],
+      "post_url": null,
+      "source": "scroll"
+    },
+    {
+      "author_name": "Gurudeepthi G",
+      "author_url": "https://www.linkedin.com/in/gurudeepthi-g-148028374",
+      "company": null,
+      "emails": [
+        "gurudeepthi.g@cliff-services.com"
+      ],
+      "fit_score": 7,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/gurudeepthi-g-148028374/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Nageshwaran Subramaniyan",
+      "author_url": "https://www.linkedin.com/in/nageshwaran-subramaniyan-nk171028",
+      "company": null,
+      "emails": [],
+      "fit_score": -12,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/nageshwaran-subramaniyan-nk171028/recent-activity/all/",
+      "source": "scroll"
+    }
+  ],
+  "all_leads": [
+    {
+      "author_name": "Shriya Murthygari",
+      "author_url": "https://www.linkedin.com/in/shriya-murthygari-68aa7b275",
+      "company": null,
+      "emails": [
+        "careers@forty4.tech"
+      ],
+      "fit_score": 20,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/shriya-murthygari-68aa7b275/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Sweety Kumari",
+      "author_url": "https://www.linkedin.com/in/sweety-kumari-61aa75314",
+      "company": null,
+      "emails": [
+        "sweety.kumari@ibugroup.co.uk"
+      ],
+      "fit_score": 20,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/sweety-kumari-61aa75314/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Affluence Travels",
+      "author_url": "https://www.linkedin.com/company/affluencetravels",
+      "company": null,
+      "emails": [
+        "hr@affluencetravels.com"
+      ],
+      "fit_score": 18,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/company/affluencetravels/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Nikhil Jathar",
+      "author_url": "https://www.linkedin.com/in/imnjatharln",
+      "company": null,
+      "emails": [
+        "careers@cybermeru.com"
+      ],
+      "fit_score": 17,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/imnjatharln/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Aakansha Soni",
+      "author_url": "https://www.linkedin.com/in/aakansha-soni-39114113a",
+      "company": null,
+      "emails": [
+        "aakansha@starhealth.in"
+      ],
+      "fit_score": 16,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/aakansha-soni-39114113a/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Manasa Muniyappa",
+      "author_url": "https://www.linkedin.com/in/manasa-muniyappa-134b6b229",
+      "company": null,
+      "emails": [
+        "manasa.morpheus@gmail.com"
+      ],
+      "fit_score": 15,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/manasa-muniyappa-134b6b229/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "BIJAYA KRUSHNA ROUT",
+      "author_url": "https://www.linkedin.com/in/bijayasap",
+      "company": null,
+      "emails": [
+        "hr@seereon.co.in"
+      ],
+      "fit_score": 14,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/bijayasap/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "US & Canada Staffing Group",
+      "author_url": null,
+      "company": null,
+      "emails": [],
+      "fit_score": 13,
+      "hiring": true,
+      "links": [],
+      "post_url": null,
+      "source": "scroll"
+    },
+    {
+      "author_name": "Nipen Chongtham",
+      "author_url": "https://www.linkedin.com/in/nipen-chongtham-111a1521",
+      "company": null,
+      "emails": [],
+      "fit_score": 13,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/nipen-chongtham-111a1521/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "PsyBE Labs",
+      "author_url": "https://www.linkedin.com/company/psybeworld",
+      "company": null,
+      "emails": [
+        "reach@psybelabs.world"
+      ],
+      "fit_score": 12,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/company/psybeworld/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Deepak Sharma",
+      "author_url": "https://www.linkedin.com/in/depaksharma",
+      "company": null,
+      "emails": [],
+      "fit_score": 10,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/gejqvTEB",
+        "https://lnkd.in/gA86xWn3"
+      ],
+      "post_url": "https://www.linkedin.com/in/depaksharma/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Deepak Sharma",
+      "author_url": "https://www.linkedin.com/in/depaksharma",
+      "company": null,
+      "emails": [],
+      "fit_score": 10,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/gejqvTEB",
+        "https://lnkd.in/gA86xWn3"
+      ],
+      "post_url": "https://www.linkedin.com/in/depaksharma/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Provati Dey",
+      "author_url": "https://www.linkedin.com/in/provati-dey-2268921b3",
+      "company": null,
+      "emails": [
+        "provati@peoplemint.in"
+      ],
+      "fit_score": 10,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/provati-dey-2268921b3/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Anoushka Bose",
+      "author_url": "https://www.linkedin.com/in/anoushka-bose-hr",
+      "company": null,
+      "emails": [
+        "anoushka@brightstar-research.com"
+      ],
+      "fit_score": 9,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/anoushka-bose-hr/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Narendra Kumar",
+      "author_url": "https://www.linkedin.com/in/narendra-kumar-b39235343",
+      "company": null,
+      "emails": [],
+      "fit_score": 9,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/diUiy-Ud",
+        "https://quickhire.me/",
+        "https://lnkd.in/gjwYegse",
+        "https://quickhire.me/job/VRg6rEpOF1nCLnDuKy02"
+      ],
+      "post_url": "https://www.linkedin.com/in/narendra-kumar-b39235343/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Amol Sonawane",
+      "author_url": "https://www.linkedin.com/in/amol-sonawane-58608a239",
+      "company": null,
+      "emails": [],
+      "fit_score": 9,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/d9XRUYDD"
+      ],
+      "post_url": "https://www.linkedin.com/in/amol-sonawane-58608a239/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Narendra Kumar",
+      "author_url": "https://www.linkedin.com/in/narendra-kumar-b39235343",
+      "company": null,
+      "emails": [],
+      "fit_score": 9,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/d4a5qifp",
+        "https://quickhire.me/",
+        "https://lnkd.in/gjwYegse",
+        "https://quickhire.me/job/YysBx5woF24pZ9mhDizS"
+      ],
+      "post_url": "https://www.linkedin.com/in/narendra-kumar-b39235343/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Neeraj Kumar",
+      "author_url": "https://www.linkedin.com/in/codernkb",
+      "company": null,
+      "emails": [
+        "sudeepr@zenith.ai"
+      ],
+      "fit_score": 9,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/codernkb/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Kalyani Gorde - Kesbhat",
+      "author_url": "https://www.linkedin.com/in/kalyani-gorde-kesbhat-4169901b",
+      "company": null,
+      "emails": [
+        "kalyanik@zenith.ai"
+      ],
+      "fit_score": 9,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/kalyani-gorde-kesbhat-4169901b/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Mohit Kumar",
+      "author_url": "https://www.linkedin.com/in/mohitdecodes",
+      "company": null,
+      "emails": [],
+      "fit_score": 8,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/g57UYs7U",
+        "https://lnkd.in/gY6zUpZJ",
+        "https://lnkd.in/gdrwBtpN",
+        "https://lnkd.in/gtMkuN7z",
+        "https://lnkd.in/giap2U55",
+        "https://lnkd.in/gZBmY_xV"
+      ],
+      "post_url": "https://www.linkedin.com/in/mohitdecodes/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "C2C - Requirement Group",
+      "author_url": null,
+      "company": null,
+      "emails": [
+        "aarvi@trulogictek.com"
+      ],
+      "fit_score": 8,
+      "hiring": true,
+      "links": [
+        "http://ASP.NET"
+      ],
+      "post_url": null,
+      "source": "scroll"
+    },
+    {
+      "author_name": "Luxmor AI Technologies Private Limited",
+      "author_url": "https://www.linkedin.com/company/luxmoraipvtltd",
+      "company": null,
+      "emails": [
+        "hr@luxmorai.com"
+      ],
+      "fit_score": 8,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/company/luxmoraipvtltd/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "QuickHire.me",
+      "author_url": "https://www.linkedin.com/company/quickhireme-india",
+      "company": null,
+      "emails": [],
+      "fit_score": 8,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/dEwH5m7x",
+        "https://quickhire.me/",
+        "https://lnkd.in/gjwYegse"
+      ],
+      "post_url": "https://www.linkedin.com/company/quickhireme-india/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Narendra Kumar",
+      "author_url": "https://www.linkedin.com/in/narendra-kumar-b39235343",
+      "company": null,
+      "emails": [],
+      "fit_score": 8,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/dHtimWXj",
+        "https://quickhire.me/",
+        "https://lnkd.in/gjwYegse",
+        "https://quickhire.me/job/afIKlBKSlGgniXgoYgD5"
+      ],
+      "post_url": "https://www.linkedin.com/in/narendra-kumar-b39235343/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "US Staffing, Bench Sales, IT Recruiters, Hotlist, C2C, W2, Vendor, Onboarding, Healthcare Recruiter",
+      "author_url": null,
+      "company": null,
+      "emails": [
+        "gurudeepthi.g@cliff-services.com"
+      ],
+      "fit_score": 7,
+      "hiring": true,
+      "links": [],
+      "post_url": null,
+      "source": "scroll"
+    },
+    {
+      "author_name": "Gurudeepthi G",
+      "author_url": "https://www.linkedin.com/in/gurudeepthi-g-148028374",
+      "company": null,
+      "emails": [
+        "gurudeepthi.g@cliff-services.com"
+      ],
+      "fit_score": 7,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/gurudeepthi-g-148028374/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Venkatesh Goud Dumbala✅",
+      "author_url": "https://www.linkedin.com/in/venkatesh-goud-dumbala%E2%9C%85-9ab987175",
+      "company": null,
+      "emails": [
+        "venkatesh@aivantainc.com"
+      ],
+      "fit_score": 7,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/venkatesh-goud-dumbala%E2%9C%85-9ab987175/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "OnlyFrontendJobs",
+      "author_url": "https://www.linkedin.com/company/onlyfrontendjobs",
+      "company": null,
+      "emails": [],
+      "fit_score": 6,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/gXxzc9mg"
+      ],
+      "post_url": "https://www.linkedin.com/company/onlyfrontendjobs/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Rattesh Bansall",
+      "author_url": "https://www.linkedin.com/in/rattesh",
+      "company": null,
+      "emails": [
+        "bansalitadvisory@gmail.com"
+      ],
+      "fit_score": 6,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/rattesh/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "munotes",
+      "author_url": "https://www.linkedin.com/company/munotes",
+      "company": null,
+      "emails": [],
+      "fit_score": 5,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/dxdCmYiX",
+        "https://lnkd.in/dPWpfT9K",
+        "https://www.munotes.in/dailytechjobs/2026-09-02"
+      ],
+      "post_url": "https://www.linkedin.com/company/munotes/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Abekus",
+      "author_url": "https://www.linkedin.com/company/abekus",
+      "company": null,
+      "emails": [],
+      "fit_score": 4,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/gERVN-Xi",
+        "https://lnkd.in/gTS_vhsd",
+        "https://lnkd.in/gi9RMQXe",
+        "https://lnkd.in/g3C_j-ww",
+        "https://lnkd.in/gtazmM5D",
+        "https://lnkd.in/gbnaVEch",
+        "https://lnkd.in/gTkuNWZs",
+        "https://lnkd.in/gi6H8-8R",
+        "https://lnkd.in/gUt2DYhC",
+        "https://lnkd.in/g8CGnEbv"
+      ],
+      "post_url": "https://www.linkedin.com/company/abekus/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "jjobs",
+      "author_url": "https://www.linkedin.com/company/jjobs-official",
+      "company": null,
+      "emails": [],
+      "fit_score": 4,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/ghm-enpc"
+      ],
+      "post_url": "https://www.linkedin.com/company/jjobs-official/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Zeenat Firdous",
+      "author_url": "https://www.linkedin.com/in/zeenat-firdous-0b8638224",
+      "company": null,
+      "emails": [
+        "nomahr24@gmail.com"
+      ],
+      "fit_score": 4,
+      "hiring": true,
+      "links": [
+        "http://ASP.NET"
+      ],
+      "post_url": "https://www.linkedin.com/in/zeenat-firdous-0b8638224/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Truemeds",
+      "author_url": "https://www.linkedin.com/company/truemeds-india",
+      "company": null,
+      "emails": [],
+      "fit_score": 3,
+      "hiring": true,
+      "links": [
+        "https://www.linkedin.com/jobs/view/4457251519/?trackingId=xkP9eHtLT3C2dqzd9MAU4A%3D%3D&isJobSearch=false",
+        "https://www.linkedin.com/jobs/view/4457251519/?trackingId=P%2BZzl4fsR4aCDOMD92k%2Btg%3D%3D&isJobSearch=false"
+      ],
+      "post_url": "https://www.linkedin.com/company/truemeds-india/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Sanjot Sekhon (HR)",
+      "author_url": "https://www.linkedin.com/in/sanjotsekhon",
+      "company": null,
+      "emails": [
+        "sanjot@brucode.com"
+      ],
+      "fit_score": 3,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/sanjotsekhon/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Jyoti Bharti",
+      "author_url": "https://www.linkedin.com/in/jyoti-bharti-a06581128",
+      "company": null,
+      "emails": [],
+      "fit_score": 3,
+      "hiring": true,
+      "links": [
+        "http://rjconsultants.co.in/our-services/",
+        "http://nauk.in/HU6z4X"
+      ],
+      "post_url": "https://www.linkedin.com/in/jyoti-bharti-a06581128/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Dev Mehra",
+      "author_url": "https://www.linkedin.com/in/dev37",
+      "company": null,
+      "emails": [],
+      "fit_score": 3,
+      "hiring": true,
+      "links": [
+        "http://ASP.NET"
+      ],
+      "post_url": "https://www.linkedin.com/in/dev37/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Subas Kumar Ekka",
+      "author_url": "https://www.linkedin.com/in/subas-kumar-ekka-1a6a523a6",
+      "company": null,
+      "emails": [],
+      "fit_score": 2,
+      "hiring": true,
+      "links": [
+        "https://uace5u.s.gy/bnNAPH",
+        "https://uace5u.s.gy/P49aa4",
+        "https://uace5u.s.gy/pkfpwc",
+        "https://uace5u.s.gy/JuqA0u",
+        "https://lnkd.in/d4Hxstuj",
+        "https://lnkd.in/d3NUe87a",
+        "https://www.placero.in/jobs/data-engineer-medpace-clinical-research-india"
+      ],
+      "post_url": "https://www.linkedin.com/in/subas-kumar-ekka-1a6a523a6/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Nitya Shukla",
+      "author_url": "https://www.linkedin.com/in/nitya-shukla-666b04302",
+      "company": null,
+      "emails": [
+        "nityashukla46@gmail.com"
+      ],
+      "fit_score": 1,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/nitya-shukla-666b04302/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Harika M",
+      "author_url": "https://www.linkedin.com/in/harika-m-301a89374",
+      "company": null,
+      "emails": [
+        "harika.m@people-prime.com"
+      ],
+      "fit_score": 1,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/harika-m-301a89374/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Grahnetra AI Labs",
+      "author_url": "https://www.linkedin.com/company/grahnetra-ai-labs",
+      "company": null,
+      "emails": [
+        "connect@grahnetra.com"
+      ],
+      "fit_score": 0,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/company/grahnetra-ai-labs/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Full Stack Developer Jobs",
+      "author_url": "https://www.linkedin.com/company/full-stack-developer-jobs-updates",
+      "company": null,
+      "emails": [],
+      "fit_score": 0,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/company/full-stack-developer-jobs-updates/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Darshna Baraskar",
+      "author_url": "https://www.linkedin.com/in/darshna-baraskar-8334853b1",
+      "company": null,
+      "emails": [],
+      "fit_score": 0,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/dK849AiA",
+        "https://lnkd.in/d-FrA5C5",
+        "http://React.js"
+      ],
+      "post_url": "https://www.linkedin.com/in/darshna-baraskar-8334853b1/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Software Engineering Jobs - IT & Non IT Jobs",
+      "author_url": "https://www.linkedin.com/company/software-engineering-jobs-it-non-it-jobs",
+      "company": null,
+      "emails": [],
+      "fit_score": -1,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/company/software-engineering-jobs-it-non-it-jobs/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Enoch Abraham H.",
+      "author_url": "https://www.linkedin.com/in/enoch-abraham-h-552400104",
+      "company": null,
+      "emails": [
+        "hemanthb@viisglobal.com"
+      ],
+      "fit_score": -2,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/enoch-abraham-h-552400104/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Sunil Babu Jonnalagadda",
+      "author_url": "https://www.linkedin.com/in/sunil-babu-jonnalagadda-971ab63b2",
+      "company": null,
+      "emails": [
+        "sunilbabujonnalagadda19@gmail.com"
+      ],
+      "fit_score": -3,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/sunil-babu-jonnalagadda-971ab63b2/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Md Tausif Alam",
+      "author_url": "https://www.linkedin.com/in/md-tausif-alam-a06258152",
+      "company": null,
+      "emails": [
+        "tausif.talent@gmail.com"
+      ],
+      "fit_score": -5,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/md-tausif-alam-a06258152/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Rajesh Vankam",
+      "author_url": "https://www.linkedin.com/in/rajeshvankam-java-developer",
+      "company": null,
+      "emails": [
+        "tausif.talent@gmail.com"
+      ],
+      "fit_score": -5,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/rajeshvankam-java-developer/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Nageshwaran Subramaniyan",
+      "author_url": "https://www.linkedin.com/in/nageshwaran-subramaniyan-nk171028",
+      "company": null,
+      "emails": [],
+      "fit_score": -12,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/nageshwaran-subramaniyan-nk171028/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "GOKUL G",
+      "author_url": "https://www.linkedin.com/in/gokul-g-70872629a",
+      "company": null,
+      "emails": [
+        "gokul.g@buzzworks.in"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/gokul-g-70872629a/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Satyendra Yadav",
+      "author_url": "https://www.linkedin.com/in/satyendrayadavece",
+      "company": null,
+      "emails": [
+        "satyendra@akliptech.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/satyendrayadavece/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Md Zakir",
+      "author_url": "https://www.linkedin.com/in/md-zakir-5b586519b",
+      "company": null,
+      "emails": [
+        "zakir@yptllc.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/md-zakir-5b586519b/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "US Staffing, Bench Sales, IT Recruiters, Hotlist, C2C, W2, Vendor, Onboarding, Healthcare Recruiter",
+      "author_url": null,
+      "company": null,
+      "emails": [
+        "satyendra@akliptech.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": null,
+      "source": "scroll"
+    },
+    {
+      "author_name": "USA Staffing-Hotlist And Requirement",
+      "author_url": null,
+      "company": null,
+      "emails": [
+        "anu@akliptech.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": null,
+      "source": "scroll"
+    },
+    {
+      "author_name": "Amol Sonawane",
+      "author_url": "https://www.linkedin.com/in/amol-sonawane-58608a239",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/deQeH-4E"
+      ],
+      "post_url": "https://www.linkedin.com/in/amol-sonawane-58608a239/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Laxman Goud (Tony)",
+      "author_url": "https://www.linkedin.com/in/laxman-goud-tony-ba9799236",
+      "company": null,
+      "emails": [
+        "tony.smith@squadsoftwares.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/laxman-goud-tony-ba9799236/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Amol Sonawane",
+      "author_url": "https://www.linkedin.com/in/amol-sonawane-58608a239",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/deQeH-4E"
+      ],
+      "post_url": "https://www.linkedin.com/in/amol-sonawane-58608a239/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "IT Recruiter_Bench Sales_OPT EAD_CPT_GC EAD_H1B_GC_USC_L2 EAD_H4 EAD_TN_E3_H1B Transfer",
+      "author_url": null,
+      "company": null,
+      "emails": [
+        "tony.smith@squadsoftwares.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": null,
+      "source": "scroll"
+    },
+    {
+      "author_name": "Swati Gupta",
+      "author_url": "https://www.linkedin.com/in/swati-gupta-3822b4122",
+      "company": null,
+      "emails": [
+        "swati.gupta@theninehertz.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/swati-gupta-3822b4122/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Shivangi Srivastava",
+      "author_url": "https://www.linkedin.com/in/shivangi-srivastava-a3ba39391",
+      "company": null,
+      "emails": [
+        "hr@techorasystems.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://techorasystems.com/",
+        "https://www.linkedin.com/services/page/628586341422585a57/"
+      ],
+      "post_url": "https://www.linkedin.com/in/shivangi-srivastava-a3ba39391/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Rishi Narayan Patel",
+      "author_url": "https://www.linkedin.com/in/rishi-narayan-patel-6369b3205",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "http://ASP.NET"
+      ],
+      "post_url": "https://www.linkedin.com/in/rishi-narayan-patel-6369b3205/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "MP Kumar",
+      "author_url": "https://www.linkedin.com/in/mp-kumar-2757a6230",
+      "company": null,
+      "emails": [
+        "mahesh.p@isiteinfo.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/mp-kumar-2757a6230/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Corp to Corp Hotlist and Requirement (C2C / W2) / (Staffing ) Bench Sales",
+      "author_url": null,
+      "company": null,
+      "emails": [
+        "irshad@vkoresolutions.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": null,
+      "source": "scroll"
+    },
+    {
+      "author_name": "Pranav Patil",
+      "author_url": "https://www.linkedin.com/in/pranav-patil-8a11b0370",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/pranav-patil-8a11b0370/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Sentrique",
+      "author_url": "https://www.linkedin.com/company/sentrique",
+      "company": null,
+      "emails": [
+        "info@sentrique.ai"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "http://B.Tech",
+        "http://M.Tech"
+      ],
+      "post_url": "https://www.linkedin.com/company/sentrique/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Nageshwar Reddy Pandem",
+      "author_url": "https://www.linkedin.com/in/nageshwaruideveloper",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/nageshwaruideveloper/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Kiran Joshi",
+      "author_url": "https://www.linkedin.com/in/kiran0304",
+      "company": null,
+      "emails": [
+        "careers@ssmtb.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "http://www.Zenexpartners.com",
+        "http://ASP.NET"
+      ],
+      "post_url": "https://www.linkedin.com/in/kiran0304/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "ayesha siddiqa",
+      "author_url": "https://www.linkedin.com/in/ayesha-siddiqa12003",
+      "company": null,
+      "emails": [
+        "ayesha.siddiqa@varite.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "http://ASP.NET"
+      ],
+      "post_url": "https://www.linkedin.com/in/ayesha-siddiqa12003/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Sakshi Aggarwal",
+      "author_url": "https://www.linkedin.com/in/sakshi-aggarwal-52750119a",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/gUHdtVHQ",
+        "https://forms.office.com/r/1ZqQmAdgXQ"
+      ],
+      "post_url": "https://www.linkedin.com/in/sakshi-aggarwal-52750119a/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Lipika Gogia",
+      "author_url": "https://www.linkedin.com/in/lipika-gogia-30a553310",
+      "company": null,
+      "emails": [
+        "lipika.gogia@appzime.in"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "http://ASP.NET"
+      ],
+      "post_url": "https://www.linkedin.com/in/lipika-gogia-30a553310/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Shamili G",
+      "author_url": "https://www.linkedin.com/in/shamili-g-931b29254",
+      "company": null,
+      "emails": [
+        "shamili@anaxontech.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/shamili-g-931b29254/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Tanu Singh",
+      "author_url": "https://www.linkedin.com/in/tanu-singh-135195b6",
+      "company": null,
+      "emails": [
+        "tanu.singh@my-bev.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/tanu-singh-135195b6/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "YOGESHWAR YADUWANSHI",
+      "author_url": "https://www.linkedin.com/in/yogeshwar-yaduwanshi-081a9823",
+      "company": null,
+      "emails": [
+        "yogeshwar.yaduwanshi@gmail.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "http://ASP.NET",
+        "http://ADO.NET"
+      ],
+      "post_url": "https://www.linkedin.com/in/yogeshwar-yaduwanshi-081a9823/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Sameer Khan",
+      "author_url": "https://www.linkedin.com/in/sameer-khan-ab3a39258",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/dxYkDhTj",
+        "https://sameer123k.github.io/Portfolio"
+      ],
+      "post_url": "https://www.linkedin.com/in/sameer-khan-ab3a39258/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Akanksha Vyas",
+      "author_url": "https://www.linkedin.com/in/akanksha-vyas-99134a166",
+      "company": null,
+      "emails": [
+        "akanksha.vyas@cloudit-us.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "Https://https://lnkd.in/dx6ce8rG",
+        "https://lnkd.in/dx6ce8rG"
+      ],
+      "post_url": "https://www.linkedin.com/in/akanksha-vyas-99134a166/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Swati .",
+      "author_url": "https://www.linkedin.com/in/swati-350977397",
+      "company": null,
+      "emails": [
+        "hr@techorasystems.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://www.linkedin.com/services/page/628586341422585a57/"
+      ],
+      "post_url": "https://www.linkedin.com/in/swati-350977397/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Naelrazaa Saiyad 📈",
+      "author_url": "https://www.linkedin.com/in/naelrazaa-saiyad",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/naelrazaa-saiyad/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Subiya Siddiqui",
+      "author_url": "https://www.linkedin.com/in/subiya-siddiqui-597072170",
+      "company": null,
+      "emails": [
+        "subiya_subiya@epam.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/subiya-siddiqui-597072170/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Abhishek Gupta",
+      "author_url": "https://www.linkedin.com/in/abhishek7184",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/abhishek7184/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Keddy Tech Solution",
+      "author_url": "https://www.linkedin.com/company/keddy-tech-solutions",
+      "company": null,
+      "emails": [
+        "hr@keddytech.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/company/keddy-tech-solutions/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Rishav Yadav",
+      "author_url": "https://www.linkedin.com/in/rishavyadav-itengineer",
+      "company": null,
+      "emails": [
+        "rishav.itengineer@gmail.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/gqbbRVTz",
+        "https://lnkd.in/dRwMWG4j",
+        "https://lnkd.in/dwFN_ncX"
+      ],
+      "post_url": "https://www.linkedin.com/in/rishavyadav-itengineer/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Er. Govardhan Chavhan",
+      "author_url": "https://www.linkedin.com/in/er-govardhan-chavhan-71a1b23b5",
+      "company": null,
+      "emails": [
+        "talentacquisition@amantyatech.com",
+        "admin@slogix.in",
+        "careers@jitglobal.net",
+        "subashreek@tvminfotech.com",
+        "careers@gravityer.com",
+        "hr@innosoft-group.com",
+        "hr@briskminds.com",
+        "hansika.dubey@americanchase.com",
+        "hr@nenosystems.com",
+        "chiragsatyal@metasite.in",
+        "manikantasrinivas@reclksemiconductors.com",
+        "kiranmayee.mallepaddi@nexteer.com",
+        "hr@tdtech.in",
+        "hr@zealwise.com",
+        "hr@gatecode.co",
+        "campusrecruitment@robosoftin.com",
+        "hr@modinaturals.com",
+        "hr@seertree.com",
+        "mala@sampradaa.in",
+        "ventanainfo@ventanaglobal.in"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/ddsHCnD3",
+        "https://lnkd.in/gHs-yJhD",
+        "https://lnkd.in/gkDaiguv",
+        "https://lnkd.in/gdMgUCHC"
+      ],
+      "post_url": "https://www.linkedin.com/in/er-govardhan-chavhan-71a1b23b5/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Shweta Nirwan",
+      "author_url": "https://www.linkedin.com/in/shweta-nirwan-7b95b020b",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/shweta-nirwan-7b95b020b/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Aditya Prerana Tirkey",
+      "author_url": "https://www.linkedin.com/in/aditya-prerana-tirkey-30a986234",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/gst4DadF"
+      ],
+      "post_url": "https://www.linkedin.com/in/aditya-prerana-tirkey-30a986234/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Snigdha Shome",
+      "author_url": "https://www.linkedin.com/in/snigdha-shome-14627080",
+      "company": null,
+      "emails": [
+        "snigdha.shome@gspann.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/snigdha-shome-14627080/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Ghanshyam Dutt",
+      "author_url": "https://www.linkedin.com/in/ghanshyam-dutt",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/ghanshyam-dutt/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Somyaa Agarwal",
+      "author_url": "https://www.linkedin.com/in/somyaa-agarwal-a6292b1b2",
+      "company": null,
+      "emails": [
+        "somyaa.agarwal@coforge.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [],
+      "post_url": "https://www.linkedin.com/in/somyaa-agarwal-a6292b1b2/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Divya M",
+      "author_url": "https://www.linkedin.com/in/divya-m-776398396",
+      "company": null,
+      "emails": [
+        "mary_r@trigent.com"
+      ],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://lnkd.in/dTfkTpBg",
+        "https://lnkd.in/dNRzkEpi"
+      ],
+      "post_url": "https://www.linkedin.com/in/divya-m-776398396/recent-activity/all/",
+      "source": "scroll"
+    },
+    {
+      "author_name": "Sonal Bajpai",
+      "author_url": "https://www.linkedin.com/in/sonal-bajpai-0529705b",
+      "company": null,
+      "emails": [],
+      "fit_score": -999,
+      "hiring": true,
+      "links": [
+        "https://www.linkedin.com/jobs/view/4459967073/?trackingId=ntLY1pLSRiK%2F3ZkaqP4qIA%3D%3D&isJobSearch=false",
+        "https://www.linkedin.com/jobs/view/4459967073/?trackingId=NeiNOn6kTpqs%2FZNVFW1xmw%3D%3D&isJobSearch=false",
+        "https://www.linkedin.com/jobs/view/4459967073/?trackingId=AJs%2B7CK%2BTPeK8qX%2FuP0kkA%3D%3D&isJobSearch=false"
+      ],
+      "post_url": "https://www.linkedin.com/in/sonal-bajpai-0529705b/recent-activity/all/",
+      "source": "scroll"
+    }
+  ]
+}

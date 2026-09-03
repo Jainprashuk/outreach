@@ -164,3 +164,92 @@ export async function uploadResumeApi(file: File): Promise<ResumeInfo | null> {
 
 export const deleteResumeApi = () =>
   apiFetch<void>('/api/settings/resume', { method: 'DELETE' });
+
+// ── Leads ───────────────────────────────────────────────────────────────────
+// Staged harvester leads. Unrelated to Contact until promoted.
+
+export type LeadStatus = 'new' | 'added-to-outreach';
+
+/** One lead exactly as it appears in the uploaded harvester JSON (pre-explode). */
+export interface SourceLead {
+  author_name: string;
+  author_url: string | null;
+  company: string | null;
+  emails: string[];
+  fit_score: number;      // -999 = hard reject
+  hiring: boolean;
+  links: string[];
+  post_url: string | null;
+  source: string;
+}
+
+/** The whole uploaded file. */
+export interface LeadFile {
+  _readme?: string[];
+  updated_at?: number;    // unix seconds
+  last_run?: Record<string, unknown>;
+  last_run_leads?: SourceLead[];
+  all_leads?: SourceLead[];
+}
+
+/** One stored (author, email) pair. */
+export interface Lead {
+  id: string;
+  authorName: string;
+  authorUrl: string | null;
+  email: string | null;   // null => cannot be moved to outreach
+  company: string;
+  role: string;
+  fitScore: number;
+  hiring: boolean;
+  links: string[];
+  postUrl: string | null;
+  source: string;
+  status: LeadStatus;
+  contactId: string | null;
+  promotedAt: string | null;
+  batchUpdatedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface LeadImportResult {
+  created: Lead[];
+  skipped: number;          // already in the lead store
+  skippedInBatch: number;   // duplicate rows inside the uploaded file
+  ignoredRows: number;
+  totalSourceLeads: number;
+  explodedRows: number;
+}
+
+export interface MoveToOutreachRow { id: string; name: string; company: string; role: string; }
+
+export interface MoveToOutreachResult {
+  ok: boolean;
+  created: Contact[];
+  alreadyExisted: number;
+  skippedNoEmail: number;
+  movedIds: string[];
+  statusUpdateFailed?: boolean;
+}
+
+export const loadLeadsApi = () => apiFetch<Lead[]>('/api/leads');
+
+export const importLeadsApi = (payload: LeadFile | SourceLead[]) =>
+  apiFetch<LeadImportResult>('/api/leads/import', { method: 'POST', body: JSON.stringify(payload) });
+
+export const moveLeadsToOutreachApi = (template: string, leads: MoveToOutreachRow[]) =>
+  apiFetch<MoveToOutreachResult>('/api/leads/move-to-outreach', {
+    method: 'POST', body: JSON.stringify({ template, leads }),
+  });
+
+export const updateLeadApi = (id: string, patch: Partial<Lead>) =>
+  apiFetch<Lead>(`/api/leads/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+
+export const deleteLeadApi = (id: string) =>
+  apiFetch<{ ok: boolean }>(`/api/leads/${id}`, { method: 'DELETE' });
+
+export const deleteLeadsApi = (ids: string[]) =>
+  apiFetch<{ ok: boolean; deleted: number }>('/api/leads/bulk-delete', {
+    method: 'POST', body: JSON.stringify({ ids }),
+  });
