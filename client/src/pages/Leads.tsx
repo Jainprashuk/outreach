@@ -4,6 +4,7 @@ import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import MoveToOutreachModal from '../components/MoveToOutreachModal';
 import LeadDetailModal from '../components/LeadDetailModal';
+import LeadFilterPanel from '../components/LeadFilterPanel';
 import { SkeletonRows } from '../components/Skeleton';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
@@ -12,6 +13,9 @@ import {
   type Lead, type LeadFile, type MoveToOutreachResult,
 } from '../lib/api';
 import { readFileText } from '../lib/csv';
+import {
+  activeChips, applyLeadFilters, countActive, DEFAULT_FILTERS, type LeadFilters,
+} from '../lib/leadFilters';
 import {
   deriveCompany, explodeForPreview, isCompanyDerived, isReject,
   summarisePreview, sourceLeadsFromFile,
@@ -44,9 +48,8 @@ export default function Leads() {
   const [saving, setSaving] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const [tab, setTab] = useState<string>('all');
-  const [search, setSearch] = useState('');
-  const [hideRejects, setHideRejects] = useState(false);
+  const [filters, setFilters] = useState<LeadFilters>(DEFAULT_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moveOpen, setMoveOpen] = useState(false);
@@ -74,14 +77,14 @@ export default function Leads() {
     withoutEmail: leads.filter(l => !l.email).length,
   }), [leads]);
 
-  const filtered = useMemo(() => {
-    let list = leads;
-    if (tab !== 'all') list = list.filter(l => l.status === tab);
-    if (hideRejects) list = list.filter(l => !isReject(l));
-    const q = search.trim().toLowerCase();
-    if (q) list = list.filter(l => (l.authorName + (l.email || '') + deriveCompany(l)).toLowerCase().includes(q));
-    return [...list].sort((a, b) => b.fitScore - a.fitScore);
-  }, [leads, tab, hideRejects, search]);
+  const filtered = useMemo(() => applyLeadFilters(leads, filters), [leads, filters]);
+  const chips = useMemo(() => activeChips(filters), [filters]);
+  const activeCount = countActive(filters);
+
+  const setFilter = (patch: Partial<LeadFilters>) => { setFilters(f => ({ ...f, ...patch })); resetPage(); };
+  const clearFilters = () => { setFilters(DEFAULT_FILTERS); resetPage(); };
+  // Chips clear one filter at a time, back to that field's default.
+  const clearOne = (key: keyof LeadFilters) => setFilter({ [key]: DEFAULT_FILTERS[key] } as Partial<LeadFilters>);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   const safePage = Math.min(page, totalPages);
@@ -338,8 +341,8 @@ export default function Leads() {
       <div className="section-head">
         <div className="nav-tabs">
           {TABS.map(([key, label]) => (
-            <div key={key} className={`nav-tab${tab === key ? ' active' : ''}`}
-              onClick={() => { setTab(key); resetPage(); }}>
+            <div key={key} className={`nav-tab${filters.status === key ? ' active' : ''}`}
+              onClick={() => setFilter({ status: key as LeadFilters['status'] })}>
               {label}
             </div>
           ))}
@@ -347,20 +350,45 @@ export default function Leads() {
         <span className="contact-count-badge">{filtered.length} leads</span>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
-        <input type="text" placeholder="Search name, email or company..." value={search}
-          onChange={e => { setSearch(e.target.value); resetPage(); }}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <input type="text" placeholder="Search name, email, company, links..." value={filters.search}
+          onChange={e => setFilter({ search: e.target.value })}
           style={{ flex: 1, minWidth: 180, maxWidth: 280 }} />
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text2)' }}>
-          <input type="checkbox" checked={hideRejects}
-            onChange={e => { setHideRejects(e.target.checked); resetPage(); }} />
-          Hide hard rejects ({rejectCount})
-        </label>
+        <button className={`btn btn-sm${showFilters ? ' btn-primary' : ''}`} type="button"
+          onClick={() => setShowFilters(v => !v)}>
+          <i className="ti ti-filter" /> Filters
+          {activeCount > 0 && <span className="contact-count-badge" style={{ marginLeft: 6 }}>{activeCount}</span>}
+        </button>
+        <button className="btn btn-sm" type="button" disabled={filters.hideRejects}
+          onClick={() => setFilter({ hideRejects: true })}
+          title="Quick filter — same as the hard-rejects option in Filters">
+          Hide rejects ({rejectCount})
+        </button>
         <button className="btn btn-sm" type="button" disabled={selectable.length === 0}
           onClick={() => toggleAll(true)}>Select all with email ({selectable.length})</button>
         <button className="btn btn-sm" type="button" disabled={selected.size === 0}
           onClick={() => setSelected(new Set())}>Clear selection</button>
       </div>
+
+      {chips.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+          {chips.map(c => (
+            <button key={c.key} className="btn btn-xs" type="button" onClick={() => clearOne(c.key)}
+              title="Remove this filter">
+              {c.label} <i className="ti ti-x" style={{ marginLeft: 2 }} />
+            </button>
+          ))}
+          <button className="btn btn-xs" type="button" onClick={clearFilters}
+            style={{ color: 'var(--red)', borderColor: 'var(--red-bg)' }}>
+            <i className="ti ti-filter-off" /> Clear all
+          </button>
+        </div>
+      )}
+
+      {showFilters && (
+        <LeadFilterPanel leads={leads} filters={filters} onChange={setFilter}
+          onReset={clearFilters} matched={filtered.length} />
+      )}
 
       <div className="table-card">
         <table>

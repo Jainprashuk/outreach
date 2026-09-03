@@ -133,6 +133,10 @@ const MULTI_TLD = [
   'com.br', 'co.jp', 'co.nz', 'com.sg', 'com.my', 'co.il',
 ];
 
+/** Personal-mailbox domains carry no company signal. */
+export const isFreemail = (email: string | null) =>
+  FREEMAIL.has((email || '').split('@')[1] || '');
+
 type CompanySource = Pick<Lead, 'email' | 'authorUrl' | 'authorName' | 'company'>;
 
 /** The lead's own company if it has one, else a best guess, else ''. */
