@@ -3,43 +3,13 @@ import { createPortal } from 'react-dom';
 import Layout from '../components/Layout';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
+import { Card, HBar } from '../components/AnalyticsCards';
+import LeadsAnalytics from '../components/LeadsAnalytics';
 import {
   ACTIVITY_META, ACTIVITY_WINDOWS, analyze, buildActivityEvents, buildDailySeries,
   computeMetrics, countActivity, cvar, dayKey, fmtAgo, fmtDur, pct,
   STATUS_META, type ActivityWindowKey, type Analyzed, type Metrics,
 } from '../lib/analytics';
-
-// ── Small building blocks ────────────────────────────────────────────────────
-function HBar({ label, dotColor, n, d, extra, fill, opacity = 0.85 }: {
-  label: string; dotColor?: string; n: number; d: number; extra?: string; fill: string; opacity?: number;
-}) {
-  return (
-    <div className="hbar-row">
-      <div className="hbar-top">
-        <span className="hbar-label">{dotColor ? <span className="dot" style={{ background: dotColor }} /> : null}{label}</span>
-        <span className="hbar-val"><b>{n.toLocaleString()}</b> <span style={{ color: 'var(--text3)' }}>{pct(n, d)}%{extra || ''}</span></span>
-      </div>
-      <div className="hbar-track"><div className="hbar-fill" style={{ width: `${Math.max(2, pct(n, d))}%`, background: fill, opacity }} /></div>
-    </div>
-  );
-}
-
-function Card({ title, icon, sub, right, children, delay }: {
-  title: string; icon: string; sub: string; right?: React.ReactNode; children: React.ReactNode; delay?: string;
-}) {
-  return (
-    <div className="an-card" style={delay ? { animationDelay: delay } : undefined}>
-      <div className="an-card-head" style={right ? { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 } : undefined}>
-        <div>
-          <div className="an-card-title"><i className={`ti ${icon}`} /> {title}</div>
-          <div className="an-card-sub">{sub}</div>
-        </div>
-        {right}
-      </div>
-      <div className="an-card-body">{children}</div>
-    </div>
-  );
-}
 
 // ── Time-series chart (2-series, hover crosshair) ────────────────────────────
 const TS = { W: 720, H: 210, padL: 32, padR: 12, padT: 12, padB: 26 };
@@ -419,6 +389,8 @@ function buildInsights(A: Analyzed[], m: Metrics, templates: Record<string, { na
 export default function Analytics() {
   const app = useApp();
   const toast = useToast();
+  const [view, setView] = useState<'outreach' | 'leads'>('outreach');
+  const [leadsRefresh, setLeadsRefresh] = useState(0);
   const [range, setRange] = useState(30);
   const [statusMode, setStatusMode] = useState<'current' | 'ever'>('current');
   const [refreshing, setRefreshing] = useState(false);
@@ -426,7 +398,8 @@ export default function Analytics() {
   const load = async () => {
     setRefreshing(true);
     try {
-      await Promise.all([app.loadContacts(), app.loadTemplates()]);
+      if (view === 'leads') setLeadsRefresh(n => n + 1);
+      else await Promise.all([app.loadContacts(), app.loadTemplates()]);
     } catch (err: any) {
       toast('Could not load analytics: ' + err.message, 'error');
     } finally {
@@ -502,6 +475,33 @@ export default function Analytics() {
   const amber = cvar('--amber') || '#8a5c00';
   const fuShare = m.repliedCount ? pct(m.afterFuCount, m.repliedCount) : 0;
 
+  const switcher = (
+    <div className="section-head" style={{ marginBottom: 14 }}>
+      <div className="nav-tabs">
+        <div className={`nav-tab${view === 'outreach' ? ' active' : ''}`} onClick={() => setView('outreach')}>
+          <i className="ti ti-send" /> Outreach
+        </div>
+        <div className={`nav-tab${view === 'leads' ? ' active' : ''}`} onClick={() => setView('leads')}>
+          <i className="ti ti-target-arrow" /> Leads
+        </div>
+      </div>
+    </div>
+  );
+
+  if (view === 'leads') {
+    return (
+      <Layout title="Analytics" subtitle="Your staged lead pipeline, before it becomes outreach"
+        actions={
+          <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
+            <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} /> Refresh
+          </button>
+        }>
+        {switcher}
+        <LeadsAnalytics refreshToken={leadsRefresh} />
+      </Layout>
+    );
+  }
+
   return (
     <Layout title="Analytics"
       subtitle={`${m.total.toLocaleString()} contacts · ${m.sentCount.toLocaleString()} emailed · ${m.repliedCount.toLocaleString()} ever replied`}
@@ -510,6 +510,7 @@ export default function Analytics() {
           <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} /> Refresh
         </button>
       }>
+      {switcher}
       <div className="stat-grid" style={{ padding: '0 0 4px', marginBottom: 14 }}>
         {kpis.map(k => (
           <div className="stat-card" key={k.label}>
