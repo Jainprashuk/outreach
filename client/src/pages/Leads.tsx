@@ -177,11 +177,12 @@ export default function Leads() {
     [leads, selected],
   );
 
-  const onMoveDone = async (r: MoveToOutreachResult) => {
+  const onMoveDone = async (r: MoveToOutreachResult, excludedCount: number) => {
     setMoveOpen(false);
     const parts = [`${r.created.length} contact${r.created.length !== 1 ? 's' : ''} created`];
     if (r.alreadyExisted > 0) parts.push(`${r.alreadyExisted} already existed`);
     if (r.skippedNoEmail > 0) parts.push(`${r.skippedNoEmail} skipped (no email)`);
+    if (excludedCount > 0) parts.push(`${excludedCount} left as new`);
     toast(
       r.statusUpdateFailed
         ? `${parts.join(', ')} — but the leads could not be marked as added. Re-check before moving them again.`
