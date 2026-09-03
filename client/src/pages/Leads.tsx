@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import MoveToOutreachModal from '../components/MoveToOutreachModal';
+import LeadDetailModal from '../components/LeadDetailModal';
 import { SkeletonRows } from '../components/Skeleton';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
@@ -49,6 +50,7 @@ export default function Leads() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moveOpen, setMoveOpen] = useState(false);
+  const [detail, setDetail] = useState<Lead | null>(null);
 
   const reload = async () => {
     const rows = await loadLeadsApi();
@@ -216,6 +218,20 @@ export default function Leads() {
     } catch (err: any) { toast('Could not delete leads: ' + err.message, 'error'); }
   };
 
+  // Row click opens the full record — but never when the click landed on a
+  // control (checkbox, link, delete button) that has its own behaviour.
+  const openDetail = (lead: Lead, e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).closest('a, button, input')) return;
+    setDetail(lead);
+  };
+
+  // "Move to outreach" from the detail view acts on that one lead.
+  const moveOne = (lead: Lead) => {
+    setDetail(null);
+    setSelected(new Set([lead.id]));
+    setMoveOpen(true);
+  };
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   const busy = loading && leads.length === 0;
@@ -370,7 +386,8 @@ export default function Leads() {
                 {leads.length === 0 ? 'No leads yet — import a harvester JSON to get started' : 'No leads match these filters'}
               </div></td></tr>
             ) : paged.map(l => (
-              <tr key={l.id}>
+              <tr key={l.id} onClick={e => openDetail(l, e)} style={{ cursor: 'pointer' }}
+                title="Click to see everything stored for this lead">
                 <td className="cb-col">
                   <input type="checkbox" className="row-cb" checked={selected.has(l.id)}
                     disabled={!l.email}
@@ -442,6 +459,16 @@ export default function Leads() {
 
       {moveOpen && selectedLeads.length > 0 && (
         <MoveToOutreachModal leads={selectedLeads} onClose={() => setMoveOpen(false)} onDone={onMoveDone} />
+      )}
+
+      {detail && (
+        <LeadDetailModal
+          lead={detail}
+          allLeads={leads}
+          onClose={() => setDetail(null)}
+          onMove={moveOne}
+          onDelete={async (l) => { setDetail(null); await confirmDelete(l); }}
+        />
       )}
     </Layout>
   );

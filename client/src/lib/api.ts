@@ -208,7 +208,8 @@ export interface Lead {
   status: LeadStatus;
   contactId: string | null;
   promotedAt: string | null;
-  batchUpdatedAt: string | null;
+  batchUpdatedAt: string | null;   // the harvest run's own updated_at
+  dedupeKey?: string;              // internal: how re-imports match this row
   createdAt: string;
   updatedAt: string;
 }
