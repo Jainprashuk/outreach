@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import Avatar from './Avatar';
 import { useApp } from '../context/AppContext';
 import { moveLeadsToOutreachApi, type Lead, type MoveToOutreachResult } from '../lib/api';
+import { deriveCompany, isCompanyDerived } from '../lib/leads';
 
 interface Edit { name: string; company: string; role: string; }
 
@@ -21,7 +22,7 @@ export default function MoveToOutreachModal({ leads, onClose, onDone }: {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [edits, setEdits] = useState<Record<string, Edit>>(() =>
-    Object.fromEntries(leads.map(l => [l.id, { name: l.authorName, company: l.company, role: l.role }])));
+    Object.fromEntries(leads.map(l => [l.id, { name: l.authorName, company: deriveCompany(l), role: l.role }])));
 
   useEffect(() => { if (!template && defaultTpl) setTemplate(defaultTpl); }, [defaultTpl]);
 
@@ -63,7 +64,7 @@ export default function MoveToOutreachModal({ leads, onClose, onDone }: {
           <div>
             <div style={{ fontWeight: 600, fontSize: 15 }}>Move {leads.length} lead{leads.length !== 1 ? 's' : ''} to outreach</div>
             <div style={{ fontSize: 12, color: 'var(--text2)' }}>
-              Creates contacts in your outreach list. Names and company/role can't be edited afterwards, so fix them here.
+              Company is pre-filled from each lead's email domain. Names and company/role can't be edited after this, so correct anything off here.
             </div>
           </div>
           <button className="btn btn-sm" onClick={onClose} style={{ flexShrink: 0 }} type="button" disabled={saving}>
@@ -110,7 +111,12 @@ export default function MoveToOutreachModal({ leads, onClose, onDone }: {
                     onChange={e => setEdit(l.id, { name: e.target.value })} />
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Company</label>
+                  <label className="form-label">
+                    Company
+                    {isCompanyDerived(l) && (
+                      <span style={{ color: 'var(--text3)', fontWeight: 400 }}> · guessed from {l.email?.split('@')[1]}</span>
+                    )}
+                  </label>
                   <input type="text" placeholder="Acme Inc." value={edits[l.id]?.company || ''}
                     onChange={e => setEdit(l.id, { company: e.target.value })} />
                 </div>

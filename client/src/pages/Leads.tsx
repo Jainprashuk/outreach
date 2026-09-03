@@ -12,7 +12,8 @@ import {
 } from '../lib/api';
 import { readFileText } from '../lib/csv';
 import {
-  explodeForPreview, isReject, summarisePreview, sourceLeadsFromFile,
+  deriveCompany, explodeForPreview, isCompanyDerived, isReject,
+  summarisePreview, sourceLeadsFromFile,
   LEAD_BADGE_CLASS, LEAD_STATUS_LABELS,
   type PreviewRow, type PreviewSummary,
 } from '../lib/leads';
@@ -76,7 +77,7 @@ export default function Leads() {
     if (tab !== 'all') list = list.filter(l => l.status === tab);
     if (hideRejects) list = list.filter(l => !isReject(l));
     const q = search.trim().toLowerCase();
-    if (q) list = list.filter(l => (l.authorName + (l.email || '') + l.company).toLowerCase().includes(q));
+    if (q) list = list.filter(l => (l.authorName + (l.email || '') + deriveCompany(l)).toLowerCase().includes(q));
     return [...list].sort((a, b) => b.fitScore - a.fitScore);
   }, [leads, tab, hideRejects, search]);
 
@@ -391,7 +392,11 @@ export default function Leads() {
                     </div>
                   </div>
                 </td>
-                <td style={{ color: 'var(--text2)' }}>{l.company || '—'}</td>
+                <td style={{ color: isCompanyDerived(l) ? 'var(--text3)' : 'var(--text2)' }}
+                  title={isCompanyDerived(l) ? 'Guessed from the email domain — confirm when you move it to outreach' : undefined}>
+                  {deriveCompany(l) || '—'}
+                  {isCompanyDerived(l) ? <span style={{ fontStyle: 'italic' }}> ?</span> : null}
+                </td>
                 <td style={{ color: 'var(--text2)' }}>
                   {l.links.length === 0 ? '—' : (
                     <>

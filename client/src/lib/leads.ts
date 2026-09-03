@@ -1,4 +1,4 @@
-import type { LeadFile, LeadStatus, SourceLead } from './api';
+import type { Lead, LeadFile, LeadStatus, SourceLead } from './api';
 
 export const HARD_REJECT = -999;
 
@@ -112,3 +112,51 @@ export function summarisePreview(source: SourceLead[], rows: PreviewRow[]): Prev
     rejects: rows.filter(r => r.fitScore === HARD_REJECT).length,
   };
 }
+
+// ── Company inference ───────────────────────────────────────────────────────
+// The harvester never fills `company` (null on every row), but it's recoverable
+// for most leads: a LinkedIn *company* page's author_name IS the company, and
+// otherwise the email domain gives a good starting point. Freemail addresses
+// carry no signal and stay blank. Derived values are only ever a pre-filled
+// suggestion — nothing is stored until you confirm it in the promote modal.
+
+const FREEMAIL = new Set([
+  'gmail.com', 'googlemail.com', 'yahoo.com', 'yahoo.co.in', 'yahoo.co.uk',
+  'hotmail.com', 'outlook.com', 'live.com', 'msn.com', 'aol.com', 'icloud.com',
+  'me.com', 'proton.me', 'protonmail.com', 'rediffmail.com', 'zoho.com',
+  'gmx.com', 'mail.com', 'yandex.com',
+]);
+
+// Two-part suffixes that must be stripped whole, or "seereon.co.in" -> "Co".
+const MULTI_TLD = [
+  'co.in', 'co.uk', 'com.au', 'co.za', 'org.in', 'net.in', 'ac.in', 'gov.in',
+  'com.br', 'co.jp', 'co.nz', 'com.sg', 'com.my', 'co.il',
+];
+
+type CompanySource = Pick<Lead, 'email' | 'authorUrl' | 'authorName' | 'company'>;
+
+/** The lead's own company if it has one, else a best guess, else ''. */
+export function deriveCompany(lead: CompanySource): string {
+  if (lead.company) return lead.company;
+
+  if (lead.authorUrl && lead.authorUrl.includes('/company/')) {
+    const name = (lead.authorName || '').trim();
+    if (name && name.length <= 60) return name;
+  }
+
+  const domain = (lead.email || '').split('@')[1] || '';
+  if (!domain || FREEMAIL.has(domain)) return '';
+
+  const host = domain.toLowerCase().replace(/^(www|mail|smtp|email)\./, '');
+  const multi = MULTI_TLD.find(t => host.endsWith('.' + t));
+  const core = (multi ? host.slice(0, -(multi.length + 1)) : host.replace(/\.[a-z]{2,}$/, ''))
+    .split('.').pop() || '';
+  if (!core) return '';
+
+  return core.split(/[-_]+/).filter(Boolean)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+/** True when the company shown is a guess rather than a stored value. */
+export const isCompanyDerived = (lead: CompanySource) => !lead.company && !!deriveCompany(lead);
