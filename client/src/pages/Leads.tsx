@@ -154,13 +154,14 @@ export default function Leads() {
       const bits: string[] = [];
       if (r.skippedInBatch > 0) bits.push(`${r.skippedInBatch} duplicate row${r.skippedInBatch !== 1 ? 's' : ''} in the file skipped`);
       if (r.skipped > 0) bits.push(`${r.skipped} already in your lead store`);
+      if (r.updated > 0) bits.push(`${r.updated} existing lead${r.updated !== 1 ? 's' : ''} backfilled with search queries`);
       if (r.ignoredRows > 0) bits.push(`${r.ignoredRows} unusable row${r.ignoredRows !== 1 ? 's' : ''} ignored`);
       const suffix = bits.length ? ` · ${bits.join(' · ')}` : '';
       toast(
         r.created.length === 0
-          ? `Nothing saved — all ${r.skipped} lead${r.skipped !== 1 ? 's were' : ' was'} already in your lead store.`
+          ? `Nothing new saved — all ${r.skipped} were already stored${r.updated > 0 ? `, but ${r.updated} got their search queries backfilled` : ''}.`
           : `${r.created.length} lead${r.created.length !== 1 ? 's' : ''} saved${suffix}.`,
-        r.created.length === 0 ? 'info' : 'success',
+        r.created.length === 0 && r.updated === 0 ? 'info' : 'success',
       );
       setPreview(null);
       setPasted('');
@@ -305,7 +306,7 @@ export default function Leads() {
               <div className="table-card" style={{ marginTop: 12 }}>
                 <table>
                   <thead>
-                    <tr><th>Fit</th><th>Lead</th><th>Email</th><th>Links</th><th>Post</th><th>Source</th></tr>
+                    <tr><th>Fit</th><th>Lead</th><th>Email</th><th>Found by</th><th>Links</th><th>Post</th></tr>
                   </thead>
                   <tbody>
                     {preview.rows.slice(0, 100).map((r, i) => (
@@ -313,9 +314,11 @@ export default function Leads() {
                         <td style={{ color: isReject(r) ? 'var(--red)' : 'var(--text2)' }}>{r.fitScore}</td>
                         <td style={{ whiteSpace: 'normal', maxWidth: 260 }}>{r.authorName}</td>
                         <td style={{ color: 'var(--text2)' }}>{r.email || <span style={{ color: 'var(--text3)' }}>no email</span>}</td>
+                        <td style={{ color: 'var(--text2)', maxWidth: 190, whiteSpace: 'normal' }}>
+                          {r.queries.length === 0 ? '—' : r.queries.join(', ')}
+                        </td>
                         <td style={{ color: 'var(--text2)' }}>{r.links.length || '—'}</td>
                         <td>{r.postUrl ? <a href={r.postUrl} target="_blank" rel="noopener noreferrer">open</a> : '—'}</td>
-                        <td style={{ color: 'var(--text2)' }}>{r.source || '—'}</td>
                       </tr>
                     ))}
                     {preview.rows.length > 100 && (
@@ -400,7 +403,7 @@ export default function Leads() {
                   onChange={e => toggleAll(e.target.checked)}
                   title="Select all leads with an email" />
               </th>
-              <th>Fit</th><th>Lead</th><th>Company</th><th>Links</th><th>Post</th><th>Source</th><th>Status</th><th></th>
+              <th>Fit</th><th>Lead</th><th>Company</th><th>Found by</th><th>Links</th><th>Post</th><th>Status</th><th></th>
             </tr>
           </thead>
           <tbody>
@@ -443,6 +446,15 @@ export default function Leads() {
                   {deriveCompany(l) || '—'}
                   {isCompanyDerived(l) ? <span style={{ fontStyle: 'italic' }}> ?</span> : null}
                 </td>
+                <td style={{ color: 'var(--text2)', maxWidth: 190 }}
+                  title={(l.queries || []).join('\n') || 'No query recorded'}>
+                  {(l.queries || []).length === 0 ? '—' : (
+                    <span style={{ whiteSpace: 'normal' }}>
+                      {l.queries[0]}
+                      {l.queries.length > 1 ? <span style={{ color: 'var(--text3)' }}> +{l.queries.length - 1}</span> : null}
+                    </span>
+                  )}
+                </td>
                 <td style={{ color: 'var(--text2)' }}>
                   {l.links.length === 0 ? '—' : (
                     <>
@@ -452,7 +464,7 @@ export default function Leads() {
                   )}
                 </td>
                 <td>{l.postUrl ? <a href={l.postUrl} target="_blank" rel="noopener noreferrer">open</a> : '—'}</td>
-                <td style={{ color: 'var(--text2)' }}>{l.source || '—'}</td>
+
                 <td><span className={`badge ${LEAD_BADGE_CLASS[l.status]}`}>{LEAD_STATUS_LABELS[l.status]}</span></td>
                 <td>
                   <button className="btn btn-sm" onClick={() => confirmDelete(l)} title="Delete lead" type="button">

@@ -6,7 +6,7 @@ import { loadLeadsApi, type Lead } from '../lib/api';
 import { cvar, pct } from '../lib/analytics';
 import {
   computeLeadMetrics, fitBuckets, harvestRuns, importsByDay,
-  sourceBreakdown, topDomains, topMultiAddress,
+  queryStats, sourceBreakdown, topDomains, topMultiAddress, unattributed,
 } from '../lib/leadAnalytics';
 
 const fmtDate = (t: number | null) =>
@@ -76,6 +76,8 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
   const runs = useMemo(() => harvestRuns(leads), [leads]);
   const series = useMemo(() => importsByDay(leads), [leads]);
   const sources = useMemo(() => sourceBreakdown(leads), [leads]);
+  const queries = useMemo(() => queryStats(leads), [leads]);
+  const noQuery = useMemo(() => unattributed(leads), [leads]);
 
   const accent = cvar('--accent') || '#4f46e5';
   const teal = cvar('--teal') || '#085041';
@@ -173,6 +175,55 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
         </div>
         <div className="an-card-body"><ImportChart series={series} /></div>
       </div>
+
+      {queries.length > 0 && (
+        <div className="an-card" style={{ marginBottom: 14, animationDelay: '.14s' }}>
+          <div className="an-card-head">
+            <div>
+              <div className="an-card-title"><i className="ti ti-search" /> Search query performance</div>
+              <div className="an-card-sub">
+                Which LinkedIn searches actually produce workable leads — "workable" means it has an
+                email and isn't a hard reject. A lead found by several searches counts for each.
+                {noQuery > 0 ? ` ${noQuery} lead${noQuery !== 1 ? 's have' : ' has'} no query recorded (imported before the field existed).` : ''}
+              </div>
+            </div>
+          </div>
+          <div className="an-card-body" style={{ overflowX: 'auto' }}>
+            <table style={{ width: '100%', fontSize: 12.5 }}>
+              <thead>
+                <tr style={{ textAlign: 'left', color: 'var(--text3)', fontSize: 11 }}>
+                  <th style={{ padding: '4px 8px 8px 0' }}>Query</th>
+                  <th style={{ padding: '4px 8px 8px' }}>Leads</th>
+                  <th style={{ padding: '4px 8px 8px' }}>With email</th>
+                  <th style={{ padding: '4px 8px 8px' }}>Workable</th>
+                  <th style={{ padding: '4px 8px 8px' }}>Hit rate</th>
+                  <th style={{ padding: '4px 8px 8px' }}>Median fit</th>
+                  <th style={{ padding: '4px 0 8px 8px' }}>Moved</th>
+                </tr>
+              </thead>
+              <tbody>
+                {queries.map(q => (
+                  <tr key={q.query} style={{ borderTop: '0.5px solid var(--border)' }}>
+                    <td style={{ padding: '6px 8px 6px 0', whiteSpace: 'normal', maxWidth: 280 }}>{q.query}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--text2)' }}>{q.n}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--text2)' }}>{q.withEmail}</td>
+                    <td style={{ padding: '6px 8px', fontWeight: 600 }}>{q.usable}</td>
+                    <td style={{ padding: '6px 8px' }}>
+                      <span style={{ color: q.hitRate >= 25 ? 'var(--green)' : q.hitRate >= 10 ? undefined : 'var(--text3)' }}>
+                        {q.hitRate}%
+                      </span>
+                    </td>
+                    <td style={{ padding: '6px 8px', color: q.medianFit === -999 ? 'var(--red)' : 'var(--text2)' }}>
+                      {q.medianFit === -999 ? 'all rejects' : q.medianFit}
+                    </td>
+                    <td style={{ padding: '6px 0 6px 8px', color: 'var(--text2)' }}>{q.moved || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
 
       <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
         <Card title="Top email domains" icon="ti-at" sub="Which organisations dominate the harvest" delay=".16s">

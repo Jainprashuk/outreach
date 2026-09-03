@@ -43,6 +43,8 @@ const explodeLead = (l) => {
     links:      Array.isArray(l.links) ? l.links.filter(x => typeof x === 'string') : [],
     postUrl:    l.post_url || null,
     source:     typeof l.source === 'string' ? l.source : '',
+    // Older dumps have no `query`; those rows simply carry an empty list.
+    queries:    typeof l.query === 'string' && l.query.trim() ? [normText(l.query)] : [],
   };
   return emails.length === 0
     ? [{ ...base, email: null }]
@@ -86,29 +88,45 @@ router.post('/import', async (req, res) => {
     //    copy — last_run_leads is a subset of all_leads, so every row arrives at
     //    least twice, and the same email can appear under two author names.
     //    Array#sort is stable, so ties keep the file's own best-fit-first order.
-    const seen = new Set();
-    const unique = [...exploded]
-      .sort((a, b) => b.fitScore - a.fitScore)
-      .filter(r => {
-        if (seen.has(r.dedupeKey)) return false;
-        seen.add(r.dedupeKey);
-        return true;
-      });
+    const byKey = new Map();
+    for (const r of [...exploded].sort((a, b) => b.fitScore - a.fitScore)) {
+      const kept = byKey.get(r.dedupeKey);
+      if (!kept) { byKey.set(r.dedupeKey, r); continue; }
+      // Keep the best-fit copy, but credit every query that surfaced this lead.
+      for (const q of r.queries) if (!kept.queries.includes(q)) kept.queries.push(q);
+    }
+    const unique = [...byKey.values()];
 
     // 3. dedupe against what's already stored (non-deleted only, matching
     //    contacts). No .collation() needed — dedupeKey is already normalised.
     const stored = await Lead.find(
       { dedupeKey: { $in: unique.map(r => r.dedupeKey) }, ...BASE_FILTER },
-      { dedupeKey: 1 }
+      { dedupeKey: 1, queries: 1 }
     ).lean();
-    const storedKeys = new Set(stored.map(d => d.dedupeKey));
-    const toInsert = unique.filter(r => !storedKeys.has(r.dedupeKey));
+    const storedByKey = new Map(stored.map(d => [d.dedupeKey, d]));
+    const toInsert = unique.filter(r => !storedByKey.has(r.dedupeKey));
+
+    // 4. Backfill: a lead already in the store still learns any query it didn't
+    //    have (older imports predate the field). Only `queries` is touched —
+    //    company/role/authorName may have been edited on promote and must not be
+    //    clobbered by a re-import.
+    const backfill = [];
+    for (const r of unique) {
+      const existing = storedByKey.get(r.dedupeKey);
+      if (!existing || r.queries.length === 0) continue;
+      const merged = [...new Set([...(existing.queries || []), ...r.queries])];
+      if (merged.length !== (existing.queries || []).length) {
+        backfill.push({ updateOne: { filter: { _id: existing._id }, update: { $set: { queries: merged } } } });
+      }
+    }
+    if (backfill.length) await Lead.bulkWrite(backfill, { ordered: false });
 
     const created = toInsert.length ? await Lead.insertMany(toInsert, { ordered: false }) : [];
 
     res.status(201).json({
       created,
       skipped: unique.length - toInsert.length,        // already in the lead store
+      updated: backfill.length,                        // existing rows that gained queries
       skippedInBatch: exploded.length - unique.length, // duplicate rows inside the file
       ignoredRows,
       totalSourceLeads: source.length,

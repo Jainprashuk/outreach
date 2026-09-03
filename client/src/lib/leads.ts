@@ -23,6 +23,7 @@ export const sourceLeadsFromFile = (file: LeadFile | SourceLead[]): SourceLead[]
     : [...(file.last_run_leads ?? []), ...(file.all_leads ?? [])];
 
 export interface PreviewRow {
+  queries: string[];
   authorName: string;
   authorUrl: string | null;
   email: string | null;
@@ -65,6 +66,7 @@ export function explodeForPreview(source: SourceLead[]): PreviewRow[] {
       links: Array.isArray(l.links) ? l.links.filter(x => typeof x === 'string') : [],
       postUrl: l.post_url || null,
       source: typeof l.source === 'string' ? l.source : '',
+      queries: typeof l.query === 'string' && l.query.trim() ? [normText(l.query)] : [],
     };
     const rows = emails.length === 0
       ? [{ ...base, email: null as string | null }]
@@ -74,14 +76,15 @@ export function explodeForPreview(source: SourceLead[]): PreviewRow[] {
 
   // Best fit wins when the same identity appears twice (sort is stable, so ties
   // keep the file's own order).
-  const seen = new Set<string>();
-  return [...exploded]
-    .sort((a, b) => b.fitScore - a.fitScore)
-    .filter(r => {
-      if (seen.has(r.dedupeKey)) return false;
-      seen.add(r.dedupeKey);
-      return true;
-    });
+  // Mirrors the server: keep the best-fit copy but union every query that
+  // surfaced the same lead.
+  const byKey = new Map<string, PreviewRow>();
+  for (const r of [...exploded].sort((a, b) => b.fitScore - a.fitScore)) {
+    const kept = byKey.get(r.dedupeKey);
+    if (!kept) { byKey.set(r.dedupeKey, r); continue; }
+    for (const q of r.queries) if (!kept.queries.includes(q)) kept.queries.push(q);
+  }
+  return [...byKey.values()];
 }
 
 export interface PreviewSummary {

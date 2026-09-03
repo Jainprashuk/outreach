@@ -12,6 +12,7 @@ export interface LeadFilters {
   emailKind: 'any' | 'corporate' | 'freemail';
   domains: string[];
   sources: string[];
+  queries: string[];
   runs: string[];              // batchUpdatedAt ISO strings
   fitMin: string;              // free text so the input can be emptied
   fitMax: string;
@@ -30,7 +31,7 @@ export interface LeadFilters {
 
 export const DEFAULT_FILTERS: LeadFilters = {
   search: '', status: 'all', hasEmail: 'any', emailKind: 'any',
-  domains: [], sources: [], runs: [],
+  domains: [], sources: [], queries: [], runs: [],
   fitMin: '', fitMax: '', hideRejects: false,
   hiring: 'any', company: 'any', role: 'any',
   hasProfile: 'any', hasPost: 'any', hasLinks: 'any',
@@ -50,6 +51,12 @@ export function filterOptions(leads: Lead[]) {
   return {
     domains: count(l => ((l.email || '').split('@')[1] || null)),
     sources: count(l => l.source || null),
+    queries: (() => {
+      // A lead can be credited to several queries, so it counts once per query.
+      const m = new Map<string, number>();
+      leads.forEach(l => (l.queries || []).forEach(q => m.set(q, (m.get(q) || 0) + 1)));
+      return [...m.entries()].map(([value, n]) => ({ value, n })).sort((a, b) => b.n - a.n);
+    })(),
     runs: count(l => l.batchUpdatedAt),
   };
 }
@@ -77,6 +84,8 @@ export function applyLeadFilters(leads: Lead[], f: LeadFilters): Lead[] {
     if (f.domains.length && !f.domains.includes((l.email || '').split('@')[1] || '')) return false;
 
     if (f.sources.length && !f.sources.includes(l.source)) return false;
+    // Matches if ANY of the lead's queries is selected.
+    if (f.queries.length && !(l.queries || []).some(q => f.queries.includes(q))) return false;
     if (f.runs.length && !f.runs.includes(l.batchUpdatedAt || '')) return false;
 
     if (f.hideRejects && l.fitScore === HARD_REJECT) return false;
@@ -106,7 +115,7 @@ export function applyLeadFilters(leads: Lead[], f: LeadFilters): Lead[] {
 
     if (q) {
       const hay = [l.authorName, l.email || '', deriveCompany(l), l.role, l.source,
-        l.authorUrl || '', l.postUrl || '', ...l.links].join(' ').toLowerCase();
+        l.authorUrl || '', l.postUrl || '', ...(l.queries || []), ...l.links].join(' ').toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -136,6 +145,7 @@ export function activeChips(f: LeadFilters): Chip[] {
   if (f.emailKind !== 'any') c.push({ key: 'emailKind', label: f.emailKind === 'freemail' ? 'Personal email' : 'Work email' });
   if (f.domains.length) c.push({ key: 'domains', label: `Domain: ${f.domains.length === 1 ? f.domains[0] : `${f.domains.length} selected`}` });
   if (f.sources.length) c.push({ key: 'sources', label: `Source: ${f.sources.join(', ')}` });
+  if (f.queries.length) c.push({ key: 'queries', label: f.queries.length === 1 ? `Query: ${f.queries[0]}` : `${f.queries.length} queries` });
   if (f.runs.length) c.push({ key: 'runs', label: `${f.runs.length} harvest run${f.runs.length > 1 ? 's' : ''}` });
   if (f.hideRejects) c.push({ key: 'hideRejects', label: 'Hard rejects hidden' });
   if (f.fitMin.trim()) c.push({ key: 'fitMin', label: `Fit ≥ ${f.fitMin}` });

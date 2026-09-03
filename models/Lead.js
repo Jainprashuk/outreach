@@ -15,6 +15,10 @@ const leadSchema = new mongoose.Schema({
   links:      { type: [String], default: [] },
   postUrl:    { type: String, default: null },
   source:     { type: String, default: '' },
+  // Every search query that surfaced this lead. An array because the same
+  // address legitimately turns up under several searches, and collapsing that
+  // to one would misattribute which search actually works.
+  queries:    { type: [String], default: [] },
 
   // Identity used for dedupe, precomputed on insert so the import check is one
   // indexed $in instead of an $or across three fields. `e:<email>` when there is
@@ -35,6 +39,7 @@ leadSchema.index({ fitScore: -1, createdAt: -1 });
 leadSchema.index({ status: 1, fitScore: -1 });
 leadSchema.index({ dedupeKey: 1 });
 leadSchema.index({ email: 1 });
+leadSchema.index({ queries: 1 });
 
 leadSchema.set('toJSON', {
   transform: (doc, ret) => {

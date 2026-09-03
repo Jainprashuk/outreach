@@ -175,6 +175,12 @@ export default function LeadFilterPanel({ leads, filters, onChange, onReset, mat
             onChange={v => onChange({ domains: v })} empty="No email addresses yet" />
         </Group>
 
+        <Group label={`Search query${filters.queries.length ? ` (${filters.queries.length})` : ''}`}>
+          <MultiCheck options={opts.queries} selected={filters.queries}
+            onChange={v => onChange({ queries: v })}
+            empty="No query recorded — re-import to backfill" />
+        </Group>
+
         <Group label={`Source${filters.sources.length ? ` (${filters.sources.length})` : ''}`}>
           <MultiCheck options={opts.sources} selected={filters.sources}
             onChange={v => onChange({ sources: v })} empty="No sources recorded" />

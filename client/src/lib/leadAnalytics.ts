@@ -142,3 +142,42 @@ export const sourceBreakdown = (leads: Lead[]) => {
   leads.forEach(l => { const k = l.source || 'unknown'; m.set(k, (m.get(k) || 0) + 1); });
   return [...m.entries()].map(([source, n]) => ({ source, n })).sort((a, b) => b.n - a.n);
 };
+
+export interface QueryStat {
+  query: string;
+  n: number;          // leads credited to this query
+  withEmail: number;
+  usable: number;     // has an email and isn't a hard reject
+  moved: number;
+  medianFit: number;  // rejects excluded, or -999 when everything was rejected
+  hitRate: number;    // % of the query's leads that are actually workable
+}
+
+/**
+ * Per-search-query performance. A lead credited to several queries counts once
+ * for each, which is what you want when asking "is this search worth repeating".
+ */
+export function queryStats(leads: Lead[]): QueryStat[] {
+  const groups = new Map<string, Lead[]>();
+  leads.forEach(l => (l.queries || []).forEach(q => {
+    if (!groups.has(q)) groups.set(q, []);
+    groups.get(q)!.push(l);
+  }));
+
+  return [...groups.entries()].map(([query, rows]) => {
+    const scored = rows.filter(l => l.fitScore !== HARD_REJECT).map(l => l.fitScore).sort((a, b) => a - b);
+    const usable = rows.filter(l => l.email && l.fitScore !== HARD_REJECT).length;
+    return {
+      query,
+      n: rows.length,
+      withEmail: rows.filter(l => l.email).length,
+      usable,
+      moved: rows.filter(l => l.status === 'added-to-outreach').length,
+      medianFit: scored.length ? scored[Math.floor(scored.length / 2)] : HARD_REJECT,
+      hitRate: rows.length ? Math.round((usable / rows.length) * 1000) / 10 : 0,
+    };
+  }).sort((a, b) => b.usable - a.usable || b.n - a.n);
+}
+
+/** Leads carrying no query at all — i.e. imported before the field existed. */
+export const unattributed = (leads: Lead[]) => leads.filter(l => (l.queries || []).length === 0).length;

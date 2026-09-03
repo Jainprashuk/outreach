@@ -181,6 +181,7 @@ export interface SourceLead {
   links: string[];
   post_url: string | null;
   source: string;
+  query?: string;         // the search that surfaced this lead (added Sep 2026)
 }
 
 /** The whole uploaded file. */
@@ -205,6 +206,7 @@ export interface Lead {
   links: string[];
   postUrl: string | null;
   source: string;
+  queries: string[];      // every search that surfaced this lead
   status: LeadStatus;
   contactId: string | null;
   promotedAt: string | null;
@@ -217,6 +219,7 @@ export interface Lead {
 export interface LeadImportResult {
   created: Lead[];
   skipped: number;          // already in the lead store
+  updated: number;          // existing rows backfilled with new queries
   skippedInBatch: number;   // duplicate rows inside the uploaded file
   ignoredRows: number;
   totalSourceLeads: number;

@@ -78,6 +78,20 @@ export default function LeadDetailModal({ lead, allLeads, onClose, onMove, onDel
             </span>
           </Field>
           <Field label="Hiring">{lead.hiring ? 'Yes' : 'No'}</Field>
+          <Field label={`Found by (${(lead.queries || []).length})`}>
+            {(lead.queries || []).length === 0
+              ? muted('no query recorded — re-import to backfill')
+              : (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                  {lead.queries.map(q => (
+                    <span key={q} style={{
+                      fontSize: 11, padding: '2px 7px', borderRadius: 999,
+                      background: 'var(--accent-bg)', color: 'var(--accent)',
+                    }}>{q}</span>
+                  ))}
+                </div>
+              )}
+          </Field>
           <Field label="Source">{lead.source || muted('—')}</Field>
           <Field label="Profile">{lead.authorUrl ? <Ext href={lead.authorUrl} /> : muted('—')}</Field>
           <Field label="Post">{lead.postUrl ? <Ext href={lead.postUrl} /> : muted('—')}</Field>
