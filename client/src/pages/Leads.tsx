@@ -357,11 +357,18 @@ export default function Leads() {
         <input type="text" placeholder="Search name, email, company, links..." value={filters.search}
           onChange={e => setFilter({ search: e.target.value })}
           style={{ flex: 1, minWidth: 180, maxWidth: 280 }} />
-        <button className={`btn btn-sm${showFilters ? ' btn-primary' : ''}`} type="button"
-          onClick={() => setShowFilters(v => !v)}>
-          <i className="ti ti-filter" /> Filters
-          {activeCount > 0 && <span className="contact-count-badge" style={{ marginLeft: 6 }}>{activeCount}</span>}
-        </button>
+        <div style={{ position: 'relative' }}>
+          <button className={`btn btn-sm${showFilters || activeCount > 0 ? ' btn-primary' : ''}`} type="button"
+            data-filter-trigger onClick={() => setShowFilters(v => !v)}>
+            <i className="ti ti-filter" /> Filters
+            {activeCount > 0 && <span className="contact-count-badge" style={{ marginLeft: 6 }}>{activeCount}</span>}
+            <i className={`ti ti-chevron-${showFilters ? 'up' : 'down'}`} style={{ marginLeft: 4, fontSize: 12 }} />
+          </button>
+          {showFilters && (
+            <LeadFilterPanel leads={leads} filters={filters} onChange={setFilter}
+              onReset={clearFilters} matched={filtered.length} onClose={() => setShowFilters(false)} />
+          )}
+        </div>
         <button className="btn btn-sm" type="button" disabled={filters.hideRejects}
           onClick={() => setFilter({ hideRejects: true })}
           title="Quick filter — same as the hard-rejects option in Filters">
@@ -388,10 +395,6 @@ export default function Leads() {
         </div>
       )}
 
-      {showFilters && (
-        <LeadFilterPanel leads={leads} filters={filters} onChange={setFilter}
-          onReset={clearFilters} matched={filtered.length} />
-      )}
 
       <div className="table-card">
         <table>

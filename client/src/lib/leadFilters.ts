@@ -163,3 +163,16 @@ export function activeChips(f: LeadFilters): Chip[] {
 }
 
 export const countActive = (f: LeadFilters) => activeChips(f).length;
+
+/**
+ * Filters that stay behind the "Advanced" tab. Chosen from what the data
+ * actually supports: `hiring` and `source` are constant across every row today,
+ * domains run to hundreds of options, and the rest answer narrow questions.
+ */
+export const ADVANCED_KEYS: Array<keyof LeadFilters> = [
+  'company', 'role', 'hiring', 'hasProfile', 'hasPost', 'hasLinks',
+  'addresses', 'contact', 'importedWithin', 'domains', 'sources', 'runs',
+];
+
+export const countAdvanced = (f: LeadFilters) =>
+  activeChips(f).filter(c => ADVANCED_KEYS.includes(c.key)).length;
