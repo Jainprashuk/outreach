@@ -1,6 +1,9 @@
 import type { Lead, LeadStatus } from './api';
 import { deriveCompany, HARD_REJECT, isFreemail } from './leads';
 import { identityOf } from './leadAnalytics';
+import { classifyLink, hasApplyableLink, LINK_TYPE_META, LINK_TYPE_ORDER, type LinkType } from './linkTypes';
+import { STAGE_LABELS, stageOf, outcomeOf, type OutcomeStage } from './leadOutcome';
+import type { LeadOutcomeMap } from './api';
 
 export type TriState = 'any' | 'yes' | 'no';
 export type SortKey = 'fit-desc' | 'fit-asc' | 'newest' | 'oldest' | 'name' | 'email';
@@ -13,7 +16,10 @@ export interface LeadFilters {
   domains: string[];
   sources: string[];
   queries: string[];
-  runs: string[];              // batchUpdatedAt ISO strings
+  runs: string[];
+  linkTypes: LinkType[];
+  applyable: TriState;
+  stage: 'any' | OutcomeStage;              // batchUpdatedAt ISO strings
   fitMin: string;              // free text so the input can be emptied
   fitMax: string;
   hideRejects: boolean;
@@ -31,7 +37,7 @@ export interface LeadFilters {
 
 export const DEFAULT_FILTERS: LeadFilters = {
   search: '', status: 'all', hasEmail: 'any', emailKind: 'any',
-  domains: [], sources: [], queries: [], runs: [],
+  domains: [], sources: [], queries: [], runs: [], linkTypes: [], applyable: 'any', stage: 'any',
   fitMin: '', fitMax: '', hideRejects: false,
   hiring: 'any', company: 'any', role: 'any',
   hasProfile: 'any', hasPost: 'any', hasLinks: 'any',
@@ -58,10 +64,20 @@ export function filterOptions(leads: Lead[]) {
       return [...m.entries()].map(([value, n]) => ({ value, n })).sort((a, b) => b.n - a.n);
     })(),
     runs: count(l => l.batchUpdatedAt),
+    linkTypes: (() => {
+      const m = new Map<LinkType, number>();
+      leads.forEach(l => {
+        const seen = new Set<LinkType>();
+        (l.links || []).forEach(u => seen.add(classifyLink(u)));
+        seen.forEach(t => m.set(t, (m.get(t) || 0) + 1));
+      });
+      return LINK_TYPE_ORDER.filter(t => m.has(t))
+        .map(t => ({ value: t as string, n: m.get(t)!, label: LINK_TYPE_META[t].label }));
+    })(),
   };
 }
 
-export function applyLeadFilters(leads: Lead[], f: LeadFilters): Lead[] {
+export function applyLeadFilters(leads: Lead[], f: LeadFilters, outcomes: LeadOutcomeMap = {}): Lead[] {
   // Multi-address is a property of the person, not the row, so it needs the
   // whole set before any per-row test.
   const groupSize = new Map<string, number>();
@@ -96,6 +112,10 @@ export function applyLeadFilters(leads: Lead[], f: LeadFilters): Lead[] {
     if (!tri(f.hasProfile, !!l.authorUrl)) return false;
     if (!tri(f.hasPost, !!l.postUrl)) return false;
     if (!tri(f.hasLinks, l.links.length > 0)) return false;
+    // Matches if ANY of the lead's links is one of the selected types.
+    if (f.linkTypes.length && !(l.links || []).some(u => f.linkTypes.includes(classifyLink(u)))) return false;
+    if (!tri(f.applyable, hasApplyableLink(l))) return false;
+    if (f.stage !== 'any' && stageOf(outcomeOf(l, outcomes)) !== f.stage) return false;
 
     if (f.company !== 'any' && (f.company === 'known') !== !!deriveCompany(l)) return false;
     if (f.role !== 'any' && (f.role === 'set') !== !!l.role) return false;
@@ -156,6 +176,9 @@ export function activeChips(f: LeadFilters): Chip[] {
   if (f.hasProfile !== 'any') c.push({ key: 'hasProfile', label: `Profile: ${TRI_LABEL[f.hasProfile]}` });
   if (f.hasPost !== 'any') c.push({ key: 'hasPost', label: `Post: ${TRI_LABEL[f.hasPost]}` });
   if (f.hasLinks !== 'any') c.push({ key: 'hasLinks', label: `Links: ${TRI_LABEL[f.hasLinks]}` });
+  if (f.linkTypes.length) c.push({ key: 'linkTypes', label: f.linkTypes.length === 1 ? LINK_TYPE_META[f.linkTypes[0]].label : `${f.linkTypes.length} link types` });
+  if (f.applyable !== 'any') c.push({ key: 'applyable', label: f.applyable === 'yes' ? 'Has a way to apply' : 'No way to apply' });
+  if (f.stage !== 'any') c.push({ key: 'stage', label: STAGE_LABELS[f.stage] });
   if (f.contact !== 'any') c.push({ key: 'contact', label: f.contact === 'created' ? 'New contact created' : 'Contact already existed' });
   if (f.addresses !== 'any') c.push({ key: 'addresses', label: f.addresses === 'multi' ? 'Several addresses' : 'Single address' });
   if (f.importedWithin !== 'any') c.push({ key: 'importedWithin', label: `Imported ≤ ${f.importedWithin}d ago` });

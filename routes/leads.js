@@ -1,5 +1,6 @@
 const express = require('express');
 const Lead = require('../models/Lead');
+const Contact = require('../models/Contact');
 const { importContacts } = require('../lib/contactImport');
 
 const router = express.Router();
@@ -54,6 +55,44 @@ const explodeLead = (l) => {
 const isUsableSourceLead = (l) =>
   !!l && typeof l === 'object' &&
   (!!normText(l.author_name) || (Array.isArray(l.emails) && l.emails.length > 0));
+
+// GET /api/leads/outcomes — what actually happened to leads after they were
+// promoted. Keyed on EMAIL, not contactId: contactId is only stamped when a new
+// contact is created, so leads whose address already existed as a contact carry
+// null and an id-based join would miss most of them.
+router.get('/outcomes', async (req, res) => {
+  try {
+    const emails = await Lead.distinct('email', { email: { $ne: null }, ...BASE_FILTER });
+    if (emails.length === 0) return res.json({ outcomes: {}, count: 0 });
+
+    const contacts = await Contact.find(
+      { email: { $in: emails }, deleted: { $ne: true } },
+      {
+        email: 1, status: 1, approvalStatus: 1, template: 1, lastSentAt: 1,
+        followUpSentAt: 1, repliedAt: 1, replySnippet: 1, bounceReason: 1, failReason: 1,
+      }
+    ).collation({ locale: 'en', strength: 2 }).lean();
+
+    const outcomes = {};
+    for (const c of contacts) {
+      outcomes[c.email.trim().toLowerCase()] = {
+        contactId: String(c._id),
+        status: c.status,
+        approvalStatus: c.approvalStatus,
+        template: c.template || '',
+        lastSentAt: c.lastSentAt || null,
+        followUpSentAt: c.followUpSentAt || null,
+        repliedAt: c.repliedAt || null,
+        replySnippet: c.replySnippet || null,
+        bounceReason: c.bounceReason || null,
+        failReason: c.failReason || null,
+      };
+    }
+    res.json({ outcomes, count: contacts.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // POST /api/leads/import — accepts the whole harvester file (union of
 // last_run_leads + all_leads) or a bare array of leads.

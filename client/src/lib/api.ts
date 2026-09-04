@@ -237,7 +237,26 @@ export interface MoveToOutreachResult {
   statusUpdateFailed?: boolean;
 }
 
+/** What became of a lead once it entered outreach. Keyed by lowercased email. */
+export interface LeadOutcome {
+  contactId: string;
+  status: ContactStatus;
+  approvalStatus: ApprovalStatus;
+  template: string;
+  lastSentAt: string | null;
+  followUpSentAt: string | null;
+  repliedAt: string | null;
+  replySnippet: string | null;
+  bounceReason: string | null;
+  failReason: string | null;
+}
+
+export type LeadOutcomeMap = Record<string, LeadOutcome>;
+
 export const loadLeadsApi = () => apiFetch<Lead[]>('/api/leads');
+
+export const loadLeadOutcomesApi = () =>
+  apiFetch<{ outcomes: LeadOutcomeMap; count: number }>('/api/leads/outcomes');
 
 export const importLeadsApi = (payload: LeadFile | SourceLead[]) =>
   apiFetch<LeadImportResult>('/api/leads/import', { method: 'POST', body: JSON.stringify(payload) });

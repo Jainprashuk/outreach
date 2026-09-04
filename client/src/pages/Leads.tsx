@@ -9,10 +9,14 @@ import { SkeletonRows } from '../components/Skeleton';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import {
-  deleteLeadApi, deleteLeadsApi, importLeadsApi, loadLeadsApi,
-  type Lead, type LeadFile, type MoveToOutreachResult,
+  deleteLeadApi, deleteLeadsApi, importLeadsApi, loadLeadsApi, loadLeadOutcomesApi,
+  type Lead, type LeadFile, type LeadOutcomeMap, type MoveToOutreachResult,
 } from '../lib/api';
 import { readFileText } from '../lib/csv';
+import { hasApplyableLink, leadLinkTypes, LINK_TYPE_META } from '../lib/linkTypes';
+import {
+  contactBadgeClass, contactStatusLabel, outcomeOf, stageOf, STAGE_BADGE, STAGE_LABELS,
+} from '../lib/leadOutcome';
 import {
   activeChips, applyLeadFilters, countActive, DEFAULT_FILTERS, type LeadFilters,
 } from '../lib/leadFilters';
@@ -38,6 +42,7 @@ export default function Leads() {
   const toast = useToast();
 
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [outcomes, setOutcomes] = useState<LeadOutcomeMap>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -56,18 +61,27 @@ export default function Leads() {
   const [detail, setDetail] = useState<Lead | null>(null);
 
   const reload = async () => {
-    const rows = await loadLeadsApi();
+    const [rows, out] = await Promise.all([
+      loadLeadsApi(),
+      // Outcomes are best-effort: the page is still useful without them.
+      loadLeadOutcomesApi().catch(() => ({ outcomes: {} as LeadOutcomeMap, count: 0 })),
+    ]);
     setLeads(rows);
+    setOutcomes(out.outcomes);
   };
 
   useEffect(() => {
-    loadLeadsApi().then(setLeads).catch(err => setError(err.message)).finally(() => setLoading(false));
+    reload().catch(err => setError(err.message)).finally(() => setLoading(false));
     app.loadTemplates().catch(() => { /* the modal shows the empty state */ });
   }, []);
 
   const resetPage = () => setPage(1);
 
   const rejectCount = useMemo(() => leads.filter(isReject).length, [leads]);
+  // No email, but a link you can actually apply through — otherwise invisible,
+  // since the checkbox is disabled for every email-less lead.
+  const applyableNoEmail = useMemo(
+    () => leads.filter(l => !l.email && hasApplyableLink(l)).length, [leads]);
 
   const stats = useMemo(() => ({
     total: leads.length,
@@ -75,9 +89,12 @@ export default function Leads() {
     moved: leads.filter(l => l.status === 'added-to-outreach').length,
     withEmail: leads.filter(l => l.email).length,
     withoutEmail: leads.filter(l => !l.email).length,
-  }), [leads]);
+    emailed: leads.filter(l => ['emailed', 'replied', 'bounced'].includes(stageOf(outcomeOf(l, outcomes)))).length,
+    replied: leads.filter(l => stageOf(outcomeOf(l, outcomes)) === 'replied').length,
+    bounced: leads.filter(l => stageOf(outcomeOf(l, outcomes)) === 'bounced').length,
+  }), [leads, outcomes]);
 
-  const filtered = useMemo(() => applyLeadFilters(leads, filters), [leads, filters]);
+  const filtered = useMemo(() => applyLeadFilters(leads, filters, outcomes), [leads, filters, outcomes]);
   const chips = useMemo(() => activeChips(filters), [filters]);
   const activeCount = countActive(filters);
 
@@ -243,7 +260,7 @@ export default function Leads() {
   return (
     <Layout
       title="Leads"
-      subtitle={`${stats.total} staged · ${stats.fresh} new · ${stats.moved} in outreach · ${stats.withoutEmail} without an email`}
+      subtitle={`${stats.total} staged · ${stats.fresh} new · ${stats.moved} in outreach · ${stats.emailed} emailed · ${stats.replied} replied${stats.bounced ? ` · ${stats.bounced} bounced` : ''}`}
       actions={
         <>
           <Link to="/contacts" className="btn btn-sm"><i className="ti ti-users" /> Contacts</Link>
@@ -374,6 +391,11 @@ export default function Leads() {
           title="Quick filter — same as the hard-rejects option in Filters">
           Hide rejects ({rejectCount})
         </button>
+        <button className="btn btn-sm" type="button" disabled={applyableNoEmail === 0}
+          onClick={() => setFilter({ hasEmail: 'no', applyable: 'yes' })}
+          title="Leads with no email address but a real application link — reachable without cold email">
+          <i className="ti ti-file-check" /> Apply directly ({applyableNoEmail})
+        </button>
         <button className="btn btn-sm" type="button" disabled={selectable.length === 0}
           onClick={() => toggleAll(true)}>Select all with email ({selectable.length})</button>
         <button className="btn btn-sm" type="button" disabled={selected.size === 0}
@@ -460,15 +482,51 @@ export default function Leads() {
                 </td>
                 <td style={{ color: 'var(--text2)' }}>
                   {l.links.length === 0 ? '—' : (
-                    <>
-                      <a href={l.links[0]} target="_blank" rel="noopener noreferrer">link</a>
-                      {l.links.length > 1 ? ` +${l.links.length - 1}` : ''}
-                    </>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 3, alignItems: 'center' }}>
+                      {leadLinkTypes(l).slice(0, 2).map(t => (
+                        <span key={t} title={LINK_TYPE_META[t].hint}
+                          style={{ fontSize: 10, padding: '1px 6px', borderRadius: 999, whiteSpace: 'nowrap',
+                            background: t === 'junk' ? 'var(--red-bg)' : 'var(--bg2)',
+                            color: t === 'junk' ? 'var(--red)' : 'var(--text2)' }}>
+                          <i className={`ti ${LINK_TYPE_META[t].icon}`} /> {LINK_TYPE_META[t].label}
+                        </span>
+                      ))}
+                      {leadLinkTypes(l).length > 2 && (
+                        <span style={{ fontSize: 10, color: 'var(--text3)' }}>+{leadLinkTypes(l).length - 2}</span>
+                      )}
+                      <a href={l.links[0]} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11 }}>
+                        open{l.links.length > 1 ? ` (${l.links.length})` : ''}
+                      </a>
+                    </div>
                   )}
                 </td>
                 <td>{l.postUrl ? <a href={l.postUrl} target="_blank" rel="noopener noreferrer">open</a> : '—'}</td>
 
-                <td><span className={`badge ${LEAD_BADGE_CLASS[l.status]}`}>{LEAD_STATUS_LABELS[l.status]}</span></td>
+                <td>
+                  {(() => {
+                    const o = outcomeOf(l, outcomes);
+                    if (!o) return <span className={`badge ${LEAD_BADGE_CLASS[l.status]}`}>{LEAD_STATUS_LABELS[l.status]}</span>;
+                    const stage = stageOf(o);
+                    return (
+                      <div>
+                        <span className={`badge ${contactBadgeClass(o.status)}`}
+                          title={`In outreach — ${STAGE_LABELS[stage]}`}>
+                          {contactStatusLabel(o.status)}
+                        </span>
+                        {o.repliedAt && (
+                          <div style={{ fontSize: 10, color: 'var(--green)', marginTop: 3 }}>
+                            <i className="ti ti-corner-down-left" /> replied
+                          </div>
+                        )}
+                        {o.bounceReason && (
+                          <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 3, maxWidth: 150, whiteSpace: 'normal', lineHeight: 1.3 }}>
+                            {o.bounceReason.slice(0, 48)}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </td>
                 <td>
                   <button className="btn btn-sm" onClick={() => confirmDelete(l)} title="Delete lead" type="button">
                     <i className="ti ti-trash" />
@@ -508,6 +566,7 @@ export default function Leads() {
         <LeadDetailModal
           lead={detail}
           allLeads={leads}
+          outcome={outcomeOf(detail, outcomes)}
           onClose={() => setDetail(null)}
           onMove={moveOne}
           onDelete={async (l) => { setDetail(null); await confirmDelete(l); }}

@@ -1,5 +1,7 @@
 import type { Lead } from './api';
 import { deriveCompany, HARD_REJECT } from './leads';
+import { outcomeOf, stageOf } from './leadOutcome';
+import type { LeadOutcomeMap } from './api';
 
 /** Rows are exploded per email, so "people" means rows regrouped by identity. */
 export const identityOf = (l: Lead) => l.authorUrl || l.authorName;
@@ -149,6 +151,9 @@ export interface QueryStat {
   withEmail: number;
   usable: number;     // has an email and isn't a hard reject
   moved: number;
+  emailed: number;    // reached the inbox stage (delivered or bounced)
+  replied: number;    // someone actually answered
+  bounced: number;
   medianFit: number;  // rejects excluded, or -999 when everything was rejected
   hitRate: number;    // % of the query's leads that are actually workable
 }
@@ -157,7 +162,7 @@ export interface QueryStat {
  * Per-search-query performance. A lead credited to several queries counts once
  * for each, which is what you want when asking "is this search worth repeating".
  */
-export function queryStats(leads: Lead[]): QueryStat[] {
+export function queryStats(leads: Lead[], outcomes: LeadOutcomeMap = {}): QueryStat[] {
   const groups = new Map<string, Lead[]>();
   leads.forEach(l => (l.queries || []).forEach(q => {
     if (!groups.has(q)) groups.set(q, []);
@@ -173,11 +178,43 @@ export function queryStats(leads: Lead[]): QueryStat[] {
       withEmail: rows.filter(l => l.email).length,
       usable,
       moved: rows.filter(l => l.status === 'added-to-outreach').length,
+      emailed: rows.filter(l => ['emailed', 'replied', 'bounced'].includes(stageOf(outcomeOf(l, outcomes)))).length,
+      replied: rows.filter(l => stageOf(outcomeOf(l, outcomes)) === 'replied').length,
+      bounced: rows.filter(l => stageOf(outcomeOf(l, outcomes)) === 'bounced').length,
       medianFit: scored.length ? scored[Math.floor(scored.length / 2)] : HARD_REJECT,
       hitRate: rows.length ? Math.round((usable / rows.length) * 1000) / 10 : 0,
     };
-  }).sort((a, b) => b.usable - a.usable || b.n - a.n);
+  }).sort((a, b) => b.replied - a.replied || b.usable - a.usable || b.n - a.n);
 }
 
 /** Leads carrying no query at all — i.e. imported before the field existed. */
 export const unattributed = (leads: Lead[]) => leads.filter(l => (l.queries || []).length === 0).length;
+
+export interface OutcomeFunnel {
+  inOutreach: number; // has a matching contact, however it got there
+  alreadyContacted: number; // still marked "new" but already a contact — don't re-send
+  emailed: number;
+  delivered: number;
+  bounced: number;
+  replied: number;
+  awaiting: number;   // in outreach but not sent yet
+}
+
+/** What happened after leads crossed into outreach. */
+export function outcomeFunnel(leads: Lead[], outcomes: LeadOutcomeMap): OutcomeFunnel {
+  const stages = leads.map(l => stageOf(outcomeOf(l, outcomes)));
+  const emailed = stages.filter(s => ['emailed', 'replied', 'bounced'].includes(s)).length;
+  const bounced = stages.filter(s => s === 'bounced').length;
+  const withOutcome = leads.filter(l => !!outcomeOf(l, outcomes));
+  return {
+    inOutreach: withOutcome.length,
+    // A lead can be in outreach without being promoted here — the address was
+    // already a contact from an earlier import. Worth knowing before re-sending.
+    alreadyContacted: withOutcome.filter(l => l.status !== 'added-to-outreach').length,
+    emailed,
+    delivered: emailed - bounced,
+    bounced,
+    replied: stages.filter(s => s === 'replied').length,
+    awaiting: stages.filter(s => s === 'queued' || s === 'awaiting-approval').length,
+  };
+}

@@ -1,7 +1,10 @@
 import { useEffect, useMemo } from 'react';
+import { Link } from 'react-router-dom';
 import Avatar from './Avatar';
-import type { Lead } from '../lib/api';
+import type { Lead, LeadOutcome } from '../lib/api';
 import { deriveCompany, isCompanyDerived, LEAD_BADGE_CLASS, LEAD_STATUS_LABELS } from '../lib/leads';
+import { classifyLink, LINK_TYPE_META } from '../lib/linkTypes';
+import { contactBadgeClass, contactStatusLabel, stageOf, STAGE_LABELS } from '../lib/leadOutcome';
 
 const fmt = (iso: string | null | undefined) =>
   iso ? new Date(iso).toLocaleString('en-US', {
@@ -29,9 +32,10 @@ const Ext = ({ href, children }: { href: string; children?: React.ReactNode }) =
 
 const muted = (t: string) => <span style={{ color: 'var(--text3)' }}>{t}</span>;
 
-export default function LeadDetailModal({ lead, allLeads, onClose, onMove, onDelete }: {
+export default function LeadDetailModal({ lead, allLeads, outcome, onClose, onMove, onDelete }: {
   lead: Lead;
   allLeads: Lead[];
+  outcome: LeadOutcome | null;
   onClose: () => void;
   onMove: (lead: Lead) => void;
   onDelete: (lead: Lead) => void;
@@ -97,8 +101,21 @@ export default function LeadDetailModal({ lead, allLeads, onClose, onMove, onDel
           <Field label="Post">{lead.postUrl ? <Ext href={lead.postUrl} /> : muted('—')}</Field>
           <Field label={`Links (${lead.links.length})`}>
             {lead.links.length === 0 ? muted('none') : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                {lead.links.map((l, i) => <Ext key={i} href={l} />)}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {lead.links.map((l, i) => {
+                  const t = classifyLink(l);
+                  return (
+                    <div key={i}>
+                      <span title={LINK_TYPE_META[t].hint}
+                        style={{ fontSize: 10, padding: '1px 6px', borderRadius: 999, marginRight: 6,
+                          background: t === 'junk' ? 'var(--red-bg)' : 'var(--bg2)',
+                          color: t === 'junk' ? 'var(--red)' : 'var(--text2)' }}>
+                        <i className={`ti ${LINK_TYPE_META[t].icon}`} /> {LINK_TYPE_META[t].label}
+                      </span>
+                      {t === 'junk' ? <span style={{ color: 'var(--text3)' }}>{l}</span> : <Ext href={l} />}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </Field>
@@ -133,11 +150,51 @@ export default function LeadDetailModal({ lead, allLeads, onClose, onMove, onDel
           )}
 
           <div className="section-title" style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '18px 0 2px' }}>Outreach</div>
-          <Field label="Status">
+          <Field label="Lead status">
             <span className={`badge ${LEAD_BADGE_CLASS[lead.status]}`}>{LEAD_STATUS_LABELS[lead.status]}</span>
           </Field>
           <Field label="Moved at">{fmt(lead.promotedAt)}</Field>
-          <Field label="Contact id" mono>{lead.contactId || muted('—')}</Field>
+
+          {outcome ? (
+            <>
+              <Field label="Contact status">
+                <span className={`badge ${contactBadgeClass(outcome.status)}`}>{contactStatusLabel(outcome.status)}</span>
+                <span style={{ color: 'var(--text3)', marginLeft: 8 }}>{STAGE_LABELS[stageOf(outcome)]}</span>
+              </Field>
+              <Field label="Template">{outcome.template || muted('none set')}</Field>
+              <Field label="First emailed">{fmt(outcome.lastSentAt)}</Field>
+              <Field label="Follow-up sent">{fmt(outcome.followUpSentAt)}</Field>
+              <Field label="Replied">
+                {outcome.repliedAt
+                  ? <span style={{ color: 'var(--green)' }}>{fmt(outcome.repliedAt)}</span>
+                  : muted('no reply yet')}
+              </Field>
+              {outcome.replySnippet && (
+                <Field label="Their reply">
+                  <div className="reply-bubble" style={{ fontSize: 12 }}>{outcome.replySnippet}</div>
+                </Field>
+              )}
+              {outcome.bounceReason && (
+                <Field label="Bounce reason">
+                  <span style={{ color: 'var(--red)' }}>{outcome.bounceReason}</span>
+                </Field>
+              )}
+              {outcome.failReason && (
+                <Field label="Failure"><span style={{ color: 'var(--red)' }}>{outcome.failReason}</span></Field>
+              )}
+              <Field label="Contact">
+                <Link to={`/contacts?search=${encodeURIComponent(lead.email || '')}`} onClick={onClose}>
+                  Open in Contacts <i className="ti ti-arrow-right" />
+                </Link>
+              </Field>
+            </>
+          ) : (
+            <Field label="Contact status">
+              {lead.status === 'added-to-outreach'
+                ? muted('marked as moved, but no matching contact found — it may have been deleted')
+                : muted('not in outreach yet')}
+            </Field>
+          )}
 
           <div className="section-title" style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '18px 0 2px' }}>Record</div>
           <Field label="Imported">{fmt(lead.createdAt)}</Field>

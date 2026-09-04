@@ -4,6 +4,8 @@ import {
   countAdvanced, DEFAULT_FILTERS, filterOptions,
   type LeadFilters, type SortKey, type TriState,
 } from '../lib/leadFilters';
+import type { LinkType } from '../lib/linkTypes';
+import { STAGE_LABELS, STAGE_ORDER, type OutcomeStage } from '../lib/leadOutcome';
 
 const fmtRun = (iso: string) =>
   new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -180,6 +182,29 @@ export default function LeadFilterPanel({ leads, filters, onChange, onReset, mat
                   onChange={e => onChange({ hideRejects: e.target.checked })} />
                 Hide leads scored −999
               </label>
+            </Group>
+
+            <Group label="Outreach outcome">
+              <select value={filters.stage}
+                onChange={e => onChange({ stage: e.target.value as 'any' | OutcomeStage })}>
+                <option value="any">Any</option>
+                {STAGE_ORDER.map(st => <option key={st} value={st}>{STAGE_LABELS[st]}</option>)}
+              </select>
+            </Group>
+
+            <Group label="Way in">
+              <select value={filters.applyable}
+                onChange={e => onChange({ applyable: e.target.value as TriState })}>
+                <option value="any">Any</option>
+                <option value="yes">Has an apply link</option>
+                <option value="no">No apply link</option>
+              </select>
+            </Group>
+
+            <Group label={`Link type${filters.linkTypes.length ? ` (${filters.linkTypes.length})` : ''}`} wide>
+              <MultiCheck options={opts.linkTypes} selected={filters.linkTypes}
+                onChange={v => onChange({ linkTypes: v as LinkType[] })}
+                empty="No links on any lead yet" />
             </Group>
 
             <Group label={`Search query${filters.queries.length ? ` (${filters.queries.length})` : ''}`} wide>

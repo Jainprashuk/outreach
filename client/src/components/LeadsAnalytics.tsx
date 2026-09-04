@@ -2,11 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, HBar } from './AnalyticsCards';
 import { SkeletonRows } from './Skeleton';
-import { loadLeadsApi, type Lead } from '../lib/api';
+import { loadLeadsApi, loadLeadOutcomesApi, type Lead, type LeadOutcomeMap } from '../lib/api';
 import { cvar, pct } from '../lib/analytics';
 import {
   computeLeadMetrics, fitBuckets, harvestRuns, importsByDay,
-  queryStats, sourceBreakdown, topDomains, topMultiAddress, unattributed,
+  outcomeFunnel, queryStats, sourceBreakdown, topDomains, topMultiAddress, unattributed,
 } from '../lib/leadAnalytics';
 
 const fmtDate = (t: number | null) =>
@@ -56,14 +56,18 @@ function ImportChart({ series }: { series: Array<{ day: number; n: number }> }) 
 export default function LeadsAnalytics({ refreshToken }: { refreshToken: number }) {
   // Leads live outside AppContext (one consumer), so this view owns its fetch.
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [outcomes, setOutcomes] = useState<LeadOutcomeMap>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    loadLeadsApi()
-      .then(rows => { if (alive) { setLeads(rows); setError(''); } })
+    Promise.all([
+      loadLeadsApi(),
+      loadLeadOutcomesApi().catch(() => ({ outcomes: {} as LeadOutcomeMap, count: 0 })),
+    ])
+      .then(([rows, out]) => { if (alive) { setLeads(rows); setOutcomes(out.outcomes); setError(''); } })
       .catch(err => { if (alive) setError(err.message); })
       .finally(() => { if (alive) setLoading(false); });
     return () => { alive = false; };
@@ -76,7 +80,8 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
   const runs = useMemo(() => harvestRuns(leads), [leads]);
   const series = useMemo(() => importsByDay(leads), [leads]);
   const sources = useMemo(() => sourceBreakdown(leads), [leads]);
-  const queries = useMemo(() => queryStats(leads), [leads]);
+  const queries = useMemo(() => queryStats(leads, outcomes), [leads, outcomes]);
+  const funnel2 = useMemo(() => outcomeFunnel(leads, outcomes), [leads, outcomes]);
   const noQuery = useMemo(() => unattributed(leads), [leads]);
 
   const accent = cvar('--accent') || '#4f46e5';
@@ -111,15 +116,19 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
     { label: 'Contactable', value: m.withEmail.toLocaleString(), sub: `${m.withoutEmail} have no email`, cls: '' },
     { label: 'Moved to outreach', value: m.moved.toLocaleString(), sub: `${m.conversion}% of contactable`, cls: 'green' },
     { label: 'Worth working', value: m.usable.toLocaleString(), sub: `${m.rejects} hard rejects excluded`, cls: 'teal' },
-    { label: 'Median fit', value: String(m.medianFit), sub: `avg ${m.avgFit}, rejects excluded`, cls: m.medianFit < 5 ? 'amber' : '' },
+    { label: 'Replies earned', value: String(funnel2.replied),
+      sub: funnel2.delivered ? `${Math.round(funnel2.replied / funnel2.delivered * 1000) / 10}% of ${funnel2.delivered} delivered` : 'nothing delivered yet',
+      cls: funnel2.replied > 0 ? 'green' : '' },
   ];
 
   const funnel = [
     { label: 'Leads harvested', n: m.total },
     { label: 'Has an email', n: m.withEmail },
     { label: 'Not a hard reject', n: m.usable },
-    { label: 'Moved to outreach', n: m.moved },
-    { label: 'New contact created', n: m.contactsCreated },
+    { label: 'In outreach', n: funnel2.inOutreach },
+    { label: 'Actually emailed', n: funnel2.emailed },
+    { label: 'Delivered', n: funnel2.delivered },
+    { label: 'Replied', n: funnel2.replied },
   ];
   const funnelMax = funnel[0].n || 1;
 
@@ -150,11 +159,16 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
             <HBar key={s.label} label={s.label} n={s.n} d={funnelMax} fill={accent} opacity={1 - i * 0.15}
               extra={i > 0 ? ` · ${pct(s.n, funnel[i - 1].n)}% of prev` : ''} />
           ))}
-          {m.alreadyExisted > 0 && (
-            <div className="an-card-sub" style={{ marginTop: 8 }}>
-              {m.alreadyExisted} moved lead{m.alreadyExisted !== 1 ? 's were' : ' was'} already in your contacts, so no new contact was created.
-            </div>
-          )}
+          <div className="an-card-sub" style={{ marginTop: 8 }}>
+            {m.alreadyExisted > 0 && (
+              <>{m.alreadyExisted} moved lead{m.alreadyExisted !== 1 ? 's were' : ' was'} already in your contacts, so no new contact was created. </>
+            )}
+            {funnel2.alreadyContacted > 0 && (
+              <><strong>{funnel2.alreadyContacted} lead{funnel2.alreadyContacted !== 1 ? 's are' : ' is'} still marked “new” but you have already
+              emailed that address</strong> — filter by outcome to find {funnel2.alreadyContacted !== 1 ? 'them' : 'it'} before sending again. </>
+            )}
+            {funnel2.bounced > 0 && <>{funnel2.bounced} bounced. </>}
+          </div>
         </Card>
 
         <Card title="Fit score spread" icon="ti-chart-bar" sub="How the harvester scored this batch" delay=".08s">
@@ -182,8 +196,8 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
             <div>
               <div className="an-card-title"><i className="ti ti-search" /> Search query performance</div>
               <div className="an-card-sub">
-                Which LinkedIn searches actually produce workable leads — "workable" means it has an
-                email and isn't a hard reject. A lead found by several searches counts for each.
+                Ranked by replies earned, then by workable leads — "workable" means it has an email
+                and isn't a hard reject. A lead found by several searches counts for each.
                 {noQuery > 0 ? ` ${noQuery} lead${noQuery !== 1 ? 's have' : ' has'} no query recorded (imported before the field existed).` : ''}
               </div>
             </div>
@@ -198,7 +212,9 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
                   <th style={{ padding: '4px 8px 8px' }}>Workable</th>
                   <th style={{ padding: '4px 8px 8px' }}>Hit rate</th>
                   <th style={{ padding: '4px 8px 8px' }}>Median fit</th>
-                  <th style={{ padding: '4px 0 8px 8px' }}>Moved</th>
+                  <th style={{ padding: '4px 8px 8px' }}>Moved</th>
+                  <th style={{ padding: '4px 8px 8px' }}>Emailed</th>
+                  <th style={{ padding: '4px 0 8px 8px' }}>Replied</th>
                 </tr>
               </thead>
               <tbody>
@@ -216,7 +232,10 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
                     <td style={{ padding: '6px 8px', color: q.medianFit === -999 ? 'var(--red)' : 'var(--text2)' }}>
                       {q.medianFit === -999 ? 'all rejects' : q.medianFit}
                     </td>
-                    <td style={{ padding: '6px 0 6px 8px', color: 'var(--text2)' }}>{q.moved || '—'}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--text2)' }}>{q.moved || '—'}</td>
+                    <td style={{ padding: '6px 8px', color: 'var(--text2)' }}>{q.emailed || '—'}</td>
+                    <td style={{ padding: '6px 0 6px 8px', fontWeight: q.replied ? 600 : 400,
+                      color: q.replied ? 'var(--green)' : 'var(--text3)' }}>{q.replied || '—'}</td>
                   </tr>
                 ))}
               </tbody>
