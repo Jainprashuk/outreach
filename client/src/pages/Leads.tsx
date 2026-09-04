@@ -19,7 +19,8 @@ import {
   contactBadgeClass, contactStatusLabel, outcomeOf, stageOf, STAGE_BADGE, STAGE_LABELS,
 } from '../lib/leadOutcome';
 import {
-  activeChips, applyLeadFilters, countActive, DEFAULT_FILTERS, type LeadFilters,
+  activeChips, applyLeadFilters, countActive, DEFAULT_FILTERS, tabCounts, TAB_LABELS,
+  type LeadFilters, type LeadTab,
 } from '../lib/leadFilters';
 import {
   APPLY_BADGE_CLASS, APPLY_STATUS_LABELS, APPLY_STATUS_ORDER, isApplyActioned,
@@ -37,7 +38,7 @@ const PAGE_SIZE = 25;
 // that apiFetch can't parse, so catch it here with a real message.
 const MAX_UPLOAD_CHARS = 9_500_000;
 
-const TABS = [['all', 'All'], ['new', 'New'], ['added-to-outreach', 'Added to outreach']] as const;
+const TABS: LeadTab[] = ['all', 'new', 'added-to-outreach', 'direct-apply'];
 
 interface Preview { rows: PreviewRow[]; summary: PreviewSummary; payload: LeadFile; label: string; }
 
@@ -84,6 +85,7 @@ export default function Leads() {
 
   const resetPage = () => setPage(1);
 
+  const counts = useMemo(() => tabCounts(leads), [leads]);
   const rejectCount = useMemo(() => leads.filter(isReject).length, [leads]);
   // No email, but a link you can actually apply through — otherwise invisible,
   // since the checkbox is disabled for every email-less lead.
@@ -383,10 +385,13 @@ export default function Leads() {
 
       <div className="section-head">
         <div className="nav-tabs">
-          {TABS.map(([key, label]) => (
+          {TABS.map(key => (
             <div key={key} className={`nav-tab${filters.status === key ? ' active' : ''}`}
-              onClick={() => setFilter({ status: key as LeadFilters['status'] })}>
-              {label}
+              onClick={() => setFilter({ status: key })}
+              title={key === 'direct-apply' ? 'Leads with a real application link — apply yourself instead of emailing' : undefined}>
+              {key === 'direct-apply' && <i className="ti ti-file-check" style={{ marginRight: 4 }} />}
+              {TAB_LABELS[key]}
+              <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{counts[key]}</span>
             </div>
           ))}
         </div>
@@ -414,16 +419,29 @@ export default function Leads() {
           title="Quick filter — same as the hard-rejects option in Filters">
           Hide rejects ({rejectCount})
         </button>
-        <button className="btn btn-sm" type="button" disabled={applyableNoEmail === 0}
-          onClick={() => setFilter({ hasEmail: 'no', applyable: 'yes' })}
-          title="Leads with no email address but a real application link — reachable without cold email">
-          <i className="ti ti-file-check" /> Apply directly ({applyableNoEmail})
-        </button>
+
         <button className="btn btn-sm" type="button" disabled={emailable.length === 0}
           onClick={selectEmailable}>Select emailable ({emailable.length})</button>
         <button className="btn btn-sm" type="button" disabled={selected.size === 0}
           onClick={() => setSelected(new Set())}>Clear selection</button>
       </div>
+
+      {filters.status === 'direct-apply' && (
+        <div className="info-box" style={{ marginBottom: 12 }}>
+          <i className="ti ti-file-check" />
+          <span>
+            {counts['direct-apply']} lead{counts['direct-apply'] !== 1 ? 's' : ''} carry a real application
+            link (ATS form, job posting or careers page).{' '}
+            {applyableNoEmail > 0 && (
+              <>
+                <strong>{applyableNoEmail}</strong> of them have no email address, so applying is the only way in —{' '}
+                <a href="#" onClick={e => { e.preventDefault(); setFilter({ hasEmail: 'no' }); }}>show just those</a>.{' '}
+              </>
+            )}
+            Track progress per lead with the <strong>Application status</strong> filter, or select rows and set it in bulk.
+          </span>
+        </div>
+      )}
 
       {chips.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>

@@ -142,6 +142,7 @@ export default function LeadFilterPanel({ leads, filters, onChange, onReset, mat
                 <option value="all">Any status</option>
                 <option value="new">New</option>
                 <option value="added-to-outreach">Added to outreach</option>
+                <option value="direct-apply">Direct apply (has an apply link)</option>
               </select>
             </Group>
 

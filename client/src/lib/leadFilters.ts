@@ -6,11 +6,18 @@ import { STAGE_LABELS, stageOf, outcomeOf, type OutcomeStage } from './leadOutco
 import type { ApplyStatus, LeadOutcomeMap } from './api';
 
 export type TriState = 'any' | 'yes' | 'no';
+
+/**
+ * The top-level tab. The first three are lead statuses; 'direct-apply' is a
+ * different axis — leads carrying a real application link, whether or not they
+ * also have an email — so it lives here rather than in the status enum.
+ */
+export type LeadTab = 'all' | LeadStatus | 'direct-apply';
 export type SortKey = 'fit-desc' | 'fit-asc' | 'newest' | 'oldest' | 'name' | 'email';
 
 export interface LeadFilters {
   search: string;
-  status: 'all' | LeadStatus;
+  status: LeadTab;
   hasEmail: TriState;
   emailKind: 'any' | 'corporate' | 'freemail';
   domains: string[];
@@ -91,7 +98,8 @@ export function applyLeadFilters(leads: Lead[], f: LeadFilters, outcomes: LeadOu
   const q = f.search.trim().toLowerCase();
 
   const out = leads.filter(l => {
-    if (f.status !== 'all' && l.status !== f.status) return false;
+    if (f.status === 'direct-apply') { if (!hasApplyableLink(l)) return false; }
+    else if (f.status !== 'all' && l.status !== f.status) return false;
 
     if (!tri(f.hasEmail, !!l.email)) return false;
     if (f.emailKind !== 'any') {
@@ -162,7 +170,7 @@ const TRI_LABEL: Record<string, string> = { yes: 'yes', no: 'no' };
 export function activeChips(f: LeadFilters): Chip[] {
   const c: Chip[] = [];
   if (f.search.trim()) c.push({ key: 'search', label: `“${f.search.trim()}”` });
-  if (f.status !== 'all') c.push({ key: 'status', label: f.status === 'new' ? 'New' : 'Added to outreach' });
+  if (f.status !== 'all') c.push({ key: 'status', label: TAB_LABELS[f.status] });
   if (f.hasEmail !== 'any') c.push({ key: 'hasEmail', label: `Has email: ${TRI_LABEL[f.hasEmail]}` });
   if (f.emailKind !== 'any') c.push({ key: 'emailKind', label: f.emailKind === 'freemail' ? 'Personal email' : 'Work email' });
   if (f.domains.length) c.push({ key: 'domains', label: `Domain: ${f.domains.length === 1 ? f.domains[0] : `${f.domains.length} selected`}` });
@@ -202,3 +210,20 @@ export const ADVANCED_KEYS: Array<keyof LeadFilters> = [
 
 export const countAdvanced = (f: LeadFilters) =>
   activeChips(f).filter(c => ADVANCED_KEYS.includes(c.key)).length;
+
+export const TAB_LABELS: Record<LeadTab, string> = {
+  'all': 'All',
+  'new': 'New',
+  'added-to-outreach': 'Added to outreach',
+  'direct-apply': 'Direct apply',
+};
+
+/** Row counts for the tab strip, each ignoring the tab constraint itself. */
+export function tabCounts(leads: Lead[]) {
+  return {
+    'all': leads.length,
+    'new': leads.filter(l => l.status === 'new').length,
+    'added-to-outreach': leads.filter(l => l.status === 'added-to-outreach').length,
+    'direct-apply': leads.filter(l => hasApplyableLink(l)).length,
+  } as Record<LeadTab, number>;
+}
