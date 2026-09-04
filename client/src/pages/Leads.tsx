@@ -34,9 +34,14 @@ import {
 
 const PAGE_SIZE = 25;
 
-// Express's json body limit is 10mb; a bigger payload comes back as an HTML 413
-// that apiFetch can't parse, so catch it here with a real message.
-const MAX_UPLOAD_CHARS = 9_500_000;
+// Vercel rejects serverless request bodies over 4,500,000 bytes at the edge,
+// before Express sees them, with a plain-text 413 that apiFetch's res.json()
+// cannot parse — so the failure would surface as an opaque SyntaxError. Guard
+// below that, and measure BYTES: string length undercounts non-ASCII, and these
+// dumps carry emoji in author names.
+const MAX_UPLOAD_BYTES = 4_000_000;
+const byteLength = (s: string) =>
+  typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(s).length : s.length;
 
 const TABS: LeadTab[] = ['all', 'new', 'added-to-outreach', 'direct-apply'];
 
@@ -143,8 +148,13 @@ export default function Leads() {
   // ── Import ────────────────────────────────────────────────────────────────
 
   const parseText = (text: string, label: string) => {
-    if (text.length > MAX_UPLOAD_CHARS) {
-      toast('That file is too large to upload (limit is about 9 MB).', 'error');
+    const bytes = byteLength(text);
+    if (bytes > MAX_UPLOAD_BYTES) {
+      toast(
+        `That JSON is ${(bytes / 1048576).toFixed(1)} MB — uploads are capped at about 4 MB `
+        + `(roughly 8,500 leads). Split the file and import it in parts.`,
+        'error',
+      );
       return;
     }
     let parsed: LeadFile;
@@ -308,7 +318,9 @@ export default function Leads() {
             onDrop={e => { e.preventDefault(); setDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleFile(f); }}>
             <i className="ti ti-file-code" />
             <div className="uz-title">Drop your leads JSON here</div>
-            <div className="uz-sub">Reads last_run_leads + all_leads · one row per email address</div>
+            <div className="uz-sub">
+              Reads last_run_leads + all_leads · one row per email address · up to ~4 MB per upload
+            </div>
             <button className="btn btn-sm" style={{ marginTop: 12 }} onClick={() => fileRef.current?.click()} type="button">
               <i className="ti ti-upload" /> Browse file
             </button>
