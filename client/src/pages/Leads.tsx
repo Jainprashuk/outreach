@@ -9,8 +9,9 @@ import { SkeletonRows } from '../components/Skeleton';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import {
-  deleteLeadApi, deleteLeadsApi, importLeadsApi, loadLeadsApi, loadLeadOutcomesApi,
-  type Lead, type LeadFile, type LeadOutcomeMap, type MoveToOutreachResult,
+  bulkUpdateLeadsApi, deleteLeadApi, deleteLeadsApi, importLeadsApi, loadLeadsApi,
+  loadLeadOutcomesApi,
+  type ApplyStatus, type Lead, type LeadFile, type LeadOutcomeMap, type MoveToOutreachResult,
 } from '../lib/api';
 import { readFileText } from '../lib/csv';
 import { hasApplyableLink, leadLinkTypes, LINK_TYPE_META } from '../lib/linkTypes';
@@ -20,6 +21,9 @@ import {
 import {
   activeChips, applyLeadFilters, countActive, DEFAULT_FILTERS, type LeadFilters,
 } from '../lib/leadFilters';
+import {
+  APPLY_BADGE_CLASS, APPLY_STATUS_LABELS, APPLY_STATUS_ORDER, isApplyActioned,
+} from '../lib/leads';
 import {
   deriveCompany, explodeForPreview, isCompanyDerived, isReject,
   summarisePreview, sourceLeadsFromFile,
@@ -59,6 +63,8 @@ export default function Leads() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moveOpen, setMoveOpen] = useState(false);
   const [detail, setDetail] = useState<Lead | null>(null);
+  // Lets the open modal pick up its own refreshed row after a save.
+  const leadsRef = useRef<Lead[]>([]);
 
   const reload = async () => {
     const [rows, out] = await Promise.all([
@@ -67,6 +73,7 @@ export default function Leads() {
       loadLeadOutcomesApi().catch(() => ({ outcomes: {} as LeadOutcomeMap, count: 0 })),
     ]);
     setLeads(rows);
+    leadsRef.current = rows;
     setOutcomes(out.outcomes);
   };
 
@@ -107,10 +114,11 @@ export default function Leads() {
   const safePage = Math.min(page, totalPages);
   const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
-  // Only leads with an email can become contacts, so select-all ignores the rest.
-  const selectable = useMemo(() => filtered.filter(l => !!l.email), [filtered]);
-  const allChecked = selectable.length > 0 && selectable.every(l => selected.has(l.id));
-  const someChecked = selectable.some(l => selected.has(l.id));
+  // Every lead is selectable: email-bearing ones can be moved to outreach, and
+  // email-less ones can still be tracked as direct applications.
+  const emailable = useMemo(() => filtered.filter(l => !!l.email), [filtered]);
+  const allChecked = filtered.length > 0 && filtered.every(l => selected.has(l.id));
+  const someChecked = filtered.some(l => selected.has(l.id));
 
   const toggleRow = (id: string, checked: boolean) => {
     setSelected(prev => {
@@ -123,10 +131,12 @@ export default function Leads() {
   const toggleAll = (checked: boolean) => {
     setSelected(prev => {
       const next = new Set(prev);
-      selectable.forEach(l => { if (checked) next.add(l.id); else next.delete(l.id); });
+      filtered.forEach(l => { if (checked) next.add(l.id); else next.delete(l.id); });
       return next;
     });
   };
+
+  const selectEmailable = () => setSelected(new Set(emailable.map(l => l.id)));
 
   // ── Import ────────────────────────────────────────────────────────────────
 
@@ -215,6 +225,19 @@ export default function Leads() {
     setSelected(new Set());
     await reload();
     app.loadContacts().catch(() => { /* the Contacts page will fetch on visit */ });
+  };
+
+  const setApplyStatusBulk = async (applyStatus: ApplyStatus) => {
+    if (selected.size === 0) return;
+    const ids = [...selected];
+    try {
+      await bulkUpdateLeadsApi(ids.map(id => ({ id, applyStatus, note: 'Bulk update' })));
+      toast(`${ids.length} lead${ids.length !== 1 ? 's' : ''} marked “${APPLY_STATUS_LABELS[applyStatus]}”.`, 'success');
+      setSelected(new Set());
+      await reload();
+    } catch (err: any) {
+      toast('Could not update: ' + err.message, 'error');
+    }
   };
 
   const confirmDelete = async (l: Lead) => {
@@ -396,8 +419,8 @@ export default function Leads() {
           title="Leads with no email address but a real application link — reachable without cold email">
           <i className="ti ti-file-check" /> Apply directly ({applyableNoEmail})
         </button>
-        <button className="btn btn-sm" type="button" disabled={selectable.length === 0}
-          onClick={() => toggleAll(true)}>Select all with email ({selectable.length})</button>
+        <button className="btn btn-sm" type="button" disabled={emailable.length === 0}
+          onClick={selectEmailable}>Select emailable ({emailable.length})</button>
         <button className="btn btn-sm" type="button" disabled={selected.size === 0}
           onClick={() => setSelected(new Set())}>Clear selection</button>
       </div>
@@ -426,7 +449,7 @@ export default function Leads() {
                 <input type="checkbox" className="row-cb" checked={allChecked}
                   ref={el => { if (el) el.indeterminate = !allChecked && someChecked; }}
                   onChange={e => toggleAll(e.target.checked)}
-                  title="Select all leads with an email" />
+                  title="Select every lead in this view" />
               </th>
               <th>Fit</th><th>Lead</th><th>Company</th><th>Found by</th><th>Links</th><th>Post</th><th>Status</th><th></th>
             </tr>
@@ -446,8 +469,7 @@ export default function Leads() {
                 title="Click to see everything stored for this lead">
                 <td className="cb-col">
                   <input type="checkbox" className="row-cb" checked={selected.has(l.id)}
-                    disabled={!l.email}
-                    title={l.email ? undefined : 'No email — cannot be moved to outreach'}
+                    title={l.email ? undefined : 'No email — can still be tracked as a direct application'}
                     onChange={e => toggleRow(l.id, e.target.checked)} />
                 </td>
                 <td style={{ color: isReject(l) ? 'var(--red)' : 'var(--text2)' }}>{l.fitScore}</td>
@@ -505,7 +527,19 @@ export default function Leads() {
                 <td>
                   {(() => {
                     const o = outcomeOf(l, outcomes);
-                    if (!o) return <span className={`badge ${LEAD_BADGE_CLASS[l.status]}`}>{LEAD_STATUS_LABELS[l.status]}</span>;
+                    const applyBadge = isApplyActioned(l) ? (
+                      <div style={{ marginTop: 3 }}>
+                        <span className={`badge ${APPLY_BADGE_CLASS[l.applyStatus]}`} title="Direct application">
+                          <i className="ti ti-file-check" /> {APPLY_STATUS_LABELS[l.applyStatus]}
+                        </span>
+                      </div>
+                    ) : null;
+                    if (!o) return (
+                      <div>
+                        <span className={`badge ${LEAD_BADGE_CLASS[l.status]}`}>{LEAD_STATUS_LABELS[l.status]}</span>
+                        {applyBadge}
+                      </div>
+                    );
                     const stage = stageOf(o);
                     return (
                       <div>
@@ -523,6 +557,7 @@ export default function Leads() {
                             {o.bounceReason.slice(0, 48)}
                           </div>
                         )}
+                        {applyBadge}
                       </div>
                     );
                   })()}
@@ -551,10 +586,23 @@ export default function Leads() {
       )}
 
       <div className={`bulk-bar${selected.size > 0 ? ' visible' : ''}`}>
-        <span className="bb-count">{selected.size} selected</span>
+        <span className="bb-count">
+          {selected.size} selected
+          {selected.size > selectedLeads.length && (
+            <span style={{ fontWeight: 400, opacity: 0.75 }}>
+              {' '}· {selectedLeads.length} emailable
+            </span>
+          )}
+        </span>
+        <select value="" onChange={e => { if (e.target.value) setApplyStatusBulk(e.target.value as ApplyStatus); e.target.value = ''; }}
+          style={{ width: 'auto', minWidth: 165 }} title="Set the direct-application status">
+          <option value="">Set application status…</option>
+          {APPLY_STATUS_ORDER.map(a => <option key={a} value={a}>{APPLY_STATUS_LABELS[a]}</option>)}
+        </select>
         <button className="btn btn-del" onClick={deleteSelected} type="button"><i className="ti ti-trash" /> Delete</button>
-        <button className="btn btn-send" onClick={() => setMoveOpen(true)} type="button" disabled={selectedLeads.length === 0}>
-          <i className="ti ti-user-plus" /> Move to outreach
+        <button className="btn btn-send" onClick={() => setMoveOpen(true)} type="button" disabled={selectedLeads.length === 0}
+          title={selectedLeads.length === 0 ? 'None of the selected leads have an email address' : undefined}>
+          <i className="ti ti-user-plus" /> Move to outreach{selected.size > selectedLeads.length ? ` (${selectedLeads.length})` : ''}
         </button>
       </div>
 
@@ -567,6 +615,11 @@ export default function Leads() {
           lead={detail}
           allLeads={leads}
           outcome={outcomeOf(detail, outcomes)}
+          onSaved={async () => {
+            await reload();
+            setDetail(d => (d ? leadsRef.current.find(x => x.id === d.id) || d : d));
+            toast('Application status saved.', 'success');
+          }}
           onClose={() => setDetail(null)}
           onMove={moveOne}
           onDelete={async (l) => { setDetail(null); await confirmDelete(l); }}

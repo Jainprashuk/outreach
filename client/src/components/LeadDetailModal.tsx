@@ -1,9 +1,12 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import Avatar from './Avatar';
-import type { Lead, LeadOutcome } from '../lib/api';
-import { deriveCompany, isCompanyDerived, LEAD_BADGE_CLASS, LEAD_STATUS_LABELS } from '../lib/leads';
-import { classifyLink, LINK_TYPE_META } from '../lib/linkTypes';
+import { updateLeadApi, type ApplyStatus, type Lead, type LeadOutcome } from '../lib/api';
+import {
+  APPLY_BADGE_CLASS, APPLY_STATUS_LABELS, APPLY_STATUS_ORDER,
+  deriveCompany, isCompanyDerived, LEAD_BADGE_CLASS, LEAD_STATUS_LABELS,
+} from '../lib/leads';
+import { APPLYABLE, classifyLink, LINK_TYPE_META } from '../lib/linkTypes';
 import { contactBadgeClass, contactStatusLabel, stageOf, STAGE_LABELS } from '../lib/leadOutcome';
 
 const fmt = (iso: string | null | undefined) =>
@@ -32,10 +35,11 @@ const Ext = ({ href, children }: { href: string; children?: React.ReactNode }) =
 
 const muted = (t: string) => <span style={{ color: 'var(--text3)' }}>{t}</span>;
 
-export default function LeadDetailModal({ lead, allLeads, outcome, onClose, onMove, onDelete }: {
+export default function LeadDetailModal({ lead, allLeads, outcome, onSaved, onClose, onMove, onDelete }: {
   lead: Lead;
   allLeads: Lead[];
   outcome: LeadOutcome | null;
+  onSaved: () => void;
   onClose: () => void;
   onMove: (lead: Lead) => void;
   onDelete: (lead: Lead) => void;
@@ -55,6 +59,30 @@ export default function LeadDetailModal({ lead, allLeads, outcome, onClose, onMo
   }, [allLeads, lead]);
 
   const derived = deriveCompany(lead);
+
+  // The application journey is manual, so it's edited right here.
+  const [applyStatus, setApplyStatus] = useState<ApplyStatus>(lead.applyStatus || 'not-applied');
+  const [applyUrl, setApplyUrl] = useState(lead.applyUrl || '');
+  const [applyNote, setApplyNote] = useState(lead.applyNote || '');
+  const [saving, setSaving] = useState(false);
+  const [saveErr, setSaveErr] = useState('');
+
+  const applyLinks = (lead.links || []).filter(l => APPLYABLE.includes(classifyLink(l)));
+  const dirty = applyStatus !== (lead.applyStatus || 'not-applied')
+    || applyUrl !== (lead.applyUrl || '')
+    || applyNote !== (lead.applyNote || '');
+
+  const saveApply = async () => {
+    setSaving(true); setSaveErr('');
+    try {
+      await updateLeadApi(lead.id, { applyStatus, applyUrl: applyUrl || null, applyNote });
+      onSaved();
+    } catch (err: any) {
+      setSaveErr(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="edit-modal-wrap open" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -149,7 +177,78 @@ export default function LeadDetailModal({ lead, allLeads, outcome, onClose, onMo
             </Field>
           )}
 
-          <div className="section-title" style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '18px 0 2px' }}>Outreach</div>
+          <div className="section-title" style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '18px 0 2px' }}>
+            Direct application
+            {applyLinks.length > 0 && (
+              <span style={{ textTransform: 'none', letterSpacing: 0, marginLeft: 6, color: 'var(--green)' }}>
+                · {applyLinks.length} apply link{applyLinks.length !== 1 ? 's' : ''}
+              </span>
+            )}
+          </div>
+
+          <Field label="Application">
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <select value={applyStatus} onChange={e => setApplyStatus(e.target.value as ApplyStatus)}
+                style={{ width: 'auto', minWidth: 150 }}>
+                {APPLY_STATUS_ORDER.map(a => <option key={a} value={a}>{APPLY_STATUS_LABELS[a]}</option>)}
+              </select>
+              <span className={`badge ${APPLY_BADGE_CLASS[applyStatus]}`}>{APPLY_STATUS_LABELS[applyStatus]}</span>
+            </div>
+          </Field>
+
+          <Field label="Applied on">{fmt(lead.appliedAt)}</Field>
+
+          <Field label="Applied through">
+            {applyLinks.length > 0 ? (
+              <select value={applyUrl} onChange={e => setApplyUrl(e.target.value)}>
+                <option value="">— pick the link you used —</option>
+                {applyLinks.map(l => (
+                  <option key={l} value={l}>{LINK_TYPE_META[classifyLink(l)].label}: {l.slice(0, 60)}</option>
+                ))}
+                {applyUrl && !applyLinks.includes(applyUrl) && <option value={applyUrl}>{applyUrl.slice(0, 60)}</option>}
+              </select>
+            ) : (
+              <input type="text" placeholder="Paste the URL you applied through" value={applyUrl}
+                onChange={e => setApplyUrl(e.target.value)} />
+            )}
+            {applyUrl && <div style={{ marginTop: 4 }}><Ext href={applyUrl}>open that link</Ext></div>}
+          </Field>
+
+          <Field label="Notes">
+            <textarea value={applyNote} onChange={e => setApplyNote(e.target.value)} rows={2}
+              placeholder="Role, referral, recruiter name, next step…"
+              style={{ width: '100%', fontSize: 12 }} />
+          </Field>
+
+          {(lead.applyHistory || []).length > 0 && (
+            <Field label="Journey">
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                {[...(lead.applyHistory || [])].reverse().map((h, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>
+                    <span className={`badge ${APPLY_BADGE_CLASS[h.status] || 'badge-queued'}`}>
+                      {APPLY_STATUS_LABELS[h.status] || h.status}
+                    </span>
+                    <span style={{ color: 'var(--text3)', fontSize: 11 }}>{fmt(h.changedAt)}</span>
+                  </div>
+                ))}
+              </div>
+            </Field>
+          )}
+
+          {saveErr && (
+            <div className="info-box" style={{ borderColor: 'var(--red)', color: 'var(--red)', marginTop: 10 }}>
+              <i className="ti ti-alert-triangle" /> {saveErr}
+            </div>
+          )}
+          {dirty && (
+            <div style={{ marginTop: 10 }}>
+              <button className="btn btn-sm btn-primary" type="button" onClick={saveApply} disabled={saving}>
+                <i className="ti ti-check" /> {saving ? 'Saving…' : 'Save application status'}
+              </button>
+            </div>
+          )}
+
+          <div className="section-title" style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '18px 0 2px' }}>Email outreach</div>
           <Field label="Lead status">
             <span className={`badge ${LEAD_BADGE_CLASS[lead.status]}`}>{LEAD_STATUS_LABELS[lead.status]}</span>
           </Field>

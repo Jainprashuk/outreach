@@ -170,6 +170,12 @@ export const deleteResumeApi = () =>
 
 export type LeadStatus = 'new' | 'added-to-outreach';
 
+/** The direct-application journey — manual, since nothing can observe it. */
+export type ApplyStatus =
+  | 'not-applied' | 'applied' | 'in-review' | 'interviewing' | 'offer' | 'rejected' | 'skipped';
+
+export interface ApplyHistoryEntry { status: ApplyStatus; changedAt: string; note?: string }
+
 /** One lead exactly as it appears in the uploaded harvester JSON (pre-explode). */
 export interface SourceLead {
   author_name: string;
@@ -208,6 +214,11 @@ export interface Lead {
   source: string;
   queries: string[];      // every search that surfaced this lead
   status: LeadStatus;
+  applyStatus: ApplyStatus;
+  appliedAt: string | null;
+  applyUrl: string | null;
+  applyNote: string;
+  applyHistory?: ApplyHistoryEntry[];
   contactId: string | null;
   promotedAt: string | null;
   batchUpdatedAt: string | null;   // the harvest run's own updated_at
@@ -266,8 +277,11 @@ export const moveLeadsToOutreachApi = (template: string, leads: MoveToOutreachRo
     method: 'POST', body: JSON.stringify({ template, leads }),
   });
 
-export const updateLeadApi = (id: string, patch: Partial<Lead>) =>
+export const updateLeadApi = (id: string, patch: Partial<Lead> & { note?: string }) =>
   apiFetch<Lead>(`/api/leads/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+
+export const bulkUpdateLeadsApi = (updates: Array<{ id: string; note?: string } & Partial<Lead>>) =>
+  apiFetch<{ ok: boolean; count: number }>('/api/leads', { method: 'PATCH', body: JSON.stringify(updates) });
 
 export const deleteLeadApi = (id: string) =>
   apiFetch<{ ok: boolean }>(`/api/leads/${id}`, { method: 'DELETE' });

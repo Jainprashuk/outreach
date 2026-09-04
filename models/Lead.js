@@ -26,6 +26,23 @@ const leadSchema = new mongoose.Schema({
   dedupeKey:  { type: String, required: true },
 
   status:     { type: String, enum: ['new', 'added-to-outreach'], default: 'new' },
+
+  // A second, independent journey: some leads have no email but a real
+  // application link, so the only way in is to apply directly. That progress is
+  // manual — nothing can observe it the way IMAP observes replies.
+  applyStatus: {
+    type: String,
+    enum: ['not-applied', 'applied', 'in-review', 'interviewing', 'offer', 'rejected', 'skipped'],
+    default: 'not-applied',
+  },
+  appliedAt:   { type: Date, default: null },
+  applyUrl:    { type: String, default: null },  // which of the links you used
+  applyNote:   { type: String, default: '' },
+  applyHistory: [{
+    status:    { type: String },
+    changedAt: { type: Date, default: Date.now },
+    note:      { type: String, default: '' },
+  }],
   contactId:  { type: String, default: null },   // Contact._id stamped on promote
   promotedAt: { type: Date, default: null },
   batchUpdatedAt: { type: Date, default: null }, // the file's own updated_at, for provenance
@@ -40,6 +57,7 @@ leadSchema.index({ status: 1, fitScore: -1 });
 leadSchema.index({ dedupeKey: 1 });
 leadSchema.index({ email: 1 });
 leadSchema.index({ queries: 1 });
+leadSchema.index({ applyStatus: 1 });
 
 leadSchema.set('toJSON', {
   transform: (doc, ret) => {

@@ -1,4 +1,4 @@
-import type { Lead, LeadFile, LeadStatus, SourceLead } from './api';
+import type { ApplyStatus, Lead, LeadFile, LeadStatus, SourceLead } from './api';
 
 export const HARD_REJECT = -999;
 
@@ -15,6 +15,35 @@ export const LEAD_BADGE_CLASS: Record<LeadStatus, string> = {
   'new': 'badge-queued',
   'added-to-outreach': 'badge-approved',
 };
+
+// ── Direct-application journey ──────────────────────────────────────────────
+export const APPLY_STATUS_ORDER: ApplyStatus[] = [
+  'not-applied', 'applied', 'in-review', 'interviewing', 'offer', 'rejected', 'skipped',
+];
+
+export const APPLY_STATUS_LABELS: Record<ApplyStatus, string> = {
+  'not-applied':  'Not applied',
+  'applied':      'Applied',
+  'in-review':    'In review',
+  'interviewing': 'Interviewing',
+  'offer':        'Offer',
+  'rejected':     'Rejected',
+  'skipped':      'Skipped',
+};
+
+export const APPLY_BADGE_CLASS: Record<ApplyStatus, string> = {
+  'not-applied':  'badge-queued',
+  'applied':      'badge-sent',
+  'in-review':    'badge-inreview',
+  'interviewing': 'badge-followup',
+  'offer':        'badge-replied',
+  'rejected':     'badge-rejected',
+  'skipped':      'badge-closed',
+};
+
+/** Anything past 'not-applied' means you actually did something with this lead. */
+export const isApplyActioned = (l: Pick<Lead, 'applyStatus'>) =>
+  !!l.applyStatus && l.applyStatus !== 'not-applied';
 
 /** The harvester file, or a bare array pasted straight in. */
 export const sourceLeadsFromFile = (file: LeadFile | SourceLead[]): SourceLead[] =>

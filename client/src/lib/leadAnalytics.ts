@@ -1,6 +1,7 @@
 import type { Lead } from './api';
 import { deriveCompany, HARD_REJECT } from './leads';
 import { outcomeOf, stageOf } from './leadOutcome';
+import { hasApplyableLink } from './linkTypes';
 import type { LeadOutcomeMap } from './api';
 
 /** Rows are exploded per email, so "people" means rows regrouped by identity. */
@@ -216,5 +217,32 @@ export function outcomeFunnel(leads: Lead[], outcomes: LeadOutcomeMap): OutcomeF
     bounced,
     replied: stages.filter(s => s === 'replied').length,
     awaiting: stages.filter(s => s === 'queued' || s === 'awaiting-approval').length,
+  };
+}
+
+export interface ApplyFunnel {
+  hasApplyLink: number;
+  notApplied: number;
+  applied: number;      // applied or anything beyond
+  inReview: number;
+  interviewing: number;
+  offer: number;
+  rejected: number;
+  skipped: number;
+}
+
+/** The direct-application journey, which runs parallel to email outreach. */
+export function applyFunnel(leads: Lead[]): ApplyFunnel {
+  const st = (s: string) => leads.filter(l => (l.applyStatus || 'not-applied') === s).length;
+  const BEYOND = ['applied', 'in-review', 'interviewing', 'offer', 'rejected'];
+  return {
+    hasApplyLink: leads.filter(l => hasApplyableLink(l)).length,
+    notApplied: st('not-applied'),
+    applied: leads.filter(l => BEYOND.includes(l.applyStatus || '')).length,
+    inReview: st('in-review'),
+    interviewing: st('interviewing'),
+    offer: st('offer'),
+    rejected: st('rejected'),
+    skipped: st('skipped'),
   };
 }

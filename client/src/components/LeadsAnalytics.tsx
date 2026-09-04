@@ -6,7 +6,7 @@ import { loadLeadsApi, loadLeadOutcomesApi, type Lead, type LeadOutcomeMap } fro
 import { cvar, pct } from '../lib/analytics';
 import {
   computeLeadMetrics, fitBuckets, harvestRuns, importsByDay,
-  outcomeFunnel, queryStats, sourceBreakdown, topDomains, topMultiAddress, unattributed,
+  applyFunnel, outcomeFunnel, queryStats, sourceBreakdown, topDomains, topMultiAddress, unattributed,
 } from '../lib/leadAnalytics';
 
 const fmtDate = (t: number | null) =>
@@ -82,6 +82,7 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
   const sources = useMemo(() => sourceBreakdown(leads), [leads]);
   const queries = useMemo(() => queryStats(leads, outcomes), [leads, outcomes]);
   const funnel2 = useMemo(() => outcomeFunnel(leads, outcomes), [leads, outcomes]);
+  const af = useMemo(() => applyFunnel(leads), [leads]);
   const noQuery = useMemo(() => unattributed(leads), [leads]);
 
   const accent = cvar('--accent') || '#4f46e5';
@@ -245,6 +246,31 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
       )}
 
       <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
+        <Card title="Direct applications" icon="ti-file-check"
+          sub="The parallel track — leads you applied to yourself rather than emailing. Updated by hand." delay=".15s">
+          {af.hasApplyLink === 0 && af.applied === 0 ? (
+            <div className="an-empty"><i className="ti ti-file-off" />No leads with an application link yet</div>
+          ) : (
+            <>
+              <HBar label="Has an apply link" n={af.hasApplyLink} d={m.total} fill={accent} />
+              <HBar label="Applied" n={af.applied} d={af.hasApplyLink || 1} fill={teal} />
+              <HBar label="In review" n={af.inReview} d={af.applied || 1} fill={teal} opacity={0.7} />
+              <HBar label="Interviewing" n={af.interviewing} d={af.applied || 1} fill={amber} />
+              <HBar label="Offer" n={af.offer} d={af.applied || 1} fill={teal} opacity={1} />
+              <HBar label="Rejected" n={af.rejected} d={af.applied || 1} fill={red} opacity={0.7} />
+              {af.skipped > 0 && (
+                <div className="an-card-sub" style={{ marginTop: 8 }}>{af.skipped} deliberately skipped.</div>
+              )}
+              {af.applied === 0 && af.hasApplyLink > 0 && (
+                <div className="an-card-sub" style={{ marginTop: 8 }}>
+                  {af.hasApplyLink} lead{af.hasApplyLink !== 1 ? 's have' : ' has'} a real application link but
+                  none are marked as applied yet — the “Apply directly” filter on the Leads page finds them.
+                </div>
+              )}
+            </>
+          )}
+        </Card>
+
         <Card title="Top email domains" icon="ti-at" sub="Which organisations dominate the harvest" delay=".16s">
           {domains.length === 0
             ? <div className="an-empty"><i className="ti ti-mail-off" />No email addresses yet</div>

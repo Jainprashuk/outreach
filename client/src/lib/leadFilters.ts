@@ -1,9 +1,9 @@
 import type { Lead, LeadStatus } from './api';
-import { deriveCompany, HARD_REJECT, isFreemail } from './leads';
+import { APPLY_STATUS_LABELS, deriveCompany, HARD_REJECT, isFreemail } from './leads';
 import { identityOf } from './leadAnalytics';
 import { classifyLink, hasApplyableLink, LINK_TYPE_META, LINK_TYPE_ORDER, type LinkType } from './linkTypes';
 import { STAGE_LABELS, stageOf, outcomeOf, type OutcomeStage } from './leadOutcome';
-import type { LeadOutcomeMap } from './api';
+import type { ApplyStatus, LeadOutcomeMap } from './api';
 
 export type TriState = 'any' | 'yes' | 'no';
 export type SortKey = 'fit-desc' | 'fit-asc' | 'newest' | 'oldest' | 'name' | 'email';
@@ -19,7 +19,8 @@ export interface LeadFilters {
   runs: string[];
   linkTypes: LinkType[];
   applyable: TriState;
-  stage: 'any' | OutcomeStage;              // batchUpdatedAt ISO strings
+  stage: 'any' | OutcomeStage;
+  applyStatus: 'any' | ApplyStatus;              // batchUpdatedAt ISO strings
   fitMin: string;              // free text so the input can be emptied
   fitMax: string;
   hideRejects: boolean;
@@ -37,7 +38,7 @@ export interface LeadFilters {
 
 export const DEFAULT_FILTERS: LeadFilters = {
   search: '', status: 'all', hasEmail: 'any', emailKind: 'any',
-  domains: [], sources: [], queries: [], runs: [], linkTypes: [], applyable: 'any', stage: 'any',
+  domains: [], sources: [], queries: [], runs: [], linkTypes: [], applyable: 'any', stage: 'any', applyStatus: 'any',
   fitMin: '', fitMax: '', hideRejects: false,
   hiring: 'any', company: 'any', role: 'any',
   hasProfile: 'any', hasPost: 'any', hasLinks: 'any',
@@ -116,6 +117,7 @@ export function applyLeadFilters(leads: Lead[], f: LeadFilters, outcomes: LeadOu
     if (f.linkTypes.length && !(l.links || []).some(u => f.linkTypes.includes(classifyLink(u)))) return false;
     if (!tri(f.applyable, hasApplyableLink(l))) return false;
     if (f.stage !== 'any' && stageOf(outcomeOf(l, outcomes)) !== f.stage) return false;
+    if (f.applyStatus !== 'any' && (l.applyStatus || 'not-applied') !== f.applyStatus) return false;
 
     if (f.company !== 'any' && (f.company === 'known') !== !!deriveCompany(l)) return false;
     if (f.role !== 'any' && (f.role === 'set') !== !!l.role) return false;
@@ -179,6 +181,7 @@ export function activeChips(f: LeadFilters): Chip[] {
   if (f.linkTypes.length) c.push({ key: 'linkTypes', label: f.linkTypes.length === 1 ? LINK_TYPE_META[f.linkTypes[0]].label : `${f.linkTypes.length} link types` });
   if (f.applyable !== 'any') c.push({ key: 'applyable', label: f.applyable === 'yes' ? 'Has a way to apply' : 'No way to apply' });
   if (f.stage !== 'any') c.push({ key: 'stage', label: STAGE_LABELS[f.stage] });
+  if (f.applyStatus !== 'any') c.push({ key: 'applyStatus', label: `Application: ${APPLY_STATUS_LABELS[f.applyStatus]}` });
   if (f.contact !== 'any') c.push({ key: 'contact', label: f.contact === 'created' ? 'New contact created' : 'Contact already existed' });
   if (f.addresses !== 'any') c.push({ key: 'addresses', label: f.addresses === 'multi' ? 'Several addresses' : 'Single address' });
   if (f.importedWithin !== 'any') c.push({ key: 'importedWithin', label: `Imported ≤ ${f.importedWithin}d ago` });

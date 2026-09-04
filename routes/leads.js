@@ -10,6 +10,15 @@ const serialize = (doc) => {
   obj.id = doc._id.toString();
   delete obj._id;
   delete obj.__v;
+  // .lean() skips schema defaults, so rows written before a field existed come
+  // back with the key missing entirely. Normalise here rather than making every
+  // caller defend against undefined.
+  if (!Array.isArray(obj.queries)) obj.queries = [];
+  if (!obj.applyStatus) obj.applyStatus = 'not-applied';
+  if (obj.appliedAt === undefined) obj.appliedAt = null;
+  if (obj.applyUrl === undefined) obj.applyUrl = null;
+  if (typeof obj.applyNote !== 'string') obj.applyNote = '';
+  if (!Array.isArray(obj.applyHistory)) obj.applyHistory = [];
   return obj;
 };
 
@@ -297,7 +306,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-const ALLOWED_PATCH = ['status', 'authorName', 'company', 'role'];
+const ALLOWED_PATCH = ['status', 'authorName', 'company', 'role', 'applyStatus', 'applyUrl', 'applyNote'];
 
 const pickPatch = (src) => {
   const patch = {};
@@ -307,6 +316,22 @@ const pickPatch = (src) => {
   return patch;
 };
 
+// Build the mongo op for a lead patch, recording apply-journey transitions so the
+// full history is inspectable later. `prev` is the stored doc (may be undefined
+// in the bulk path, in which case appliedAt is set defensively via $min-ish logic).
+const buildOp = (patch, note, prev) => {
+  const op = { $set: { ...patch } };
+  if (patch.applyStatus) {
+    op.$push = {
+      applyHistory: { status: patch.applyStatus, changedAt: new Date(), note: note || 'Manual update' },
+    };
+    // Stamp the date the first time it reaches 'applied'; clear it if reset.
+    if (patch.applyStatus === 'not-applied') op.$set.appliedAt = null;
+    else if (!prev || !prev.appliedAt) op.$set.appliedAt = new Date();
+  }
+  return op;
+};
+
 // PATCH /api/leads — bulk update (array of {id, ...fields})
 router.patch('/', async (req, res) => {
   try {
@@ -314,10 +339,19 @@ router.patch('/', async (req, res) => {
     if (!Array.isArray(updates) || updates.length === 0) {
       return res.status(400).json({ error: 'Expected non-empty array of updates' });
     }
+    const ids = updates.filter(u => u && u.id).map(u => String(u.id));
+    const prevById = new Map(
+      (await Lead.find({ _id: { $in: ids } }, { appliedAt: 1 }).lean())
+        .map(d => [String(d._id), d])
+    );
     const ops = updates
       .filter(u => u && u.id)
-      .map(u => ({ updateOne: { filter: { _id: u.id }, update: { $set: pickPatch(u) } } }))
-      .filter(op => Object.keys(op.updateOne.update.$set).length > 0);
+      .map(u => {
+        const patch = pickPatch(u);
+        if (Object.keys(patch).length === 0) return null;
+        return { updateOne: { filter: { _id: u.id }, update: buildOp(patch, u.note, prevById.get(String(u.id))) } };
+      })
+      .filter(Boolean);
 
     if (ops.length === 0) return res.json({ ok: true, count: 0 });
     const result = await Lead.bulkWrite(ops);
@@ -334,8 +368,11 @@ router.patch('/:id', async (req, res) => {
     if (Object.keys(patch).length === 0) {
       return res.status(400).json({ error: 'No updatable fields provided' });
     }
-    const lead = await Lead.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true });
-    if (!lead) return res.status(404).json({ error: 'Lead not found' });
+    const prev = await Lead.findById(req.params.id, { appliedAt: 1 }).lean();
+    if (!prev) return res.status(404).json({ error: 'Lead not found' });
+    const lead = await Lead.findByIdAndUpdate(
+      req.params.id, buildOp(patch, req.body.note, prev), { new: true }
+    );
     res.json(lead);
   } catch (err) {
     res.status(500).json({ error: err.message });

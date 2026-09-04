@@ -6,6 +6,8 @@ import {
 } from '../lib/leadFilters';
 import type { LinkType } from '../lib/linkTypes';
 import { STAGE_LABELS, STAGE_ORDER, type OutcomeStage } from '../lib/leadOutcome';
+import { APPLY_STATUS_LABELS, APPLY_STATUS_ORDER } from '../lib/leads';
+import type { ApplyStatus } from '../lib/api';
 
 const fmtRun = (iso: string) =>
   new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -189,6 +191,14 @@ export default function LeadFilterPanel({ leads, filters, onChange, onReset, mat
                 onChange={e => onChange({ stage: e.target.value as 'any' | OutcomeStage })}>
                 <option value="any">Any</option>
                 {STAGE_ORDER.map(st => <option key={st} value={st}>{STAGE_LABELS[st]}</option>)}
+              </select>
+            </Group>
+
+            <Group label="Application status">
+              <select value={filters.applyStatus}
+                onChange={e => onChange({ applyStatus: e.target.value as 'any' | ApplyStatus })}>
+                <option value="any">Any</option>
+                {APPLY_STATUS_ORDER.map(a => <option key={a} value={a}>{APPLY_STATUS_LABELS[a]}</option>)}
               </select>
             </Group>
 
