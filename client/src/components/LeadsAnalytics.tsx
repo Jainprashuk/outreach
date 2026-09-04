@@ -8,6 +8,18 @@ import {
   computeLeadMetrics, fitBuckets, harvestRuns, importsByDay,
   applyFunnel, outcomeFunnel, queryStats, sourceBreakdown, topDomains, topMultiAddress, unattributed,
 } from '../lib/leadAnalytics';
+import { stageCounts, STAGE_LABELS, STAGE_PIPELINE, type OutcomeStage } from '../lib/leadOutcome';
+
+// Resolved at render time so the colours follow the active theme.
+const STAGE_FILL: Record<OutcomeStage, () => string> = {
+  'not-in-outreach':   () => cvar('--text3') || '#8a8a8a',
+  'awaiting-approval': () => cvar('--amber') || '#8a5c00',
+  'queued':            () => cvar('--accent') || '#635bff',
+  'emailed':           () => cvar('--blue') || '#1557a0',
+  'replied':           () => cvar('--green') || '#1a7a4a',
+  'bounced':           () => cvar('--red') || '#c0392b',
+  'failed':            () => cvar('--red') || '#c0392b',
+};
 
 const fmtDate = (t: number | null) =>
   t ? new Date(t).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'unknown';
@@ -83,6 +95,7 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
   const queries = useMemo(() => queryStats(leads, outcomes), [leads, outcomes]);
   const funnel2 = useMemo(() => outcomeFunnel(leads, outcomes), [leads, outcomes]);
   const af = useMemo(() => applyFunnel(leads), [leads]);
+  const stages = useMemo(() => stageCounts(leads, outcomes), [leads, outcomes]);
   const noQuery = useMemo(() => unattributed(leads), [leads]);
 
   const accent = cvar('--accent') || '#4f46e5';
@@ -280,13 +293,24 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
             ))}
         </Card>
 
-        <Card title="Status" icon="ti-chart-pie" sub="Where your staged leads currently sit" delay=".2s">
-          <HBar label="New — not yet actioned" n={m.fresh} d={m.total} fill={accent} dotColor={accent} />
-          <HBar label="Added to outreach" n={m.moved} d={m.total} fill={teal} dotColor={teal} />
+        <Card title="Status" icon="ti-chart-pie"
+          sub="Where every lead sits right now — the stages past “in outreach” come from the live contact record" delay=".2s">
+          {STAGE_PIPELINE.filter(st => stages[st] > 0).map(st => (
+            <HBar key={st} label={STAGE_LABELS[st]} n={stages[st]} d={m.total}
+              fill={STAGE_FILL[st]()} dotColor={STAGE_FILL[st]()}
+              opacity={st === 'not-in-outreach' ? 0.45 : 0.9} />
+          ))}
           <div className="an-card-sub" style={{ marginTop: 10 }}>
-            {m.withoutEmail > 0
-              ? `${m.withoutEmail} of the ${m.fresh} new leads can't be actioned without finding an email first.`
-              : 'Every staged lead has an email address.'}
+            {stages['not-in-outreach'] > 0 && m.withoutEmail > 0 && (
+              <>{m.withoutEmail} of the {stages['not-in-outreach']} leads not yet in outreach have no email
+              address{af.hasApplyLink > 0 ? <> — though {af.hasApplyLink} carry an application link instead</> : null}. </>
+            )}
+            {stages['awaiting-approval'] > 0 && (
+              <><strong>{stages['awaiting-approval']} are in outreach but still awaiting approval</strong>, so nothing has gone out for them yet. </>
+            )}
+            {stages['emailed'] > 0 && stages['replied'] === 0 && (
+              <>{stages['emailed']} have been emailed with no reply yet. </>
+            )}
           </div>
         </Card>
       </div>

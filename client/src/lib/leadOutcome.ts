@@ -16,9 +16,24 @@ export const STAGE_LABELS: Record<OutcomeStage, string> = {
   'failed':            'Send failed',
 };
 
+// Most-interesting-first, for the filter dropdown.
 export const STAGE_ORDER: OutcomeStage[] = [
   'replied', 'emailed', 'bounced', 'failed', 'queued', 'awaiting-approval', 'not-in-outreach',
 ];
+
+// Lifecycle order, for reading a distribution top to bottom.
+export const STAGE_PIPELINE: OutcomeStage[] = [
+  'not-in-outreach', 'awaiting-approval', 'queued', 'emailed', 'replied', 'bounced', 'failed',
+];
+
+/** How many leads sit at each stage. */
+export function stageCounts(
+  leads: Array<Lead>, map: LeadOutcomeMap,
+): Record<OutcomeStage, number> {
+  const out = Object.fromEntries(STAGE_PIPELINE.map(s => [s, 0])) as Record<OutcomeStage, number>;
+  leads.forEach(l => { out[stageOf(outcomeOf(l, map))]++; });
+  return out;
+}
 
 const REPLIED = new Set(['replied', 'follow-up-replied', 'closed', 'no-openings', 'in-review']);
 
