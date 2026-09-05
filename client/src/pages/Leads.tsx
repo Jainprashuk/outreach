@@ -145,6 +145,10 @@ export default function Leads() {
 
   const selectEmailable = () => setSelected(new Set(emailable.map(l => l.id)));
 
+  // Quick-select the first N leads of the current filtered list (replaces the
+  // current selection so counts stay predictable across pages).
+  const selectFirst = (n: number) => setSelected(new Set(filtered.slice(0, n).map(l => l.id)));
+
   // ── Import ────────────────────────────────────────────────────────────────
 
   const parseText = (text: string, label: string) => {
@@ -431,7 +435,17 @@ export default function Leads() {
           title="Quick filter — same as the hard-rejects option in Filters">
           Hide rejects ({rejectCount})
         </button>
+      </div>
 
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <span style={{ fontSize: 12, color: 'var(--text3)' }}>Quick select:</span>
+        {[25, 50, 100].map(n => (
+          <button key={n} className="btn btn-sm" type="button" disabled={filtered.length === 0}
+            onClick={() => selectFirst(n)}
+            title={`Select the first ${n} leads in this view`}>
+            First {n}
+          </button>
+        ))}
         <button className="btn btn-sm" type="button" disabled={emailable.length === 0}
           onClick={selectEmailable}>Select emailable ({emailable.length})</button>
         <button className="btn btn-sm" type="button" disabled={selected.size === 0}
