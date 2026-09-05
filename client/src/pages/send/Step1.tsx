@@ -191,11 +191,11 @@ export default function Step1() {
             {validRows.map((r, i) => (
               <div className="batch-row" key={i}>
                 <Avatar name={r.name} />
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontSize: 13, fontWeight: 500 }}>{r.name}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text2)' }}>{r.email} · {r.company}</div>
+                  <div style={{ fontSize: 11, color: 'var(--text2)', wordBreak: 'break-word' }}>{r.email} · {r.company}</div>
                 </div>
-                <span style={{ fontSize: 11, color: 'var(--text2)' }}>{r.template}</span>
+                <span style={{ fontSize: 11, color: 'var(--text2)', flexShrink: 0 }}>{r.template}</span>
               </div>
             ))}
           </div>

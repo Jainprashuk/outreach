@@ -11,6 +11,12 @@ const fmtDate = (d: string) => new Date(d).toLocaleString('en-US', {
   month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
 });
 
+// Portalled popups are anchored to a badge that can sit anywhere across a
+// horizontally scrolled table — on a narrow viewport a raw rect.left runs the
+// panel off the right edge, so keep it inside with an 8px margin.
+const clampLeft = (left: number, width: number) =>
+  Math.max(8, Math.min(left, window.innerWidth - width - 8));
+
 export default function StatusBadge({ status, contact, onChanged }: {
   status: string;
   contact?: Contact;         // provided → hover history + dblclick edit enabled
@@ -29,7 +35,7 @@ export default function StatusBadge({ status, contact, onChanged }: {
     if (!editable || dropdown) return;
     if (hideTimer.current) clearTimeout(hideTimer.current);
     const rect = badgeRef.current!.getBoundingClientRect();
-    setPopup({ top: rect.bottom + 6, left: rect.left });
+    setPopup({ top: rect.bottom + 6, left: clampLeft(rect.left, 340) });
   };
 
   const scheduleHide = () => {
@@ -41,7 +47,7 @@ export default function StatusBadge({ status, contact, onChanged }: {
     e.stopPropagation();
     setPopup(null);
     const rect = badgeRef.current!.getBoundingClientRect();
-    setDropdown({ top: rect.bottom + 4, left: rect.left });
+    setDropdown({ top: rect.bottom + 4, left: clampLeft(rect.left, 150) });
   };
 
   // Close the dropdown on any outside click (mirrors the once-listener in app.js)

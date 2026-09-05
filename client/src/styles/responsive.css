@@ -1,0 +1,156 @@
+/* ============================================================================
+   OUTREACH — mobile / small-screen refinements
+   Loads last, so these rules win over the base sheet and the Aurora theme.
+   Pure presentation: no class names, IDs or behaviour hooks are changed.
+   ============================================================================ */
+
+/* ── Shared building blocks (used by both layouts, not just mobile) ────────── */
+
+/* Topbar action cluster (Layout.tsx). Was an inline flex row that could not wrap. */
+.topbar-actions {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap; justify-content: flex-end;
+}
+
+/* Label + value rows in the lead detail modal. */
+.lead-field {
+  display: flex; gap: 12px; padding: 7px 0;
+  border-bottom: 0.5px solid var(--border);
+}
+.lead-field-label { width: 132px; flex-shrink: 0; font-size: 12px; color: var(--text3); }
+.lead-field-value { flex: 1; min-width: 0; font-size: 12.5px; word-break: break-word; }
+
+/* Mobile browser chrome eats part of 100vh — dvh keeps the shell exact. */
+.app-shell { height: 100vh; height: 100dvh; }
+/* A short viewport (landscape phone) must not clip the nav. */
+.sidebar { overflow-y: auto; }
+
+/* Long option lists in the mode picker need to scroll, not overflow the page. */
+.mode-picker { max-height: calc(100vh - 40px); overflow-y: auto; }
+
+/* Portalled popups are positioned from a badge that may sit near the edge. */
+.status-history-popup { max-width: min(340px, calc(100vw - 24px)); max-height: 60vh; overflow-y: auto; }
+.status-edit-dropdown { max-width: calc(100vw - 24px); max-height: 60vh; overflow-y: auto; }
+
+/* Momentum scrolling for the horizontal strips. */
+.nav-tabs, .table-card, .activity-feed { -webkit-overflow-scrolling: touch; }
+
+/* ── Tablet ───────────────────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* ── Phone ────────────────────────────────────────────────────────────────── */
+@media (max-width: 700px) {
+  /* iOS Safari zooms the whole page when a focused control is under 16px. */
+  input[type=text], input[type=email], input[type=password], input[type=number],
+  input[type=search], input[type=tel], input[type=url], select, textarea {
+    font-size: 16px !important;
+  }
+
+  /* Tap targets */
+  .btn { min-height: 36px; }
+  .btn-sm { min-height: 34px; }
+  input[type="checkbox"].row-cb { width: 18px; height: 18px; }
+
+  /* Topbar — title block and action buttons each get a full row */
+  .topbar { align-items: flex-start; }
+  .topbar-left { flex: 1 1 100%; min-width: 0; }
+  .topbar-left > div { min-width: 0; }
+  .topbar-actions { flex: 1 1 100%; justify-content: flex-start; gap: 8px; }
+  .topbar-actions > * { flex: 1 1 auto; justify-content: center; }
+
+  /* KPI grid — two up, with type scaled to match */
+  .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; padding: 14px 16px 0; }
+  .stat-card { padding: 14px; }
+  .stat-value, .kpi-value { font-size: 24px; }
+  .stat-label { font-size: 10px; margin-bottom: 6px; }
+  .stat-sub { font-size: 10.5px; }
+  .kpi-ico { top: 10px; right: 10px; width: 28px; height: 28px; font-size: 14px; border-radius: 8px; }
+
+  /* Rows that used to squash their contents now wrap instead */
+  .section-head { flex-wrap: wrap; gap: 10px; }
+  .an-card-head { flex-wrap: wrap; }
+  .an-card-head .seg-toggle { margin-left: auto; }
+  .s-head { flex-wrap: wrap; gap: 10px; }
+  .s-body { padding: 16px; }
+  .template-head { flex-wrap: wrap; gap: 8px; }
+  .template-actions { flex-wrap: wrap; gap: 8px; }
+  .reply-modal-header { flex-wrap: wrap; }
+  .reply-modal-footer { flex-wrap: wrap; }
+  .upload-strip { flex-wrap: wrap; }
+  .upload-strip .us-text { flex: 1 1 100%; order: 3; }
+  .batch-row { flex-wrap: wrap; }
+  .batch-row input { min-width: 120px; }
+  .seg-toggle { max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+  .seg-toggle::-webkit-scrollbar { height: 0; width: 0; }
+
+  /* Denser table cells buy back horizontal room before the scroll kicks in */
+  thead th { padding: 10px 12px; }
+  tbody td { padding: 11px 12px; }
+
+  /* Analytics card tables have no scroll wrapper, so they must fit the card.
+     Fixed layout shares the width evenly and the decorative bar drops out —
+     the percentage right beside it already carries the number. */
+  .an-table { table-layout: fixed; width: 100%; }
+  .an-table th, .an-table td { padding: 8px 6px; }
+  .an-table th.num, .an-table td.num { width: auto !important; }
+  .an-table th:first-child, .an-table td:first-child {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .mini-track { display: none; }
+
+  /* Wizard footer */
+  .step-footer { flex-wrap: wrap; gap: 10px; padding: 12px 16px; }
+  .step-footer > * { flex: 1 1 auto; justify-content: center; }
+  .step-footer > div { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; align-items: center; }
+
+  /* Modals sit at the top of the viewport and scroll inside themselves */
+  .edit-modal-wrap, .mode-picker-wrap { padding: 12px; align-items: flex-start; }
+  .edit-modal, .mode-picker { padding: 18px; max-height: calc(100dvh - 24px); overflow-y: auto; }
+  .edit-modal h2, .mode-picker h2 { font-size: 16px; }
+
+  /* Lead detail — label above value instead of a 132px gutter */
+  .lead-field { flex-direction: column; gap: 2px; padding: 8px 0; }
+  .lead-field-label { width: auto; }
+
+  /* Selection bar: count on its own line, controls share the next */
+  .bulk-bar { flex-wrap: wrap; gap: 8px; padding: 10px 14px; }
+  .bulk-bar .bb-count { flex: 1 1 100%; font-size: 13px; }
+  .bulk-bar select { flex: 1 1 100%; width: 100% !important; min-width: 0 !important; }
+  .bulk-bar .btn { flex: 1 1 auto; justify-content: center; }
+
+  /* The lead filter popover becomes a bottom sheet — an anchored popover that
+     wide can't stay on-screen next to a trigger sitting mid-row. */
+  .filter-panel {
+    position: fixed !important;
+    inset: auto 12px 12px 12px !important;
+    width: auto !important;
+    max-height: 78vh !important;
+  }
+
+  /* Floating furniture stays inside the viewport */
+  .toast-container { right: 12px; bottom: 12px; max-width: min(360px, calc(100vw - 24px)); }
+  #send-job-widget { width: min(292px, calc(100vw - 24px)); right: 12px; bottom: 12px; }
+
+  .success-screen { padding: 32px 16px; }
+  .success-title { font-size: 21px; }
+  .success-sub { font-size: 13px; margin-bottom: 22px; }
+  .empty-state { padding: 36px 16px; }
+}
+
+/* ── Small phone ──────────────────────────────────────────────────────────── */
+@media (max-width: 420px) {
+  /* Two-up KPIs hold all the way down — a single column turns five tiles into
+     a page of scrolling before the table is even reachable. */
+  .stat-grid { gap: 8px; padding: 12px 14px 0; }
+  .stat-card { padding: 12px; }
+  .stat-value, .kpi-value { font-size: 21px; }
+  .kpi-ico { display: none; }
+  .topbar { padding: 11px 14px; }
+  .section { padding: 14px; }
+  .pagination-bar { gap: 6px; }
+  .pagination-bar button { min-width: 0; }
+  .pagination-bar .page-info { min-width: 0; font-size: 12px; }
+  #send-job-widget { width: auto; left: 12px; right: 12px; }
+}

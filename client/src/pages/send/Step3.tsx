@@ -305,18 +305,18 @@ export default function Step3() {
                     borderTop: i === 0 ? 'none' : '0.5px solid var(--border)', fontSize: 13, background: 'var(--bg)',
                   }}>
                     <Avatar name={item.name} />
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 500 }}>{item.name}</div>
-                      <div style={{ fontSize: 11, color: 'var(--text2)' }}>{item.to}</div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.to}</div>
                     </div>
                     {item.status === 'sent' ? (
-                      <span style={{ color: 'var(--green)' }}><i className="ti ti-circle-check" /> Sent</span>
+                      <span style={{ color: 'var(--green)', flexShrink: 0, whiteSpace: 'nowrap' }}><i className="ti ti-circle-check" /> Sent</span>
                     ) : item.status === 'failed' ? (
-                      <span style={{ color: 'var(--red)' }} title={(item.error || '').slice(0, 60)}><i className="ti ti-circle-x" /> Failed</span>
+                      <span style={{ color: 'var(--red)', flexShrink: 0, whiteSpace: 'nowrap' }} title={(item.error || '').slice(0, 60)}><i className="ti ti-circle-x" /> Failed</span>
                     ) : item.status === 'skipped' ? (
-                      <span style={{ color: 'var(--text3)' }} title={item.error || 'Skipped'}><i className="ti ti-player-skip-forward" /> Skipped</span>
+                      <span style={{ color: 'var(--text3)', flexShrink: 0, whiteSpace: 'nowrap' }} title={item.error || 'Skipped'}><i className="ti ti-player-skip-forward" /> Skipped</span>
                     ) : (
-                      <span style={{ fontSize: 12, color: 'var(--amber)' }}><i className="ti ti-loader" style={{ animation: 'spin 1s linear infinite' }} /> Sending</span>
+                      <span style={{ fontSize: 12, color: 'var(--amber)', flexShrink: 0, whiteSpace: 'nowrap' }}><i className="ti ti-loader" style={{ animation: 'spin 1s linear infinite' }} /> Sending</span>
                     )}
                   </div>
                 ))}

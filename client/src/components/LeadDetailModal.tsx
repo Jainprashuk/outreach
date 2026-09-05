@@ -17,12 +17,12 @@ const fmt = (iso: string | null | undefined) =>
 /** Label + value row. `mono` for ids and keys. */
 function Field({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
   return (
-    <div style={{ display: 'flex', gap: 12, padding: '7px 0', borderBottom: '0.5px solid var(--border)' }}>
-      <div style={{ width: 132, flexShrink: 0, fontSize: 12, color: 'var(--text3)' }}>{label}</div>
-      <div style={{
-        flex: 1, minWidth: 0, fontSize: 12.5, wordBreak: 'break-word',
-        fontFamily: mono ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : undefined,
-      }}>
+    <div className="lead-field">
+      <div className="lead-field-label">{label}</div>
+      <div
+        className="lead-field-value"
+        style={mono ? { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } : undefined}
+      >
         {children}
       </div>
     </div>

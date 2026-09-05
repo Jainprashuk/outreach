@@ -133,11 +133,11 @@ export default function Step2() {
           return (
             <div className={`template-card${isApproved ? ' approved' : ''}`} key={a.id}>
               <div className="template-head">
-                <div className="contact-chip">
+                <div className="contact-chip" style={{ minWidth: 0 }}>
                   <Avatar name={a.name} />
-                  <div>
+                  <div style={{ minWidth: 0 }}>
                     <div style={{ fontSize: 13, fontWeight: 500 }}>{a.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text2)' }}>{a.email} · {app.templates[a.template]?.name || a.template}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text2)', wordBreak: 'break-word' }}>{a.email} · {app.templates[a.template]?.name || a.template}</div>
                   </div>
                 </div>
                 <StatusBadge status={a.localApproval} />

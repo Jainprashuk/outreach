@@ -7,6 +7,7 @@ import { ToastProvider } from './context/ToastContext';
 import { SessionProvider } from './context/SessionContext';
 import './styles/pages.css';
 import './styles/theme.css';
+import './styles/responsive.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

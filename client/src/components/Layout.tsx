@@ -92,7 +92,7 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
               {subtitle ? <p>{subtitle}</p> : null}
             </div>
           </div>
-          {actions ? <div style={{ display: 'flex', gap: 10 }}>{actions}</div> : null}
+          {actions ? <div className="topbar-actions">{actions}</div> : null}
         </div>
         {wide ? children : <div className="section" style={{ flex: 1 }}>{children}</div>}
       </div>

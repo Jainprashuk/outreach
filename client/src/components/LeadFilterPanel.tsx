@@ -111,7 +111,7 @@ export default function LeadFilterPanel({ leads, filters, onChange, onReset, mat
   const isDefault = JSON.stringify(filters) === JSON.stringify(DEFAULT_FILTERS);
 
   return (
-    <div ref={ref} style={{
+    <div ref={ref} className="filter-panel" style={{
       // 220 clears the selection bulk-bar (200) but stays under modals and the
       // mobile sidebar backdrop (250+).
       position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 220,
