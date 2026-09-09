@@ -48,7 +48,7 @@ export default function SyncReportBanner({ report, onDismiss }: {
     `${t.inserted} new`,
     `${t.closed} closed`,
     t.reopened > 0 ? `${t.reopened} reopened` : null,
-    `${t.fetched} listed across ${t.boards} board${t.boards === 1 ? '' : 's'}`,
+    `${t.fetched} listed across ${t.boards} source${t.boards === 1 ? '' : 's'}`,
   ].filter(Boolean);
 
   return (
@@ -58,6 +58,13 @@ export default function SyncReportBanner({ report, onDismiss }: {
         <div>
           <strong>Synced in {(report.ms / 1000).toFixed(1)}s</strong> — {parts.join(' · ')}.
         </div>
+
+        {t.filteredOut > 0 && (
+          <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text2)' }}>
+            {t.filteredOut} role{t.filteredOut === 1 ? '' : 's'} listed but not stored — your criteria
+            excluded them. They're still open at the company; they were not closed.
+          </div>
+        )}
 
         {firstSyncs.length > 0 && (
           <div style={{ marginTop: 4, fontSize: 12, color: 'var(--text2)' }}>

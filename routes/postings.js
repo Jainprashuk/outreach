@@ -4,6 +4,7 @@ const JobBoard = require('../models/JobBoard');
 const Settings = require('../models/Settings');
 const boards = require('../lib/boards');
 const { syncAllBoards, MASS_CLOSE_WARN } = require('../lib/postingSync');
+const { normaliseCriteria, matchesCriteria, DEFAULTS: CRITERIA_DEFAULTS } = require('../lib/criteria');
 
 const router = express.Router();
 
@@ -16,6 +17,7 @@ const serialize = (doc) => {
   delete obj._id;
   delete obj.__v;
   if (!Array.isArray(obj.locations)) obj.locations = [];
+  if (!Array.isArray(obj.queries)) obj.queries = [];
   if (!Array.isArray(obj.applyHistory)) obj.applyHistory = [];
   if (!obj.applyStatus) obj.applyStatus = 'not-applied';
   if (!obj.listingStatus) obj.listingStatus = 'open';
@@ -38,6 +40,15 @@ const serializeBoard = (doc) => {
 };
 
 const BASE_FILTER = { deleted: { $ne: true } };
+
+const QUERY_FIELDS = ['category', 'industry', 'level', 'location', 'geo', 'tag'];
+const pickQuery = (src) => {
+  const q = {};
+  for (const k of QUERY_FIELDS) {
+    if (src && src[k] !== undefined) q[k] = boards.normText(src[k]);
+  }
+  return q;
+};
 
 // Escape before putting user text in a RegExp — otherwise a search for "c++"
 // is a syntax error rather than a search.
@@ -74,6 +85,78 @@ router.get('/meta', async (_req, res) => {
   }
 });
 
+// ── Criteria ("what I actually want") ───────────────────────────────────────
+// Applied when a sync decides what to STORE, so a 600-role board only keeps the
+// roles you would actually read. See lib/criteria.js.
+
+router.get('/criteria', async (_req, res) => {
+  try {
+    const s = await Settings.findOne({}, { jobCriteria: 1 }).lean();
+    res.json({
+      criteria: normaliseCriteria(s && s.jobCriteria),
+      defaults: CRITERIA_DEFAULTS,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/criteria', async (req, res) => {
+  try {
+    const criteria = normaliseCriteria(req.body || {});
+    // Scoped to the real singleton and never upserted — Settings has no unique
+    // index, so an upsert whose filter misses would insert a second one.
+    const singleton = await Settings.getSingleton();
+    await Settings.updateOne({ _id: singleton._id }, { $set: { jobCriteria: criteria } });
+    res.json({ criteria });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/postings/criteria/test — how would this profile treat what you have
+// already? Lets you see the effect before turning it on and re-syncing.
+router.post('/criteria/test', async (req, res) => {
+  try {
+    const criteria = normaliseCriteria({ ...(req.body || {}), enabled: true });
+    const rows = await JobPosting.find(BASE_FILTER,
+      { title: 1, company: 1, department: 1, team: 1, remote: 1, location: 1, locations: 1 }).lean();
+    const kept = rows.filter(r => matchesCriteria(r, criteria));
+    const dropped = rows.filter(r => !matchesCriteria(r, criteria));
+    res.json({
+      total: rows.length,
+      kept: kept.length,
+      dropped: dropped.length,
+      keptSample: kept.slice(0, 8).map(r => r.title),
+      droppedSample: dropped.slice(0, 8).map(r => r.title),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Sources ─────────────────────────────────────────────────────────────────
+
+// GET /api/postings/sources — the vocabulary the UI needs to build a search:
+// which sources exist, whether each is a company board or a query, and the
+// valid category/industry/level values for each.
+router.get('/sources', (_req, res) => {
+  const out = {};
+  for (const key of boards.SOURCES) {
+    const meta = boards.SOURCE_META[key] || {};
+    out[key] = {
+      label: meta.label || key,
+      kind: meta.kind || 'board',
+      closes: !!meta.closes,
+      tokenHint: meta.tokenHint || '',
+      categories: meta.categories || null,
+      industries: meta.industries || null,
+      levels: meta.levels || null,
+    };
+  }
+  res.json({ sources: out });
+});
+
 // ── Boards ──────────────────────────────────────────────────────────────────
 
 router.get('/boards', async (_req, res) => {
@@ -99,7 +182,7 @@ router.post('/boards/preview', async (req, res) => {
       return res.status(400).json({ error: 'That does not look like a board token' });
     }
 
-    const result = await boards.fetchBoard(source, clean, {});
+    const result = await boards.fetchBoard(source, clean, { query: pickQuery(req.body) });
     const sample = result.postings.slice(0, 5).map(p => ({ title: p.title, location: p.location }));
     // Greenhouse is the only source that names the company; for the others the
     // slug is the best suggestion we can honestly make.
@@ -129,8 +212,13 @@ router.post('/boards', async (req, res) => {
     }
     const clean = boards.normaliseToken(token);
     if (!boards.isValidToken(clean)) {
-      return res.status(400).json({ error: 'That does not look like a board token' });
+      return res.status(400).json({
+        error: boards.isSearchSource(source)
+          ? 'Give this search a short name (letters, numbers, dashes)'
+          : 'That does not look like a board token',
+      });
     }
+    const query = pickQuery(req.body);
 
     // Adding the same board twice would double every one of its postings, so
     // this is checked in the application layer (there is no unique index — a
@@ -148,6 +236,7 @@ router.post('/boards', async (req, res) => {
           $set: {
             deleted: false, deletedAt: null, enabled: true,
             label: boards.normText(label) || existing.label || boards.titleCaseSlug(clean),
+            query,
           },
         },
         { new: true }
@@ -158,6 +247,7 @@ router.post('/boards', async (req, res) => {
     const board = await JobBoard.create({
       source, token: clean,
       label: boards.normText(label) || boards.titleCaseSlug(clean),
+      query,
     });
     res.status(201).json({ board });
   } catch (err) {
@@ -170,6 +260,7 @@ router.patch('/boards/:id', async (req, res) => {
     const patch = {};
     if (req.body && req.body.label !== undefined) patch.label = boards.normText(req.body.label);
     if (req.body && req.body.enabled !== undefined) patch.enabled = !!req.body.enabled;
+    if (req.body && req.body.query !== undefined) patch.query = pickQuery(req.body.query);
     if (Object.keys(patch).length === 0) {
       return res.status(400).json({ error: 'No updatable fields provided' });
     }
@@ -245,6 +336,7 @@ router.get('/', async (req, res) => {
     }
     if (source && source !== 'all') filter.source = source;
     if (boardToken) filter.boardToken = boardToken;
+    if (req.query.query) filter.queries = req.query.query;
     if (ids) filter._id = { $in: String(ids).split(',').filter(Boolean) };
     if (q) {
       const rx = new RegExp(escapeRegExp(String(q).trim()), 'i');

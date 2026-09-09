@@ -20,6 +20,7 @@ const Settings = require('../models/Settings');
 const boards = require('../lib/boards');
 const sync = require('../lib/postingSync');
 const R = require('../lib/boards/result');
+const { normaliseCriteria } = require('../lib/criteria');
 
 const SOURCE = 'greenhouse';
 const TOKEN = '__difftest';
@@ -51,10 +52,13 @@ const byId = async (id) =>
 const closedCount = () =>
   JobPosting.countDocuments({ source: SOURCE, boardToken: TOKEN, listingStatus: 'closed' });
 
-const run = async (board, { dryRun = false } = {}) => {
+const run = async (board, { dryRun = false, criteria = null } = {}) => {
   const fresh = await JobBoard.findById(board._id).lean();
-  return sync.syncBoard(fresh, { runStartedAt: new Date(), dryRun });
+  return sync.syncBoard(fresh, { runStartedAt: new Date(), dryRun, criteria });
 };
+
+// A posting with an explicit title, for the search + criteria sections below.
+const titled = (id, title, extra = {}) => ({ ...post(id, extra), title });
 
 (async () => {
   await mongoose.connect(process.env.MONGODB_URI_DEV, { serverSelectionTimeoutMS: 10000 });

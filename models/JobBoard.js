@@ -6,8 +6,21 @@ const mongoose = require('mongoose');
 // the Settings singleton holds a resume Buffer, and a sync racing a settings
 // save would clobber it.
 const jobBoardSchema = new mongoose.Schema({
-  source: { type: String, enum: ['greenhouse', 'lever', 'ashby'], required: true },
-  token:  { type: String, required: true },   // slug, stored lowercased + trimmed
+  source: { type: String, enum: ['greenhouse', 'lever', 'ashby', 'muse', 'jobicy'], required: true },
+  // For a company board this is the ATS slug. For a 'search' source it is just a
+  // name for the saved search — the real parameters live in `query` below.
+  token:  { type: String, required: true },   // stored lowercased + trimmed
+  // Search parameters. Empty for company boards. Kept loose (a small fixed set
+  // of optional strings) because each search source has its own vocabulary,
+  // validated by its adapter.
+  query: {
+    category: { type: String, default: '' },   // muse
+    industry: { type: String, default: '' },   // jobicy
+    level:    { type: String, default: '' },   // both
+    location: { type: String, default: '' },   // muse
+    geo:      { type: String, default: '' },   // jobicy
+    tag:      { type: String, default: '' },   // jobicy
+  },
   // Display name. For lever/ashby this IS the company — neither exposes one, so
   // there is nothing else to show or to stamp onto their postings.
   label:   { type: String, default: '' },

@@ -11,10 +11,14 @@ const mongoose = require('mongoose');
 // shared rows. Please don't "fix" this.
 const jobPostingSchema = new mongoose.Schema({
   // ── identity ───────────────────────────────────────────────────────────────
-  source:     { type: String, enum: ['greenhouse', 'lever', 'ashby'], required: true },
+  source:     { type: String, enum: ['greenhouse', 'lever', 'ashby', 'muse', 'jobicy'], required: true },
   boardToken: { type: String, required: true },
   boardId:    { type: String, default: null },   // JobBoard._id as a string
   sourceId:   { type: String, required: true },  // the board's own id, always stringified
+  // Which saved searches surfaced this posting. Only meaningful for 'search'
+  // sources, where the same job can be found by several queries and is stored
+  // ONCE — the same approach Lead.queries takes for harvester search terms.
+  queries:    { type: [String], default: [] },
   // `${source}:${boardToken}:${sourceId}`, precomputed on write so the upsert is
   // one indexed filter — the same trick as Lead.dedupeKey. The token has to be
   // in the key: Greenhouse ids are global ints but Lever/Ashby are UUIDs with no
@@ -36,6 +40,12 @@ const jobPostingSchema = new mongoose.Schema({
   url:        { type: String, default: '' },
   applyUrl:   { type: String, default: '' },
   requisitionId: { type: String, default: '' },
+
+  // Only Jobicy publishes pay among the current sources; null everywhere else.
+  salaryMin:      { type: Number, default: null },
+  salaryMax:      { type: Number, default: null },
+  salaryCurrency: { type: String, default: '' },
+  salaryPeriod:   { type: String, default: '' },
 
   // ── what the board says ────────────────────────────────────────────────────
   postedAt:        { type: Date, default: null },
@@ -82,6 +92,7 @@ jobPostingSchema.index({ listingStatus: 1, postedAt: -1 });             // defau
 jobPostingSchema.index({ firstSeenAt: -1 });                            // "new since last sync"
 jobPostingSchema.index({ applyStatus: 1 });
 jobPostingSchema.index({ company: 1 });
+jobPostingSchema.index({ queries: 1 });
 
 jobPostingSchema.set('toJSON', {
   transform: (doc, ret) => {

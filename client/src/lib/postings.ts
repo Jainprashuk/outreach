@@ -1,4 +1,6 @@
-import type { BoardSource, BoardSyncStatus, JobBoard, Lead, Posting, TrackStatus } from './api';
+import type {
+  BoardSource, BoardSyncStatus, JobBoard, Lead, Posting, SourceKind, TrackStatus,
+} from './api';
 
 // ── Why postings are not leads ──────────────────────────────────────────────
 // A Lead is a PERSON you found and might email. A Posting is a ROLE a company
@@ -42,18 +44,42 @@ export const SOURCE_LABELS: Record<BoardSource, string> = {
   greenhouse: 'Greenhouse',
   lever: 'Lever',
   ashby: 'Ashby',
+  muse: 'The Muse',
+  jobicy: 'Jobicy',
 };
+
+/**
+ * 'board' — one company's ATS page. Complete and authoritative, so a posting
+ *           vanishing genuinely means it closed.
+ * 'search' — a query across many employers. We read the first few pages of
+ *           something that can run to 1400+, so it is a partial slice and never
+ *           closes anything. This distinction is enforced server-side.
+ */
+export const SOURCE_KIND: Record<BoardSource, SourceKind> = {
+  greenhouse: 'board',
+  lever: 'board',
+  ashby: 'board',
+  muse: 'search',
+  jobicy: 'search',
+};
+
+export const isSearchSource = (s: BoardSource) => SOURCE_KIND[s] === 'search';
 
 export const SOURCE_BOARD_URL: Record<BoardSource, (token: string) => string> = {
   greenhouse: (t) => `https://boards.greenhouse.io/${t}`,
   lever: (t) => `https://jobs.lever.co/${t}`,
   ashby: (t) => `https://jobs.ashbyhq.com/${t}`,
+  // Searches have no per-token page of their own.
+  muse: () => 'https://www.themuse.com/search/',
+  jobicy: () => 'https://jobicy.com/',
 };
 
 export const SOURCE_TOKEN_HINT: Record<BoardSource, string> = {
   greenhouse: 'the slug in boards.greenhouse.io/<token>',
   lever: 'the slug in jobs.lever.co/<token>',
   ashby: 'the slug in jobs.ashbyhq.com/<token>',
+  muse: 'a short name for this saved search',
+  jobicy: 'a short name for this saved search',
 };
 
 export const BOARD_STATUS_LABELS: Record<BoardSyncStatus, string> = {
@@ -121,6 +147,24 @@ export const boardFirstSyncMap = (boards: JobBoard[]): Record<string, string | n
   Object.fromEntries(boards.map(b => [b.id, b.firstSyncAt]));
 
 export const boardLabel = (b: JobBoard) => b.label || b.token;
+
+/** A short human salary, or '' when the source didn't publish one. */
+export function formatSalary(p: Pick<Posting, 'salaryMin' | 'salaryMax' | 'salaryCurrency' | 'salaryPeriod'>): string {
+  const { salaryMin: lo, salaryMax: hi, salaryCurrency: cur, salaryPeriod: per } = p;
+  if (!lo && !hi) return '';
+  const money = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+  const range = lo && hi && lo !== hi ? `${money(lo)}–${money(hi)}` : money((hi || lo) as number);
+  const unit = per === 'yearly' ? '/yr' : per === 'monthly' ? '/mo' : per === 'hourly' ? '/hr' : '';
+  return `${cur ? cur + ' ' : ''}${range}${unit}`;
+}
+
+/** A one-line description of a saved search, for the boards table. */
+export function describeQuery(b: JobBoard): string {
+  const q = b.query || {};
+  const bits = [q.category, q.industry, q.level, q.location, q.geo, q.tag]
+    .map(x => (x || '').trim()).filter(Boolean);
+  return bits.length ? bits.join(' · ') : 'everything (no filters)';
+}
 
 /** '2 hours ago' — the sync freshness line. */
 export function relativeTime(iso: string | null): string {

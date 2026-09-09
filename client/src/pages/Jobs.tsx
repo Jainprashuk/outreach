@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Layout from '../components/Layout';
 import BoardManager from '../components/BoardManager';
+import CriteriaPanel from '../components/CriteriaPanel';
 import PostingDetailModal from '../components/PostingDetailModal';
 import PostingFilterPanel from '../components/PostingFilterPanel';
 import SyncReportBanner from '../components/SyncReportBanner';
@@ -17,8 +18,9 @@ import {
   tabCounts, type PostingFilters, type PostingTab,
 } from '../lib/postingFilters';
 import {
-  boardFirstSyncMap, isNewSince, isSyncStale, relativeTime, SOURCE_LABELS,
-  SYNC_STALE_HOURS, TRACK_BADGE_CLASS, TRACK_STATUS_LABELS, TRACK_STATUS_ORDER,
+  boardFirstSyncMap, formatSalary, isNewSince, isSyncStale, relativeTime,
+  SOURCE_LABELS, SYNC_STALE_HOURS, TRACK_BADGE_CLASS, TRACK_STATUS_LABELS,
+  TRACK_STATUS_ORDER,
 } from '../lib/postings';
 
 const PAGE_SIZE = 25;
@@ -45,6 +47,7 @@ export default function Jobs() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [detail, setDetail] = useState<Posting | null>(null);
   const [showBoards, setShowBoards] = useState(false);
+  const [showCriteria, setShowCriteria] = useState(false);
   const [includeClosed, setIncludeClosed] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [report, setReport] = useState<SyncRunReport | null>(null);
@@ -132,7 +135,8 @@ export default function Jobs() {
       } else {
         const t = res.totals;
         const bits = [`${t.inserted} new`, `${t.closed} closed`];
-        if (t.notFound + t.errored > 0) bits.push(`${t.notFound + t.errored} board(s) failed`);
+        if (t.filteredOut > 0) bits.push(`${t.filteredOut} filtered out`);
+        if (t.notFound + t.errored > 0) bits.push(`${t.notFound + t.errored} source(s) failed`);
         toast(`Sync done — ${bits.join(', ')}.`, t.notFound + t.errored > 0 ? 'info' : 'success');
       }
       await reload();
@@ -209,8 +213,11 @@ export default function Jobs() {
       subtitle={subtitle}
       actions={
         <>
+          <button className="btn btn-sm" type="button" onClick={() => setShowCriteria(v => !v)}>
+            <i className="ti ti-adjustments" /> What I want
+          </button>
           <button className="btn btn-sm" type="button" onClick={() => setShowBoards(v => !v)}>
-            <i className="ti ti-list-details" /> Boards ({boards.length})
+            <i className="ti ti-list-details" /> Sources ({boards.length})
           </button>
           <button className="btn btn-sm btn-primary" type="button" disabled={syncing} onClick={() => sync()}>
             <i className={`ti ti-${syncing ? 'loader' : 'refresh'}`} /> {syncing ? 'Syncing…' : 'Sync now'}
@@ -238,6 +245,10 @@ export default function Jobs() {
               : ' No CRON_SECRET is configured, so scheduled syncs are not running — use Sync now, or set it up.'}
           </span>
         </div>
+      )}
+
+      {showCriteria && (
+        <CriteriaPanel onSaved={reload} onClose={() => setShowCriteria(false)} />
       )}
 
       {(showBoards || boards.length === 0) && (
@@ -373,7 +384,15 @@ export default function Jobs() {
                           </div>
                         )}
                       </td>
-                      <td>{p.company || <span style={{ color: 'var(--text3)' }}>—</span>}</td>
+                      <td>
+                        {p.company || <span style={{ color: 'var(--text3)' }}>—</span>}
+                        {(() => {
+                          const pay = formatSalary(p);
+                          return pay
+                            ? <div style={{ fontSize: 11, color: 'var(--green)' }}>{pay}</div>
+                            : null;
+                        })()}
+                      </td>
                       <td>
                         {p.location || <span style={{ color: 'var(--text3)' }}>—</span>}
                         {p.remote && (
@@ -386,7 +405,11 @@ export default function Jobs() {
                         )}
                       </td>
                       <td>
-                        <div style={{ fontSize: 12 }}>{p.boardToken}</div>
+                        {/* Search-sourced postings are attributed by which saved
+                            searches found them, not by a single board token. */}
+                        <div style={{ fontSize: 12 }}>
+                          {p.queries.length ? p.queries.join(', ') : p.boardToken}
+                        </div>
                         <div style={{ fontSize: 11, color: 'var(--text3)' }}>{SOURCE_LABELS[p.source]}</div>
                       </td>
                       <td style={{ whiteSpace: 'nowrap', fontSize: 12 }}>{fmtDate(p.postedAt)}</td>

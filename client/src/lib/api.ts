@@ -297,7 +297,10 @@ export const deleteLeadsApi = (ids: string[]) =>
 // email, and Lever/Ashby expose no company name), so they are two independent
 // journeys that share a vocabulary. See lib/postings.ts.
 
-export type BoardSource = 'greenhouse' | 'lever' | 'ashby';
+export type BoardSource = 'greenhouse' | 'lever' | 'ashby' | 'muse' | 'jobicy';
+/** 'board' = one company's ATS page (authoritative, so vanishing = closed).
+ *  'search' = a query across many employers (a partial slice, so it never closes). */
+export type SourceKind = 'board' | 'search';
 export type ListingStatus = 'open' | 'closed';
 
 /** ApplyStatus plus 'saved'. A SEPARATE type on purpose — widening ApplyStatus
@@ -335,6 +338,13 @@ export interface Posting {
   url: string;
   applyUrl: string;
   requisitionId: string;
+  /** Which saved searches surfaced this. Only used by 'search' sources, where
+   *  one job is stored once no matter how many queries found it. */
+  queries: string[];
+  salaryMin: number | null;
+  salaryMax: number | null;
+  salaryCurrency: string;
+  salaryPeriod: string;
   postedAt: string | null;
   sourceUpdatedAt: string | null;
   firstSeenAt: string;
@@ -353,12 +363,24 @@ export interface Posting {
   updatedAt: string;
 }
 
+/** Search parameters. Empty for company boards; each search source validates
+ *  its own vocabulary server-side. */
+export interface BoardQuery {
+  category?: string;   // muse
+  industry?: string;   // jobicy
+  level?: string;      // both
+  location?: string;   // muse
+  geo?: string;        // jobicy
+  tag?: string;        // jobicy
+}
+
 export interface JobBoard {
   id: string;
   source: BoardSource;
   token: string;
   label: string;
   enabled: boolean;
+  query?: BoardQuery;
   lastSyncAt: string | null;
   lastSuccessAt: string | null;
   /** Set once, on a board's first success. firstSeenAt equal to this means
@@ -385,6 +407,10 @@ export interface BoardSyncReport {
   error: string | null;
   fetched: number;
   filtered: number;
+  /** Listed by the source but not stored, because your criteria excluded it.
+   *  These are NOT closed — the company still has them open. */
+  filteredOut: number;
+  kind: SourceKind;
   inserted: number;
   updated: number;
   reopened: number;
@@ -407,10 +433,11 @@ export interface SyncRunReport {
   ms: number;
   previousSyncAt: string | null;
   boards: BoardSyncReport[];
+  criteriaEnabled?: boolean;
   totals: {
     boards: number; ok: number; empty: number; notFound: number;
-    errored: number; skipped: number; fetched: number; inserted: number;
-    updated: number; reopened: number; closed: number;
+    errored: number; skipped: number; fetched: number; filteredOut: number;
+    inserted: number; updated: number; reopened: number; closed: number;
   };
   massCloseWarnThreshold?: number;
 }
@@ -421,6 +448,34 @@ export interface PostingsMeta {
   cronConfigured: boolean;
   syncRunning: boolean;
   counts: { open: number; closed: number; tracked: number; newSinceLastSync: number };
+}
+
+export interface JobCriteria {
+  enabled: boolean;
+  include: string[];
+  /** A blocklist, and it WINS over `include` — so "Solution Engineer
+   *  (Pre-Sales)" is dropped despite containing "engineer". */
+  exclude: string[];
+  locations: string[];
+  remoteOnly: boolean;
+}
+
+export interface CriteriaTestResult {
+  total: number;
+  kept: number;
+  dropped: number;
+  keptSample: string[];
+  droppedSample: string[];
+}
+
+export interface SourceInfo {
+  label: string;
+  kind: SourceKind;
+  closes: boolean;
+  tokenHint: string;
+  categories: string[] | null;
+  industries: string[] | null;
+  levels: string[] | null;
 }
 
 export interface BoardPreview {
@@ -441,12 +496,12 @@ export const loadPostingsMetaApi = () => apiFetch<PostingsMeta>('/api/postings/m
 
 export const loadBoardsApi = () => apiFetch<{ boards: JobBoard[] }>('/api/postings/boards');
 
-export const createBoardApi = (body: { source: BoardSource; token: string; label?: string }) =>
+export const createBoardApi = (body: { source: BoardSource; token: string; label?: string } & BoardQuery) =>
   apiFetch<{ board: JobBoard; revived?: boolean }>('/api/postings/boards', {
     method: 'POST', body: JSON.stringify(body),
   });
 
-export const updateBoardApi = (id: string, patch: { label?: string; enabled?: boolean }) =>
+export const updateBoardApi = (id: string, patch: { label?: string; enabled?: boolean; query?: BoardQuery }) =>
   apiFetch<{ board: JobBoard }>(`/api/postings/boards/${id}`, {
     method: 'PATCH', body: JSON.stringify(patch),
   });
@@ -455,9 +510,26 @@ export const deleteBoardApi = (id: string, mode: 'keep' | 'delete' = 'keep') =>
   apiFetch<{ ok: boolean; board: JobBoard; postingsDeleted: number }>(
     `/api/postings/boards/${id}?postings=${mode}`, { method: 'DELETE' });
 
-export const previewBoardApi = (body: { source: BoardSource; token: string }) =>
+export const previewBoardApi = (body: { source: BoardSource; token: string } & BoardQuery) =>
   apiFetch<BoardPreview>('/api/postings/boards/preview', {
     method: 'POST', body: JSON.stringify(body),
+  });
+
+export const loadSourcesApi = () =>
+  apiFetch<{ sources: Record<BoardSource, SourceInfo> }>('/api/postings/sources');
+
+export const loadCriteriaApi = () =>
+  apiFetch<{ criteria: JobCriteria; defaults: JobCriteria }>('/api/postings/criteria');
+
+export const saveCriteriaApi = (criteria: JobCriteria) =>
+  apiFetch<{ criteria: JobCriteria }>('/api/postings/criteria', {
+    method: 'PUT', body: JSON.stringify(criteria),
+  });
+
+/** Preview a profile against what you already have, before turning it on. */
+export const testCriteriaApi = (criteria: JobCriteria) =>
+  apiFetch<CriteriaTestResult>('/api/postings/criteria/test', {
+    method: 'POST', body: JSON.stringify(criteria),
   });
 
 /**

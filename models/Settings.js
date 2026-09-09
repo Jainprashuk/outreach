@@ -29,6 +29,15 @@ const settingsSchema = new mongoose.Schema({
   // Advisory lease. Stops two tabs, or cron plus a click, from syncing at once.
   // Held for at most LOCK_TTL_MS so a killed invocation self-heals.
   postingSyncLockAt: { type: Date, default: null },
+  // "What I actually want" — applied when a sync decides what to STORE, so a
+  // 600-role board only keeps the roles you'd read. See lib/criteria.js.
+  jobCriteria: {
+    enabled:    { type: Boolean, default: false },
+    include:    { type: [String], default: undefined },
+    exclude:    { type: [String], default: undefined },
+    locations:  { type: [String], default: undefined },
+    remoteOnly: { type: Boolean, default: false },
+  },
 }, { timestamps: true });
 
 settingsSchema.set('toJSON', {

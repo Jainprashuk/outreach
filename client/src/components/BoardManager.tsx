@@ -1,13 +1,14 @@
-import { useState } from 'react';
-import type { BoardPreview, BoardSource, JobBoard, Lead, Posting } from '../lib/api';
-import { createBoardApi, deleteBoardApi, previewBoardApi, updateBoardApi } from '../lib/api';
+import { useEffect, useState } from 'react';
+import type { BoardPreview, BoardQuery, BoardSource, JobBoard, Lead, Posting, SourceInfo } from '../lib/api';
+import { createBoardApi, deleteBoardApi, loadSourcesApi, previewBoardApi, updateBoardApi } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import {
-  BOARD_STATUS_BADGE, BOARD_STATUS_LABELS, boardLabel, relativeTime,
-  SOURCE_BOARD_URL, SOURCE_LABELS, SOURCE_TOKEN_HINT, suggestedBoardsFromLeads,
+  BOARD_STATUS_BADGE, BOARD_STATUS_LABELS, boardLabel, describeQuery, isSearchSource,
+  relativeTime, SOURCE_BOARD_URL, SOURCE_LABELS, SOURCE_TOKEN_HINT, suggestedBoardsFromLeads,
 } from '../lib/postings';
 
-const SOURCES: BoardSource[] = ['greenhouse', 'lever', 'ashby'];
+// Company boards first, then the cross-company searches.
+const SOURCES: BoardSource[] = ['greenhouse', 'lever', 'ashby', 'muse', 'jobicy'];
 
 export default function BoardManager({ boards, postings, leads, onChanged, onSyncBoard, syncing }: {
   boards: JobBoard[];
@@ -24,6 +25,15 @@ export default function BoardManager({ boards, postings, leads, onChanged, onSyn
   const [preview, setPreview] = useState<BoardPreview | null>(null);
   const [checking, setChecking] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [query, setQuery] = useState<BoardQuery>({});
+  // The valid category/industry/level vocabularies come from the server, which
+  // is where they are validated — so the UI can't drift out of sync with them.
+  const [sources, setSources] = useState<Record<string, SourceInfo> | null>(null);
+
+  useEffect(() => { loadSourcesApi().then(r => setSources(r.sources)).catch(() => setSources(null)); }, []);
+
+  const info = sources ? sources[source] : null;
+  const searching = isSearchSource(source);
 
   const suggestions = suggestedBoardsFromLeads(leads, boards);
 
@@ -38,7 +48,7 @@ export default function BoardManager({ boards, postings, leads, onChanged, onSyn
     setChecking(true);
     setPreview(null);
     try {
-      const p = await previewBoardApi({ source, token: token.trim() });
+      const p = await previewBoardApi({ source, token: token.trim(), ...query });
       setPreview(p);
       // Greenhouse is the only source that names the company; for the others
       // this is the slug title-cased, which is the honest best guess.
@@ -50,12 +60,12 @@ export default function BoardManager({ boards, postings, leads, onChanged, onSyn
     }
   };
 
-  const add = async (src: BoardSource, tok: string, lab?: string) => {
+  const add = async (src: BoardSource, tok: string, lab?: string, q?: BoardQuery) => {
     setAdding(true);
     try {
-      const res = await createBoardApi({ source: src, token: tok, label: lab });
+      const res = await createBoardApi({ source: src, token: tok, label: lab, ...(q || {}) });
       toast(res.revived ? `Re-added ${boardLabel(res.board)}.` : `Added ${boardLabel(res.board)}.`, 'success');
-      setToken(''); setLabel(''); setPreview(null);
+      setToken(''); setLabel(''); setPreview(null); setQuery({});
       await onChanged();
     } catch (err) {
       toast(err instanceof Error ? err.message : 'Could not add that board', 'error');
@@ -103,7 +113,9 @@ export default function BoardManager({ boards, postings, leads, onChanged, onSyn
         <div>
           <h2 style={{ fontSize: 14, margin: 0 }}>Boards</h2>
           <p style={{ fontSize: 12, color: 'var(--text2)', margin: '2px 0 0' }}>
-            Public job boards to watch. No API keys, nothing to sign up for.
+            Two kinds, both keyless: a <strong>company board</strong> (everything one company posts, and it
+            notices closures) or a <strong>search</strong> across thousands of employers (broad, but a partial
+            slice — so it never marks anything closed).
           </p>
         </div>
         <span className="contact-count-badge">{boards.length} tracked</span>
@@ -126,12 +138,19 @@ export default function BoardManager({ boards, postings, leads, onChanged, onSyn
                     <td>
                       <div style={{ fontWeight: 500 }}>{boardLabel(b)}</div>
                       <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                        {url
-                          ? <a href={url} target="_blank" rel="noopener noreferrer">{b.token}</a>
-                          : b.token}
+                        {isSearchSource(b.source)
+                          ? describeQuery(b)
+                          : (url
+                            ? <a href={url} target="_blank" rel="noopener noreferrer">{b.token}</a>
+                            : b.token)}
                       </div>
                     </td>
-                    <td>{SOURCE_LABELS[b.source]}</td>
+                    <td>
+                      {SOURCE_LABELS[b.source]}
+                      <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                        {isSearchSource(b.source) ? 'search' : 'company board'}
+                      </div>
+                    </td>
                     <td>
                       {open} open
                       {total !== open && (
@@ -206,28 +225,87 @@ export default function BoardManager({ boards, postings, leads, onChanged, onSyn
           </select>
         </div>
         <div className="form-group">
-          <label className="form-label">Board token</label>
-          <input type="text" placeholder={source === 'lever' ? 'leverdemo' : source === 'ashby' ? 'ashby' : 'stripe'}
+          <label className="form-label">{searching ? 'Name this search' : 'Board token'}</label>
+          <input type="text"
+            placeholder={searching ? 'eng-roles'
+              : source === 'lever' ? 'leverdemo' : source === 'ashby' ? 'ashby' : 'stripe'}
             value={token}
             onChange={e => { setToken(e.target.value); setPreview(null); }}
             onKeyDown={e => { if (e.key === 'Enter') check(); }} />
           <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>
-            {SOURCE_TOKEN_HINT[source]} — pasting the whole board URL works too.
+            {SOURCE_TOKEN_HINT[source]}
+            {!searching && ' — pasting the whole board URL works too.'}
           </div>
         </div>
-        <div className="form-group">
-          <label className="form-label">
-            Label{source !== 'greenhouse' && <span style={{ color: 'var(--text3)' }}> (shown as the company)</span>}
-          </label>
-          <input type="text" placeholder="Optional" value={label} onChange={e => setLabel(e.target.value)} />
-        </div>
+
+        {searching ? (
+          <>
+            {info && info.categories && (
+              <div className="form-group">
+                <label className="form-label">Category</label>
+                <select value={query.category || ''}
+                  onChange={e => { setQuery(q => ({ ...q, category: e.target.value })); setPreview(null); }}>
+                  <option value="">Everything</option>
+                  {info.categories.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>
+                  One category per search — The Muse silently returns everything if given two.
+                </div>
+              </div>
+            )}
+            {info && info.industries && (
+              <div className="form-group">
+                <label className="form-label">Industry</label>
+                <select value={query.industry || ''}
+                  onChange={e => { setQuery(q => ({ ...q, industry: e.target.value })); setPreview(null); }}>
+                  <option value="">Everything</option>
+                  {info.industries.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            )}
+            {info && info.levels && (
+              <div className="form-group">
+                <label className="form-label">Level</label>
+                <select value={query.level || ''}
+                  onChange={e => { setQuery(q => ({ ...q, level: e.target.value })); setPreview(null); }}>
+                  <option value="">Any</option>
+                  {info.levels.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            )}
+            {source === 'muse' && (
+              <div className="form-group">
+                <label className="form-label">Location (optional)</label>
+                <input type="text" placeholder="Bangalore, India" value={query.location || ''}
+                  onChange={e => { setQuery(q => ({ ...q, location: e.target.value })); setPreview(null); }} />
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>
+                  Loose — it also returns roles tagged “Flexible / Remote” based anywhere.
+                </div>
+              </div>
+            )}
+            {source === 'jobicy' && (
+              <div className="form-group">
+                <label className="form-label">Keyword (optional)</label>
+                <input type="text" placeholder="python" value={query.tag || ''}
+                  onChange={e => { setQuery(q => ({ ...q, tag: e.target.value })); setPreview(null); }} />
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="form-group">
+            <label className="form-label">
+              Label{source !== 'greenhouse' && <span style={{ color: 'var(--text3)' }}> (shown as the company)</span>}
+            </label>
+            <input type="text" placeholder="Optional" value={label} onChange={e => setLabel(e.target.value)} />
+          </div>
+        )}
         <div className="form-group" style={{ display: 'flex', alignItems: 'flex-end', gap: 8 }}>
           <button className="btn btn-sm" type="button" onClick={check} disabled={checking || !token.trim()}>
             <i className={`ti ti-${checking ? 'loader' : 'search'}`} /> {checking ? 'Checking…' : 'Check'}
           </button>
           <button className="btn btn-sm btn-primary" type="button" disabled={adding || !token.trim()}
-            onClick={() => add(source, token.trim(), label.trim() || undefined)}>
-            <i className="ti ti-plus" /> Add board
+            onClick={() => add(source, token.trim(), label.trim() || undefined, searching ? query : undefined)}>
+            <i className="ti ti-plus" /> {searching ? 'Add search' : 'Add board'}
           </button>
         </div>
       </div>
