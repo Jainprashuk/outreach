@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import Avatar from './Avatar';
 import { Field, muted } from './DetailFields';
@@ -199,7 +200,8 @@ export default function InterviewDetailModal({ interview, onClose }: {
     );
   };
 
-  return (
+  // Portalled for the same reason as MoveToInterviewModal — see the note there.
+  return createPortal(
     <div className="edit-modal-wrap open" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="edit-modal" style={{ maxWidth: 720, maxHeight: '88vh', overflowY: 'auto' }}>
         <div className="reply-modal-header">
@@ -379,6 +381,7 @@ export default function InterviewDetailModal({ interview, onClose }: {
           </div>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import Avatar from './Avatar';
 import { useInterviews } from '../context/InterviewContext';
 import { useToast } from '../context/ToastContext';
@@ -76,7 +77,11 @@ export default function MoveToInterviewModal({ seed, onClose, onCreated }: {
     </label>
   );
 
-  return (
+  // Portalled to <body>: this modal is opened from inside a table cell, and
+  // .table-card keeps a filled `transform` from its fadeInUp animation, which
+  // would otherwise make it the containing block for our position:fixed wrap
+  // and clip it with overflow-x. Same reason StatusBadge portals its popups.
+  return createPortal(
     <div className="edit-modal-wrap open" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
       <div className="edit-modal" style={{ maxWidth: 520, maxHeight: '85vh', overflowY: 'auto' }}>
         <div className="reply-modal-header">
@@ -139,6 +144,7 @@ export default function MoveToInterviewModal({ seed, onClose, onCreated }: {
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
