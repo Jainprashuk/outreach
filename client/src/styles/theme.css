@@ -170,7 +170,9 @@ body {
 .btn:disabled:hover { background: var(--bg); transform: none; filter: none; }
 
 /* ── Inputs ────────────────────────────────────────────────────────────────── */
-input[type=text], input[type=email], input[type=password], input[type=number], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=number],
+input[type=tel], input[type=url], input[type=search], input[type=datetime-local],
+select, textarea {
   padding: 9px 12px; border-radius: 10px; border: 1px solid var(--border-md); background: var(--bg);
   font-size: 13px; transition: border-color .14s var(--ease), box-shadow .14s var(--ease), background-color .2s var(--ease);
 }

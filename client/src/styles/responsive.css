@@ -44,7 +44,8 @@
 @media (max-width: 700px) {
   /* iOS Safari zooms the whole page when a focused control is under 16px. */
   input[type=text], input[type=email], input[type=password], input[type=number],
-  input[type=search], input[type=tel], input[type=url], select, textarea {
+  input[type=search], input[type=tel], input[type=url], input[type=datetime-local],
+  select, textarea {
     font-size: 16px !important;
   }
 

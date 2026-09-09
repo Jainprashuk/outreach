@@ -58,8 +58,6 @@ function Input({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-const ROW: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 };
-
 export default function InterviewDetailModal({ interview, onClose }: {
   interview: Interview;
   onClose: () => void;
@@ -260,15 +258,17 @@ export default function InterviewDetailModal({ interview, onClose }: {
         )}
 
         <div style={SECTION}>Who</div>
-        <div style={ROW}>
-          <Input label="Name"><input type="text" value={form.name} style={{ width: '100%' }}
-            onChange={e => set('name', e.target.value)} /></Input>
-          <Input label="Phone" hint="add or override">
-            <input type="tel" value={form.phone} style={{ width: '100%' }} placeholder="+91 …"
-              onChange={e => set('phone', e.target.value)} /></Input>
+        {/* Name spans the full width so the four paired fields below stay in
+            tidy rows instead of leaving Role orphaned in a half column. */}
+        <Input label="Name"><input type="text" value={form.name} style={{ width: '100%' }}
+          onChange={e => set('name', e.target.value)} /></Input>
+        <div className="iv-grid">
           <Input label="Email" hint="add or override">
             <input type="email" value={form.email} style={{ width: '100%' }}
               onChange={e => set('email', e.target.value)} /></Input>
+          <Input label="Phone" hint="add or override">
+            <input type="tel" value={form.phone} style={{ width: '100%' }} placeholder="+91 …"
+              onChange={e => set('phone', e.target.value)} /></Input>
           <Input label="Company"><input type="text" value={form.company} style={{ width: '100%' }}
             onChange={e => set('company', e.target.value)} /></Input>
           <Input label="Role"><input type="text" value={form.role} style={{ width: '100%' }}
@@ -276,7 +276,7 @@ export default function InterviewDetailModal({ interview, onClose }: {
         </div>
 
         <div style={SECTION}>Interview</div>
-        <div style={ROW}>
+        <div className="iv-grid">
           <Input label="Date & time" hint="drives the reminder">
             <input type="datetime-local" value={form.interviewAt} style={{ width: '100%' }}
               onChange={e => set('interviewAt', e.target.value)} /></Input>
@@ -303,13 +303,11 @@ export default function InterviewDetailModal({ interview, onClose }: {
         )}
 
         <div style={SECTION}>Compensation & logistics</div>
-        <div style={ROW}>
+        <div className="iv-grid">
           <Input label="Expected CTC"><input type="text" value={form.expectedCtc} style={{ width: '100%' }}
             placeholder="e.g. 24 LPA" onChange={e => set('expectedCtc', e.target.value)} /></Input>
           <Input label="Offered CTC"><input type="text" value={form.offeredCtc} style={{ width: '100%' }}
             placeholder="e.g. 21-23 LPA" onChange={e => set('offeredCtc', e.target.value)} /></Input>
-          <Input label="Notice period"><input type="text" value={form.noticePeriod} style={{ width: '100%' }}
-            placeholder="e.g. 60 days" onChange={e => set('noticePeriod', e.target.value)} /></Input>
           <Input label="Location"><input type="text" value={form.location} style={{ width: '100%' }}
             placeholder="e.g. Bengaluru" onChange={e => set('location', e.target.value)} /></Input>
           <Input label="Work mode">
@@ -319,6 +317,8 @@ export default function InterviewDetailModal({ interview, onClose }: {
                 <option key={m} value={m}>{WORK_MODE_LABELS[m]}</option>
               ))}
             </select></Input>
+          <Input label="Notice period"><input type="text" value={form.noticePeriod} style={{ width: '100%' }}
+            placeholder="e.g. 60 days" onChange={e => set('noticePeriod', e.target.value)} /></Input>
         </div>
 
         <div style={SECTION}>Notes</div>

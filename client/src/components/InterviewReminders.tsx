@@ -46,7 +46,7 @@ export default function InterviewReminders() {
   };
 
   const row = (iv: Interview, right: React.ReactNode, sub: React.ReactNode) => (
-    <div key={iv.id} style={{
+    <div key={iv.id} className="iv-reminder-row" style={{
       display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
       padding: '10px 0', borderBottom: '1px solid var(--border)',
     }}>
@@ -61,7 +61,7 @@ export default function InterviewReminders() {
       <span className={`badge ${INTERVIEW_BADGE_CLASS[iv.status]}`} style={{ fontSize: 10 }}>
         {INTERVIEW_STATUS_LABELS[iv.status]}
       </span>
-      <div style={{ display: 'flex', gap: 6 }}>{right}</div>
+      <div className="iv-reminder-actions" style={{ display: 'flex', gap: 6 }}>{right}</div>
     </div>
   );
 

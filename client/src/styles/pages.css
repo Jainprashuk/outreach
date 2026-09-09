@@ -130,3 +130,17 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
    One extra badge colour; every other interview status reuses an existing
    .badge-* class from css/style.css so the palette stays consistent. */
 .badge-iv-process { background: var(--purple-bg); color: var(--purple); }
+
+/* Two-up field grid in the interview modals. A CLASS, not an inline style —
+   inline styles outrank media queries, so an inline grid could never collapse
+   on a phone. Single column below the phone breakpoint used elsewhere. */
+.iv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 700px) { .iv-grid { grid-template-columns: 1fr; } }
+
+/* The interview reminder lists one person per row; on a narrow screen the
+   status chip and buttons wrap under the name instead of crushing it. */
+@media (max-width: 700px) {
+  .iv-reminder-row { flex-wrap: wrap; }
+  .iv-reminder-row .iv-reminder-actions { flex: 1 1 100%; }
+  .iv-reminder-row .iv-reminder-actions .btn { flex: 1 1 auto; justify-content: center; }
+}

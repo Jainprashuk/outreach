@@ -113,7 +113,7 @@ export default function MoveToInterviewModal({ seed, onClose, onCreated }: {
 
         {field('Name', <input type="text" value={name} style={{ width: '100%' }}
           onChange={e => setName(e.target.value)} />)}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+        <div className="iv-grid">
           {field('Email', <input type="email" value={email} style={{ width: '100%' }}
             placeholder="add or override" onChange={e => setEmail(e.target.value)} />)}
           {field('Phone', <input type="tel" value={phone} style={{ width: '100%' }}

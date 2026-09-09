@@ -479,7 +479,8 @@ tbody tr:hover { background: var(--bg2); }
 .form-group { margin-bottom: 14px; }
 .form-group.full { grid-column: 1 / -1; }
 .form-label { font-size: 12px; font-weight: 500; color: var(--text2); display: block; margin-bottom: 5px; }
-input[type=text], input[type=email], input[type=password], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=tel],
+input[type=url], input[type=search], input[type=datetime-local], select, textarea {
   width: 100%; padding: 8px 11px;
   border: 0.5px solid var(--border-md);
   border-radius: var(--radius);
@@ -488,7 +489,9 @@ input[type=text], input[type=email], input[type=password], select, textarea {
   outline: none;
   transition: border-color .12s var(--ease), box-shadow .12s var(--ease), background-color .2s var(--ease), color .2s var(--ease);
 }
-input[type=text]:hover, input[type=email]:hover, input[type=password]:hover, select:hover, textarea:hover { border-color: var(--text3); }
+input[type=text]:hover, input[type=email]:hover, input[type=password]:hover, input[type=tel]:hover,
+input[type=url]:hover, input[type=search]:hover, input[type=datetime-local]:hover,
+select:hover, textarea:hover { border-color: var(--text3); }
 input:focus, select:focus, textarea:focus { border-color: var(--accent); box-shadow: var(--ring); }
 input::placeholder, textarea::placeholder { color: var(--text3); }
 textarea { resize: vertical; min-height: 80px; }
