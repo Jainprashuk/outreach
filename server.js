@@ -35,6 +35,37 @@ const EXPORT_COOKIE   = 'outreach_share';
 // Namespaced so it never collides with the owner token even if secrets match.
 const EXPORT_TOKEN = EXPORT_PASSWORD ? makeToken('share:' + EXPORT_PASSWORD) : null;
 
+// ── Third independent credential — machine-to-machine cron ──────────────────
+// The GitHub Actions workflows send the RAW secret; we HMAC it here and compare,
+// exactly as POST /login and /api/share/login do. Sending a pre-derived token
+// would gain nothing (it is a bearer credential either way) and would force the
+// secret to be HMAC'd by hand to populate the GitHub secret.
+const CRON_SECRET = process.env.CRON_SECRET;
+const CRON_TOKEN  = CRON_SECRET ? makeToken('cron:' + CRON_SECRET) : null;
+
+// Constant-time compare of two hex digests. Both sides are fixed-length here, so
+// the length precheck that stops timingSafeEqual from throwing cannot leak
+// anything about the secret.
+const tokenMatches = (candidate, expected) => {
+  if (!expected || typeof candidate !== 'string' || candidate.length !== expected.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(candidate), Buffer.from(expected));
+  } catch (_) {
+    return false;
+  }
+};
+
+// EXACT paths only, never a prefix — so a future /api/postings/* endpoint is not
+// reachable with a cron secret just because the sync endpoint is.
+const CRON_PATHS = new Set(['/api/postings/sync', '/api/check-mailbox']);
+
+const isCron = (req) => {
+  if (!CRON_TOKEN) return false;   // unset secret => carve-out is inert
+  const raw = req.headers['x-cron-secret'];
+  if (typeof raw !== 'string' || !raw) return false;
+  return tokenMatches(makeToken('cron:' + raw), CRON_TOKEN);
+};
+
 // Read a cookie value from the raw header and constant-time compare to a token.
 const cookieMatches = (req, name, expected) => {
   if (!expected) return false;
@@ -62,6 +93,10 @@ const requireAuth = (req, res, next) => {
   if (req.path.startsWith('/api/share')) return next();
   // Allow static assets so the login page can load its CSS/JS
   if (/\.(css|js|woff2?|ttf|svg|ico|png|jpg|jpeg)$/.test(req.path)) return next();
+
+  // Scheduled jobs have no cookie to send. Gated to two exact paths, and inert
+  // unless CRON_SECRET is configured.
+  if (CRON_PATHS.has(req.path) && isCron(req)) return next();
 
   if (isOwner(req)) return next();
 
@@ -186,6 +221,9 @@ app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));
 app.use('/api/jobs', requireDb, require('./routes/jobs'));
 app.use('/api/leads', requireDb, require('./routes/leads'));
+// Job postings pulled from public ATS boards. NOT /api/jobs — that is taken by
+// the email SendJob routes above, and these are job *postings* anyway.
+app.use('/api/postings', requireDb, require('./routes/postings'));
 
 // ── Inngest handler ─────────────────────────────────────────────────────────
 const { serve } = require('inngest/express');

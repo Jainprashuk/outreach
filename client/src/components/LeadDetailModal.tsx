@@ -8,32 +8,7 @@ import {
 } from '../lib/leads';
 import { APPLYABLE, classifyLink, LINK_TYPE_META } from '../lib/linkTypes';
 import { contactBadgeClass, contactStatusLabel, stageOf, STAGE_LABELS } from '../lib/leadOutcome';
-
-const fmt = (iso: string | null | undefined) =>
-  iso ? new Date(iso).toLocaleString('en-US', {
-    month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  }) : '—';
-
-/** Label + value row. `mono` for ids and keys. */
-function Field({ label, children, mono }: { label: string; children: React.ReactNode; mono?: boolean }) {
-  return (
-    <div className="lead-field">
-      <div className="lead-field-label">{label}</div>
-      <div
-        className="lead-field-value"
-        style={mono ? { fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } : undefined}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-const Ext = ({ href, children }: { href: string; children?: React.ReactNode }) => (
-  <a href={href} target="_blank" rel="noopener noreferrer">{children || href}</a>
-);
-
-const muted = (t: string) => <span style={{ color: 'var(--text3)' }}>{t}</span>;
+import { Ext, Field, fmtDateTime as fmt, muted } from './DetailFields';
 
 export default function LeadDetailModal({ lead, allLeads, outcome, onSaved, onClose, onMove, onDelete }: {
   lead: Lead;

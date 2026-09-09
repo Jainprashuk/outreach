@@ -21,6 +21,14 @@ const settingsSchema = new mongoose.Schema({
   customVariables: { type: [variableSchema], default: [] },
   resume: { type: resumeSchema, default: null },
   lastMailboxCheckAt: { type: Date, default: null },
+
+  // ── Job-posting sync (see lib/postingSync.js) ────────────────────────────
+  // Scalars, so the singleton is the right home; the boards themselves are a
+  // collection because they carry per-board state written on every run.
+  lastPostingSyncAt: { type: Date, default: null },
+  // Advisory lease. Stops two tabs, or cron plus a click, from syncing at once.
+  // Held for at most LOCK_TTL_MS so a killed invocation self-heals.
+  postingSyncLockAt: { type: Date, default: null },
 }, { timestamps: true });
 
 settingsSchema.set('toJSON', {

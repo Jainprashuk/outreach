@@ -1,0 +1,21 @@
+name: Sync job postings
+
+on:
+  workflow_dispatch:      # allows manual trigger from the GitHub Actions tab
+  schedule:
+    - cron: '17 */6 * * *'   # 4x/day, offset off the hour to avoid the rush
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger posting sync
+        run: |
+          code=$(curl -s -o /tmp/out.json -w '%{http_code}' -X POST \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.VERCEL_APP_URL }}/api/postings/sync")
+          echo "HTTP $code"
+          cat /tmp/out.json; echo
+          # Fail loudly. A silently-swallowed 401 is exactly how the mailbox cron
+          # went unnoticed, so this job must go red rather than print a shrug.
+          test "$code" = "200"

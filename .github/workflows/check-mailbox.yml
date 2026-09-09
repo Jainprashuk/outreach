@@ -11,5 +11,12 @@ jobs:
     steps:
       - name: Trigger mailbox check
         run: |
-          curl -s -f -X POST ${{ secrets.VERCEL_APP_URL }}/api/check-mailbox \
-            || echo "Check returned non-2xx (non-critical, will retry next run)"
+          # /api/check-mailbox sits behind requireAuth, so this needs a credential.
+          # Without one it returned 401 and the old `|| echo "non-critical"` hid it,
+          # which meant this cron did nothing at all whenever AUTH_PASSWORD was set.
+          code=$(curl -s -o /tmp/out.json -w '%{http_code}' -X POST \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.VERCEL_APP_URL }}/api/check-mailbox")
+          echo "HTTP $code"
+          cat /tmp/out.json; echo
+          test "$code" = "200"

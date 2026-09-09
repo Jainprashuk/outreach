@@ -5,81 +5,13 @@ import {
   type LeadFilters, type SortKey, type TriState,
 } from '../lib/leadFilters';
 import type { LinkType } from '../lib/linkTypes';
+import { Group, MultiCheck, Tri } from './FilterControls';
 import { STAGE_LABELS, STAGE_ORDER, type OutcomeStage } from '../lib/leadOutcome';
 import { APPLY_STATUS_LABELS, APPLY_STATUS_ORDER } from '../lib/leads';
 import type { ApplyStatus } from '../lib/api';
 
 const fmtRun = (iso: string) =>
   new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-
-function Group({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) {
-  return (
-    <div className="form-group" style={wide ? { gridColumn: '1 / -1' } : undefined}>
-      <label className="form-label">{label}</label>
-      {children}
-    </div>
-  );
-}
-
-/** Yes / No / Any — the shape most of these fields take. */
-function Tri({ value, onChange, yes = 'Yes', no = 'No' }: {
-  value: TriState; onChange: (v: TriState) => void; yes?: string; no?: string;
-}) {
-  return (
-    <select value={value} onChange={e => onChange(e.target.value as TriState)}>
-      <option value="any">Any</option>
-      <option value="yes">{yes}</option>
-      <option value="no">{no}</option>
-    </select>
-  );
-}
-
-/** Checkbox list — a native multi-select is unusable at these option counts. */
-function MultiCheck({ options, selected, onChange, empty, search }: {
-  options: Array<{ value: string; n: number; label?: string }>;
-  selected: string[];
-  onChange: (v: string[]) => void;
-  empty: string;
-  search?: boolean;
-}) {
-  const [q, setQ] = useState('');
-  if (options.length === 0) return <div style={{ fontSize: 11, color: 'var(--text3)' }}>{empty}</div>;
-
-  const shown = q.trim()
-    ? options.filter(o => (o.label || o.value).toLowerCase().includes(q.trim().toLowerCase()))
-    : options;
-  const toggle = (v: string) =>
-    onChange(selected.includes(v) ? selected.filter(x => x !== v) : [...selected, v]);
-
-  return (
-    <div>
-      {search && options.length > 8 && (
-        <input type="text" placeholder={`Filter ${options.length} options…`} value={q}
-          onChange={e => setQ(e.target.value)} style={{ marginBottom: 6, fontSize: 12 }} />
-      )}
-      <div style={{
-        maxHeight: 150, overflowY: 'auto', border: '0.5px solid var(--border)',
-        borderRadius: 'var(--radius-lg)', padding: '6px 8px',
-      }}>
-        {shown.length === 0 && <div style={{ fontSize: 11, color: 'var(--text3)' }}>No match</div>}
-        {shown.map(o => (
-          <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '3px 0', fontSize: 12, cursor: 'pointer' }}>
-            <input type="checkbox" checked={selected.includes(o.value)} onChange={() => toggle(o.value)} />
-            <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {o.label || o.value}
-            </span>
-            <span style={{ color: 'var(--text3)', fontSize: 11 }}>{o.n}</span>
-          </label>
-        ))}
-      </div>
-      {selected.length > 0 && (
-        <button className="btn btn-xs" type="button" style={{ marginTop: 6 }} onClick={() => onChange([])}>
-          Clear {selected.length} selected
-        </button>
-      )}
-    </div>
-  );
-}
 
 export default function LeadFilterPanel({ leads, filters, onChange, onReset, matched, onClose }: {
   leads: Lead[];
