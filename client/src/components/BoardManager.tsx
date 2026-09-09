@@ -1,6 +1,12 @@
 import { useEffect, useState } from 'react';
-import type { BoardPreview, BoardQuery, BoardSource, JobBoard, Lead, Posting, SourceInfo } from '../lib/api';
-import { createBoardApi, deleteBoardApi, loadSourcesApi, previewBoardApi, updateBoardApi } from '../lib/api';
+import type {
+  BoardPreview, BoardQuery, BoardSource, JobBoard, Lead, MuseCompany, Posting,
+  SourceInfo, StarterBoard,
+} from '../lib/api';
+import {
+  createBoardApi, deleteBoardApi, loadCompaniesApi, loadSourcesApi,
+  loadStarterBoardsApi, previewBoardApi, updateBoardApi,
+} from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import {
   BOARD_STATUS_BADGE, BOARD_STATUS_LABELS, boardLabel, describeQuery, isSearchSource,
@@ -31,6 +37,30 @@ export default function BoardManager({ boards, postings, leads, onChanged, onSyn
   const [sources, setSources] = useState<Record<string, SourceInfo> | null>(null);
 
   useEffect(() => { loadSourcesApi().then(r => setSources(r.sources)).catch(() => setSources(null)); }, []);
+
+  // A curated, pre-verified list, because no ATS vendor will enumerate its
+  // customers. Cheap and static, so load it up front.
+  const [starter, setStarter] = useState<StarterBoard[]>([]);
+  const [starterQ, setStarterQ] = useState('');
+  useEffect(() => { loadStarterBoardsApi().then(r => setStarter(r.starterBoards)).catch(() => setStarter([])); }, []);
+
+  // The Muse's ~950-company directory. Loaded on demand: it is 49 upstream
+  // pages (~10s cold), so it would be rude to fetch it on every mount.
+  const [companies, setCompanies] = useState<MuseCompany[] | null>(null);
+  const [companiesLoading, setCompaniesLoading] = useState(false);
+  const [companyQ, setCompanyQ] = useState('');
+  const loadCompanies = async () => {
+    setCompaniesLoading(true);
+    try {
+      const r = await loadCompaniesApi();
+      setCompanies(r.companies);
+      if (r.error) toast(`Company list may be incomplete: ${r.error}`, 'info');
+    } catch (err) {
+      toast(err instanceof Error ? err.message : 'Could not load companies', 'error');
+    } finally {
+      setCompaniesLoading(false);
+    }
+  };
 
   const info = sources ? sources[source] : null;
   const searching = isSearchSource(source);
@@ -216,6 +246,86 @@ export default function BoardManager({ boards, postings, leads, onChanged, onSyn
           </div>
         </div>
       )}
+
+      {/* No ATS vendor publishes a customer directory, so a curated list is the
+          only way to offer a pick-from-a-list flow for company boards. */}
+      {starter.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+            <label className="form-label" style={{ margin: 0 }}>
+              Pick a known company ({starter.length})
+            </label>
+            <input type="text" placeholder="Filter…" value={starterQ}
+              onChange={e => setStarterQ(e.target.value)}
+              style={{ fontSize: 12, width: 160, marginLeft: 'auto' }} />
+          </div>
+          <div style={{
+            maxHeight: 170, overflowY: 'auto', border: '0.5px solid var(--border)',
+            borderRadius: 'var(--radius-lg)', padding: '8px', display: 'flex',
+            flexWrap: 'wrap', gap: 6,
+          }}>
+            {starter
+              .filter(b => !boards.some(x => x.source === b.source && x.token === b.token))
+              .filter(b => !starterQ.trim() || b.name.toLowerCase().includes(starterQ.trim().toLowerCase()))
+              .map(b => (
+                <button key={`${b.source}:${b.token}`} className="btn btn-xs" type="button" disabled={adding}
+                  onClick={() => add(b.source, b.token, b.name)}
+                  title={`${SOURCE_LABELS[b.source]} · ${b.token} — roughly ${b.approxRoles} roles when last checked`}>
+                  <i className="ti ti-plus" /> {b.name}
+                  <span style={{ color: 'var(--text3)', marginLeft: 4 }}>{b.approxRoles}</span>
+                </button>
+              ))}
+          </div>
+          <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>
+            Each was verified against the live API, and the counts are a snapshot — the real number
+            is fetched when you add it. Anything that has since moved ATS shows up as a clean “not found”.
+          </div>
+        </div>
+      )}
+
+      {/* The Muse is the ONLY source with a real company directory. */}
+      <div style={{ marginBottom: 14 }}>
+        {companies === null ? (
+          <button className="btn btn-sm" type="button" onClick={loadCompanies} disabled={companiesLoading}>
+            <i className={`ti ti-${companiesLoading ? 'loader' : 'building-store'}`} />
+            {companiesLoading ? ' Loading ~950 companies…' : ' Browse The Muse company list'}
+          </button>
+        ) : (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <label className="form-label" style={{ margin: 0 }}>
+                The Muse companies ({companies.length})
+              </label>
+              <input type="text" placeholder="Search companies…" value={companyQ}
+                onChange={e => setCompanyQ(e.target.value)}
+                style={{ fontSize: 12, width: 200, marginLeft: 'auto' }} />
+            </div>
+            <div style={{
+              maxHeight: 170, overflowY: 'auto', border: '0.5px solid var(--border)',
+              borderRadius: 'var(--radius-lg)', padding: '8px', display: 'flex',
+              flexWrap: 'wrap', gap: 6,
+            }}>
+              {(companyQ.trim()
+                ? companies.filter(c => c.name.toLowerCase().includes(companyQ.trim().toLowerCase()))
+                : companies
+              ).slice(0, 120).map(c => (
+                <button key={c.token} className="btn btn-xs" type="button" disabled={adding}
+                  onClick={() => add('muse', c.token, c.name, { company: c.name })}
+                  title={[c.size, ...(c.industries || [])].filter(Boolean).join(' · ')}>
+                  <i className="ti ti-plus" /> {c.name}
+                </button>
+              ))}
+              {companyQ.trim() &&
+                companies.filter(c => c.name.toLowerCase().includes(companyQ.trim().toLowerCase())).length === 0 && (
+                  <span style={{ fontSize: 12, color: 'var(--text3)' }}>No match.</span>
+                )}
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>
+              Adds a saved search scoped to that employer. Showing the first 120 — type to narrow.
+            </div>
+          </>
+        )}
+      </div>
 
       <div className="form-grid">
         <div className="form-group">

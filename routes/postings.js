@@ -5,6 +5,8 @@ const Settings = require('../models/Settings');
 const boards = require('../lib/boards');
 const { syncAllBoards, MASS_CLOSE_WARN } = require('../lib/postingSync');
 const { normaliseCriteria, matchesCriteria, DEFAULTS: CRITERIA_DEFAULTS } = require('../lib/criteria');
+const { listCompanies } = require('../lib/boards/museCompanies');
+const { STARTER_BOARDS } = require('../lib/boards/starterBoards');
 
 const router = express.Router();
 
@@ -41,7 +43,7 @@ const serializeBoard = (doc) => {
 
 const BASE_FILTER = { deleted: { $ne: true } };
 
-const QUERY_FIELDS = ['category', 'industry', 'level', 'location', 'geo', 'tag'];
+const QUERY_FIELDS = ['category', 'company', 'industry', 'level', 'location', 'geo', 'tag'];
 const pickQuery = (src) => {
   const q = {};
   for (const k of QUERY_FIELDS) {
@@ -155,6 +157,33 @@ router.get('/sources', (_req, res) => {
     };
   }
   res.json({ sources: out });
+});
+
+// GET /api/postings/companies — The Muse's employer directory (~950), for a
+// searchable dropdown. It is the ONLY source here that publishes one: Greenhouse
+// /v1/boards is a 404, Lever /v0/postings is a 404, and Ashby's board root is a
+// 401. Cached server-side for a day; the full fetch is 49 pages / ~10s.
+router.get('/companies', async (req, res) => {
+  try {
+    const out = await listCompanies({ force: req.query.refresh === '1' });
+    res.json({
+      companies: out.companies,
+      cached: out.cached,
+      pages: out.pages,
+      error: out.error,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/postings/starter-boards — a curated list of well-known company
+// boards, since no ATS vendor will enumerate its customers. Every entry was
+// verified against the live API when it was added; tokens can still go stale as
+// companies switch vendors, so the UI runs each through the preview before it
+// can be added.
+router.get('/starter-boards', (_req, res) => {
+  res.json({ starterBoards: STARTER_BOARDS });
 });
 
 // ── Boards ──────────────────────────────────────────────────────────────────

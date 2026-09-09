@@ -367,6 +367,7 @@ export interface Posting {
  *  its own vocabulary server-side. */
 export interface BoardQuery {
   category?: string;   // muse
+  company?: string;    // muse — scopes a search to one employer
   industry?: string;   // jobicy
   level?: string;      // both
   location?: string;   // muse
@@ -478,6 +479,22 @@ export interface SourceInfo {
   levels: string[] | null;
 }
 
+export interface MuseCompany {
+  name: string;
+  token: string;
+  size: string;
+  industries: string[];
+}
+
+/** A curated, pre-verified company board. `approxRoles` is a snapshot and goes
+ *  stale — the live count comes from the preview. */
+export interface StarterBoard {
+  source: BoardSource;
+  token: string;
+  name: string;
+  approxRoles: number;
+}
+
 export interface BoardPreview {
   kind: 'ok' | 'empty' | 'not-found' | 'error';
   httpStatus: number | null;
@@ -514,6 +531,14 @@ export const previewBoardApi = (body: { source: BoardSource; token: string } & B
   apiFetch<BoardPreview>('/api/postings/boards/preview', {
     method: 'POST', body: JSON.stringify(body),
   });
+
+/** The Muse's employer directory — the only source here that publishes one. */
+export const loadCompaniesApi = (refresh = false) =>
+  apiFetch<{ companies: MuseCompany[]; cached: boolean; pages: number; error: string | null }>(
+    `/api/postings/companies${refresh ? '?refresh=1' : ''}`);
+
+export const loadStarterBoardsApi = () =>
+  apiFetch<{ starterBoards: StarterBoard[] }>('/api/postings/starter-boards');
 
 export const loadSourcesApi = () =>
   apiFetch<{ sources: Record<BoardSource, SourceInfo> }>('/api/postings/sources');

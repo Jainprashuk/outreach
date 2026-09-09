@@ -15,6 +15,7 @@ const jobBoardSchema = new mongoose.Schema({
   // validated by its adapter.
   query: {
     category: { type: String, default: '' },   // muse
+    company:  { type: String, default: '' },   // muse — scope to one employer
     industry: { type: String, default: '' },   // jobicy
     level:    { type: String, default: '' },   // both
     location: { type: String, default: '' },   // muse
