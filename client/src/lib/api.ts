@@ -595,3 +595,113 @@ export const deletePostingsApi = (ids: string[]) =>
   apiFetch<{ ok: boolean; deleted: number }>('/api/postings/bulk-delete', {
     method: 'POST', body: JSON.stringify({ ids }),
   });
+
+// ── Interviews ──────────────────────────────────────────────────────────────
+// People who actually got back to you. A separate store from Contact/Lead: the
+// source row keeps its own journey, this record carries the conversation.
+
+export type InterviewStatus =
+  | 'initial-discussion' | 'asked-to-schedule' | 'scheduled'
+  | 'in-process' | 'selected' | 'rejected';
+
+export type InterviewSource = 'contact' | 'lead' | 'manual';
+export type InterviewMode = '' | 'call' | 'video' | 'onsite';
+export type WorkMode = '' | 'remote' | 'hybrid' | 'onsite';
+export type InterviewFileKind = 'cv' | 'jd';
+
+export interface InterviewFile {
+  filename: string;
+  contentType: string;
+  size: number;
+  uploadedAt: string;
+}
+
+export interface Interview {
+  id: string;
+  sourceType: InterviewSource;
+  sourceId: string | null;
+  name: string;
+  email: string;
+  phone: string;
+  company: string;
+  role: string;
+  status: InterviewStatus;
+  rejectionReason: string;
+  interviewAt: string | null;
+  round: string;
+  mode: InterviewMode;
+  meetingLink: string;
+  expectedCtc: string;
+  offeredCtc: string;
+  noticePeriod: string;
+  location: string;
+  workMode: WorkMode;
+  notes: string;
+  cv: InterviewFile | null;
+  jd: InterviewFile | null;
+  statusHistory?: StatusHistoryEntry[];
+  /** Bumped by every status change, edit, upload or explicit follow-up. */
+  lastActivityAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Everything the create/edit forms can send. `note` annotates the history entry. */
+export type InterviewPatch = Partial<Omit<Interview,
+  'id' | 'cv' | 'jd' | 'statusHistory' | 'lastActivityAt' | 'createdAt' | 'updatedAt'>>
+  & { note?: string };
+
+export const loadInterviewsApi = () => apiFetch<Interview[]>('/api/interviews');
+
+/** 409 means this person already has a record — the caller opens that instead. */
+export class AlreadyTrackedError extends Error {
+  interview: Interview;
+  constructor(interview: Interview) {
+    super('This person is already being tracked in Interviews');
+    this.name = 'AlreadyTrackedError';
+    this.interview = interview;
+  }
+}
+
+export async function createInterviewApi(body: InterviewPatch): Promise<Interview> {
+  const res = await fetch(`${API_BASE}/api/interviews`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (res.status === 409 && data.interview) throw new AlreadyTrackedError(data.interview);
+  if (!res.ok) throw new Error(data.error || 'Could not add to interviews');
+  return data as Interview;
+}
+
+export const updateInterviewApi = (id: string, patch: InterviewPatch) =>
+  apiFetch<Interview>(`/api/interviews/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+
+export const markInterviewFollowedUpApi = (id: string, note?: string) =>
+  apiFetch<Interview>(`/api/interviews/${id}/followed-up`, {
+    method: 'POST', body: JSON.stringify({ note }),
+  });
+
+export const deleteInterviewApi = (id: string) =>
+  apiFetch<{ ok: boolean }>(`/api/interviews/${id}`, { method: 'DELETE' });
+
+export async function uploadInterviewFileApi(
+  id: string, kind: InterviewFileKind, file: File,
+): Promise<Interview> {
+  const formData = new FormData();
+  formData.append('file', file);
+  // No Content-Type header — the browser must set the multipart boundary itself.
+  const res = await fetch(`${API_BASE}/api/interviews/${id}/file/${kind}`, {
+    method: 'POST', body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Upload failed');
+  return data as Interview;
+}
+
+export const deleteInterviewFileApi = (id: string, kind: InterviewFileKind) =>
+  apiFetch<Interview>(`/api/interviews/${id}/file/${kind}`, { method: 'DELETE' });
+
+export const interviewFileUrl = (id: string, kind: InterviewFileKind) =>
+  `${API_BASE}/api/interviews/${id}/file/${kind}`;

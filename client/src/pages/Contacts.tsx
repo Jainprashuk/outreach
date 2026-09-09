@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import StatusBadge from '../components/StatusBadge';
+import InterviewCell from '../components/InterviewCell';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { API_BASE, resetForSendApi, type Contact } from '../lib/api';
@@ -259,16 +260,16 @@ export default function Contacts() {
                   ref={el => { if (el) el.indeterminate = !allChecked && someChecked; }}
                   onChange={e => toggleAll(e.target.checked)} title="Select all" />
               </th>
-              <th>Contact</th><th>Company</th><th>Role</th><th>Template</th><th>Status</th><th>Approval</th><th></th>
+              <th>Contact</th><th>Company</th><th>Role</th><th>Template</th><th>Status</th><th>Approval</th><th>Interview</th><th></th>
             </tr>
           </thead>
           <tbody>
             {busy ? (
-              <SkeletonRows rows={8} cols={8} chipCol={1} />
+              <SkeletonRows rows={8} cols={9} chipCol={1} />
             ) : error ? (
-              <tr><td colSpan={8}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
+              <tr><td colSpan={9}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
             ) : paged.length === 0 ? (
-              <tr><td colSpan={8}><div className="empty-state"><i className="ti ti-users" />No contacts found</div></td></tr>
+              <tr><td colSpan={9}><div className="empty-state"><i className="ti ti-users" />No contacts found</div></td></tr>
             ) : paged.map(c => (
               <tr key={c.id}>
                 <td className="cb-col">
@@ -298,6 +299,14 @@ export default function Contacts() {
                   </div>
                 </td>
                 <td><StatusBadge status={c.approvalStatus} /></td>
+                <td>
+                  {/* Additive: links to the interview record, or starts one.
+                      Never writes to the contact's own status. */}
+                  <InterviewCell seed={{
+                    sourceType: 'contact', sourceId: c.id,
+                    name: c.name, email: c.email, company: c.company, role: c.role,
+                  }} />
+                </td>
                 <td>
                   <button className="btn btn-sm" onClick={() => confirmDelete(c)} title="Delete contact" type="button">
                     <i className="ti ti-trash" />

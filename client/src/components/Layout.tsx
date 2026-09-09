@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useTheme } from '../hooks/useTheme';
 import { useSession } from '../context/SessionContext';
+import { useInterviews } from '../context/InterviewContext';
 import SendJobWidget from './SendJobWidget';
 
 function switchToClassic() {
@@ -18,7 +19,11 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
 }) {
   const { toggleTheme } = useTheme(); // applies data-theme + provides the toggle
   const { owner } = useSession();
+  const { reminders } = useInterviews();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Everything the reminder popup would nag about, surfaced permanently in the rail
+  // so a dismissed popup doesn't mean a forgotten interview.
+  const needsAttention = reminders.soon.length + reminders.stale.length;
 
   const nav = (
     <>
@@ -29,27 +34,34 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
       <NavLink to="/" end className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-layout-dashboard" /> Dashboard
       </NavLink>
-      <NavLink to="/leads" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-target-arrow" /> Leads
+      <NavLink to="/analytics" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-chart-histogram" /> Analytics
       </NavLink>
-      {/* Leads + Jobs are "finding work"; Contacts onward is "emailing people". */}
-      <NavLink to="/jobs" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-briefcase" /> Jobs
-      </NavLink>
-      <NavLink to="/contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-users" /> Contacts
+      {/* High up on purpose: the people who actually got back to you are the
+          ones worth checking first. Both Contacts and Leads feed this. */}
+      <NavLink to="/interviews" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-user-check" /> Interviews
+        {needsAttention > 0 && (
+          <span className="tab-badge" title="Upcoming interviews or follow-ups due">{needsAttention}</span>
+        )}
       </NavLink>
       <NavLink to="/add-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-user-plus" /> Add Contacts
       </NavLink>
-      <NavLink to="/export-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-file-export" /> Export Contacts
+      <NavLink to="/contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-users" /> Contacts
+      </NavLink>
+      <NavLink to="/leads" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-target-arrow" /> Leads
+      </NavLink>
+      <NavLink to="/jobs" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-briefcase" /> Jobs
       </NavLink>
       <NavLink to="/templates" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-file-text" /> Templates
       </NavLink>
-      <NavLink to="/analytics" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-chart-histogram" /> Analytics
+      <NavLink to="/export-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-file-export" /> Export Contacts
       </NavLink>
       <div className="nav-section-label">Account</div>
       <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>

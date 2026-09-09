@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
 import Leads from './pages/Leads';
 import Jobs from './pages/Jobs';
+import Interviews from './pages/Interviews';
 import AddContacts from './pages/AddContacts';
 import ExportContacts from './pages/ExportContacts';
 import Templates from './pages/Templates';
@@ -40,6 +41,7 @@ export default function App() {
       <Route path="/" element={owner(<Dashboard />)} />
       <Route path="/leads" element={owner(<Leads />)} />
       <Route path="/jobs" element={owner(<Jobs />)} />
+      <Route path="/interviews" element={owner(<Interviews />)} />
       <Route path="/contacts" element={owner(<Contacts />)} />
       <Route path="/add-contacts" element={owner(<AddContacts />)} />
       <Route path="/export-contacts" element={<ExportContacts />} />

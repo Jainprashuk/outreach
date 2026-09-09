@@ -5,6 +5,7 @@ import Avatar from '../components/Avatar';
 import MoveToOutreachModal from '../components/MoveToOutreachModal';
 import LeadDetailModal from '../components/LeadDetailModal';
 import LeadFilterPanel from '../components/LeadFilterPanel';
+import InterviewCell from '../components/InterviewCell';
 import { SkeletonRows } from '../components/Skeleton';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
@@ -605,6 +606,15 @@ export default function Leads() {
                       </div>
                     );
                   })()}
+                  {/* Additive: the lead's own status and apply journey above are
+                      untouched — this only links to (or starts) an interview record. */}
+                  <div style={{ marginTop: 3 }} onClick={e => e.stopPropagation()}>
+                    <InterviewCell compact seed={{
+                      sourceType: 'lead', sourceId: l.id,
+                      name: l.authorName, email: l.email || '',
+                      company: deriveCompany(l), role: l.role,
+                    }} />
+                  </div>
                 </td>
                 <td>
                   <button className="btn btn-sm" onClick={() => confirmDelete(l)} title="Delete lead" type="button">

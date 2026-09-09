@@ -9,6 +9,7 @@ import {
 import { APPLYABLE, classifyLink, LINK_TYPE_META } from '../lib/linkTypes';
 import { contactBadgeClass, contactStatusLabel, stageOf, STAGE_LABELS } from '../lib/leadOutcome';
 import { Ext, Field, fmtDateTime as fmt, muted } from './DetailFields';
+import InterviewCell from './InterviewCell';
 
 export default function LeadDetailModal({ lead, allLeads, outcome, onSaved, onClose, onMove, onDelete }: {
   lead: Lead;
@@ -151,6 +152,20 @@ export default function LeadDetailModal({ lead, allLeads, outcome, onSaved, onCl
               </div>
             </Field>
           )}
+
+          <div className="section-title" style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '18px 0 2px' }}>Interviews</div>
+          <Field label="Interview track">
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <InterviewCell seed={{
+                sourceType: 'lead', sourceId: lead.id,
+                name: lead.authorName, email: lead.email || '',
+                company: derived, role: lead.role,
+              }} />
+              <span style={{ color: 'var(--text3)', fontSize: 11 }}>
+                Tracked separately — this lead's own status stays as it is.
+              </span>
+            </div>
+          </Field>
 
           <div className="section-title" style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '18px 0 2px' }}>
             Direct application

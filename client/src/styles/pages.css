@@ -125,3 +125,8 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
 .af-what { font-weight: 500; color: var(--text); white-space: nowrap; }
 .af-who { color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .af-when { margin-left: auto; color: var(--text3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+/* ── Interviews ─────────────────────────────────────────────────────────────
+   One extra badge colour; every other interview status reuses an existing
+   .badge-* class from css/style.css so the palette stays consistent. */
+.badge-iv-process { background: var(--purple-bg); color: var(--purple); }

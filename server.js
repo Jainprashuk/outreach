@@ -221,6 +221,9 @@ app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));
 app.use('/api/jobs', requireDb, require('./routes/jobs'));
 app.use('/api/leads', requireDb, require('./routes/leads'));
+// People who actually got back to you. A separate store from Contact/Lead so the
+// outreach and apply journeys above are never written to — see models/Interview.js.
+app.use('/api/interviews', requireDb, require('./routes/interviews'));
 // Job postings pulled from public ATS boards. NOT /api/jobs — that is taken by
 // the email SendJob routes above, and these are job *postings* anyway.
 app.use('/api/postings', requireDb, require('./routes/postings'));
