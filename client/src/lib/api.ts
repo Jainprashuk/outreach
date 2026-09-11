@@ -886,6 +886,10 @@ export interface Timeline {
 export const loadTimelineApi = (granularity: 'day' | 'hour') =>
   apiFetch<Timeline>(`/api/campaigns/timeline?granularity=${granularity}`);
 
+/** Both granularities in one round trip, for the side-by-side view. */
+export const loadTimelinesApi = () =>
+  apiFetch<{ day: Timeline; hour: Timeline }>('/api/campaigns/timeline?granularity=both');
+
 export const loadCampaignsApi = () => apiFetch<Campaign[]>('/api/campaigns');
 
 export const loadCampaignApi = (id: string) => apiFetch<CampaignDetail>(`/api/campaigns/${id}`);

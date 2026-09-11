@@ -94,3 +94,43 @@
   --tl-a: #3987e5;
   --tl-b: #d95926;
 }
+
+/* Small multiples: two measures x two time scales. Two y-scales on one chart is
+   the one thing never to do, so each measure keeps its own plot and they sit
+   side by side instead. */
+.tl-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.tl-plot {
+  background: var(--bg);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 12px 14px 8px;
+  min-width: 0;
+}
+
+.tl-plot svg { width: 100%; height: auto; display: block; overflow: visible; }
+
+.tl-plot-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.tl-plot-head h4 { margin: 0; font-size: 12.5px; font-weight: 600; }
+.tl-plot-head span { font-size: 10.5px; color: var(--text3); }
+
+/* Reserved so the row does not reflow as the pointer moves across bars. */
+.tl-tip {
+  font-size: 11px;
+  color: var(--text2);
+  min-height: 18px;
+  margin-top: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tl-note p { margin: 0; font-size: 11.5px; color: var(--text3); line-height: 1.65; }
+
+@media (max-width: 900px) {
+  .tl-grid { grid-template-columns: 1fr; }
+}
