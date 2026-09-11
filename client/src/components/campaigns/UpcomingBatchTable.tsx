@@ -22,8 +22,27 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [deepScanning, setDeepScanning] = useState(false);
+  const [deepScanned, setDeepScanned] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
   const cbRef = useRef<HTMLInputElement>(null);
+
+  /** Read the WHOLE sheet, not just far enough to fill one batch. */
+  const deepScan = async () => {
+    setDeepScanning(true);
+    try {
+      // want=400 raises the scan cap to 4,000 rows, which covers any sheet this
+      // size. It stops early once it finds 400 sendable — enough either way to
+      // answer the question.
+      setPreview(await previewCampaignApi(campaign.id, 400));
+      setDeepScanned(true);
+      setLoadError('');
+    } catch (err) {
+      setLoadError((err as Error).message || 'The deeper scan could not finish');
+    } finally {
+      setDeepScanning(false);
+    }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -129,6 +148,25 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
           <button className="btn btn-sm" type="button" onClick={load}>
             <i className="ti ti-refresh" /> Try again
           </button>
+        )}
+        {preview.capped && !deepScanned && (
+          <div>
+            <button className="btn btn-sm btn-primary" type="button"
+              disabled={deepScanning} onClick={deepScan}>
+              {deepScanning
+                ? <><i className="ti ti-loader-2" style={{ animation: 'spin 1s linear infinite' }} /> Reading the whole sheet…</>
+                : <><i className="ti ti-search" /> Scan the rest of the sheet</>}
+            </button>
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 8 }}>
+              Checks all {preview.remainingPending.toLocaleString()} remaining rows so you can see how many
+              are genuinely new. Nothing is sent and nothing is changed.
+            </div>
+          </div>
+        )}
+        {deepScanned && preview.exhausted && (
+          <div style={{ fontSize: 12, color: 'var(--amber)', marginTop: 4 }}>
+            Every row in this sheet is already in your Contacts — there is nobody new to email.
+          </div>
         )}
       </div>
     );

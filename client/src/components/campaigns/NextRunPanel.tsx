@@ -75,7 +75,10 @@ export default function NextRunPanel({ campaign, cronConfigured }: {
         {/* The schedule is a cron, not a promise — say so rather than letting a
             precise-looking countdown imply a guarantee. */}
         <div style={{ color: 'var(--text3)', marginTop: 4 }}>
-          Releases are triggered by an hourly job, so the real start can be 5–30 minutes later than shown.
+          This is the earliest the batch can go out, not a guarantee. Releases are triggered by a
+          scheduled job that GitHub runs when it has capacity — often hours late — so the batch goes
+          out on the first trigger at or after the time above. An early send hour leaves more of the
+          day for one to land.
           {cronConfigured === false && (
             <strong style={{ color: 'var(--amber)' }}>
               {' '}CRON_SECRET isn't configured, so nothing will fire on its own — use “Run now”.
