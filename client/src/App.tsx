@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
 import Leads from './pages/Leads';
 import Jobs from './pages/Jobs';
+import CampaignsRouter from './pages/campaigns/CampaignsRouter';
 import Interviews from './pages/Interviews';
 import AddContacts from './pages/AddContacts';
 import ExportContacts from './pages/ExportContacts';
@@ -41,6 +42,8 @@ export default function App() {
       <Route path="/" element={owner(<Dashboard />)} />
       <Route path="/leads" element={owner(<Leads />)} />
       <Route path="/jobs" element={owner(<Jobs />)} />
+      {/* Splat route: the list, wizard and detail screens live in CampaignsRouter. */}
+      <Route path="/campaigns/*" element={owner(<CampaignsRouter />)} />
       <Route path="/interviews" element={owner(<Interviews />)} />
       <Route path="/contacts" element={owner(<Contacts />)} />
       <Route path="/add-contacts" element={owner(<AddContacts />)} />

@@ -57,7 +57,7 @@ const tokenMatches = (candidate, expected) => {
 
 // EXACT paths only, never a prefix — so a future /api/postings/* endpoint is not
 // reachable with a cron secret just because the sync endpoint is.
-const CRON_PATHS = new Set(['/api/postings/sync', '/api/check-mailbox']);
+const CRON_PATHS = new Set(['/api/postings/sync', '/api/check-mailbox', '/api/campaigns/run-due']);
 
 const isCron = (req) => {
   if (!CRON_TOKEN) return false;   // unset secret => carve-out is inert
@@ -227,6 +227,7 @@ app.use('/api/interviews', requireDb, require('./routes/interviews'));
 // Job postings pulled from public ATS boards. NOT /api/jobs — that is taken by
 // the email SendJob routes above, and these are job *postings* anyway.
 app.use('/api/postings', requireDb, require('./routes/postings'));
+app.use('/api/campaigns', requireDb, require('./routes/campaigns'));
 
 // ── Inngest handler ─────────────────────────────────────────────────────────
 const { serve } = require('inngest/express');

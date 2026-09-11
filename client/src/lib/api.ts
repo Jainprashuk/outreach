@@ -705,3 +705,207 @@ export const deleteInterviewFileApi = (id: string, kind: InterviewFileKind) =>
 
 export const interviewFileUrl = (id: string, kind: InterviewFileKind) =>
   `${API_BASE}/api/interviews/${id}/file/${kind}`;
+
+// ── Campaigns ───────────────────────────────────────────────────────────────
+// A Campaign owns a list of CampaignRows and releases them in daily batches.
+// Each released batch creates one ordinary SendJob with sendMode 'drip', so the
+// existing job widget, /api/jobs/* and analytics keep working untouched — a
+// campaign is a scheduler on top of SendJob, not a replacement.
+
+export type CampaignStatus = 'draft' | 'running' | 'paused' | 'completed' | 'failed';
+
+export type CampaignRowStatus = 'pending' | 'queued' | 'released' | 'skipped' | 'removed';
+
+export type CampaignSkipReason =
+  | 'blank_email' | 'invalid_email' | 'duplicate_in_file' | 'duplicate_contact'
+  | 'removed_by_user' | 'queue_failed' | 'render_empty';
+
+export interface CampaignStats {
+  total: number; pending: number; released: number; skipped: number; removed: number;
+  queued?: number;
+}
+
+/** One day the runner actually released. Embedded on the campaign, newest last. */
+export interface CampaignRelease {
+  releasedOn: string;              // 'YYYY-MM-DD' in IST
+  trigger: 'cron' | 'manual';
+  jobId: string | null;
+  released: number;
+  skipped: number;
+  scanned: number;
+  exhausted: boolean;
+  error: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+}
+
+/** Stored for display only — the client applied the mapping before uploading. */
+export interface CampaignColumnMap {
+  name?: number[] | null;
+  email?: number | null;
+  company?: number | null;
+  role?: number | null;
+}
+
+export interface Campaign {
+  id: string;
+  name: string;
+  fileName: string;
+  templateKey: string;
+  status: CampaignStatus;
+  contactsPerDay: number;
+  ratePerHour: number;
+  runHourIst: number;              // 0-23, Asia/Kolkata
+  attachResume: boolean;
+  columnMap: CampaignColumnMap;
+  sourceColumns: string[];
+  headerRow: number;
+  stats: CampaignStats;
+  lastReleaseOn: string | null;
+  lastReleaseAt: string | null;
+  lastJobId: string | null;
+  lastError: string | null;
+  releases: CampaignRelease[];
+  completedAt: string | null;
+  pausedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CampaignRow {
+  id: string;
+  campaignId: string;
+  rowIndex: number;
+  sourceRow: number;               // 1-based line in the original sheet
+  name: string;
+  email: string;
+  company: string;
+  role: string;
+  extras: { k: string; v: string }[];
+  status: CampaignRowStatus;
+  skipReason: CampaignSkipReason | null;
+  contactId: string | null;
+  jobId: string | null;
+  releasedAt: string | null;
+  releasedOn: string | null;
+}
+
+/** Per-batch send outcome, so a drip that failed wholesale is visible. */
+export interface CampaignJobSummary {
+  id: string;
+  status: SendJob['status'];
+  sendMode: string;
+  ratePerHour: number;
+  createdAt: string;
+  total: number; sent: number; failed: number; skipped: number; pending: number;
+}
+
+export interface CampaignDetail {
+  campaign: Campaign;
+  jobSummaries: CampaignJobSummary[];
+}
+
+export interface CampaignMeta {
+  dailyCap: number;
+  sentToday: number;
+  inFlight: number;
+  headroom: number;
+  todayIst: string;
+  cronConfigured: boolean;
+  credentialSource: 'env' | 'none';
+  running: number;
+  paused: number;
+  dailyCommitment: number;
+}
+
+/** A row after the client has applied the column mapping. */
+export interface CampaignRowInput {
+  name: string; email: string; company: string; role: string;
+  extras: { k: string; v: string }[];
+  row: number;
+}
+
+/** Byte-identical to what the release will send — same renderer, same inputs. */
+export interface CampaignPreview {
+  campaignId: string;
+  date: string;
+  templateMissing: boolean;
+  willRelease: Array<CampaignRowInput & { id: string; rowIndex: number; subject: string; body: string }>;
+  willSkip: Array<{ id: string; rowIndex: number; sourceRow: number; name: string; email: string; reason: CampaignSkipReason }>;
+  scanned: number;
+  exhausted: boolean;
+  remainingPending: number;
+}
+
+export interface CampaignReleaseReport {
+  ok: boolean;
+  reason?: string;
+  campaignId: string;
+  name?: string;
+  released: number;
+  skipped: number;
+  scanned: number;
+  exhausted: boolean;
+  jobId: string | null;
+  error: string | null;
+}
+
+export const loadCampaignsApi = () => apiFetch<Campaign[]>('/api/campaigns');
+
+export const loadCampaignApi = (id: string) => apiFetch<CampaignDetail>(`/api/campaigns/${id}`);
+
+export const loadCampaignMetaApi = () => apiFetch<CampaignMeta>('/api/campaigns/meta');
+
+/** Phase 1 of creation: config + mapping metadata, no rows. Returns a draft. */
+export const createCampaignApi = (body: {
+  name: string; templateKey: string; contactsPerDay: number; ratePerHour: number;
+  runHourIst: number; attachResume: boolean;
+  columnMap: CampaignColumnMap; sourceColumns: string[]; headerRow: number; fileName: string;
+}) => apiFetch<Campaign>('/api/campaigns', { method: 'POST', body: JSON.stringify(body) });
+
+/** Phase 2: rows, in byte-budgeted chunks. `last: true` flips draft -> running. */
+export const appendCampaignRowsApi = (
+  id: string, payload: { startIndex: number; rows: CampaignRowInput[]; last: boolean },
+) => apiFetch<{ ok: boolean; inserted: number; duplicates: number; received: number;
+                totalRows: number; campaign: Campaign }>(
+  `/api/campaigns/${id}/rows`, { method: 'POST', body: JSON.stringify(payload) });
+
+export const loadCampaignRowsApi = (id: string, params?: Record<string, string>) =>
+  apiFetch<{ rows: CampaignRow[]; total: number; page: number; limit: number; pages: number }>(
+    `/api/campaigns/${id}/rows${params ? '?' + new URLSearchParams(params) : ''}`);
+
+export const previewCampaignApi = (id: string, limit?: number) =>
+  apiFetch<CampaignPreview>(`/api/campaigns/${id}/preview${limit ? `?limit=${limit}` : ''}`);
+
+export const updateCampaignApi = (id: string, patch: Partial<Pick<Campaign,
+  'name' | 'contactsPerDay' | 'ratePerHour' | 'runHourIst' | 'templateKey' | 'attachResume'>>) =>
+  apiFetch<Campaign>(`/api/campaigns/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+
+/** Stops FUTURE releases only — a batch already in flight finishes on its own. */
+export const pauseCampaignApi = (id: string) =>
+  apiFetch<{ campaign: Campaign; inFlightJobs: Array<{ id: string; status: string; pending: number }> }>(
+    `/api/campaigns/${id}/pause`, { method: 'POST' });
+
+export const resumeCampaignApi = (id: string, releaseNow = false) =>
+  apiFetch<{ campaign: Campaign; released: CampaignReleaseReport | null }>(
+    `/api/campaigns/${id}/resume`, { method: 'POST', body: JSON.stringify({ releaseNow }) });
+
+export const runCampaignNowApi = (id: string, force = false) =>
+  apiFetch<CampaignReleaseReport>(`/api/campaigns/${id}/run-now`, {
+    method: 'POST', body: JSON.stringify({ force }),
+  });
+
+/** 409 when the rows are no longer pending — the batch already started sending. */
+export const removeCampaignRowsApi = (id: string, ids: string[]) =>
+  apiFetch<{ ok: boolean; removed: number }>(`/api/campaigns/${id}/rows/remove`, {
+    method: 'POST', body: JSON.stringify({ ids }),
+  });
+
+export const restoreCampaignRowsApi = (id: string, ids: string[]) =>
+  apiFetch<{ ok: boolean; restored: number }>(`/api/campaigns/${id}/rows/restore`, {
+    method: 'POST', body: JSON.stringify({ ids }),
+  });
+
+export const deleteCampaignApi = (id: string, purgeRows = false) =>
+  apiFetch<{ ok: boolean; purgedRows: number }>(
+    `/api/campaigns/${id}${purgeRows ? '?purgeRows=1' : ''}`, { method: 'DELETE' });

@@ -1,0 +1,26 @@
+name: Release campaign batches
+
+on:
+  workflow_dispatch:      # allows manual trigger from the GitHub Actions tab
+  schedule:
+    # Hourly, offset off the hour. Hourly rather than daily because each campaign
+    # picks its own release hour (runHourIst); this fires often enough that every
+    # hour is reachable. Extra fires are free: a campaign that already released
+    # today fails the lastReleaseOn filter and is a no-op, so a transient 5xx or
+    # GitHub's usual 5-30 min scheduling lag self-heals on the next pass.
+    - cron: '5 * * * *'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Release due campaign batches
+        run: |
+          code=$(curl -s -o /tmp/out.json -w '%{http_code}' -X POST \
+            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+            "${{ secrets.VERCEL_APP_URL }}/api/campaigns/run-due")
+          echo "HTTP $code"
+          cat /tmp/out.json; echo
+          # Fail loudly. A silently-swallowed 401 is exactly how the mailbox cron
+          # went unnoticed, so this job must go red rather than print a shrug.
+          test "$code" = "200"

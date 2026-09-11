@@ -54,6 +54,9 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
       <NavLink to="/leads" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-target-arrow" /> Leads
       </NavLink>
+      <NavLink to="/campaigns" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-calendar-repeat" /> Campaigns
+      </NavLink>
       <NavLink to="/jobs" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-briefcase" /> Jobs
       </NavLink>

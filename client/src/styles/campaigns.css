@@ -1,0 +1,29 @@
+/* Only what could not be composed from the existing classes in css/style.css.
+   Everything else on the campaign screens reuses .table-card, .stat-card,
+   .badge-*, .nav-tabs, .progress-bar, .form-grid, .info-box and .bulk-bar. */
+
+/* The mapping table puts a <select>, a stack of sample pills and a badge group
+   in one row, so cells must align to the top rather than centre. */
+.cmp-map-row td {
+  vertical-align: top;
+}
+
+.cmp-map-row select {
+  width: 100%;
+}
+
+/* Sample values are arbitrary spreadsheet text and can be very long; let the
+   cell wrap instead of stretching the table past the viewport. */
+.cmp-sample {
+  max-width: 420px;
+  line-height: 2;
+}
+
+.cmp-sample .var-pill {
+  display: inline-block;
+  max-width: 190px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
