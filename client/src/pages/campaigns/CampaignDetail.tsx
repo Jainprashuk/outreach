@@ -5,6 +5,7 @@ import UpcomingBatchTable from '../../components/campaigns/UpcomingBatchTable';
 import BatchHistoryList from '../../components/campaigns/BatchHistoryList';
 import SkippedRowsPanel from '../../components/campaigns/SkippedRowsPanel';
 import NextRunPanel from '../../components/campaigns/NextRunPanel';
+import UpcomingSchedule from '../../components/campaigns/UpcomingSchedule';
 import { useApp } from '../../context/AppContext';
 import { useToast } from '../../context/ToastContext';
 import { useCampaignPoll } from '../../hooks/useCampaignPoll';
@@ -14,7 +15,7 @@ import {
 } from '../../lib/api';
 import {
   CAMPAIGN_STATUS_BADGE, CAMPAIGN_STATUS_LABEL, daysRemaining, dripDuration,
-  fmtCountdown, fmtHour, fmtIst, fromNow, nextRunAt, pct,
+  fmtCountdown, fmtHour, fmtIst, fromNow, nextRunAt, pct, totalBatches,
 } from '../../lib/campaigns';
 
 type Tab = 'upcoming' | 'history' | 'skipped' | 'removed' | 'setup';
@@ -26,6 +27,8 @@ export default function CampaignDetail() {
   const navigate = useNavigate();
   const { data, loading, error, refresh, lastUpdated } = useCampaignPoll(id);
   const [tab, setTab] = useState<Tab>('upcoming');
+  // Two questions live under Upcoming: who goes next, and when does this finish.
+  const [upcomingView, setUpcomingView] = useState<'batch' | 'schedule'>('batch');
   const [busy, setBusy] = useState(false);
   // Without this, the page shows a precise countdown for a release that can
   // never fire, which is worse than showing nothing.
@@ -282,7 +285,28 @@ export default function CampaignDetail() {
         </div>
       </div>
 
-      {tab === 'upcoming' && <UpcomingBatchTable campaign={c} onChanged={refresh} />}
+      {tab === 'upcoming' && (
+        <>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
+            <button type="button"
+              className={`btn btn-sm${upcomingView === 'batch' ? ' btn-primary' : ''}`}
+              onClick={() => setUpcomingView('batch')}>
+              <i className="ti ti-users" /> Next batch
+            </button>
+            <button type="button"
+              className={`btn btn-sm${upcomingView === 'schedule' ? ' btn-primary' : ''}`}
+              onClick={() => setUpcomingView('schedule')}>
+              <i className="ti ti-calendar-repeat" /> Full schedule
+              {s.pending > 0 && (
+                <span style={{ marginLeft: 5, opacity: 0.7 }}>{totalBatches(c)}</span>
+              )}
+            </button>
+          </div>
+          {upcomingView === 'batch'
+            ? <UpcomingBatchTable campaign={c} onChanged={refresh} />
+            : <UpcomingSchedule campaign={c} />}
+        </>
+      )}
       {tab === 'history' && <BatchHistoryList campaign={c} jobSummaries={data.jobSummaries} />}
       {tab === 'skipped' && <SkippedRowsPanel campaign={c} status="skipped" onChanged={refresh} />}
       {tab === 'removed' && <SkippedRowsPanel campaign={c} status="removed" onChanged={refresh} />}

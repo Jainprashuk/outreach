@@ -184,3 +184,46 @@ export const projectedFinish = (c: Campaign): Date | null => {
   if (batches <= 0) return null;
   return new Date(next.getTime() + (batches - 1) * 86_400_000);
 };
+
+export interface ScheduledBatch {
+  date: Date;
+  count: number;
+  cumulative: number;
+  index: number;    // 1-based batch number
+}
+
+/** How many batches are left at the current daily rate. */
+export const totalBatches = (c: Campaign) =>
+  Math.ceil((c.stats?.pending || 0) / Math.max(1, c.contactsPerDay));
+
+/**
+ * Project every remaining batch forward from the next release.
+ *
+ * A straight projection, not a promise: it assumes a trigger lands every day and
+ * that no further rows turn out to be duplicates. Both can slip, so the UI
+ * showing this must say so rather than presenting it as a delivery date.
+ *
+ * IST has no DST, so adding whole days keeps the same wall-clock hour.
+ */
+export function projectSchedule(c: Campaign, max = 60): ScheduledBatch[] {
+  const first = nextRunAt(c);
+  const pending = c.stats?.pending || 0;
+  if (!first || pending <= 0) return [];
+
+  const per = Math.max(1, c.contactsPerDay);
+  const batches = Math.ceil(pending / per);
+  const out: ScheduledBatch[] = [];
+  let done = 0;
+
+  for (let i = 0; i < Math.min(batches, max); i++) {
+    const count = Math.min(per, pending - done);
+    done += count;
+    out.push({
+      date: new Date(first.getTime() + i * 86_400_000),
+      count,
+      cumulative: done,
+      index: i + 1,
+    });
+  }
+  return out;
+}
