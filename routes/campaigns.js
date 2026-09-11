@@ -6,7 +6,7 @@ const SendJob = require('../models/SendJob');
 const Template = require('../models/Template');
 const {
   runDueCampaigns, releaseCampaign, previewNextBatch, sendHeadroom,
-  reconcileDuplicates, EMAIL_RE,
+  reconcileDuplicates, buildTimeline, EMAIL_RE,
 } = require('../lib/campaignRunner');
 const { deadline } = require('../lib/http');
 
@@ -120,6 +120,17 @@ router.get('/meta', async (_req, res) => {
       running, paused,
       dailyCommitment: active.reduce((n, c) => n + (c.contactsPerDay || 0), 0),
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/campaigns/timeline?granularity=day|hour — what has been sent and what
+// is still coming. Declared before /:id so 'timeline' is not read as an id.
+router.get('/timeline', async (req, res) => {
+  try {
+    const granularity = req.query.granularity === 'hour' ? 'hour' : 'day';
+    res.json(await buildTimeline({ granularity }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

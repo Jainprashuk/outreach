@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import { SkeletonRows } from '../../components/Skeleton';
+import SendingTimeline from '../../components/campaigns/SendingTimeline';
 import { useToast } from '../../context/ToastContext';
 import {
   loadCampaignsApi, loadCampaignMetaApi, pauseCampaignApi, resumeCampaignApi,
@@ -114,7 +115,12 @@ export default function CampaignList() {
         </div>
       )}
 
-      <div className="section-head">
+      <div className="section-head" style={{ marginTop: 6 }}>
+        <div className="section-title">Sending timeline</div>
+      </div>
+      <SendingTimeline />
+
+      <div className="section-head" style={{ marginTop: 22 }}>
         <div className="section-title">All campaigns</div>
         <span className="contact-count-badge">{campaigns?.length ?? 0}</span>
       </div>

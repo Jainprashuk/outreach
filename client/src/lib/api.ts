@@ -864,6 +864,28 @@ export interface CampaignReleaseReport {
   capped?: boolean;
 }
 
+export interface TimelineBucket {
+  key: string;            // 'YYYY-MM-DD' or 'YYYY-MM-DDTHH', in IST
+  t: number;              // epoch ms at the bucket start
+  sent: number;           // already delivered
+  scheduled: number;      // in flight or projected
+  peakSent: number;       // busiest hour inside the bucket
+  peakScheduled: number;
+  past: boolean;
+}
+
+export interface Timeline {
+  granularity: 'day' | 'hour';
+  now: number;
+  from: number;
+  to: number;
+  dailyCap: number;
+  buckets: TimelineBucket[];
+}
+
+export const loadTimelineApi = (granularity: 'day' | 'hour') =>
+  apiFetch<Timeline>(`/api/campaigns/timeline?granularity=${granularity}`);
+
 export const loadCampaignsApi = () => apiFetch<Campaign[]>('/api/campaigns');
 
 export const loadCampaignApi = (id: string) => apiFetch<CampaignDetail>(`/api/campaigns/${id}`);

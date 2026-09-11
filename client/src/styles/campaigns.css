@@ -70,3 +70,27 @@
 }
 
 .cmp-danger { border-color: var(--red); }
+
+/* ── Sending timeline ───────────────────────────────────────────────────────
+   Two series: delivered vs still-to-come. Hues are the validated categorical
+   slots 1 and 2, stepped separately for each surface rather than flipped —
+   `node scripts/validate_palette.js "#2a78d6,#eb6834" --mode light` and
+   "#3987e5,#d95926" --mode dark both pass all six checks (worst adjacent CVD
+   ΔE 24.7 protan, well clear of the 8 target). Projected bars additionally
+   carry a 45° texture, so the two are never told apart by colour alone. */
+.tl-root {
+  --tl-a: #2a78d6;   /* sent */
+  --tl-b: #eb6834;   /* scheduled */
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .tl-root {
+    --tl-a: #3987e5;
+    --tl-b: #d95926;
+  }
+}
+
+:root[data-theme="dark"] .tl-root {
+  --tl-a: #3987e5;
+  --tl-b: #d95926;
+}
