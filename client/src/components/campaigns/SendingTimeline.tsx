@@ -32,6 +32,9 @@ function label(t: number, granularity: 'day' | 'hour', long = false) {
  */
 export default function SendingTimeline() {
   const [range, setRange] = useState<TimelineRange>('7d');
+  // Both measures as bars, one at a time. Overlaying the rate as a tick inside
+  // the volume bar was legible in principle and not in practice.
+  const [measure, setMeasure] = useState<'volume' | 'rate'>('volume');
   const [data, setData] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -88,7 +91,21 @@ export default function SendingTimeline() {
   const slot = plotW / Math.max(1, b.length);
   const barW = Math.max(2, Math.min(20, slot - 2));   // 2px surface gap
   const peakOf = (x: TimelineBucket) => Math.max(x.peakSent, x.peakScheduled);
-  const max = Math.max(1, ...b.map((x) => Math.max(x.sent + x.scheduled, peakOf(x))));
+  // Derived rather than corrected with setState during render: an hourly bar is
+  // already a per-hour rate, so the rate view collapses into the volume view.
+  // Keeping `measure` untouched means switching back to a daily range restores
+  // the choice instead of silently resetting it.
+  const rate = measure === 'rate' && !hourly;
+  const valOf = (x: TimelineBucket) => rate
+    ? { sent: x.peakSent, scheduled: x.peakScheduled }
+    : { sent: x.sent, scheduled: x.scheduled };
+  // The cap belongs to daily volume only — it is meaningless against an hourly
+  // bucket or a per-hour rate.
+  const showCap = !rate && !hourly;
+  const dataMax = Math.max(1, ...b.map((x) => valOf(x).sent + valOf(x).scheduled));
+  // Fold the cap into the scale. Without this the line is drawn above the plot
+  // whenever the cap exceeds the data, where it strikes through the text above.
+  const max = showCap ? Math.max(dataMax, data.dailyCap) : dataMax;
   const h = (v: number) => (v / max) * (H - PAD_B - 12);
   const nowX = PAD_L + ((data.now - data.from) / (data.to - data.from)) * plotW;
   const every = Math.max(1, Math.ceil(b.length / 12));
@@ -108,11 +125,20 @@ export default function SendingTimeline() {
               className={`btn btn-sm${range === r ? ' btn-primary' : ''}`}
               onClick={() => setRange(r)}>{lbl}</button>
           ))}
-          {/* Two fills plus a marker, so a legend is always present; the hatch
-              and the tick mean nothing is identified by colour alone. */}
-          <span className="tl-key"><span className="tl-sw tl-sw-a" /> Sent</span>
+          <span className="tl-sep" />
+          <button type="button" className={`btn btn-sm${measure === 'volume' ? ' btn-primary' : ''}`}
+            onClick={() => setMeasure('volume')}>Volume</button>
+          <button type="button" className={`btn btn-sm${measure === 'rate' ? ' btn-primary' : ''}`}
+            onClick={() => setMeasure('rate')} disabled={hourly}
+            title={hourly ? 'An hourly bar is already a per-hour rate' : 'Busiest hour of each day'}>
+            Peak /hr
+          </button>
+          <span className="tl-sep" />
+          {/* Legend follows the measure, so the swatch always matches the bars. */}
+          <span className="tl-key">
+            <span className={`tl-sw ${rate ? 'tl-sw-r' : 'tl-sw-a'}`} /> Sent
+          </span>
           <span className="tl-key"><span className="tl-sw tl-sw-b" /> Scheduled</span>
-          <span className="tl-key"><span className="tl-sw tl-sw-r" /> Peak /hr</span>
         </div>
         <button type="button" className="btn btn-sm" onClick={() => setAsTable((v) => !v)}>
           <i className={`ti ti-${asTable ? 'chart-bar' : 'table'}`} /> {asTable ? 'Chart' : 'Table'}
@@ -122,8 +148,13 @@ export default function SendingTimeline() {
       <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>
         {totals.sent.toLocaleString()} sent · {totals.scheduled.toLocaleString()} still to come ·
         busiest hour <strong>{totals.peak}/hr</strong>
-        {!hourly && <span style={{ color: 'var(--text3)' }}> · bars are emails per day, the tick is that day's busiest hour</span>}
-        {hourly && <span style={{ color: 'var(--text3)' }}> · each bar is one hour, so its height is also the rate</span>}
+        <span style={{ color: 'var(--text3)' }}>
+          {rate
+            ? ' · bars are the busiest hour of each day'
+            : hourly
+              ? ' · each bar is one hour, so its height is also the rate'
+              : ' · bars are emails per day'}
+        </span>
       </div>
 
       {asTable ? (
@@ -164,7 +195,7 @@ export default function SendingTimeline() {
               );
             })}
 
-            {!hourly && data.dailyCap <= max * 1.4 && (
+            {showCap && (
               <>
                 <line x1={PAD_L} y1={H - PAD_B - h(data.dailyCap)} x2={W - 10} y2={H - PAD_B - h(data.dailyCap)}
                   stroke="var(--amber)" strokeWidth="1.5" strokeDasharray="4 3" />
@@ -179,24 +210,19 @@ export default function SendingTimeline() {
             {b.map((x, i) => {
               const bx = PAD_L + i * slot + (slot - barW) / 2;
               const base = H - PAD_B;
-              const peak = peakOf(x);
+              const v = valOf(x);
               return (
                 <g key={x.key} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
                   <rect x={PAD_L + i * slot} y={0} width={slot} height={H - PAD_B}
-                    fill={hover === i ? 'var(--bg3)' : 'transparent'} />
-                  {x.sent > 0 && (
-                    <rect x={bx} y={base - h(x.sent)} width={barW} height={h(x.sent)} rx="3" fill="var(--tl-a)" />
+                    fill="var(--text)" opacity={hover === i ? 0.06 : 0} />
+                  {v.sent > 0 && (
+                    <rect x={bx} y={base - h(v.sent)} width={barW} height={h(v.sent)} rx="3"
+                      fill={rate ? 'var(--tl-r)' : 'var(--tl-a)'} />
                   )}
-                  {x.scheduled > 0 && (
-                    <rect x={bx} y={base - h(x.sent) - h(x.scheduled) - (x.sent > 0 ? 2 : 0)}
-                      width={barW} height={h(x.scheduled)} rx="3"
+                  {v.scheduled > 0 && (
+                    <rect x={bx} y={base - h(v.sent) - h(v.scheduled) - (v.sent > 0 ? 2 : 0)}
+                      width={barW} height={h(v.scheduled)} rx="3"
                       fill="url(#tl-proj)" stroke="var(--tl-b)" strokeWidth="1" />
-                  )}
-                  {/* Same axis, same unit — a tick showing the busiest hour inside
-                      this bucket. On an hourly bucket it coincides with the top. */}
-                  {peak > 0 && !hourly && (
-                    <line x1={bx - 1.5} y1={base - h(peak)} x2={bx + barW + 1.5} y2={base - h(peak)}
-                      stroke="var(--tl-r)" strokeWidth="2" strokeLinecap="round" />
                   )}
                   {i % every === 0 && (
                     <text x={PAD_L + i * slot + slot / 2} y={H - 7} textAnchor="middle"
@@ -213,7 +239,11 @@ export default function SendingTimeline() {
               <>
                 <strong>{label(hb.t, data.granularity, true)}</strong>
                 {' · '}{hb.sent} sent{' · '}{hb.scheduled} scheduled
-                {!hourly && peakOf(hb) > 0 && <> · busiest hour {peakOf(hb)}/hr</>}
+                {/* The measure not currently plotted still shows here, so
+                    switching is never needed just to read a number. */}
+                {!hourly && (rate
+                  ? <> · {hb.sent + hb.scheduled} that day in total</>
+                  : peakOf(hb) > 0 && <> · busiest hour {peakOf(hb)}/hr</>)}
                 {!hb.past && <span style={{ color: 'var(--text3)' }}> · upcoming</span>}
               </>
             ) : <span>&nbsp;</span>}

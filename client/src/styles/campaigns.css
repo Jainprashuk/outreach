@@ -156,3 +156,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* Separates the range group from the measure group in the control row. */
+.tl-sep {
+  width: 1px;
+  height: 18px;
+  background: var(--border);
+  margin: 0 2px;
+  flex: none;
+}
