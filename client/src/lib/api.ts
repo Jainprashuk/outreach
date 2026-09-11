@@ -912,6 +912,11 @@ export const removeCampaignRowsApi = (id: string, ids: string[]) =>
     method: 'POST', body: JSON.stringify({ ids }),
   });
 
+/** Retire queued rows that are already Contacts. Idempotent; safe to re-run. */
+export const recheckCampaignRowsApi = (id: string) =>
+  apiFetch<{ ok: boolean; scanned: number; marked: number; complete: boolean; campaign: Campaign }>(
+    `/api/campaigns/${id}/rows/recheck`, { method: 'POST' });
+
 export const restoreCampaignRowsApi = (id: string, ids: string[]) =>
   apiFetch<{ ok: boolean; restored: number }>(`/api/campaigns/${id}/rows/restore`, {
     method: 'POST', body: JSON.stringify({ ids }),

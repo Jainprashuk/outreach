@@ -2,7 +2,8 @@ import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import Avatar from '../Avatar';
 import { useToast } from '../../context/ToastContext';
 import {
-  previewCampaignApi, removeCampaignRowsApi, type Campaign, type CampaignPreview,
+  previewCampaignApi, recheckCampaignRowsApi, removeCampaignRowsApi,
+  type Campaign, type CampaignPreview,
 } from '../../lib/api';
 import { SKIP_REASON_BADGE, SKIP_REASON_LABEL, fmtCountdown, fmtIst, nextRunAt } from '../../lib/campaigns';
 
@@ -27,18 +28,28 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
   const [expanded, setExpanded] = useState<string | null>(null);
   const cbRef = useRef<HTMLInputElement>(null);
 
-  /** Read the WHOLE sheet, not just far enough to fill one batch. */
-  const deepScan = async () => {
+  /**
+   * Retire rows that are already Contacts, so they stop blocking the scan.
+   *
+   * This replaces a read-only "look further down the sheet": looking alone left
+   * the dead rows queued, so the very next scan hit exactly the same wall.
+   */
+  const recheck = async () => {
     setDeepScanning(true);
     try {
-      // want=400 raises the scan cap to 4,000 rows, which covers any sheet this
-      // size. It stops early once it finds 400 sendable — enough either way to
-      // answer the question.
-      setPreview(await previewCampaignApi(campaign.id, 400));
+      const r = await recheckCampaignRowsApi(campaign.id);
       setDeepScanned(true);
-      setLoadError('');
+      toast(
+        r.marked > 0
+          ? `${r.marked.toLocaleString()} rows retired — they were already in your Contacts.`
+          : 'Nothing to retire — none of the queued rows are in your Contacts.',
+        'success',
+      );
+      // The pool changed, so both the batch preview and the parent counts are stale.
+      await load();
+      onChanged();
     } catch (err) {
-      setLoadError((err as Error).message || 'The deeper scan could not finish');
+      setLoadError((err as Error).message || 'The recheck could not finish');
     } finally {
       setDeepScanning(false);
     }
@@ -149,17 +160,17 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
             <i className="ti ti-refresh" /> Try again
           </button>
         )}
-        {preview.capped && !deepScanned && (
+        {preview.capped && (
           <div>
             <button className="btn btn-sm btn-primary" type="button"
-              disabled={deepScanning} onClick={deepScan}>
+              disabled={deepScanning} onClick={recheck}>
               {deepScanning
-                ? <><i className="ti ti-loader-2" style={{ animation: 'spin 1s linear infinite' }} /> Reading the whole sheet…</>
-                : <><i className="ti ti-search" /> Scan the rest of the sheet</>}
+                ? <><i className="ti ti-loader-2" style={{ animation: 'spin 1s linear infinite' }} /> Checking…</>
+                : <><i className="ti ti-filter-off" /> Clear out contacts you already have</>}
             </button>
-            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 8 }}>
-              Checks all {preview.remainingPending.toLocaleString()} remaining rows so you can see how many
-              are genuinely new. Nothing is sent and nothing is changed.
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 8, maxWidth: 520 }}>
+              Moves every queued row that is already in your Contacts into Skipped, so the batch scan
+              stops rediscovering them. Nothing is sent.
             </div>
           </div>
         )}
@@ -177,35 +188,15 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
       <div className="info-box" style={{ marginBottom: 12 }}>
         <i className="ti ti-clock" />
         <span>
-          {/* A deep scan reads far past one day's worth, so the row count here is
-              NOT the batch size. Saying "these N go out" after one would promise
-              a send five times larger than contactsPerDay. */}
-          {deepScanned ? (
-            <>
-              Found <strong>{rows.length.toLocaleString()}</strong> sendable contacts in this sheet.
-              The next batch{' '}
-              {(() => {
-                const n = nextRunAt(campaign);
-                if (!n) return <>(once you continue the campaign)</>;
-                const ms = n.getTime() - Date.now();
-                return <><strong>{fmtIst(n)}</strong>{ms > 0 && <> — in {fmtCountdown(ms)}</>}</>;
-              })()}
-              {' '}sends the first <strong>{Math.min(campaign.contactsPerDay, rows.length)}</strong> of them,
-              one every {minutesApart} minutes. The rest follow on later days.
-            </>
-          ) : (
-            <>
-              These <strong>{rows.length}</strong> go out{' '}
-              {(() => {
-                const n = nextRunAt(campaign);
-                if (!n) return <>when you continue the campaign</>;
-                const ms = n.getTime() - Date.now();
-                return <>
-                  <strong>{fmtIst(n)}</strong>{ms > 0 && <> — in {fmtCountdown(ms)}</>}, one every {minutesApart} minutes
-                </>;
-              })()}
-            </>
-          )}
+          These <strong>{rows.length}</strong> go out{' '}
+          {(() => {
+            const n = nextRunAt(campaign);
+            if (!n) return <>when you continue the campaign</>;
+            const ms = n.getTime() - Date.now();
+            return <>
+              <strong>{fmtIst(n)}</strong>{ms > 0 && <> — in {fmtCountdown(ms)}</>}, one every {minutesApart} minutes
+            </>;
+          })()}
           . Removing someone here takes them out of the campaign entirely — they are never re-queued.
         </span>
       </div>
@@ -236,20 +227,9 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
+            {rows.map((r) => (
               <Fragment key={r.id}>
-                {/* Everything below this line waits for a later day. */}
-                {deepScanned && i === campaign.contactsPerDay && (
-                  <tr>
-                    <td colSpan={6} style={{
-                      background: 'var(--bg3)', color: 'var(--text3)', fontSize: 11,
-                      textAlign: 'center', padding: '6px 0', letterSpacing: '.04em',
-                    }}>
-                      ─── everything below goes out on later days ───
-                    </td>
-                  </tr>
-                )}
-                <tr style={deepScanned && i >= campaign.contactsPerDay ? { opacity: 0.55 } : undefined}>
+                <tr>
                   <td className="cb-col">
                     <input type="checkbox" className="row-cb" checked={selected.has(r.id)}
                       onChange={(e) => {
