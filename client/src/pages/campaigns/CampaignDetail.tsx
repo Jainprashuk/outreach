@@ -54,6 +54,17 @@ export default function CampaignDetail() {
   const handled = s.released + s.skipped + s.removed;
   const next = nextRunAt(c);
   const countdownMs = next ? next.getTime() - Date.now() : 0;
+  const lastBatch = [...(c.releases || [])].reverse().find((r) => r.kind !== 'reconcile');
+  const lastJob = lastBatch?.jobId ? data.jobSummaries.find((j) => j.id === lastBatch.jobId) : undefined;
+  const lastBatchState = (() => {
+    if (!lastBatch) return null;
+    if (lastBatch.error) return { text: 'could not be queued', color: 'var(--red)' };
+    if (!lastJob) return { text: 'queued', color: 'var(--text3)' };
+    if (lastJob.pending > 0) return { text: `sending · ${lastJob.pending} to go`, color: 'var(--amber)' };
+    if (lastJob.failed > 0 && lastJob.sent > 0) return { text: `${lastJob.failed} failed`, color: 'var(--amber)' };
+    if (lastJob.failed > 0) return { text: 'all failed', color: 'var(--red)' };
+    return { text: 'all sent', color: 'var(--green)' };
+  })();
   const jobTotals = data.jobSummaries.reduce(
     (acc, j) => ({ sent: acc.sent + j.sent, failed: acc.failed + j.failed }), { sent: 0, failed: 0 },
   );
@@ -193,6 +204,27 @@ export default function CampaignDetail() {
           <div className="stat-label">Skipped</div>
           <div className="stat-value">{s.skipped.toLocaleString()}</div>
           <div className="stat-sub">{s.removed.toLocaleString()} removed by you</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Last batch</div>
+          {lastBatch ? (
+            <>
+              <div className="stat-value" style={{ fontSize: 22 }}>
+                {lastJob
+                  ? <>{lastJob.sent.toLocaleString()}<span style={{ fontSize: 14, color: 'var(--text3)' }}> / {lastBatch.released}</span></>
+                  : lastBatch.released.toLocaleString()}
+              </div>
+              <div className="stat-sub">
+                {fromNow(lastBatch.finishedAt || c.lastReleaseAt)}
+                {lastBatchState && <> · <span style={{ color: lastBatchState.color }}>{lastBatchState.text}</span></>}
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="stat-value" style={{ fontSize: 22, color: 'var(--text3)' }}>—</div>
+              <div className="stat-sub">no batch has run yet</div>
+            </>
+          )}
         </div>
         <div className="stat-card">
           <div className="stat-label">Next batch</div>
