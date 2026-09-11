@@ -14,16 +14,37 @@ export default function SendingTimeline() {
   const [error, setError] = useState('');
   const [hover, setHover] = useState<number | null>(null);
   const [asTable, setAsTable] = useState(false);
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
     let alive = true;
+    let retry: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
-    loadTimelineApi(granularity)
-      .then((d) => { if (alive) { setData(d); setError(''); } })
-      .catch((e) => { if (alive) setError((e as Error).message); })
-      .finally(() => { if (alive) setLoading(false); });
-    return () => { alive = false; };
-  }, [granularity]);
+
+    // A cold Vercel lambda runs the seed and three backfill scans before it will
+    // serve anything, so the first request after an idle period can lose the race
+    // and come back 503. Retrying twice costs nothing and covers it.
+    const run = (tries: number) => {
+      loadTimelineApi(granularity)
+        .then((d) => { if (alive) { setData(d); setError(''); setLoading(false); } })
+        .catch((e) => {
+          if (!alive) return;
+          const msg = (e as Error).message || '';
+          const transient = /not available|ECONN|timed out|before initial connection/i.test(msg);
+          if (transient && tries < 2) {
+            retry = setTimeout(() => run(tries + 1), 1200 * (tries + 1));
+            return;
+          }
+          setError(msg);
+          setLoading(false);
+        });
+    };
+
+    // Let the campaign list's own request warm the connection first rather than
+    // adding a third concurrent query to a cold start.
+    const start = setTimeout(() => run(0), attempt === 0 ? 350 : 0);
+    return () => { alive = false; clearTimeout(start); if (retry) clearTimeout(retry); };
+  }, [granularity, attempt]);
 
   const fmtBucket = (b: TimelineBucket, long = false) => {
     const d = new Date(b.t + 5.5 * 3_600_000);
@@ -49,7 +70,22 @@ export default function SendingTimeline() {
     return <div className="empty-state"><i className="ti ti-loader-2" /> Building the timeline…</div>;
   }
   if (error || !data) {
-    return <div className="empty-state"><i className="ti ti-alert-triangle" /> {error || 'No timeline'}</div>;
+    // A raw driver message in a full-width block reads as a broken app. Say what
+    // it means, keep it small, and offer the one action that usually fixes it.
+    const transient = /not available|before initial connection|timed out/i.test(error);
+    return (
+      <div className="empty-state">
+        <i className="ti ti-chart-bar-off" />
+        <div style={{ marginBottom: 10, maxWidth: 520 }}>
+          {transient
+            ? "Couldn't load the timeline — the database was still waking up. Nothing is wrong with your campaigns."
+            : `Couldn't load the timeline — ${error}`}
+        </div>
+        <button className="btn btn-sm" type="button" onClick={() => setAttempt((a) => a + 1)}>
+          <i className="ti ti-refresh" /> Try again
+        </button>
+      </div>
+    );
   }
 
   const b = data.buckets;

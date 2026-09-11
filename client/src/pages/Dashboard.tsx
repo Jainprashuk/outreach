@@ -6,7 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import ReplyModal from '../components/ReplyModal';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
-import { loadPostingsMetaApi, retryFailedApi, type Contact, type PostingsMeta } from '../lib/api';
+import { retryFailedApi, type Contact } from '../lib/api';
 import { Skeleton, SkeletonRows } from '../components/Skeleton';
 
 const PAGE_SIZE = 25;
@@ -24,11 +24,6 @@ export default function Dashboard() {
   const app = useApp();
   const toast = useToast();
   const navigate = useNavigate();
-
-  // Best effort: the Jobs feature is independent, and a failure here must never
-  // take the dashboard down with it.
-  const [postingsMeta, setPostingsMeta] = useState<PostingsMeta | null>(null);
-  useEffect(() => { loadPostingsMetaApi().then(setPostingsMeta).catch(() => setPostingsMeta(null)); }, []);
 
   const [tab, setTab] = useState('all');
   const [search, setSearch] = useState('');
@@ -209,13 +204,6 @@ export default function Dashboard() {
     { label: 'Bounced', value: stats.bounced, cls: 'red', icon: 'ti-alert-triangle', ico: 'red' },
     { label: 'Follow-up Due', value: stats.followUpDue, cls: 'amber', link: true, icon: 'ti-clock-hour-4', ico: 'amber' },
     { label: 'In Review', value: stats.inReview, cls: '', style: { color: '#2563eb' }, icon: 'ti-eye', ico: 'teal' },
-    ...(postingsMeta ? [{
-      label: postingsMeta.counts.newSinceLastSync > 0
-        ? `Open postings · ${postingsMeta.counts.newSinceLastSync} new`
-        : 'Open postings',
-      value: postingsMeta.counts.open,
-      cls: '', icon: 'ti-briefcase', ico: 'teal' as string, to: '/jobs',
-    }] : []),
   ];
 
   return (
@@ -238,13 +226,7 @@ export default function Dashboard() {
       </>
     } wide>
       <div className="stat-grid">
-        {kpis.map(k => 'to' in k && k.to ? (
-          <Link key={k.label} to={k.to} className="stat-card" style={{ textDecoration: 'none' }}>
-            <div className={`kpi-ico ${k.ico}`}><i className={`ti ${k.icon}`} /></div>
-            <div className="stat-label">{k.label}</div>
-            <div className={`stat-value ${k.cls}`}>{k.value}</div>
-          </Link>
-        ) : k.link ? (
+        {kpis.map(k => k.link ? (
           <a key={k.label} href="#" className="stat-card" style={{ textDecoration: 'none' }}
             onClick={e => { e.preventDefault(); setTab('followup-due'); setPage(1); }}>
             <div className={`kpi-ico ${k.ico}`}><i className={`ti ${k.icon}`} /></div>
