@@ -165,3 +165,41 @@
   margin: 0 2px;
   flex: none;
 }
+
+/* The shared .stat-grid is repeat(5, 1fr) and is used by five other pages, so it
+   stays as it is. This page has four cards, which left a dead fifth column. */
+.cmp-stats { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+@media (max-width: 1100px) {
+  .cmp-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .cmp-stats { grid-template-columns: 1fr; }
+}
+
+/* The denominator of a hero number, kept clearly subordinate to it. */
+.stat-of {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text3);
+  letter-spacing: 0;
+}
+
+.cmp-meter {
+  height: 4px;
+  border-radius: 999px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+.cmp-meter > i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  transition: width .3s var(--ease);
+}
+.cmp-meter.green       { background: var(--green-bg); }
+.cmp-meter.green > i   { background: var(--green); }
+.cmp-meter.amber       { background: var(--amber-bg); }
+.cmp-meter.amber > i   { background: var(--amber); }
+.cmp-meter.red         { background: var(--red-bg); }
+.cmp-meter.red > i     { background: var(--red); }

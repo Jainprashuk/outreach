@@ -68,32 +68,63 @@ export default function CampaignList() {
       subtitle="Drip a spreadsheet into outreach, a few contacts a day"
       actions={<Link to="/campaigns/new" className="btn btn-primary"><i className="ti ti-plus" /> New campaign</Link>}
     >
-      {meta && (
-        <div className="stat-grid">
-          <div className="stat-card">
-            <div className="stat-label">Running</div>
-            <div className="stat-value">{meta.running}</div>
-            <div className="stat-sub">{meta.paused} paused</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Committed per day</div>
-            <div className="stat-value" style={overCap ? { color: 'var(--red)' } : undefined}>{committed}</div>
-            <div className="stat-sub">across running campaigns</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Sent today</div>
-            <div className="stat-value">{meta.sentToday}</div>
-            <div className="stat-sub">{meta.inFlight} still scheduled</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-label">Gmail headroom</div>
-            <div className="stat-value" style={meta.headroom === 0 ? { color: 'var(--red)' } : undefined}>
-              {meta.headroom}
+      {meta && (() => {
+        // Used, not remaining, so the meter reads as consumption. Both numbers
+        // are still shown — headroom is what you act on.
+        const used = Math.max(0, meta.dailyCap - meta.headroom);
+        const pctUsed = Math.min(100, Math.round((used / Math.max(1, meta.dailyCap)) * 100));
+        const level = pctUsed >= 90 ? 'red' : pctUsed >= 70 ? 'amber' : 'green';
+        return (
+          <div className="stat-grid cmp-stats">
+            <div className="stat-card">
+              <div className="stat-label">Active campaigns</div>
+              <div className="stat-value">{meta.running}</div>
+              <div className="stat-sub">
+                {meta.paused > 0 ? `${meta.paused} paused` : 'none paused'}
+              </div>
             </div>
-            <div className="stat-sub">of {meta.dailyCap} you allow per day</div>
+
+            <div className="stat-card">
+              <div className="stat-label">Committed per day</div>
+              <div className="stat-value" style={overCap ? { color: 'var(--red)' } : undefined}>
+                {committed.toLocaleString()}
+              </div>
+              <div className="stat-sub">
+                across {meta.running} running campaign{meta.running === 1 ? '' : 's'}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Sent today</div>
+              <div className="stat-value" style={{ color: 'var(--green)' }}>
+                {meta.sentToday.toLocaleString()}
+              </div>
+              <div className="stat-sub">
+                {meta.inFlight > 0
+                  ? `${meta.inFlight.toLocaleString()} still scheduled`
+                  : 'nothing left in the queue'}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Gmail budget</div>
+              <div className="stat-value">
+                {used.toLocaleString()}
+                <span className="stat-of"> / {meta.dailyCap.toLocaleString()}</span>
+              </div>
+              {/* Fill carries severity; the track is a lighter step of the same
+                  hue so the state reads across the whole bar. */}
+              <div className={`cmp-meter ${level}`} role="img"
+                aria-label={`${pctUsed}% of the daily allowance used`}>
+                <i style={{ width: `${pctUsed}%` }} />
+              </div>
+              <div className="stat-sub">
+                {meta.headroom.toLocaleString()} left today
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {overCap && (
         <div className="info-box" style={{ background: 'var(--amber-bg)', color: 'var(--amber)', marginBottom: 14 }}>
