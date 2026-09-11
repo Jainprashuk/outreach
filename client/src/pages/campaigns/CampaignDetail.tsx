@@ -1,19 +1,20 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import UpcomingBatchTable from '../../components/campaigns/UpcomingBatchTable';
 import BatchHistoryList from '../../components/campaigns/BatchHistoryList';
 import SkippedRowsPanel from '../../components/campaigns/SkippedRowsPanel';
+import NextRunPanel from '../../components/campaigns/NextRunPanel';
 import { useApp } from '../../context/AppContext';
 import { useToast } from '../../context/ToastContext';
 import { useCampaignPoll } from '../../hooks/useCampaignPoll';
 import {
-  deleteCampaignApi, pauseCampaignApi, resumeCampaignApi, runCampaignNowApi,
-  updateCampaignApi,
+  deleteCampaignApi, loadCampaignMetaApi, pauseCampaignApi, resumeCampaignApi,
+  runCampaignNowApi, updateCampaignApi, type CampaignMeta,
 } from '../../lib/api';
 import {
   CAMPAIGN_STATUS_BADGE, CAMPAIGN_STATUS_LABEL, daysRemaining, dripDuration,
-  fmtHour, fromNow, pct,
+  fmtCountdown, fmtHour, fmtIst, fromNow, nextRunAt, pct,
 } from '../../lib/campaigns';
 
 type Tab = 'upcoming' | 'history' | 'skipped' | 'removed' | 'setup';
@@ -26,6 +27,16 @@ export default function CampaignDetail() {
   const { data, loading, error, refresh, lastUpdated } = useCampaignPoll(id);
   const [tab, setTab] = useState<Tab>('upcoming');
   const [busy, setBusy] = useState(false);
+  // Without this, the page shows a precise countdown for a release that can
+  // never fire, which is worse than showing nothing.
+  const [meta, setMeta] = useState<CampaignMeta | null>(null);
+  useEffect(() => { loadCampaignMetaApi().then(setMeta).catch(() => {}); }, []);
+  // Ticks the countdown once a second, independently of the 10s data poll.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   if (loading && !data) {
     return <Layout title="Campaign"><div className="empty-state"><i className="ti ti-loader-2" /> Loading…</div></Layout>;
@@ -41,6 +52,8 @@ export default function CampaignDetail() {
   const c = data.campaign;
   const s = c.stats;
   const handled = s.released + s.skipped + s.removed;
+  const next = nextRunAt(c);
+  const countdownMs = next ? next.getTime() - Date.now() : 0;
   const jobTotals = data.jobSummaries.reduce(
     (acc, j) => ({ sent: acc.sent + j.sent, failed: acc.failed + j.failed }), { sent: 0, failed: 0 },
   );
@@ -155,15 +168,26 @@ export default function CampaignDetail() {
           <div className="stat-sub">{s.removed.toLocaleString()} removed by you</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Status</div>
-          <div className="stat-value" style={{ fontSize: 18 }}>
-            <span className={`badge ${CAMPAIGN_STATUS_BADGE[c.status]}`}>{CAMPAIGN_STATUS_LABEL[c.status]}</span>
-          </div>
-          <div className="stat-sub">
-            {c.status === 'running' && s.pending > 0
-              ? `about ${daysRemaining(c)} days to go`
-              : `last release ${fromNow(c.lastReleaseAt)}`}
-          </div>
+          <div className="stat-label">Next batch</div>
+          {next ? (
+            <>
+              <div className="stat-value" style={{ fontSize: 20, fontVariantNumeric: 'tabular-nums' }}>
+                {countdownMs <= 0 ? 'due now' : fmtCountdown(countdownMs)}
+              </div>
+              <div className="stat-sub">{fmtIst(next)}</div>
+            </>
+          ) : (
+            <>
+              <div className="stat-value" style={{ fontSize: 18 }}>
+                <span className={`badge ${CAMPAIGN_STATUS_BADGE[c.status]}`}>{CAMPAIGN_STATUS_LABEL[c.status]}</span>
+              </div>
+              <div className="stat-sub">
+                {c.status === 'running' && s.pending > 0
+                  ? `about ${daysRemaining(c)} days to go`
+                  : `last release ${fromNow(c.lastReleaseAt)}`}
+              </div>
+            </>
+          )}
         </div>
       </div>
 
@@ -174,6 +198,10 @@ export default function CampaignDetail() {
         {c.contactsPerDay}/day at {c.ratePerHour}/hour from {fmtHour(c.runHourIst)} IST — each batch takes about{' '}
         {dripDuration(c.contactsPerDay, c.ratePerHour)}
         {c.attachResume && <> · <i className="ti ti-paperclip" /> resume attached</>}
+      </div>
+
+      <div style={{ marginTop: 14 }}>
+        <NextRunPanel campaign={c} cronConfigured={meta?.cronConfigured} />
       </div>
 
       <div className="section-head" style={{ marginTop: 18 }}>

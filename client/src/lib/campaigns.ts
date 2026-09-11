@@ -112,18 +112,75 @@ export const isCronStale = (c: Campaign) =>
   && !!c.lastReleaseAt
   && Date.now() - new Date(c.lastReleaseAt).getTime() > STALE_MS;
 
-/** The next IST hour:00 at which this campaign would release. */
+// The GitHub workflow runs on cron '5 * * * *' — :05 past every UTC hour. IST is
+// UTC+5:30, so every fire lands at :35 past an IST hour. A campaign releases on
+// the first fire whose IST hour is >= runHourIst and whose IST date is not the
+// one already recorded in lastReleaseOn.
+export const CRON_MINUTE_IST = 35;
+const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
+
+/**
+ * When the next batch will actually be released.
+ *
+ * Walks the real cron fire slots rather than assuming runHourIst:00, because two
+ * things make that assumption wrong: fires land at :35, and if the hour has
+ * already passed without a release the runner CATCHES UP on the very next fire
+ * rather than waiting for tomorrow.
+ */
 export const nextRunAt = (c: Campaign): Date | null => {
   if (c.status !== 'running') return null;
-  const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
-  const now = new Date();
-  const ist = new Date(now.getTime() + IST_OFFSET_MS);
-  const todayKey = ist.toISOString().slice(0, 10);
-  const alreadyToday = c.lastReleaseOn === todayKey;
-  const dayOffset = alreadyToday || ist.getUTCHours() >= c.runHourIst ? 1 : 0;
-  const target = new Date(Date.UTC(
-    ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + (alreadyToday ? 1 : dayOffset),
-    c.runHourIst, 0, 0,
-  ));
-  return new Date(target.getTime() - IST_OFFSET_MS);
+  const now = Date.now();
+  const ist = new Date(now + IST_OFFSET_MS);
+
+  // 48 hourly slots is always enough to find the next qualifying one.
+  for (let i = 0; i <= 48; i++) {
+    // Built in "IST-as-UTC" space, so getUTC* reads back as IST wall clock.
+    const slot = new Date(Date.UTC(
+      ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(),
+      ist.getUTCHours() + i, CRON_MINUTE_IST, 0,
+    ));
+    const realTime = slot.getTime() - IST_OFFSET_MS;
+    if (realTime <= now) continue;
+    if (slot.getUTCHours() < c.runHourIst) continue;
+    if (c.lastReleaseOn === slot.toISOString().slice(0, 10)) continue;
+    return new Date(realTime);
+  }
+  return null;
+};
+
+/** "2d 4h", "3h 12m", "45m 08s" — coarser the further away it is. */
+export const fmtCountdown = (ms: number): string => {
+  if (ms <= 0) return 'any moment';
+  const s = Math.floor(ms / 1000);
+  const d = Math.floor(s / 86400);
+  const h = Math.floor((s % 86400) / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const sec = s % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m ${String(sec).padStart(2, '0')}s`;
+};
+
+/** "Fri 11 Sep, 10:35 pm IST" — always stated in IST, the schedule's own zone. */
+export const fmtIst = (d: Date): string => {
+  const ist = new Date(d.getTime() + IST_OFFSET_MS);
+  const day = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][ist.getUTCDay()];
+  const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][ist.getUTCMonth()];
+  const h24 = ist.getUTCHours();
+  const suffix = h24 < 12 ? 'am' : 'pm';
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${day} ${ist.getUTCDate()} ${mon}, ${h12}:${String(ist.getUTCMinutes()).padStart(2, '0')} ${suffix} IST`;
+};
+
+/** When the last email of a batch lands, at the configured drip rate. */
+export const batchEndsAt = (start: Date, contactsPerDay: number, ratePerHour: number): Date =>
+  new Date(start.getTime() + Math.max(0, contactsPerDay - 1) * (3_600_000 / Math.max(1, ratePerHour)));
+
+/** Projected final batch, assuming no missed days. */
+export const projectedFinish = (c: Campaign): Date | null => {
+  const next = nextRunAt(c);
+  if (!next) return null;
+  const batches = Math.ceil((c.stats?.pending || 0) / Math.max(1, c.contactsPerDay));
+  if (batches <= 0) return null;
+  return new Date(next.getTime() + (batches - 1) * 86_400_000);
 };

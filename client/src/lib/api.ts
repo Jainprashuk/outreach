@@ -835,6 +835,12 @@ export interface CampaignPreview {
   scanned: number;
   exhausted: boolean;
   remainingPending: number;
+  /** The scan ran out of its time budget — an empty batch here means "unknown",
+   *  not "nothing to send". */
+  timedOut: boolean;
+  /** The scan read its maximum stretch of rows without filling the batch. */
+  capped: boolean;
+  skipBreakdown: Partial<Record<CampaignSkipReason, number>>;
 }
 
 export interface CampaignReleaseReport {

@@ -8,8 +8,8 @@ import {
   type Campaign, type CampaignMeta,
 } from '../../lib/api';
 import {
-  CAMPAIGN_STATUS_BADGE, CAMPAIGN_STATUS_LABEL, daysRemaining, fmtHour, fromNow,
-  isCronStale, pct,
+  CAMPAIGN_STATUS_BADGE, CAMPAIGN_STATUS_LABEL, daysRemaining, fmtCountdown, fmtHour,
+  fmtIst, fromNow, isCronStale, nextRunAt, pct,
 } from '../../lib/campaigns';
 
 export default function CampaignList() {
@@ -18,6 +18,12 @@ export default function CampaignList() {
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null);
   const [meta, setMeta] = useState<CampaignMeta | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Ticks the per-row countdowns without re-fetching anything.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const load = async () => {
     const [list, m] = await Promise.all([
@@ -121,7 +127,7 @@ export default function CampaignList() {
               <th style={{ width: 190 }}>Progress</th>
               <th style={{ width: 120 }}>Status</th>
               <th style={{ width: 150 }}>Schedule</th>
-              <th style={{ width: 140 }}>Last release</th>
+              <th style={{ width: 190 }}>Next run</th>
               <th style={{ width: 120 }} />
             </tr>
           </thead>
@@ -163,7 +169,28 @@ export default function CampaignList() {
                   <td style={{ fontSize: 12, color: 'var(--text2)' }}>
                     {c.contactsPerDay}/day at {fmtHour(c.runHourIst)}
                   </td>
-                  <td style={{ fontSize: 12, color: 'var(--text2)' }}>{fromNow(c.lastReleaseAt)}</td>
+                  <td style={{ fontSize: 12 }}>
+                    {(() => {
+                      const n = nextRunAt(c);
+                      if (!n) {
+                        return (
+                          <span style={{ color: 'var(--text3)' }}>
+                            {c.status === 'completed' ? 'finished' : 'not scheduled'}
+                            <div style={{ fontSize: 11 }}>last {fromNow(c.lastReleaseAt)}</div>
+                          </span>
+                        );
+                      }
+                      const ms = n.getTime() - Date.now();
+                      return (
+                        <>
+                          <div style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
+                            {ms <= 0 ? 'due now' : `in ${fmtCountdown(ms)}`}
+                          </div>
+                          <div style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtIst(n)}</div>
+                        </>
+                      );
+                    })()}
+                  </td>
                   <td onClick={(e) => e.stopPropagation()}>
                     {(c.status === 'running' || c.status === 'paused' || c.status === 'failed') && (
                       <button className="btn btn-sm" type="button" disabled={busy === c.id} onClick={() => toggle(c)}>

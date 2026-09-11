@@ -4,7 +4,7 @@ import { useToast } from '../../context/ToastContext';
 import {
   previewCampaignApi, removeCampaignRowsApi, type Campaign, type CampaignPreview,
 } from '../../lib/api';
-import { SKIP_REASON_BADGE, SKIP_REASON_LABEL, fmtHour } from '../../lib/campaigns';
+import { SKIP_REASON_BADGE, SKIP_REASON_LABEL, fmtCountdown, fmtIst, nextRunAt } from '../../lib/campaigns';
 
 /**
  * The batch that goes out next, with the ability to pull anyone before it does.
@@ -18,6 +18,7 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
 }) {
   const toast = useToast();
   const [preview, setPreview] = useState<CampaignPreview | null>(null);
+  const [loadError, setLoadError] = useState('');
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
@@ -29,8 +30,11 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
     try {
       setPreview(await previewCampaignApi(campaign.id));
       setSelected(new Set());
+      setLoadError('');
     } catch (err) {
-      toast((err as Error).message, 'error');
+      // Record it. Rendering a failed request as "nothing to release" would say
+      // the opposite of what happened.
+      setLoadError((err as Error).message || 'Could not work out the next batch');
     } finally {
       setLoading(false);
     }
@@ -77,11 +81,55 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
     );
   }
 
-  if (rows.length === 0) {
+  // A failed request is not an empty batch. Say which one happened.
+  if (loadError || !preview) {
     return (
       <div className="empty-state">
-        <i className="ti ti-inbox" />
-        Nothing left to release{preview?.exhausted ? ' — the sheet is used up.' : '.'}
+        <i className="ti ti-alert-triangle" style={{ color: 'var(--red)' }} />
+        <div style={{ marginBottom: 10 }}>
+          Couldn't work out the next batch — {loadError || 'no response from the server'}.
+          {campaign.stats.pending > 0 && <>
+            {' '}Your {campaign.stats.pending.toLocaleString()} queued contacts are untouched.
+          </>}
+        </div>
+        <button className="btn btn-sm" type="button" onClick={load}>
+          <i className="ti ti-refresh" /> Try again
+        </button>
+      </div>
+    );
+  }
+
+  if (rows.length === 0) {
+    const breakdown = Object.entries(preview.skipBreakdown || {})
+      .map(([reason, n]) => `${n} ${SKIP_REASON_LABEL[reason as keyof typeof SKIP_REASON_LABEL] || reason}`)
+      .join(', ');
+    return (
+      <div className="empty-state">
+        <i className={preview.timedOut ? 'ti ti-clock-exclamation' : 'ti ti-inbox'} />
+        {preview.timedOut ? (
+          <div style={{ marginBottom: 10 }}>
+            Working out the next batch took too long, so this list is incomplete — it does{' '}
+            <strong>not</strong> mean there is nothing to send. The scheduled release is unaffected.
+          </div>
+        ) : preview.exhausted ? (
+          <div>Nothing left to release — every row in the sheet has been dealt with.</div>
+        ) : preview.capped ? (
+          <div style={{ marginBottom: 10 }}>
+            Read {preview.scanned.toLocaleString()} rows without finding anyone sendable
+            {breakdown ? <> — {breakdown}</> : null}.{' '}
+            {preview.remainingPending.toLocaleString()} rows are still queued further down the sheet.
+          </div>
+        ) : (
+          <div style={{ marginBottom: 10 }}>
+            Nothing to release right now
+            {breakdown ? <> — {breakdown} in the rows scanned</> : null}.
+          </div>
+        )}
+        {preview.timedOut && (
+          <button className="btn btn-sm" type="button" onClick={load}>
+            <i className="ti ti-refresh" /> Try again
+          </button>
+        )}
       </div>
     );
   }
@@ -92,9 +140,14 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
         <i className="ti ti-clock" />
         <span>
           These <strong>{rows.length}</strong> go out{' '}
-          {campaign.status === 'running'
-            ? <>on the next release at <strong>{fmtHour(campaign.runHourIst)} IST</strong>, one every {minutesApart} minutes</>
-            : <>when you continue the campaign</>}
+          {(() => {
+            const n = nextRunAt(campaign);
+            if (!n) return <>when you continue the campaign</>;
+            const ms = n.getTime() - Date.now();
+            return <>
+              <strong>{fmtIst(n)}</strong>{ms > 0 && <> — in {fmtCountdown(ms)}</>}, one every {minutesApart} minutes
+            </>;
+          })()}
           . Removing someone here takes them out of the campaign entirely — they are never re-queued.
         </span>
       </div>
