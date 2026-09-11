@@ -14,25 +14,60 @@ export default function SkippedRowsPanel({ campaign, status, onChanged }: {
 }) {
   const toast = useToast();
   const [rows, setRows] = useState<CampaignRow[] | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
   const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
-  const load = async () => {
-    const res = await loadCampaignRowsApi(campaign.id, { status, limit: '500' });
+  const PAGE_SIZE = 100;
+  // The endpoint caps a page at 500. Reading one page and calling its length the
+  // total is what made 1,754 skipped rows report as "500 skipped rows".
+  const FETCH_MAX = 500;
+
+  const load = async (p = page) => {
+    const res = await loadCampaignRowsApi(campaign.id, {
+      status, page: String(p), limit: String(PAGE_SIZE),
+    });
     setRows(res.rows);
+    setTotal(res.total);
+    setPages(Math.max(1, res.pages));
   };
-  useEffect(() => { load().catch((e) => toast(e.message, 'error')); }, [campaign.id, status, campaign.stats.skipped, campaign.stats.removed]);
+  useEffect(() => { load(page).catch((e) => toast(e.message, 'error')); },
+    [campaign.id, status, page, campaign.stats.skipped, campaign.stats.removed]);
+  // A status switch must not land the user on a page that no longer exists.
+  useEffect(() => { setPage(1); }, [status]);
 
   // Reuses the existing CSV export helpers verbatim, so a rejected row can be
   // fixed in the sheet and re-uploaded as its own campaign.
-  function exportCsv() {
-    if (!rows || rows.length === 0) return;
-    const text = toDelimitedText(
-      ['Name', 'Email', 'Company', 'Role', 'Reason', 'Sheet row'],
-      rows.map((r) => [r.name, r.email, r.company, r.role,
-        r.skipReason ? SKIP_REASON_LABEL[r.skipReason] : '', String(r.sourceRow)]),
-      ',',
-    );
-    downloadTextFile(`${campaign.name.replace(/[^\w-]+/g, '-')}-${status}.csv`, text, 'text/csv');
+  //
+  // Pages through EVERYTHING rather than exporting the rows currently on screen:
+  // a file silently missing 1,254 of 1,754 rows is worse than no file at all.
+  async function exportCsv() {
+    if (total === 0) return;
+    setExporting(true);
+    try {
+      const all: CampaignRow[] = [];
+      for (let p = 1; ; p++) {
+        const res = await loadCampaignRowsApi(campaign.id, {
+          status, page: String(p), limit: String(FETCH_MAX),
+        });
+        all.push(...res.rows);
+        if (res.rows.length < FETCH_MAX || all.length >= res.total) break;
+      }
+      const text = toDelimitedText(
+        ['Name', 'Email', 'Company', 'Role', 'Reason', 'Sheet row'],
+        all.map((r) => [r.name, r.email, r.company, r.role,
+          r.skipReason ? SKIP_REASON_LABEL[r.skipReason] : '', String(r.sourceRow)]),
+        ',',
+      );
+      downloadTextFile(`${campaign.name.replace(/[^\w-]+/g, '-')}-${status}.csv`, text, 'text/csv');
+      toast(`Exported ${all.length.toLocaleString()} rows.`, 'success');
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function restore(ids: string[]) {
@@ -78,10 +113,17 @@ export default function SkippedRowsPanel({ campaign, status, onChanged }: {
     <>
       <div className="section-head">
         <span style={{ fontSize: 12, color: 'var(--text2)' }}>
-          {rows.length.toLocaleString()} {status === 'skipped' ? 'skipped' : 'removed'} rows
+          {total.toLocaleString()} {status === 'skipped' ? 'skipped' : 'removed'} rows
+          {pages > 1 && (
+            <span style={{ color: 'var(--text3)' }}>
+              {' '}· showing {rows.length.toLocaleString()} on this page
+            </span>
+          )}
         </span>
-        <button className="btn btn-sm" type="button" onClick={exportCsv}>
-          <i className="ti ti-file-export" /> Download as CSV
+        <button className="btn btn-sm" type="button" onClick={exportCsv} disabled={exporting}>
+          {exporting
+            ? <><i className="ti ti-loader-2" style={{ animation: 'spin 1s linear infinite' }} /> Exporting…</>
+            : <><i className="ti ti-file-export" /> Download all as CSV</>}
         </button>
       </div>
       <div className="table-card">
@@ -117,6 +159,20 @@ export default function SkippedRowsPanel({ campaign, status, onChanged }: {
           </tbody>
         </table>
       </div>
+
+      {pages > 1 && (
+        <div className="pagination-bar">
+          <button className="btn btn-sm" type="button" disabled={page === 1}
+            onClick={() => setPage((p) => p - 1)}>
+            <i className="ti ti-chevron-left" /> Prev
+          </button>
+          <span className="page-info">Page {page} of {pages}</span>
+          <button className="btn btn-sm" type="button" disabled={page === pages}
+            onClick={() => setPage((p) => p + 1)}>
+            Next <i className="ti ti-chevron-right" />
+          </button>
+        </div>
+      )}
     </>
   );
 }
