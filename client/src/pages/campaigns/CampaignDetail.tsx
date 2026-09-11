@@ -74,6 +74,14 @@ export default function CampaignDetail() {
     if (lastJob.failed > 0) return { text: 'all failed', color: 'var(--red)' };
     return { text: 'all sent', color: 'var(--green)' };
   })();
+  const o = data.outcomes;
+  // Rate over what actually left, not over the whole sheet — a 4% bounce rate on
+  // 75 sent is the deliverability signal; 4% of 3,371 queued is meaningless.
+  const denom = Math.max(1, o.total);
+  const bouncePct = Math.round((o.bounced / denom) * 100);
+  const replyPct = Math.round((o.replied / denom) * 100);
+  // Mailbox providers start treating a sender as suspect around 5%.
+  const bounceLevel = bouncePct >= 8 ? 'var(--red)' : bouncePct >= 4 ? 'var(--amber)' : 'var(--text)';
   const jobTotals = data.jobSummaries.reduce(
     (acc, j) => ({ sent: acc.sent + j.sent, failed: acc.failed + j.failed }), { sent: 0, failed: 0 },
   );
@@ -195,7 +203,7 @@ export default function CampaignDetail() {
         </div>
       )}
 
-      <div className="stat-grid">
+      <div className="stat-grid cmp-detail-stats">
         <div className="stat-card">
           <div className="stat-label">Released</div>
           <div className="stat-value">
@@ -210,9 +218,28 @@ export default function CampaignDetail() {
           <div className="stat-sub">{jobTotals.failed} failed · recent batches</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Skipped</div>
-          <div className="stat-value">{s.skipped.toLocaleString()}</div>
-          <div className="stat-sub">{s.removed.toLocaleString()} removed by you</div>
+          <div className="stat-label">Bounced</div>
+          <div className="stat-value" style={{ color: bounceLevel }}>
+            {o.bounced.toLocaleString()}
+            {o.total > 0 && <span className="stat-of"> · {bouncePct}%</span>}
+          </div>
+          <div className="stat-sub">
+            {o.total === 0
+              ? 'nothing sent yet'
+              : bouncePct >= 4
+                ? 'high — check list quality'
+                : 'of everyone emailed'}
+          </div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Replied</div>
+          <div className="stat-value" style={{ color: o.replied > 0 ? 'var(--teal)' : undefined }}>
+            {o.replied.toLocaleString()}
+            {o.total > 0 && <span className="stat-of"> · {replyPct}%</span>}
+          </div>
+          <div className="stat-sub">
+            {o.failed > 0 ? `${o.failed} failed to send` : 'of everyone emailed'}
+          </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Last batch</div>

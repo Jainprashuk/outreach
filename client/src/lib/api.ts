@@ -803,9 +803,22 @@ export interface CampaignJobSummary {
   total: number; sent: number; failed: number; skipped: number; pending: number;
 }
 
+/** What became of the contacts this campaign created, joined from Contact. */
+export interface CampaignOutcomes {
+  total: number;
+  delivered: number;   // sent or follow-up-sent, no reply yet
+  replied: number;     // replied or follow-up-replied
+  bounced: number;
+  failed: number;
+  queued: number;
+  closed: number;
+  byStatus: Record<string, number>;
+}
+
 export interface CampaignDetail {
   campaign: Campaign;
   jobSummaries: CampaignJobSummary[];
+  outcomes: CampaignOutcomes;
 }
 
 export interface CampaignMeta {

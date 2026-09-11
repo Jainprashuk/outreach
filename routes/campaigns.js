@@ -316,6 +316,32 @@ router.get('/:id', async (req, res) => {
       stats.total += g.n;
     }
 
+    // What became of the contacts this campaign created. Released rows carry the
+    // contactId, so this is a join rather than anything the campaign has to
+    // track itself — and it stays correct when the mailbox check later flips
+    // someone to bounced or replied.
+    const outcomeRows = await CampaignRow.aggregate([
+      { $match: { campaignId: campaign._id, status: 'released', contactId: { $ne: null } } },
+      { $addFields: { cid: { $toObjectId: '$contactId' } } },
+      { $lookup: { from: 'contacts', localField: 'cid', foreignField: '_id', as: 'c' } },
+      { $unwind: '$c' },
+      { $match: { 'c.deleted': { $ne: true } } },
+      { $group: { _id: '$c.status', n: { $sum: 1 } } },
+    ]);
+    const byStatus = Object.fromEntries(outcomeRows.map(r => [r._id, r.n]));
+    const pick = (...keys) => keys.reduce((n, k) => n + (byStatus[k] || 0), 0);
+    const outcomes = {
+      total:    outcomeRows.reduce((n, r) => n + r.n, 0),
+      // 'sent' and 'follow-up-sent' both mean delivered with no reply yet.
+      delivered: pick('sent', 'follow-up-sent'),
+      replied:   pick('replied', 'follow-up-replied'),
+      bounced:   pick('bounced'),
+      failed:    pick('failed'),
+      queued:    pick('queued'),
+      closed:    pick('closed', 'no-openings', 'in-review'),
+      byStatus,
+    };
+
     // Outcomes for recent batches, so a drip that failed wholesale is visible
     // instead of silently burning the sheet one day at a time.
     const recent = (campaign.releases || []).slice(-7).filter(r => r.jobId);
@@ -336,7 +362,7 @@ router.get('/:id', async (req, res) => {
       pending: j.items.filter(i => i.status === 'pending').length,
     }));
 
-    res.json({ campaign: { ...serialize(campaign), stats }, jobSummaries });
+    res.json({ campaign: { ...serialize(campaign), stats }, jobSummaries, outcomes });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
