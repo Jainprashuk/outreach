@@ -177,15 +177,35 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
       <div className="info-box" style={{ marginBottom: 12 }}>
         <i className="ti ti-clock" />
         <span>
-          These <strong>{rows.length}</strong> go out{' '}
-          {(() => {
-            const n = nextRunAt(campaign);
-            if (!n) return <>when you continue the campaign</>;
-            const ms = n.getTime() - Date.now();
-            return <>
-              <strong>{fmtIst(n)}</strong>{ms > 0 && <> — in {fmtCountdown(ms)}</>}, one every {minutesApart} minutes
-            </>;
-          })()}
+          {/* A deep scan reads far past one day's worth, so the row count here is
+              NOT the batch size. Saying "these N go out" after one would promise
+              a send five times larger than contactsPerDay. */}
+          {deepScanned ? (
+            <>
+              Found <strong>{rows.length.toLocaleString()}</strong> sendable contacts in this sheet.
+              The next batch{' '}
+              {(() => {
+                const n = nextRunAt(campaign);
+                if (!n) return <>(once you continue the campaign)</>;
+                const ms = n.getTime() - Date.now();
+                return <><strong>{fmtIst(n)}</strong>{ms > 0 && <> — in {fmtCountdown(ms)}</>}</>;
+              })()}
+              {' '}sends the first <strong>{Math.min(campaign.contactsPerDay, rows.length)}</strong> of them,
+              one every {minutesApart} minutes. The rest follow on later days.
+            </>
+          ) : (
+            <>
+              These <strong>{rows.length}</strong> go out{' '}
+              {(() => {
+                const n = nextRunAt(campaign);
+                if (!n) return <>when you continue the campaign</>;
+                const ms = n.getTime() - Date.now();
+                return <>
+                  <strong>{fmtIst(n)}</strong>{ms > 0 && <> — in {fmtCountdown(ms)}</>}, one every {minutesApart} minutes
+                </>;
+              })()}
+            </>
+          )}
           . Removing someone here takes them out of the campaign entirely — they are never re-queued.
         </span>
       </div>
@@ -216,9 +236,20 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {rows.map((r, i) => (
               <Fragment key={r.id}>
-                <tr>
+                {/* Everything below this line waits for a later day. */}
+                {deepScanned && i === campaign.contactsPerDay && (
+                  <tr>
+                    <td colSpan={6} style={{
+                      background: 'var(--bg3)', color: 'var(--text3)', fontSize: 11,
+                      textAlign: 'center', padding: '6px 0', letterSpacing: '.04em',
+                    }}>
+                      ─── everything below goes out on later days ───
+                    </td>
+                  </tr>
+                )}
+                <tr style={deepScanned && i >= campaign.contactsPerDay ? { opacity: 0.55 } : undefined}>
                   <td className="cb-col">
                     <input type="checkbox" className="row-cb" checked={selected.has(r.id)}
                       onChange={(e) => {
