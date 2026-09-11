@@ -5,11 +5,17 @@ import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { Card, HBar } from '../components/AnalyticsCards';
 import LeadsAnalytics from '../components/LeadsAnalytics';
+import InterviewFunnelCard from '../components/InterviewFunnelCard';
+import { useInterviews } from '../context/InterviewContext';
+import {
+  EMPTY_FUNNEL, indexInterviews, interviewFunnel, type InterviewFunnel,
+} from '../lib/interviewAnalytics';
 import {
   ACTIVITY_META, ACTIVITY_WINDOWS, analyze, buildActivityEvents, buildDailySeries,
   computeMetrics, countActivity, cvar, dayKey, fmtAgo, fmtDur, pct,
   STATUS_META, type ActivityWindowKey, type Analyzed, type Metrics,
 } from '../lib/analytics';
+import type { Interview } from '../lib/api';
 
 // ── Time-series chart (2-series, hover crosshair) ────────────────────────────
 const TS = { W: 720, H: 210, padL: 32, padR: 12, padT: 12, padB: 26 };
@@ -173,7 +179,7 @@ function WeekdayChart({ A }: { A: Analyzed[] }) {
 }
 
 // ── Recent activity (counts per event type across time windows) ──────────────
-function ActivitySection({ A }: { A: Analyzed[] }) {
+function ActivitySection({ A, interviews }: { A: Analyzed[]; interviews: Interview[] }) {
   const [now, setNow] = useState(() => Date.now());
   const [win, setWin] = useState<ActivityWindowKey>('24h');
 
@@ -183,7 +189,7 @@ function ActivitySection({ A }: { A: Analyzed[] }) {
     return () => clearInterval(id);
   }, []);
 
-  const events = useMemo(() => buildActivityEvents(A), [A]);
+  const events = useMemo(() => buildActivityEvents(A, interviews), [A, interviews]);
   const cols = useMemo(
     () => ACTIVITY_WINDOWS.map(w => ({ ...w, counts: countActivity(events, w.ms, now) })),
     [events, now],
@@ -209,7 +215,8 @@ function ActivitySection({ A }: { A: Analyzed[] }) {
         <div>
           <div className="an-card-title"><i className="ti ti-activity" /> Recent activity</div>
           <div className="an-card-sub">
-            What happened in the last hour, 6 hours, day, week and month — added, sent, replied, bounced and every other status change
+            What happened in the last hour, 6 hours, day, week and month — added, sent, replied, bounced,
+            every other status change, and every move in the interview pipeline
           </div>
         </div>
         <div className="seg-toggle">
@@ -299,7 +306,9 @@ function ActivitySection({ A }: { A: Analyzed[] }) {
 // ── Insights builder (pure port of renderInsights) ───────────────────────────
 interface Insight { i: string; c: string; t: string; x: React.ReactNode; }
 
-function buildInsights(A: Analyzed[], m: Metrics, templates: Record<string, { name: string }>): Insight[] {
+function buildInsights(
+  A: Analyzed[], m: Metrics, templates: Record<string, { name: string }>, iv: InterviewFunnel,
+): Insight[] {
   const items: Insight[] = [];
 
   const tmap: Record<string, { s: number; r: number }> = {};
@@ -372,6 +381,27 @@ function buildInsights(A: Analyzed[], m: Metrics, templates: Record<string, { na
       x: <><b>{adv}</b> of {m.repliedCount} repliers ({pct(adv, m.repliedCount)}%) progressed to review or closed.{m.repliedCount - adv > 0 ? ` ${m.repliedCount - adv} replies may still need a next step.` : ''}</> });
   }
 
+  // The interview store is the only place that knows a reply turned into a real
+  // conversation, so this is the one conversion number the status history can't give.
+  if (iv.tracked > 0) {
+    items.push({
+      i: iv.selected > 0 ? 'ti-confetti' : 'ti-user-check',
+      c: iv.selected > 0 ? '--green' : '--indigo',
+      t: 'Reply \u2192 interview conversion',
+      x: <>
+        <b>{iv.tracked}</b> contact{iv.tracked !== 1 ? 's' : ''}{m.repliedCount > 0 ? <> of your {m.repliedCount} repliers ({pct(iv.tracked, m.repliedCount)}%)</> : null}{' '}
+        reached the interview stage; <b>{iv.interviewed}</b> got a booked round.{' '}
+        {iv.selected > 0 ? <><b>{iv.selected}</b> selected. </> : null}
+        {iv.live > 0
+          ? <>{iv.live} still in play{iv.upcoming > 0 ? <>, {iv.upcoming} with a date on the calendar</> : ' with no date booked yet'}.</>
+          : 'Nothing is still in play.'}
+      </>,
+    });
+  } else if (m.repliedCount >= 3) {
+    items.push({ i: 'ti-user-off', c: '--amber', t: 'No interviews tracked',
+      x: <>{m.repliedCount} contacts have replied but none are tracked in Interviews — flag the real conversations there so this page can measure what replies actually turn into.</> });
+  }
+
   const due = A.filter(a => (a.c.status === 'sent' || a.c.status === 'replied') && !a.c.followUpSentAt && a.c.lastSentAt && (now - new Date(a.c.lastSentAt).getTime()) > 3 * 86400000).length;
   if (due > 0 || m.queuedNow > 0) {
     items.push({ i: 'ti-hourglass-high', c: '--amber', t: 'Waiting on you',
@@ -389,6 +419,7 @@ function buildInsights(A: Analyzed[], m: Metrics, templates: Record<string, { na
 export default function Analytics() {
   const app = useApp();
   const toast = useToast();
+  const { interviews, loaded: interviewsLoaded } = useInterviews();
   const [view, setView] = useState<'outreach' | 'leads'>('outreach');
   const [leadsRefresh, setLeadsRefresh] = useState(0);
   const [range, setRange] = useState(30);
@@ -411,9 +442,17 @@ export default function Analytics() {
 
   const A = useMemo(() => app.contacts.map(analyze), [app.contacts]);
   const m = useMemo(() => computeMetrics(A), [A]);
+  // Interviews live in their own store keyed on (sourceType, sourceId), so the
+  // join has to happen here — no contact field records that someone interviewed.
+  const iv = useMemo(
+    () => (interviewsLoaded
+      ? interviewFunnel(app.contacts, indexInterviews(interviews), 'contact', c => c.email)
+      : EMPTY_FUNNEL),
+    [app.contacts, interviews, interviewsLoaded],
+  );
   const series = useMemo(() => buildDailySeries(A, range), [A, range]);
   const allPairs = useMemo(() => A.flatMap(a => a.pairs), [A]);
-  const insights = useMemo(() => buildInsights(A, m, app.templates), [A, m, app.templates]);
+  const insights = useMemo(() => buildInsights(A, m, app.templates, iv), [A, m, app.templates, iv]);
 
   const sortedPairs = [...allPairs].sort((a, b) => a - b);
   const median = sortedPairs.length ? sortedPairs[Math.floor(sortedPairs.length / 2)] : null;
@@ -424,15 +463,24 @@ export default function Analytics() {
     { label: 'Ever replied', value: String(m.repliedCount), sub: `${m.replyRate}% of emailed`, cls: 'green' },
     { label: 'Bounce rate', value: `${m.bounceRate}%`, sub: `${m.bouncedCount} ever bounced`, cls: m.bounceRate > 10 ? 'red' : '' },
     { label: 'Advanced', value: String(m.inReviewEver + m.closedEver), sub: `${m.inReviewEver} in review · ${m.closedEver} closed`, cls: 'teal' },
+    { label: 'In interviews', value: String(iv.tracked),
+      sub: iv.tracked
+        ? `${iv.live} still in play · ${iv.selected} selected`
+        : 'nobody tracked in Interviews yet',
+      cls: iv.selected > 0 ? 'green' : iv.tracked > 0 ? 'teal' : '' },
   ];
 
   // Funnel
+  // "Moved to review" and "Closed" are resting statuses rather than rungs on the
+  // way to a job, so they sit under the chart instead of inside it — otherwise
+  // the interview steps, which don't require either, would read as a fall-off.
   const funnelSteps = [
     { label: 'Contacts added', n: m.total },
     { label: 'Emailed', n: m.sentCount },
     { label: 'Replied (ever)', n: m.repliedCount },
-    { label: 'Moved to review', n: m.inReviewEver },
-    { label: 'Closed', n: m.closedEver },
+    { label: 'In interviews', n: iv.tracked },
+    { label: 'Reached a booked round', n: iv.interviewed },
+    { label: 'Selected', n: iv.selected },
   ];
   const funnelMax = funnelSteps[0].n || 1;
   const accent = cvar('--accent') || '#4f46e5';
@@ -504,7 +552,7 @@ export default function Analytics() {
 
   return (
     <Layout title="Analytics"
-      subtitle={`${m.total.toLocaleString()} contacts · ${m.sentCount.toLocaleString()} emailed · ${m.repliedCount.toLocaleString()} ever replied`}
+      subtitle={`${m.total.toLocaleString()} contacts · ${m.sentCount.toLocaleString()} emailed · ${m.repliedCount.toLocaleString()} ever replied · ${iv.tracked.toLocaleString()} in interviews`}
       actions={
         <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
           <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} /> Refresh
@@ -521,14 +569,22 @@ export default function Analytics() {
         ))}
       </div>
 
-      <ActivitySection A={A} />
+      <ActivitySection A={A} interviews={interviews} />
 
       <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
-        <Card title="Outreach funnel" icon="ti-filter" sub="Every stage a contact has ever reached (history-based)" delay=".04s">
+        <Card title="Outreach funnel" icon="ti-filter"
+          sub="Every stage a contact has ever reached — email history, then the interview record it led to" delay=".04s">
           {funnelSteps.map((s, i) => (
             <HBar key={s.label} label={s.label} n={s.n} d={funnelMax} fill={accent} opacity={1 - i * 0.15}
               extra={i > 0 ? ` · ${pct(s.n, funnelSteps[i - 1].n)}% of prev` : ''} />
           ))}
+          <div className="an-card-sub" style={{ marginTop: 10 }}>
+            Alongside this, <strong>{m.inReviewEver}</strong> were moved to review and <strong>{m.closedEver}</strong> closed —
+            resting statuses, not steps, so they are charted under “Status breakdown”.
+            {iv.tracked === 0 && m.repliedCount > 0
+              ? ' No contact is tracked in Interviews yet, which is why the last three rows are empty.'
+              : ''}
+          </div>
         </Card>
         <Card title="Status breakdown" icon="ti-chart-pie" delay=".08s"
           sub={statusMode === 'current' ? 'Where every contact sits right now' : 'Contacts that ever passed through each status — one contact can count in several'}
@@ -593,6 +649,16 @@ export default function Analytics() {
             </table>
           )}
         </Card>
+      </div>
+
+      <div className="an-grid" style={{ marginBottom: 14 }}>
+        <InterviewFunnelCard
+          funnel={iv} base={m.repliedCount} baseLabel="of contacts who replied" delay=".22s"
+          sub="Contacts who got a real conversation — tracked in the Interviews store, not in the email status"
+          emptyHint="No contact is tracked in Interviews yet. Flag one from the Contacts page and this fills in."
+          elsewhere={{ n: Math.max(0, interviews.length - iv.records.length),
+            label: 'came from a lead or were added by hand' }}
+        />
       </div>
 
       <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>

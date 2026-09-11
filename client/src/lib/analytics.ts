@@ -1,7 +1,8 @@
 // Port of the event-based analytics derivations from analytics.html.
 // All metrics count what contacts EVER passed through (statusHistory), not just
 // their current resting status.
-import type { Contact } from './api';
+import type { Contact, Interview } from './api';
+import { FOLLOWED_UP, INTERVIEW_STATUS_LABELS, INTERVIEW_STATUS_ORDER } from './interviews';
 
 export const STATUS_META: Record<string, { label: string; c: string }> = {
   queued: { label: 'Queued', c: '--blue' },
@@ -153,15 +154,27 @@ export const ACTIVITY_META: Array<{ type: string; label: string; c: string; icon
   { type: 'closed', label: 'Closed', c: '--slate', icon: 'ti-circle-check' },
   { type: 'no-openings', label: 'No openings', c: '--purple', icon: 'ti-door-off' },
   { type: 'queued', label: 'Queued for sending', c: '--blue', icon: 'ti-clock' },
+  // Interviews are a separate store, so their events are prefixed to keep them
+  // from colliding with the identically-named contact statuses.
+  ...INTERVIEW_STATUS_ORDER.map(st => ({
+    type: `interview-${st}`,
+    label: `Interview · ${INTERVIEW_STATUS_LABELS[st]}`,
+    c: st === 'selected' ? '--green' : st === 'rejected' ? '--red' : '--indigo',
+    icon: st === 'selected' ? 'ti-confetti' : st === 'rejected' ? 'ti-mood-sad' : 'ti-user-check',
+  })),
+  { type: 'interview-followed-up', label: 'Interview · Followed up', c: '--amber', icon: 'ti-bell-ringing' },
 ];
 
+/** Whoever the event happened to. Both Contact and Interview satisfy this. */
+export interface ActivityActor { id: string; name: string; company?: string }
+
 export interface ActivityEvent {
-  t: number; type: string; c: Contact; note?: string;
+  t: number; type: string; c: ActivityActor; note?: string;
   /** Derived tally (e.g. `delivered`) — counted in the matrix, hidden from the event log. */
   countOnly?: boolean;
 }
 
-export function buildActivityEvents(A: Analyzed[]): ActivityEvent[] {
+export function buildActivityEvents(A: Analyzed[], interviews: Interview[] = []): ActivityEvent[] {
   const out: ActivityEvent[] = [];
   A.forEach(a => {
     const c = a.c;
@@ -189,6 +202,26 @@ export function buildActivityEvents(A: Analyzed[]): ActivityEvent[] {
       a.sends.forEach(s => out.push({ t: s.t, type: 'delivered', c, countOnly: true }));
     }
   });
+
+  // Creating an interview already writes its first history entry, so there is no
+  // synthetic "started" event to add — the history IS the stream. The createdAt
+  // fallback only covers a record whose history somehow never got written.
+  interviews.forEach(iv => {
+    const hist = (iv.statusHistory || [])
+      .map(h => ({ t: new Date(h.changedAt).getTime(), s: h.status, note: h.note }))
+      .filter(h => Number.isFinite(h.t));
+    if (hist.length) {
+      hist.forEach(h => out.push({
+        t: h.t,
+        type: h.s === FOLLOWED_UP ? 'interview-followed-up' : `interview-${h.s}`,
+        c: iv, note: h.note,
+      }));
+    } else {
+      const t = new Date(iv.createdAt).getTime();
+      if (Number.isFinite(t)) out.push({ t, type: `interview-${iv.status}`, c: iv });
+    }
+  });
+
   return out.sort((x, y) => y.t - x.t);
 }
 

@@ -9,6 +9,9 @@ import {
   applyFunnel, outcomeFunnel, queryStats, sourceBreakdown, topDomains, topMultiAddress, unattributed,
 } from '../lib/leadAnalytics';
 import { stageCounts, STAGE_LABELS, STAGE_PIPELINE, type OutcomeStage } from '../lib/leadOutcome';
+import { EMPTY_FUNNEL, indexInterviews, interviewFunnel } from '../lib/interviewAnalytics';
+import InterviewFunnelCard from './InterviewFunnelCard';
+import { useInterviews } from '../context/InterviewContext';
 
 // Resolved at render time so the colours follow the active theme.
 const STAGE_FILL: Record<OutcomeStage, () => string> = {
@@ -67,6 +70,7 @@ function ImportChart({ series }: { series: Array<{ day: number; n: number }> }) 
 
 export default function LeadsAnalytics({ refreshToken }: { refreshToken: number }) {
   // Leads live outside AppContext (one consumer), so this view owns its fetch.
+  const { interviews, loaded: interviewsLoaded } = useInterviews();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [outcomes, setOutcomes] = useState<LeadOutcomeMap>({});
   const [loading, setLoading] = useState(true);
@@ -96,6 +100,15 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
   const funnel2 = useMemo(() => outcomeFunnel(leads, outcomes), [leads, outcomes]);
   const af = useMemo(() => applyFunnel(leads), [leads]);
   const stages = useMemo(() => stageCounts(leads, outcomes), [leads, outcomes]);
+  // Matched on sourceId AND email: a promoted lead is usually flagged from the
+  // contact side, so source alone would report zero interviews for every lead
+  // that actually made it through.
+  const iv = useMemo(
+    () => (interviewsLoaded
+      ? interviewFunnel(leads, indexInterviews(interviews), 'lead', l => l.email)
+      : EMPTY_FUNNEL),
+    [leads, interviews, interviewsLoaded],
+  );
   const noQuery = useMemo(() => unattributed(leads), [leads]);
 
   const accent = cvar('--accent') || '#4f46e5';
@@ -133,6 +146,9 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
     { label: 'Replies earned', value: String(funnel2.replied),
       sub: funnel2.delivered ? `${Math.round(funnel2.replied / funnel2.delivered * 1000) / 10}% of ${funnel2.delivered} delivered` : 'nothing delivered yet',
       cls: funnel2.replied > 0 ? 'green' : '' },
+    { label: 'Reached interviews', value: String(iv.tracked),
+      sub: iv.tracked ? `${iv.live} still in play · ${iv.selected} selected` : 'no lead has interviewed yet',
+      cls: iv.selected > 0 ? 'green' : iv.tracked > 0 ? 'teal' : '' },
   ];
 
   const funnel = [
@@ -143,6 +159,8 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
     { label: 'Actually emailed', n: funnel2.emailed },
     { label: 'Delivered', n: funnel2.delivered },
     { label: 'Replied', n: funnel2.replied },
+    { label: 'Reached an interview', n: iv.tracked },
+    { label: 'Selected', n: iv.selected },
   ];
   const funnelMax = funnel[0].n || 1;
 
@@ -182,6 +200,10 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
               emailed that address</strong> — filter by outcome to find {funnel2.alreadyContacted !== 1 ? 'them' : 'it'} before sending again. </>
             )}
             {funnel2.bounced > 0 && <>{funnel2.bounced} bounced. </>}
+            {iv.tracked > 0
+              ? <>The last two rows come from the Interviews store, so they also count leads you applied to
+                directly or that HR called out of the blue — that is why they can exceed the reply count. </>
+              : null}
           </div>
         </Card>
 
@@ -258,9 +280,20 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
         </div>
       )}
 
+      <div className="an-grid" style={{ marginBottom: 14 }}>
+        <InterviewFunnelCard
+          funnel={iv} base={m.total} baseLabel="of all leads" delay=".145s"
+          sub="Leads that turned into a real conversation — matched to the Interviews store by lead and by email address"
+          emptyHint="No lead has reached an interview yet. Flag one from the Leads page and this fills in."
+          elsewhere={{ n: Math.max(0, interviews.length - iv.records.length),
+            label: 'trace back to a contact you cold-emailed rather than a staged lead' }}
+        />
+      </div>
+
       <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
         <Card title="Direct applications" icon="ti-file-check"
-          sub="The parallel track — leads you applied to yourself rather than emailing. Updated by hand." delay=".15s">
+          sub="The parallel track — leads you applied to yourself rather than emailing. Self-reported per lead, so its “Interviewing” row is what you ticked on the Leads page, not the Interviews store above."
+          delay=".15s">
           {af.hasApplyLink === 0 && af.applied === 0 ? (
             <div className="an-empty"><i className="ti ti-file-off" />No leads with an application link yet</div>
           ) : (
