@@ -62,6 +62,20 @@ export default function CampaignList() {
   const committed = running.reduce((n, c) => n + c.contactsPerDay, 0);
   const overCap = !!meta && committed > meta.dailyCap;
 
+  // Rolled up across every campaign, so the row answers "is my sending healthy"
+  // without opening each one.
+  const all = (campaigns || []).reduce((a, c) => {
+    const o = c.outcomes;
+    if (!o) return a;
+    return {
+      total: a.total + o.total, bounced: a.bounced + o.bounced,
+      replied: a.replied + o.replied, delivered: a.delivered + o.delivered,
+    };
+  }, { total: 0, bounced: 0, replied: 0, delivered: 0 });
+  const bouncePct = all.total ? Math.round((all.bounced / all.total) * 100) : 0;
+  // Mailbox providers start treating a sender as suspect around 5%.
+  const bounceColor = bouncePct >= 8 ? 'var(--red)' : bouncePct >= 4 ? 'var(--amber)' : undefined;
+
   return (
     <Layout
       title="Campaigns"
@@ -75,7 +89,7 @@ export default function CampaignList() {
         const pctUsed = Math.min(100, Math.round((used / Math.max(1, meta.dailyCap)) * 100));
         const level = pctUsed >= 90 ? 'red' : pctUsed >= 70 ? 'amber' : 'green';
         return (
-          <div className="stat-grid cmp-stats">
+          <div className="stat-grid cmp-stats-5">
             <div className="stat-card">
               <div className="stat-label">Active campaigns</div>
               <div className="stat-value">{meta.running}</div>
@@ -103,6 +117,21 @@ export default function CampaignList() {
                 {meta.inFlight > 0
                   ? `${meta.inFlight.toLocaleString()} still scheduled`
                   : 'nothing left in the queue'}
+              </div>
+            </div>
+
+            <div className="stat-card">
+              <div className="stat-label">Bounced</div>
+              <div className="stat-value" style={{ color: bounceColor }}>
+                {all.bounced.toLocaleString()}
+                {all.total > 0 && <span className="stat-of"> · {bouncePct}%</span>}
+              </div>
+              <div className="stat-sub">
+                {all.total === 0
+                  ? 'nothing emailed yet'
+                  : bouncePct >= 4
+                    ? 'high — check list quality'
+                    : `${all.replied.toLocaleString()} replied`}
               </div>
             </div>
 
@@ -164,14 +193,15 @@ export default function CampaignList() {
               <th style={{ width: 190 }}>Progress</th>
               <th style={{ width: 120 }}>Status</th>
               <th style={{ width: 150 }}>Schedule</th>
+              <th style={{ width: 170 }}>Outcomes</th>
               <th style={{ width: 190 }}>Next run</th>
               <th style={{ width: 120 }} />
             </tr>
           </thead>
           <tbody>
-            {campaigns === null && <SkeletonRows rows={4} cols={6} />}
+            {campaigns === null && <SkeletonRows rows={4} cols={7} />}
             {campaigns?.length === 0 && (
-              <tr><td colSpan={6}>
+              <tr><td colSpan={7}>
                 <div className="empty-state">
                   <i className="ti ti-calendar-repeat" />
                   No campaigns yet. Upload a spreadsheet and it'll be emailed a few contacts a day.
@@ -205,6 +235,26 @@ export default function CampaignList() {
                   </td>
                   <td style={{ fontSize: 12, color: 'var(--text2)' }}>
                     {c.contactsPerDay}/day at {fmtHour(c.runHourIst)}
+                  </td>
+                  <td style={{ fontSize: 12 }}>
+                    {(() => {
+                      const o = c.outcomes;
+                      if (!o || o.total === 0) {
+                        return <span style={{ color: 'var(--text3)' }}>nothing sent yet</span>;
+                      }
+                      const p = Math.round((o.bounced / o.total) * 100);
+                      const col = p >= 8 ? 'var(--red)' : p >= 4 ? 'var(--amber)' : 'var(--text2)';
+                      return (
+                        <>
+                          <div style={{ color: 'var(--green)' }}>{o.delivered.toLocaleString()} delivered</div>
+                          <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                            <span style={{ color: col }}>{o.bounced} bounced</span>
+                            {o.bounced > 0 && <span style={{ color: col }}> ({p}%)</span>}
+                            {' · '}{o.replied} replied
+                          </div>
+                        </>
+                      );
+                    })()}
                   </td>
                   <td style={{ fontSize: 12 }}>
                     {(() => {

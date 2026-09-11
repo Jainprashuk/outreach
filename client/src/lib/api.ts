@@ -750,6 +750,18 @@ export interface CampaignColumnMap {
   role?: number | null;
 }
 
+/** What became of the contacts this campaign created, joined from Contact. */
+export interface CampaignOutcomes {
+  total: number;
+  delivered: number;   // sent or follow-up-sent, no reply yet
+  replied: number;     // replied or follow-up-replied
+  bounced: number;
+  failed: number;
+  queued: number;
+  closed: number;
+  byStatus: Record<string, number>;
+}
+
 export interface Campaign {
   id: string;
   name: string;
@@ -773,6 +785,8 @@ export interface Campaign {
   pausedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Present on the list endpoint; the detail endpoint returns it alongside. */
+  outcomes?: CampaignOutcomes;
 }
 
 export interface CampaignRow {
@@ -801,18 +815,6 @@ export interface CampaignJobSummary {
   ratePerHour: number;
   createdAt: string;
   total: number; sent: number; failed: number; skipped: number; pending: number;
-}
-
-/** What became of the contacts this campaign created, joined from Contact. */
-export interface CampaignOutcomes {
-  total: number;
-  delivered: number;   // sent or follow-up-sent, no reply yet
-  replied: number;     // replied or follow-up-replied
-  bounced: number;
-  failed: number;
-  queued: number;
-  closed: number;
-  byStatus: Record<string, number>;
 }
 
 export interface CampaignDetail {

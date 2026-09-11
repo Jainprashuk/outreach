@@ -125,6 +125,51 @@ router.get('/meta', async (_req, res) => {
   }
 });
 
+/**
+ * What became of the contacts one or more campaigns created.
+ *
+ * One aggregation for every campaign at once — a per-campaign join would be N
+ * round trips to render a list. Released rows carry contactId, so this reflects
+ * later mailbox-check updates without the campaign recording anything itself.
+ */
+async function outcomesByCampaign(campaignIds) {
+  const match = { status: 'released', contactId: { $ne: null } };
+  if (campaignIds) match.campaignId = { $in: campaignIds };
+
+  const rows = await CampaignRow.aggregate([
+    { $match: match },
+    { $addFields: { cid: { $toObjectId: '$contactId' } } },
+    { $lookup: { from: 'contacts', localField: 'cid', foreignField: '_id', as: 'c' } },
+    { $unwind: '$c' },
+    { $match: { 'c.deleted': { $ne: true } } },
+    { $group: { _id: { campaignId: '$campaignId', status: '$c.status' }, n: { $sum: 1 } } },
+  ]);
+
+  const byCampaign = new Map();
+  for (const r of rows) {
+    const k = String(r._id.campaignId);
+    if (!byCampaign.has(k)) byCampaign.set(k, {});
+    byCampaign.get(k)[r._id.status] = r.n;
+  }
+  return byCampaign;
+}
+
+/** Fold a per-status map into the handful of numbers the UI actually shows. */
+function foldOutcomes(byStatus = {}) {
+  const pick = (...keys) => keys.reduce((n, k) => n + (byStatus[k] || 0), 0);
+  return {
+    total: Object.values(byStatus).reduce((n, v) => n + v, 0),
+    // 'sent' and 'follow-up-sent' both mean delivered with no reply yet.
+    delivered: pick('sent', 'follow-up-sent'),
+    replied:   pick('replied', 'follow-up-replied'),
+    bounced:   pick('bounced'),
+    failed:    pick('failed'),
+    queued:    pick('queued'),
+    closed:    pick('closed', 'no-openings', 'in-review'),
+    byStatus,
+  };
+}
+
 // GET /api/campaigns/timeline?granularity=day|hour — what has been sent and what
 // is still coming. Declared before /:id so 'timeline' is not read as an id.
 router.get('/timeline', async (req, res) => {
@@ -141,7 +186,11 @@ router.get('/timeline', async (req, res) => {
 router.get('/', async (_req, res) => {
   try {
     const campaigns = await Campaign.find(BASE_FILTER).sort({ createdAt: -1 }).lean();
-    res.json(campaigns.map(serialize));
+    const byCampaign = await outcomesByCampaign(campaigns.map(c => c._id));
+    res.json(campaigns.map(c => ({
+      ...serialize(c),
+      outcomes: foldOutcomes(byCampaign.get(String(c._id)) || {}),
+    })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -320,27 +369,8 @@ router.get('/:id', async (req, res) => {
     // contactId, so this is a join rather than anything the campaign has to
     // track itself — and it stays correct when the mailbox check later flips
     // someone to bounced or replied.
-    const outcomeRows = await CampaignRow.aggregate([
-      { $match: { campaignId: campaign._id, status: 'released', contactId: { $ne: null } } },
-      { $addFields: { cid: { $toObjectId: '$contactId' } } },
-      { $lookup: { from: 'contacts', localField: 'cid', foreignField: '_id', as: 'c' } },
-      { $unwind: '$c' },
-      { $match: { 'c.deleted': { $ne: true } } },
-      { $group: { _id: '$c.status', n: { $sum: 1 } } },
-    ]);
-    const byStatus = Object.fromEntries(outcomeRows.map(r => [r._id, r.n]));
-    const pick = (...keys) => keys.reduce((n, k) => n + (byStatus[k] || 0), 0);
-    const outcomes = {
-      total:    outcomeRows.reduce((n, r) => n + r.n, 0),
-      // 'sent' and 'follow-up-sent' both mean delivered with no reply yet.
-      delivered: pick('sent', 'follow-up-sent'),
-      replied:   pick('replied', 'follow-up-replied'),
-      bounced:   pick('bounced'),
-      failed:    pick('failed'),
-      queued:    pick('queued'),
-      closed:    pick('closed', 'no-openings', 'in-review'),
-      byStatus,
-    };
+    const byCampaign = await outcomesByCampaign([campaign._id]);
+    const outcomes = foldOutcomes(byCampaign.get(String(campaign._id)) || {});
 
     // Outcomes for recent batches, so a drip that failed wholesale is visible
     // instead of silently burning the sheet one day at a time.
