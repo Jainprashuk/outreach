@@ -854,6 +854,11 @@ export interface CampaignReleaseReport {
   exhausted: boolean;
   jobId: string | null;
   error: string | null;
+  /** The run answered nothing (timed out / hit the row cap), so the day was NOT
+   *  consumed and the next scheduled fire will try again. */
+  retryable?: boolean;
+  timedOut?: boolean;
+  capped?: boolean;
 }
 
 export const loadCampaignsApi = () => apiFetch<Campaign[]>('/api/campaigns');

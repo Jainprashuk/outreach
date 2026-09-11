@@ -73,14 +73,41 @@ export default function CampaignDetail() {
 
   const resume = () => act(() => resumeCampaignApi(c.id), 'Campaign resumed.');
 
-  const runNow = () => act(async () => {
-    const r = await runCampaignNowApi(c.id);
-    if (!r.ok && r.reason === 'locked_or_already_released') {
-      throw new Error("Today's batch has already gone out.");
+  const runNow = async () => {
+    const n = nextRunAt(c);
+    const ok = window.confirm(
+      `Send ${c.contactsPerDay} emails now?\n\n`
+      + `This releases today's batch immediately instead of waiting`
+      + `${n ? ` for ${fmtIst(n)}` : ''}. The emails go out one every `
+      + `${Math.round(60 / Math.max(1, c.ratePerHour))} minutes and cannot be recalled once sent, `
+      + `and today's scheduled release will not run again.`,
+    );
+    if (!ok) return;
+    setBusy(true);
+    try {
+      const r = await runCampaignNowApi(c.id);
+      if (!r.ok && r.reason === 'locked_or_already_released') {
+        throw new Error("Today's batch has already gone out.");
+      }
+      if (r.error) throw new Error(r.error);
+      if (r.released === 0) {
+        // Saying "released 0" as a success would imply the day is done. It isn't.
+        toast(
+          r.retryable
+            ? `Nobody was released — the scan ${r.timedOut ? 'timed out' : 'hit its row limit'} before finding anyone. Today's release is still scheduled.`
+            : `Nobody was released — ${r.skipped} rows were skipped as duplicates or invalid.`,
+          r.retryable ? 'error' : 'info',
+        );
+      } else {
+        toast(`Released ${r.released} contacts — they'll go out over the next few hours.`, 'success');
+      }
+      await refresh();
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    } finally {
+      setBusy(false);
     }
-    if (r.error) throw new Error(r.error);
-    toast(`Released ${r.released} contacts.`, 'success');
-  }, 'Batch released.');
+  };
 
   const save = (patch: Parameters<typeof updateCampaignApi>[1]) =>
     act(() => updateCampaignApi(c.id, patch), 'Saved.');
