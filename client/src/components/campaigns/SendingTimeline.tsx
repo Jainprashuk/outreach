@@ -1,13 +1,14 @@
-import { useEffect, useMemo, useState } from 'react';
-import { loadTimelinesApi, type Timeline, type TimelineBucket } from '../../lib/api';
+import { useEffect, useState } from 'react';
+import { loadTimelineApi, type Timeline, type TimelineBucket, type TimelineRange } from '../../lib/api';
 
 const IST = 5.5 * 3_600_000;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 
-type Series = (x: TimelineBucket) => { sent: number; scheduled: number };
-
-const VOLUME: Series = (x) => ({ sent: x.sent, scheduled: x.scheduled });
-const RATE: Series = (x) => ({ sent: x.peakSent, scheduled: x.peakScheduled });
+const RANGES: [TimelineRange, string][] = [
+  ['24h', 'Hourly'],
+  ['7d', '7 days'],
+  ['30d', '30 days'],
+];
 
 function label(t: number, granularity: 'day' | 'hour', long = false) {
   const d = new Date(t + IST);
@@ -20,94 +21,21 @@ function label(t: number, granularity: 'day' | 'hour', long = false) {
   return long ? `${d.getUTCDate()} ${mon}` : String(d.getUTCDate());
 }
 
-/** One small multiple: a single measure, a single y-scale. */
-function Plot({ tl, series, title, sub, capLine }: {
-  tl: Timeline;
-  series: Series;
-  title: string;
-  sub: string;
-  capLine?: number;
-}) {
-  const [hover, setHover] = useState<number | null>(null);
-  const b = tl.buckets;
-  const W = 440, H = 128, PAD_L = 30, PAD_B = 18;
-  const plotW = W - PAD_L - 8;
-  const slot = plotW / Math.max(1, b.length);
-  const barW = Math.max(1.5, Math.min(14, slot - 2));   // 2px surface gap
-  const max = Math.max(1, ...b.map((x) => series(x).sent + series(x).scheduled));
-  const nowX = PAD_L + ((tl.now - tl.from) / (tl.to - tl.from)) * plotW;
-  const h = (v: number) => (v / max) * (H - PAD_B - 10);
-  const every = Math.max(1, Math.ceil(b.length / 8));
-
-  return (
-    <div className="tl-plot">
-      <div className="tl-plot-head">
-        <h4>{title}</h4><span>{sub}</span>
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`${title}, ${sub}`}>
-        {[0, Math.round(max / 2), max].map((v, i) => {
-          const y = H - PAD_B - h(v);
-          return (
-            <g key={i}>
-              <line x1={PAD_L} y1={y} x2={W - 8} y2={y} stroke="var(--border)"
-                strokeWidth="1" opacity={v === 0 ? 0.9 : 0.35} />
-              <text x={PAD_L - 5} y={y + 3} textAnchor="end" fontSize="8.5" fill="var(--text3)">{v}</text>
-            </g>
-          );
-        })}
-
-        {capLine !== undefined && capLine <= max * 1.4 && (
-          <>
-            <line x1={PAD_L} y1={H - PAD_B - h(capLine)} x2={W - 8} y2={H - PAD_B - h(capLine)}
-              stroke="var(--amber)" strokeWidth="1.5" strokeDasharray="4 3" />
-            <text x={W - 9} y={H - PAD_B - h(capLine) - 3} textAnchor="end" fontSize="8.5"
-              fill="var(--amber)">cap {capLine}</text>
-          </>
-        )}
-
-        <line x1={nowX} y1={4} x2={nowX} y2={H - PAD_B} stroke="var(--text3)"
-          strokeWidth="1" strokeDasharray="3 3" />
-
-        {b.map((x, i) => {
-          const v = series(x);
-          const bx = PAD_L + i * slot + (slot - barW) / 2;
-          const base = H - PAD_B;
-          return (
-            <g key={x.key} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
-              <rect x={PAD_L + i * slot} y={0} width={slot} height={H - PAD_B}
-                fill={hover === i ? 'var(--bg3)' : 'transparent'} />
-              {v.sent > 0 && (
-                <rect x={bx} y={base - h(v.sent)} width={barW} height={h(v.sent)} rx="2.5" fill="var(--tl-a)" />
-              )}
-              {v.scheduled > 0 && (
-                <rect x={bx} y={base - h(v.sent) - h(v.scheduled) - (v.sent > 0 ? 2 : 0)}
-                  width={barW} height={h(v.scheduled)} rx="2.5"
-                  fill="url(#tl-proj)" stroke="var(--tl-b)" strokeWidth="1" />
-              )}
-              {i % every === 0 && (
-                <text x={PAD_L + i * slot + slot / 2} y={H - 5} textAnchor="middle"
-                  fontSize="8.5" fill="var(--text3)">{label(x.t, tl.granularity)}</text>
-              )}
-            </g>
-          );
-        })}
-      </svg>
-      <div className="tl-tip">
-        {hover !== null && b[hover] ? (
-          <>
-            <strong>{label(b[hover].t, tl.granularity, true)}</strong>
-            {' · '}{series(b[hover]).sent} sent{' · '}{series(b[hover]).scheduled} scheduled
-          </>
-        ) : <span>&nbsp;</span>}
-      </div>
-    </div>
-  );
-}
-
+/**
+ * One chart carrying both measures.
+ *
+ * Volume and peak rate are both counts of emails, so they share a SINGLE y-axis
+ * — what must never happen is two y-scales, not two series. On a daily bucket
+ * the rate marker sits inside its bar ("of these 75, the busiest hour did 40");
+ * on an hourly bucket the two coincide by definition and the marker rides the
+ * bar top, which is the honest picture rather than a second invented series.
+ */
 export default function SendingTimeline() {
-  const [data, setData] = useState<{ day: Timeline; hour: Timeline } | null>(null);
+  const [range, setRange] = useState<TimelineRange>('7d');
+  const [data, setData] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [hover, setHover] = useState<number | null>(null);
   const [asTable, setAsTable] = useState(false);
   const [attempt, setAttempt] = useState(0);
 
@@ -116,7 +44,7 @@ export default function SendingTimeline() {
     let retry: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     const run = (tries: number) => {
-      loadTimelinesApi()
+      loadTimelineApi(range)
         .then((d) => { if (alive) { setData(d); setError(''); setLoading(false); } })
         .catch((e) => {
           if (!alive) return;
@@ -131,17 +59,7 @@ export default function SendingTimeline() {
     };
     const start = setTimeout(() => run(0), attempt === 0 ? 350 : 0);
     return () => { alive = false; clearTimeout(start); if (retry) clearTimeout(retry); };
-  }, [attempt]);
-
-  const totals = useMemo(() => {
-    if (!data) return { sent: 0, scheduled: 0, peak: 0 };
-    const d = data.day.buckets;
-    return {
-      sent: d.reduce((a, x) => a + x.sent, 0),
-      scheduled: d.reduce((a, x) => a + x.scheduled, 0),
-      peak: d.reduce((a, x) => Math.max(a, x.peakSent, x.peakScheduled), 0),
-    };
-  }, [data]);
+  }, [range, attempt]);
 
   if (loading && !data) {
     return <div className="empty-state"><i className="ti ti-loader-2" /> Building the timeline…</div>;
@@ -163,81 +81,144 @@ export default function SendingTimeline() {
     );
   }
 
-  const rows = [...data.day.buckets.map((x) => ({ ...x, g: 'day' as const })),
-                ...data.hour.buckets.map((x) => ({ ...x, g: 'hour' as const }))]
-    .filter((x) => x.sent || x.scheduled);
+  const b = data.buckets;
+  const hourly = data.granularity === 'hour';
+  const W = 900, H = 190, PAD_L = 34, PAD_B = 22;
+  const plotW = W - PAD_L - 10;
+  const slot = plotW / Math.max(1, b.length);
+  const barW = Math.max(2, Math.min(20, slot - 2));   // 2px surface gap
+  const peakOf = (x: TimelineBucket) => Math.max(x.peakSent, x.peakScheduled);
+  const max = Math.max(1, ...b.map((x) => Math.max(x.sent + x.scheduled, peakOf(x))));
+  const h = (v: number) => (v / max) * (H - PAD_B - 12);
+  const nowX = PAD_L + ((data.now - data.from) / (data.to - data.from)) * plotW;
+  const every = Math.max(1, Math.ceil(b.length / 12));
+  const totals = {
+    sent: b.reduce((a, x) => a + x.sent, 0),
+    scheduled: b.reduce((a, x) => a + x.scheduled, 0),
+    peak: b.reduce((a, x) => Math.max(a, peakOf(x)), 0),
+  };
+  const hb = hover !== null ? b[hover] : null;
 
   return (
     <div className="tl-root">
-      {/* One pattern definition shared by every plot. */}
-      <svg width="0" height="0" style={{ position: 'absolute' }} aria-hidden="true">
-        <defs>
-          <pattern id="tl-proj" width="5" height="5" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
-            <rect width="5" height="5" fill="var(--tl-b)" opacity="0.35" />
-            <line x1="0" y1="0" x2="0" y2="5" stroke="var(--tl-b)" strokeWidth="2.4" />
-          </pattern>
-        </defs>
-      </svg>
-
       <div className="section-head" style={{ marginBottom: 10 }}>
-        <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', fontSize: 12, color: 'var(--text2)' }}>
-          {/* Legend is always present for two series; the hatch means neither is
-              identified by colour alone. */}
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--tl-a)' }} /> Sent
-          </span>
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, border: '1px solid var(--tl-b)',
-              background: 'repeating-linear-gradient(45deg, var(--tl-b) 0 2px, transparent 2px 5px)' }} /> Scheduled
-          </span>
-          <span style={{ color: 'var(--text3)' }}>
-            {totals.sent.toLocaleString()} sent · {totals.scheduled.toLocaleString()} to come · busiest hour {totals.peak}/hr
-          </span>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          {RANGES.map(([r, lbl]) => (
+            <button key={r} type="button"
+              className={`btn btn-sm${range === r ? ' btn-primary' : ''}`}
+              onClick={() => setRange(r)}>{lbl}</button>
+          ))}
+          {/* Two fills plus a marker, so a legend is always present; the hatch
+              and the tick mean nothing is identified by colour alone. */}
+          <span className="tl-key"><span className="tl-sw tl-sw-a" /> Sent</span>
+          <span className="tl-key"><span className="tl-sw tl-sw-b" /> Scheduled</span>
+          <span className="tl-key"><span className="tl-sw tl-sw-r" /> Peak /hr</span>
         </div>
         <button type="button" className="btn btn-sm" onClick={() => setAsTable((v) => !v)}>
-          <i className={`ti ti-${asTable ? 'chart-bar' : 'table'}`} /> {asTable ? 'Charts' : 'Table'}
+          <i className={`ti ti-${asTable ? 'chart-bar' : 'table'}`} /> {asTable ? 'Chart' : 'Table'}
         </button>
+      </div>
+
+      <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>
+        {totals.sent.toLocaleString()} sent · {totals.scheduled.toLocaleString()} still to come ·
+        busiest hour <strong>{totals.peak}/hr</strong>
+        {!hourly && <span style={{ color: 'var(--text3)' }}> · bars are emails per day, the tick is that day's busiest hour</span>}
+        {hourly && <span style={{ color: 'var(--text3)' }}> · each bar is one hour, so its height is also the rate</span>}
       </div>
 
       {asTable ? (
         <div className="table-card" style={{ maxHeight: 420, overflowY: 'auto' }}>
           <table>
-            <thead><tr><th>Scale</th><th>When</th><th>Sent</th><th>Scheduled</th><th>Peak /hr</th></tr></thead>
+            <thead><tr><th>When</th><th>Sent</th><th>Scheduled</th><th>Peak /hr</th></tr></thead>
             <tbody>
-              {rows.map((x) => (
-                <tr key={`${x.g}-${x.key}`}>
-                  <td style={{ color: 'var(--text3)' }}>{x.g}</td>
-                  <td>{label(x.t, x.g, true)}{!x.past && <span style={{ color: 'var(--text3)' }}> · upcoming</span>}</td>
+              {b.filter((x) => x.sent || x.scheduled).map((x) => (
+                <tr key={x.key}>
+                  <td>{label(x.t, data.granularity, true)}{!x.past && <span style={{ color: 'var(--text3)' }}> · upcoming</span>}</td>
                   <td>{x.sent || '—'}</td>
                   <td>{x.scheduled || '—'}</td>
-                  <td>{Math.max(x.peakSent, x.peakScheduled) || '—'}</td>
+                  <td>{peakOf(x) || '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
       ) : (
-        <div className="tl-grid">
-          <Plot tl={data.day} series={VOLUME} title="Volume · by day"
-            sub="emails per day, 14 days back / 30 ahead" capLine={data.day.dailyCap} />
-          <Plot tl={data.hour} series={VOLUME} title="Volume · by hour"
-            sub="emails per hour, 24h back / 48h ahead" />
-          <Plot tl={data.day} series={RATE} title="Rate · by day"
-            sub="busiest hour of each day, emails/hour" />
-          {/* Deliberately not a fourth chart: at hourly resolution the count in a
-              bucket IS the rate, so it would repeat the plot above it. */}
-          <div className="tl-plot tl-note">
-            <div className="tl-plot-head"><h4>Rate · by hour</h4></div>
-            <p>
-              At hourly resolution the volume chart above <em>is</em> the rate — each bar is already
-              emails per hour, so repeating it here would say nothing new.
-            </p>
-            <p style={{ marginTop: 8 }}>
-              Use <strong>Rate · by day</strong> to see how hard any single day pushed, and the
-              dashed line on <strong>Volume · by day</strong> for the {data.day.dailyCap}/day ceiling.
-            </p>
+        <>
+          <svg viewBox={`0 0 ${W} ${H}`} className="tl-svg" role="img"
+            aria-label={`Emails sent and scheduled, ${range}`}>
+            <defs>
+              <pattern id="tl-proj" width="5" height="5" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+                <rect width="5" height="5" fill="var(--tl-b)" opacity="0.35" />
+                <line x1="0" y1="0" x2="0" y2="5" stroke="var(--tl-b)" strokeWidth="2.4" />
+              </pattern>
+            </defs>
+
+            {[0, Math.round(max / 2), max].map((v, i) => {
+              const y = H - PAD_B - h(v);
+              return (
+                <g key={i}>
+                  <line x1={PAD_L} y1={y} x2={W - 10} y2={y} stroke="var(--border)"
+                    strokeWidth="1" opacity={v === 0 ? 0.9 : 0.35} />
+                  <text x={PAD_L - 6} y={y + 3} textAnchor="end" fontSize="9" fill="var(--text3)">{v}</text>
+                </g>
+              );
+            })}
+
+            {!hourly && data.dailyCap <= max * 1.4 && (
+              <>
+                <line x1={PAD_L} y1={H - PAD_B - h(data.dailyCap)} x2={W - 10} y2={H - PAD_B - h(data.dailyCap)}
+                  stroke="var(--amber)" strokeWidth="1.5" strokeDasharray="4 3" />
+                <text x={W - 11} y={H - PAD_B - h(data.dailyCap) - 4} textAnchor="end" fontSize="9"
+                  fill="var(--amber)">cap {data.dailyCap}/day</text>
+              </>
+            )}
+
+            <line x1={nowX} y1={6} x2={nowX} y2={H - PAD_B} stroke="var(--text3)" strokeWidth="1" strokeDasharray="3 3" />
+            <text x={nowX + 4} y={13} fontSize="9" fill="var(--text3)">now</text>
+
+            {b.map((x, i) => {
+              const bx = PAD_L + i * slot + (slot - barW) / 2;
+              const base = H - PAD_B;
+              const peak = peakOf(x);
+              return (
+                <g key={x.key} onMouseEnter={() => setHover(i)} onMouseLeave={() => setHover(null)}>
+                  <rect x={PAD_L + i * slot} y={0} width={slot} height={H - PAD_B}
+                    fill={hover === i ? 'var(--bg3)' : 'transparent'} />
+                  {x.sent > 0 && (
+                    <rect x={bx} y={base - h(x.sent)} width={barW} height={h(x.sent)} rx="3" fill="var(--tl-a)" />
+                  )}
+                  {x.scheduled > 0 && (
+                    <rect x={bx} y={base - h(x.sent) - h(x.scheduled) - (x.sent > 0 ? 2 : 0)}
+                      width={barW} height={h(x.scheduled)} rx="3"
+                      fill="url(#tl-proj)" stroke="var(--tl-b)" strokeWidth="1" />
+                  )}
+                  {/* Same axis, same unit — a tick showing the busiest hour inside
+                      this bucket. On an hourly bucket it coincides with the top. */}
+                  {peak > 0 && !hourly && (
+                    <line x1={bx - 1.5} y1={base - h(peak)} x2={bx + barW + 1.5} y2={base - h(peak)}
+                      stroke="var(--tl-r)" strokeWidth="2" strokeLinecap="round" />
+                  )}
+                  {i % every === 0 && (
+                    <text x={PAD_L + i * slot + slot / 2} y={H - 7} textAnchor="middle"
+                      fontSize="9" fill="var(--text3)">{label(x.t, data.granularity)}</text>
+                  )}
+                </g>
+              );
+            })}
+          </svg>
+
+          {/* Height reserved so the layout does not jump as the pointer moves. */}
+          <div className="tl-tip">
+            {hb ? (
+              <>
+                <strong>{label(hb.t, data.granularity, true)}</strong>
+                {' · '}{hb.sent} sent{' · '}{hb.scheduled} scheduled
+                {!hourly && peakOf(hb) > 0 && <> · busiest hour {peakOf(hb)}/hr</>}
+                {!hb.past && <span style={{ color: 'var(--text3)' }}> · upcoming</span>}
+              </>
+            ) : <span>&nbsp;</span>}
           </div>
-        </div>
+        </>
       )}
     </div>
   );

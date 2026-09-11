@@ -874,7 +874,10 @@ export interface TimelineBucket {
   past: boolean;
 }
 
+export type TimelineRange = '24h' | '7d' | '30d';
+
 export interface Timeline {
+  range: TimelineRange;
   granularity: 'day' | 'hour';
   now: number;
   from: number;
@@ -883,12 +886,8 @@ export interface Timeline {
   buckets: TimelineBucket[];
 }
 
-export const loadTimelineApi = (granularity: 'day' | 'hour') =>
-  apiFetch<Timeline>(`/api/campaigns/timeline?granularity=${granularity}`);
-
-/** Both granularities in one round trip, for the side-by-side view. */
-export const loadTimelinesApi = () =>
-  apiFetch<{ day: Timeline; hour: Timeline }>('/api/campaigns/timeline?granularity=both');
+export const loadTimelineApi = (range: TimelineRange) =>
+  apiFetch<Timeline>(`/api/campaigns/timeline?range=${range}`);
 
 export const loadCampaignsApi = () => apiFetch<Campaign[]>('/api/campaigns');
 

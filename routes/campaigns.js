@@ -129,18 +129,8 @@ router.get('/meta', async (_req, res) => {
 // is still coming. Declared before /:id so 'timeline' is not read as an id.
 router.get('/timeline', async (req, res) => {
   try {
-    // 'both' in one request: the page shows day and hour side by side, and two
-    // parallel calls would double the load on exactly the cold start that
-    // already struggles to serve the first one.
-    if (req.query.granularity === 'both') {
-      const [day, hour] = await Promise.all([
-        buildTimeline({ granularity: 'day' }),
-        buildTimeline({ granularity: 'hour' }),
-      ]);
-      return res.json({ day, hour });
-    }
-    const granularity = req.query.granularity === 'hour' ? 'hour' : 'day';
-    res.json(await buildTimeline({ granularity }));
+    const range = ['24h', '7d', '30d'].includes(req.query.range) ? req.query.range : '7d';
+    res.json(await buildTimeline({ range }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

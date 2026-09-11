@@ -95,42 +95,64 @@
   --tl-b: #d95926;
 }
 
-/* Small multiples: two measures x two time scales. Two y-scales on one chart is
-   the one thing never to do, so each measure keeps its own plot and they sit
-   side by side instead. */
-.tl-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+/* ── Sending timeline ───────────────────────────────────────────────────────
+   One chart, three marks. Volume and peak rate are both counts of emails, so
+   they share a single y-axis — two y-SCALES is the thing never to do, not two
+   series.
+
+   Hues are validated categorical slots 1, 2 and 7, stepped per surface rather
+   than flipped. Both modes pass all six checks:
+     node scripts/validate_palette.js "#2a78d6,#eb6834,#4a3aa7" --mode light
+     node scripts/validate_palette.js "#3987e5,#d95926,#9085e9" --mode dark
+   Worst adjacent CVD dE 24.7 (light) / 26.0 (dark) against a target of 8.
+   Aqua was the obvious third pick and was rejected: it warned at 2.74:1 contrast
+   on the light surface. Green failed outright at dE 3.2 against orange. */
+.tl-root {
+  --tl-a: #2a78d6;   /* sent */
+  --tl-b: #eb6834;   /* scheduled */
+  --tl-r: #4a3aa7;   /* peak rate marker */
 }
 
-.tl-plot {
-  background: var(--bg);
-  border: 0.5px solid var(--border);
-  border-radius: var(--radius-lg);
-  padding: 12px 14px 8px;
-  min-width: 0;
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .tl-root {
+    --tl-a: #3987e5;
+    --tl-b: #d95926;
+    --tl-r: #9085e9;
+  }
 }
 
-.tl-plot svg { width: 100%; height: auto; display: block; overflow: visible; }
+:root[data-theme="dark"] .tl-root {
+  --tl-a: #3987e5;
+  --tl-b: #d95926;
+  --tl-r: #9085e9;
+}
 
-.tl-plot-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
-.tl-plot-head h4 { margin: 0; font-size: 12.5px; font-weight: 600; }
-.tl-plot-head span { font-size: 10.5px; color: var(--text3); }
+.tl-svg { width: 100%; height: auto; display: block; overflow: visible; }
 
-/* Reserved so the row does not reflow as the pointer moves across bars. */
-.tl-tip {
-  font-size: 11px;
+.tl-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
   color: var(--text2);
-  min-height: 18px;
-  margin-top: 4px;
+}
+
+.tl-sw { width: 11px; height: 11px; border-radius: 2px; flex: none; }
+.tl-sw-a { background: var(--tl-a); }
+.tl-sw-b {
+  border: 1px solid var(--tl-b);
+  background: repeating-linear-gradient(45deg, var(--tl-b) 0 2px, transparent 2px 5px);
+}
+/* The marker is a rule, not a fill — the swatch mirrors its shape. */
+.tl-sw-r { height: 3px; border-radius: 2px; background: var(--tl-r); }
+
+/* Reserved height so the layout does not jump as the pointer crosses bars. */
+.tl-tip {
+  font-size: 12px;
+  color: var(--text2);
+  min-height: 20px;
+  margin-top: 6px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.tl-note p { margin: 0; font-size: 11.5px; color: var(--text3); line-height: 1.65; }
-
-@media (max-width: 900px) {
-  .tl-grid { grid-template-columns: 1fr; }
 }
