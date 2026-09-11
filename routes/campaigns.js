@@ -269,7 +269,7 @@ router.post('/:id/rows', async (req, res) => {
     // so whatever is left is finished by the recheck endpoint or the next run.
     let reconciled = null;
     if (body.last) {
-      reconciled = await reconcileDuplicates(campaign._id, { budget: deadline(20_000) });
+      reconciled = await reconcileDuplicates(campaign._id, { budget: deadline(20_000), trigger: 'upload' });
       if (reconciled.marked > 0) {
         updated = await Campaign.findById(campaign._id).lean();
       }
@@ -510,7 +510,7 @@ router.post('/:id/rows/recheck', async (req, res) => {
   try {
     const campaign = await findCampaign(req.params.id, { _id: 1 });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
-    const result = await reconcileDuplicates(campaign._id, { budget: deadline(40_000) });
+    const result = await reconcileDuplicates(campaign._id, { budget: deadline(40_000), trigger: 'manual' });
     const fresh = await Campaign.findById(campaign._id).lean();
     res.json({ ok: true, ...result, campaign: serialize(fresh) });
   } catch (err) {

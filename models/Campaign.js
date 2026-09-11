@@ -1,10 +1,12 @@
 const mongoose = require('mongoose');
 
-// One entry per day the runner actually released. Bounded with $slice so this
-// never becomes the thing that blows the document up.
+// The campaign's activity log. Two kinds of entry share it: a 'release' (a day's
+// batch actually went out) and a 'reconcile' (rows were retired because they were
+// already Contacts). Bounded with $slice so it never blows the document up.
 const releaseSchema = new mongoose.Schema({
+  kind:       { type: String, enum: ['release', 'reconcile'], default: 'release' },
   releasedOn: { type: String, required: true },   // 'YYYY-MM-DD' in IST
-  trigger:    { type: String, enum: ['cron', 'manual'], default: 'cron' },
+  trigger:    { type: String, enum: ['cron', 'manual', 'upload'], default: 'cron' },
   jobId:      { type: String, default: null },
   released:   { type: Number, default: 0 },       // items actually on the SendJob
   skipped:    { type: Number, default: 0 },

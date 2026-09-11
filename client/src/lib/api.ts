@@ -725,10 +725,13 @@ export interface CampaignStats {
   queued?: number;
 }
 
-/** One day the runner actually released. Embedded on the campaign, newest last. */
+/** One entry in the campaign's activity log. Embedded on the campaign, newest last.
+ *  'release' = a day's batch went out. 'reconcile' = rows were retired because
+ *  they were already Contacts. */
 export interface CampaignRelease {
+  kind?: 'release' | 'reconcile';
   releasedOn: string;              // 'YYYY-MM-DD' in IST
-  trigger: 'cron' | 'manual';
+  trigger: 'cron' | 'manual' | 'upload';
   jobId: string | null;
   released: number;
   skipped: number;

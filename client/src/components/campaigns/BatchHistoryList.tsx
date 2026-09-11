@@ -67,6 +67,31 @@ export default function BatchHistoryList({ campaign, jobSummaries }: {
         </thead>
         <tbody>
           {releases.map((r, i) => {
+            if (r.kind === 'reconcile') {
+              return (
+                <tr key={`rec-${r.releasedOn}-${i}`}>
+                  <td>
+                    <div style={{ fontWeight: 500 }}>{r.releasedOn}</div>
+                    <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                      {r.trigger === 'upload' ? 'on upload' : 'manual check'}
+                    </div>
+                  </td>
+                  <td>—</td>
+                  <td><span className="badge badge-queued">Duplicate check</span></td>
+                  <td style={{ fontSize: 12 }}>
+                    <strong>{r.skipped.toLocaleString()}</strong> rows retired — already in your Contacts
+                    <span style={{ color: 'var(--text3)' }}> · {r.scanned.toLocaleString()} checked</span>
+                    {!r.exhausted && (
+                      <div style={{ fontSize: 11, color: 'var(--amber)' }}>
+                        Stopped early — run the check again to finish the sheet.
+                      </div>
+                    )}
+                  </td>
+                  <td style={{ fontSize: 12, color: 'var(--text2)' }}>{fmtDateTime(r.finishedAt)}</td>
+                  <td />
+                </tr>
+              );
+            }
             const s = r.jobId ? byId.get(r.jobId) : undefined;
             const job = r.jobId ? jobs[r.jobId] : undefined;
             return (
