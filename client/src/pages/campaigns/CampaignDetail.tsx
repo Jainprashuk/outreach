@@ -31,6 +31,12 @@ export default function CampaignDetail() {
   // never fire, which is worse than showing nothing.
   const [meta, setMeta] = useState<CampaignMeta | null>(null);
   useEffect(() => { loadCampaignMetaApi().then(setMeta).catch(() => {}); }, []);
+  // Only the templates — init() would also pull every contact, which this page
+  // never reads.
+  const templatesLoaded = Object.keys(app.templates).length > 0;
+  useEffect(() => {
+    if (!templatesLoaded) app.loadTemplates().catch(() => {});
+  }, [templatesLoaded]);
   // Ticks the countdown once a second, independently of the 10s data poll.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -281,65 +287,107 @@ export default function CampaignDetail() {
       {tab === 'skipped' && <SkippedRowsPanel campaign={c} status="skipped" onChanged={refresh} />}
       {tab === 'removed' && <SkippedRowsPanel campaign={c} status="removed" onChanged={refresh} />}
       {tab === 'setup' && (
-        <div className="form-grid">
-          <div className="form-group">
-            <label className="form-label">Contacts per day</label>
-            <input type="number" min={1} max={500} defaultValue={c.contactsPerDay} disabled={busy}
-              onBlur={(e) => {
-                const v = Number(e.target.value);
-                if (v !== c.contactsPerDay) save({ contactsPerDay: v });
-              }} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Emails per hour</label>
-            <input type="number" min={1} max={60} defaultValue={c.ratePerHour} disabled={busy}
-              onBlur={(e) => {
-                const v = Number(e.target.value);
-                if (v !== c.ratePerHour) save({ ratePerHour: v });
-              }} />
-          </div>
-          <div className="form-group">
-            <label className="form-label">Send each day at (IST)</label>
-            <select value={c.runHourIst} disabled={busy}
-              onChange={(e) => save({ runHourIst: Number(e.target.value) })}>
-              {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{fmtHour(h)}</option>)}
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Template</label>
-            <select value={c.templateKey} disabled={busy}
-              onChange={(e) => save({ templateKey: e.target.value })}>
-              {Object.values(app.templates).map((t) => <option key={t.key} value={t.key}>{t.name}</option>)}
-            </select>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Attach resume</label>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
-              <input type="checkbox" checked={c.attachResume} disabled={busy}
-                onChange={(e) => save({ attachResume: e.target.checked })} />
-              Attach the resume from Settings
-            </label>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Columns from your sheet</label>
-            <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.7 }}>
-              {c.sourceColumns.length > 0
-                ? c.sourceColumns.map((h, i) => <span key={i} className="var-pill" style={{ marginRight: 4 }}>{h}</span>)
-                : '—'}
-              <div style={{ marginTop: 6, color: 'var(--text3)' }}>
-                The mapping is fixed once rows are uploaded — create a new campaign to remap.
+        <div className="cmp-setup">
+          <section className="cmp-setup-block">
+            <h3 className="cmp-setup-title">Schedule</h3>
+            <p className="cmp-setup-hint">
+              How fast the sheet is worked through, and when each day's batch starts.
+            </p>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Contacts per day</label>
+                {/* Keyed on the server value so a rejected edit snaps back
+                    instead of leaving an invalid number on screen. */}
+                <input key={`cpd-${c.contactsPerDay}`} type="number" min={1} max={500}
+                  defaultValue={c.contactsPerDay} disabled={busy}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (v !== c.contactsPerDay) save({ contactsPerDay: v });
+                  }} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Emails per hour</label>
+                <input key={`rph-${c.ratePerHour}`} type="number" min={1} max={60}
+                  defaultValue={c.ratePerHour} disabled={busy}
+                  onBlur={(e) => {
+                    const v = Number(e.target.value);
+                    if (v !== c.ratePerHour) save({ ratePerHour: v });
+                  }} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Send each day at (IST)</label>
+                <select value={c.runHourIst} disabled={busy}
+                  onChange={(e) => save({ runHourIst: Number(e.target.value) })}>
+                  {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{fmtHour(h)}</option>)}
+                </select>
               </div>
             </div>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Danger zone</label>
+            <div className="info-box" style={{ marginTop: 12 }}>
+              <i className="ti ti-clock" />
+              <span>
+                {c.contactsPerDay}/day at {c.ratePerHour}/hour from {fmtHour(c.runHourIst)} — each batch
+                takes about <strong>{dripDuration(c.contactsPerDay, c.ratePerHour)}</strong>.
+                {s.pending > 0 && <> {s.pending.toLocaleString()} left, about <strong>{daysRemaining(c)} days</strong> to go.</>}
+              </span>
+            </div>
+          </section>
+
+          <section className="cmp-setup-block">
+            <h3 className="cmp-setup-title">Content</h3>
+            <p className="cmp-setup-hint">What every contact in this campaign receives.</p>
+            <div className="form-grid">
+              <div className="form-group">
+                <label className="form-label">Template</label>
+                <select value={c.templateKey} disabled={busy || !templatesLoaded}
+                  onChange={(e) => save({ templateKey: e.target.value })}>
+                  {!templatesLoaded && <option value={c.templateKey}>Loading templates…</option>}
+                  {templatesLoaded && !app.templates[c.templateKey] && (
+                    <option value={c.templateKey}>{c.templateKey} (no longer exists)</option>
+                  )}
+                  {Object.values(app.templates).map((t) => (
+                    <option key={t.key} value={t.key}>{t.name}</option>
+                  ))}
+                </select>
+                {templatesLoaded && !app.templates[c.templateKey] && (
+                  <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 4 }}>
+                    This template has been deleted — pick another or the next batch will fail.
+                  </div>
+                )}
+              </div>
+              <div className="form-group">
+                <label className="form-label">Resume</label>
+                <label className="cmp-check">
+                  <input type="checkbox" checked={c.attachResume} disabled={busy}
+                    onChange={(e) => save({ attachResume: e.target.checked })} />
+                  Attach the resume from Settings to every email
+                </label>
+              </div>
+            </div>
+          </section>
+
+          <section className="cmp-setup-block">
+            <h3 className="cmp-setup-title">Source</h3>
+            <p className="cmp-setup-hint">
+              {c.fileName || 'The uploaded spreadsheet'} · {s.total.toLocaleString()} rows.
+              The mapping is fixed once rows are uploaded — create a new campaign to remap.
+            </p>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+              {c.sourceColumns.length > 0
+                ? c.sourceColumns.map((h, i) => <span key={i} className="var-pill">{h}</span>)
+                : <span style={{ fontSize: 12, color: 'var(--text3)' }}>No columns recorded.</span>}
+            </div>
+          </section>
+
+          <section className="cmp-setup-block cmp-danger">
+            <h3 className="cmp-setup-title" style={{ color: 'var(--red)' }}>Danger zone</h3>
+            <p className="cmp-setup-hint">
+              Deleting stops all future releases. Contacts already emailed are kept, and their
+              history stays intact.
+            </p>
             <button className="btn btn-sm btn-danger" type="button" disabled={busy} onClick={remove}>
               <i className="ti ti-trash" /> Delete campaign
             </button>
-            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>
-              Contacts already emailed are kept — this only stops future releases.
-            </div>
-          </div>
+          </section>
         </div>
       )}
     </Layout>

@@ -27,3 +27,46 @@
   white-space: nowrap;
   vertical-align: bottom;
 }
+
+/* ── Setup tab ──────────────────────────────────────────────────────────────
+   The settings were one flat form-grid, so schedule, content, source and a
+   delete button all read as a single undifferentiated list. Grouping them
+   costs four rules and makes the destructive action visually separate. */
+.cmp-setup {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  max-width: 900px;
+}
+
+.cmp-setup-block {
+  background: var(--bg);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 18px 20px;
+}
+
+.cmp-setup-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: .01em;
+}
+
+.cmp-setup-hint {
+  margin: 4px 0 14px;
+  font-size: 12px;
+  color: var(--text3);
+  line-height: 1.6;
+}
+
+/* Aligns the checkbox with the inputs beside it rather than the label above. */
+.cmp-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  min-height: 34px;
+}
+
+.cmp-danger { border-color: var(--red); }

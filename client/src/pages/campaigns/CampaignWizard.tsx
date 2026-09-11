@@ -55,6 +55,10 @@ export default function CampaignWizard() {
   const launchingRef = useRef(false);
 
   useEffect(() => { loadCampaignMetaApi().then(setMeta).catch(() => {}); }, []);
+  // Templates for the picker, contacts for the duplicate count. Landing here
+  // directly (rather than via a page that already called init) would otherwise
+  // give an empty template list and a duplicate count of zero.
+  useEffect(() => { if (!app.loaded) app.init().catch(() => {}); }, [app.loaded]);
   useEffect(() => {
     if (!templateKey) {
       const first = Object.keys(app.templates)[0];
