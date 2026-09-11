@@ -875,9 +875,12 @@ export interface TimelineBucket {
 }
 
 export type TimelineRange = '24h' | '7d' | '30d';
+/** 'campaigns' counts only batches a campaign released; 'all' includes manual sends. */
+export type TimelineScope = 'all' | 'campaigns';
 
 export interface Timeline {
   range: TimelineRange;
+  scope: TimelineScope;
   granularity: 'day' | 'hour';
   now: number;
   from: number;
@@ -886,8 +889,8 @@ export interface Timeline {
   buckets: TimelineBucket[];
 }
 
-export const loadTimelineApi = (range: TimelineRange) =>
-  apiFetch<Timeline>(`/api/campaigns/timeline?range=${range}`);
+export const loadTimelineApi = (range: TimelineRange, scope: TimelineScope) =>
+  apiFetch<Timeline>(`/api/campaigns/timeline?range=${range}&scope=${scope}`);
 
 export const loadCampaignsApi = () => apiFetch<Campaign[]>('/api/campaigns');
 

@@ -130,7 +130,8 @@ router.get('/meta', async (_req, res) => {
 router.get('/timeline', async (req, res) => {
   try {
     const range = ['24h', '7d', '30d'].includes(req.query.range) ? req.query.range : '7d';
-    res.json(await buildTimeline({ range }));
+    const scope = req.query.scope === 'campaigns' ? 'campaigns' : 'all';
+    res.json(await buildTimeline({ range, scope }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { loadTimelineApi, type Timeline, type TimelineBucket, type TimelineRange } from '../../lib/api';
+import {
+  loadTimelineApi, type Timeline, type TimelineBucket, type TimelineRange, type TimelineScope,
+} from '../../lib/api';
 
 const IST = 5.5 * 3_600_000;
 const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -35,6 +37,10 @@ export default function SendingTimeline() {
   // Both measures as bars, one at a time. Overlaying the rate as a tick inside
   // the volume bar was legible in principle and not in practice.
   const [measure, setMeasure] = useState<'volume' | 'rate'>('volume');
+  // The chart reads every SendJob, so a manual Step 3 batch shows up alongside
+  // campaign drips. Both views are worth having: Gmail counts everything, but
+  // "is my campaign pacing correctly" needs the campaigns-only picture.
+  const [scope, setScope] = useState<TimelineScope>('all');
   const [data, setData] = useState<Timeline | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -47,7 +53,7 @@ export default function SendingTimeline() {
     let retry: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     const run = (tries: number) => {
-      loadTimelineApi(range)
+      loadTimelineApi(range, scope)
         .then((d) => { if (alive) { setData(d); setError(''); setLoading(false); } })
         .catch((e) => {
           if (!alive) return;
@@ -62,7 +68,7 @@ export default function SendingTimeline() {
     };
     const start = setTimeout(() => run(0), attempt === 0 ? 350 : 0);
     return () => { alive = false; clearTimeout(start); if (retry) clearTimeout(retry); };
-  }, [range, attempt]);
+  }, [range, scope, attempt]);
 
   if (loading && !data) {
     return <div className="empty-state"><i className="ti ti-loader-2" /> Building the timeline…</div>;
@@ -134,6 +140,13 @@ export default function SendingTimeline() {
             Peak /hr
           </button>
           <span className="tl-sep" />
+          <button type="button" className={`btn btn-sm${scope === 'all' ? ' btn-primary' : ''}`}
+            onClick={() => setScope('all')} title="Every email this app has sent">All sends</button>
+          <button type="button" className={`btn btn-sm${scope === 'campaigns' ? ' btn-primary' : ''}`}
+            onClick={() => setScope('campaigns')} title="Only batches released by a campaign">
+            Campaigns
+          </button>
+          <span className="tl-sep" />
           {/* Legend follows the measure, so the swatch always matches the bars. */}
           <span className="tl-key">
             <span className={`tl-sw ${rate ? 'tl-sw-r' : 'tl-sw-a'}`} /> Sent
@@ -154,6 +167,9 @@ export default function SendingTimeline() {
             : hourly
               ? ' · each bar is one hour, so its height is also the rate'
               : ' · bars are emails per day'}
+          {scope === 'campaigns'
+            ? ' · campaign batches only'
+            : ' · every send, including manual ones'}
         </span>
       </div>
 
