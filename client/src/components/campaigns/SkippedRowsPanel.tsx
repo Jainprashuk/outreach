@@ -49,10 +49,27 @@ export default function SkippedRowsPanel({ campaign, status, onChanged }: {
 
   if (rows === null) return <div className="empty-state"><i className="ti ti-loader-2" /> Loading…</div>;
   if (rows.length === 0) {
+    // A campaign that has never released has nothing recorded here yet, even
+    // though the Upcoming preview may already be reporting duplicates. The
+    // preview is a pure read — it deliberately writes nothing — so saying only
+    // "nothing has been skipped" would contradict the other tab.
+    const neverRan = (campaign.releases || []).length === 0;
     return (
       <div className="empty-state">
         <i className="ti ti-circle-check" />
-        {status === 'skipped' ? 'Nothing has been skipped.' : "You haven't removed anyone."}
+        {status === 'removed' ? (
+          "You haven't removed anyone."
+        ) : neverRan ? (
+          <div style={{ maxWidth: 560 }}>
+            Nothing recorded here yet — no batch has run.
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 8, lineHeight: 1.6 }}>
+              Rows are only marked skipped when a batch actually runs. Anything the Upcoming tab
+              reports as a duplicate is still queued and untouched until then.
+            </div>
+          </div>
+        ) : (
+          'Nothing has been skipped.'
+        )}
       </div>
     );
   }
