@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { useEffect, useState, type ReactNode } from 'react';
+import { NavLink, useLocation } from 'react-router-dom';
 import { useTheme } from '../hooks/useTheme';
 import { useSession } from '../context/SessionContext';
 import { useInterviews } from '../context/InterviewContext';
@@ -21,6 +21,20 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
   const { owner } = useSession();
   const { reminders } = useInterviews();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { pathname } = useLocation();
+
+  // The six routes worth reaching in one click stay at the top level; the rest
+  // live in a group that remembers whether it was open.
+  const OTHERS = ['/add-contacts', '/jobs', '/templates', '/export-contacts'];
+  const inOthers = OTHERS.some(p => pathname === p || pathname.startsWith(p + '/'));
+  const [othersOpen, setOthersOpen] = useState(() => {
+    try { return localStorage.getItem('outreach-nav-others') === 'open'; } catch { return false; }
+  });
+  // Never hide the page you are actually on.
+  const showOthers = othersOpen || inOthers;
+  useEffect(() => {
+    try { localStorage.setItem('outreach-nav-others', othersOpen ? 'open' : 'closed'); } catch { /* private mode */ }
+  }, [othersOpen]);
   // Everything the reminder popup would nag about, surfaced permanently in the rail
   // so a dismissed popup doesn't mean a forgotten interview.
   const needsAttention = reminders.soon.length + reminders.stale.length;
@@ -45,9 +59,6 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
           <span className="tab-badge" title="Upcoming interviews or follow-ups due">{needsAttention}</span>
         )}
       </NavLink>
-      <NavLink to="/add-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-user-plus" /> Add Contacts
-      </NavLink>
       <NavLink to="/contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-users" /> Contacts
       </NavLink>
@@ -57,15 +68,28 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
       <NavLink to="/campaigns" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-calendar-repeat" /> Campaigns
       </NavLink>
-      <NavLink to="/jobs" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-briefcase" /> Jobs
-      </NavLink>
-      <NavLink to="/templates" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-file-text" /> Templates
-      </NavLink>
-      <NavLink to="/export-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-file-export" /> Export Contacts
-      </NavLink>
+
+      <button type="button" className={`nav-item nav-group${inOthers && !othersOpen ? ' has-active' : ''}`}
+        aria-expanded={showOthers} aria-controls="nav-others"
+        onClick={() => setOthersOpen(o => !o)}>
+        <i className="ti ti-dots" /> Others
+        <i className={`ti ti-chevron-down nav-caret${showOthers ? ' open' : ''}`} />
+      </button>
+      <div id="nav-others" className="nav-children" hidden={!showOthers}>
+        <NavLink to="/add-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+          <i className="ti ti-user-plus" /> Add Contacts
+        </NavLink>
+        <NavLink to="/jobs" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+          <i className="ti ti-briefcase" /> Jobs
+        </NavLink>
+        <NavLink to="/templates" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+          <i className="ti ti-file-text" /> Templates
+        </NavLink>
+        <NavLink to="/export-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+          <i className="ti ti-file-export" /> Export Contacts
+        </NavLink>
+      </div>
+
       <div className="nav-section-label">Account</div>
       <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-settings" /> Settings

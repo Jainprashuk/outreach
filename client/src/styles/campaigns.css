@@ -220,3 +220,37 @@
 @media (max-width: 460px) {
   .cmp-detail-stats { grid-template-columns: 1fr; }
 }
+
+/* ── Sidebar "Others" group ─────────────────────────────────────────────────
+   Six routes stay at the top level; the rest collapse into a group. The toggle
+   is a <button>, so it needs the <a>-shaped .nav-item resets that the browser
+   does not apply to buttons. */
+.nav-item.nav-group {
+  width: calc(100% - 24px);
+  background: none;
+  border: 0;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.nav-caret {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: .55;
+  transition: transform .18s var(--ease);
+}
+.nav-caret.open { transform: rotate(180deg); }
+
+/* A collapsed group holding the current page still says so. */
+.nav-item.nav-group.has-active { color: var(--accent); }
+.nav-item.nav-group.has-active .nav-caret { opacity: 1; }
+
+/* Indented so children read as belonging to the group, with a hairline rail
+   tying them together. */
+.nav-children {
+  margin-left: 24px;
+  border-left: 1px solid var(--border);
+  padding-left: 2px;
+}
+.nav-children .nav-item { margin-left: 6px; margin-right: 12px; }
