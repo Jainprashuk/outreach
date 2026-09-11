@@ -340,6 +340,25 @@ export default function CampaignDetail() {
       {tab === 'setup' && (
         <div className="cmp-setup">
           <section className="cmp-setup-block">
+            <h3 className="cmp-setup-title">Name</h3>
+            <p className="cmp-setup-hint">
+              What this campaign is called in the list and in its history. Renaming is safe — it
+              changes nothing about who gets emailed.
+            </p>
+            <div className="form-group" style={{ maxWidth: 420 }}>
+              {/* Keyed on the server value so a rejected rename snaps back rather
+                  than leaving text on screen that was never saved. */}
+              <input key={`name-${c.name}`} defaultValue={c.name} disabled={busy}
+                placeholder="Campaign name"
+                onBlur={(e) => {
+                  const v = e.target.value.trim();
+                  if (v && v !== c.name) save({ name: v });
+                }}
+                onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }} />
+            </div>
+          </section>
+
+          <section className="cmp-setup-block">
             <h3 className="cmp-setup-title">Schedule</h3>
             <p className="cmp-setup-hint">
               How fast the sheet is worked through, and when each day's batch starts.
