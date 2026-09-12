@@ -278,11 +278,13 @@ export default function CampaignList() {
                           </span>
                         );
                       }
+                      // Overdue was handled above, and nextRunAt only ever
+                      // returns a future slot, so this is always positive.
                       const ms = n.getTime() - Date.now();
                       return (
                         <>
                           <div style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                            {ms <= 0 ? 'due now' : `in ${fmtCountdown(ms)}`}
+                            in {fmtCountdown(ms)}
                           </div>
                           <div style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtIst(n)}</div>
                         </>
