@@ -112,11 +112,15 @@ export const isCronStale = (c: Campaign) =>
   && !!c.lastReleaseAt
   && Date.now() - new Date(c.lastReleaseAt).getTime() > STALE_MS;
 
-// The GitHub workflow runs on cron '5 * * * *' — :05 past every UTC hour. IST is
-// UTC+5:30, so every fire lands at :35 past an IST hour. A campaign releases on
-// the first fire whose IST hour is >= runHourIst and whose IST date is not the
-// one already recorded in lastReleaseOn.
-export const CRON_MINUTE_IST = 35;
+// The workflow asks for ':05 past every UTC hour', but GitHub runs scheduled
+// jobs when it has capacity, not at the requested minute — observed fires on
+// this repo land at 00:29, 03:03, 05:24 IST and so on. So the trigger time
+// cannot be predicted at all.
+//
+// What IS predictable is when a batch becomes RELEASABLE: the runner tests
+// `runHourIst <= istHour()`, which is true from the top of the hour. Everything
+// here is therefore expressed as "earliest releasable at runHourIst:00, then
+// whenever a trigger next lands".
 const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000;
 
 /**
@@ -132,18 +136,16 @@ export const nextRunAt = (c: Campaign): Date | null => {
   const now = Date.now();
   const ist = new Date(now + IST_OFFSET_MS);
 
-  // 48 hourly slots is always enough to find the next qualifying one.
-  for (let i = 0; i <= 48; i++) {
-    // Built in "IST-as-UTC" space, so getUTC* reads back as IST wall clock.
+  // Today, then tomorrow. Nothing further is needed: a campaign releases once a
+  // day, so the next window is always within 48 hours.
+  for (let d = 0; d <= 2; d++) {
     const slot = new Date(Date.UTC(
-      ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(),
-      ist.getUTCHours() + i, CRON_MINUTE_IST, 0,
+      ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate() + d, c.runHourIst, 0, 0,
     ));
-    const realTime = slot.getTime() - IST_OFFSET_MS;
-    if (realTime <= now) continue;
-    if (slot.getUTCHours() < c.runHourIst) continue;
+    const at = slot.getTime() - IST_OFFSET_MS;
+    if (at <= now) continue;
     if (c.lastReleaseOn === slot.toISOString().slice(0, 10)) continue;
-    return new Date(realTime);
+    return new Date(at);
   }
   return null;
 };
@@ -151,19 +153,18 @@ export const nextRunAt = (c: Campaign): Date | null => {
 /**
  * True when the send hour has arrived and today's batch has not gone out.
  *
- * The runner releases on the first trigger at or after runHourIst, so once that
- * hour passes with nothing released the campaign is OVERDUE — it fires on the
- * next trigger, not at the next :35 slot. Without this, nextRunAt rolls to the
- * following hour the instant the slot passes, which reads as the schedule
- * sliding forward an hour every hour rather than a batch waiting to go.
+ * Once runHourIst:00 passes with nothing released the campaign is OVERDUE: it
+ * goes out on whatever trigger lands next. Without this, nextRunAt rolled to the
+ * following day the instant the hour passed, which read as the schedule sliding
+ * away rather than a batch waiting to go.
  */
 export const isDueNow = (c: Campaign): boolean => dueSince(c) !== null;
 
 /**
  * When today's batch became releasable, or null if it is not due.
  *
- * Triggers land at :35 past an IST hour, so the earliest one that can satisfy
- * runHourIst is runHourIst:35 — being merely inside the hour is not enough.
+ * The runner's test is `runHourIst <= istHour()`, so a batch is releasable from
+ * the TOP of its hour. It does not wait for any particular minute.
  */
 export const dueSince = (c: Campaign): Date | null => {
   if (c.status !== 'running') return null;
@@ -173,7 +174,7 @@ export const dueSince = (c: Campaign): Date | null => {
   if (c.lastReleaseOn === ist.toISOString().slice(0, 10)) return null;
 
   const dueAt = Date.UTC(
-    ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), c.runHourIst, CRON_MINUTE_IST, 0,
+    ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), c.runHourIst, 0, 0,
   ) - IST_OFFSET_MS;
   return Date.now() >= dueAt ? new Date(dueAt) : null;
 };
