@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Campaign } from '../../lib/api';
 import {
-  batchEndsAt, fmtCountdown, fmtIst, nextRunAt, projectedFinish,
+  batchEndsAt, dueSince, fmtCountdown, fmtIst, nextRunAt, projectedFinish,
 } from '../../lib/campaigns';
 
 /**
@@ -23,6 +23,7 @@ export default function NextRunPanel({ campaign, cronConfigured }: {
   }, []);
 
   const next = nextRunAt(campaign);
+  const due = dueSince(campaign);
 
   if (campaign.status === 'completed') {
     return (
@@ -45,10 +46,32 @@ export default function NextRunPanel({ campaign, cronConfigured }: {
     );
   }
 
+  // Overdue is its own state. Counting down to the next hourly slot made a
+  // waiting batch look like a schedule sliding forward an hour every hour.
+  if (due) {
+    return (
+      <div className="info-box" style={{ display: 'block' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <i className="ti ti-player-play" style={{ fontSize: 18 }} />
+          <span style={{ fontSize: 13 }}>
+            <strong>This batch is due</strong> — it was ready at {fmtIst(due)}
+          </span>
+          <span className="badge badge-pending" title="Waiting for the scheduled job to fire">
+            waiting {fmtCountdown(Date.now() - due.getTime())}
+          </span>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 8, lineHeight: 1.7 }}>
+          It goes out on the next trigger, which GitHub runs when it has capacity — often hours
+          after the scheduled time. Nothing is wrong and nothing is lost; the batch has not been
+          skipped. Use <strong>Run now</strong> if you do not want to wait.
+        </div>
+      </div>
+    );
+  }
+
   if (!next) return null;
 
   const ms = next.getTime() - Date.now();
-  const due = ms <= 0;
   const ends = batchEndsAt(next, campaign.contactsPerDay, campaign.ratePerHour);
   const finish = projectedFinish(campaign);
 
@@ -60,11 +83,11 @@ export default function NextRunPanel({ campaign, cronConfigured }: {
           <strong>Next batch</strong> — {fmtIst(next)}
         </span>
         <span
-          className={`badge ${due ? 'badge-pending' : 'badge-sent'}`}
+          className="badge badge-sent"
           style={{ fontVariantNumeric: 'tabular-nums', fontSize: 12 }}
           title="Counts down to the scheduled release"
         >
-          {due ? 'due now' : `in ${fmtCountdown(ms)}`}
+          in {fmtCountdown(ms)}
         </span>
       </div>
 

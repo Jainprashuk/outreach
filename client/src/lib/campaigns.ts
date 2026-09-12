@@ -148,6 +148,36 @@ export const nextRunAt = (c: Campaign): Date | null => {
   return null;
 };
 
+/**
+ * True when the send hour has arrived and today's batch has not gone out.
+ *
+ * The runner releases on the first trigger at or after runHourIst, so once that
+ * hour passes with nothing released the campaign is OVERDUE — it fires on the
+ * next trigger, not at the next :35 slot. Without this, nextRunAt rolls to the
+ * following hour the instant the slot passes, which reads as the schedule
+ * sliding forward an hour every hour rather than a batch waiting to go.
+ */
+export const isDueNow = (c: Campaign): boolean => dueSince(c) !== null;
+
+/**
+ * When today's batch became releasable, or null if it is not due.
+ *
+ * Triggers land at :35 past an IST hour, so the earliest one that can satisfy
+ * runHourIst is runHourIst:35 — being merely inside the hour is not enough.
+ */
+export const dueSince = (c: Campaign): Date | null => {
+  if (c.status !== 'running') return null;
+  if ((c.stats?.pending || 0) <= 0) return null;
+
+  const ist = new Date(Date.now() + IST_OFFSET_MS);
+  if (c.lastReleaseOn === ist.toISOString().slice(0, 10)) return null;
+
+  const dueAt = Date.UTC(
+    ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), c.runHourIst, CRON_MINUTE_IST, 0,
+  ) - IST_OFFSET_MS;
+  return Date.now() >= dueAt ? new Date(dueAt) : null;
+};
+
 /** "2d 4h", "3h 12m", "45m 08s" — coarser the further away it is. */
 export const fmtCountdown = (ms: number): string => {
   if (ms <= 0) return 'any moment';

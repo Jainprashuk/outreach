@@ -9,8 +9,8 @@ import {
   type Campaign, type CampaignMeta,
 } from '../../lib/api';
 import {
-  CAMPAIGN_STATUS_BADGE, CAMPAIGN_STATUS_LABEL, daysRemaining, fmtCountdown, fmtHour,
-  fmtIst, fromNow, isCronStale, nextRunAt, pct,
+  CAMPAIGN_STATUS_BADGE, CAMPAIGN_STATUS_LABEL, daysRemaining, dueSince, fmtCountdown,
+  fmtHour, fmtIst, fromNow, isCronStale, nextRunAt, pct,
 } from '../../lib/campaigns';
 
 export default function CampaignList() {
@@ -258,6 +258,17 @@ export default function CampaignList() {
                   </td>
                   <td style={{ fontSize: 12 }}>
                     {(() => {
+                      const od = dueSince(c);
+                      if (od) {
+                        return (
+                          <>
+                            <div style={{ color: 'var(--amber)' }}>due now</div>
+                            <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                              waiting {fmtCountdown(Date.now() - od.getTime())}
+                            </div>
+                          </>
+                        );
+                      }
                       const n = nextRunAt(c);
                       if (!n) {
                         return (

@@ -15,7 +15,7 @@ import {
 } from '../../lib/api';
 import {
   CAMPAIGN_STATUS_BADGE, CAMPAIGN_STATUS_LABEL, daysRemaining, dripDuration,
-  fmtCountdown, fmtHour, fmtIst, fromNow, nextRunAt, pct, totalBatches,
+  dueSince, fmtCountdown, fmtHour, fmtIst, fromNow, nextRunAt, pct, totalBatches,
 } from '../../lib/campaigns';
 
 type Tab = 'upcoming' | 'history' | 'skipped' | 'removed' | 'setup';
@@ -62,6 +62,7 @@ export default function CampaignDetail() {
   const s = c.stats;
   const handled = s.released + s.skipped + s.removed;
   const next = nextRunAt(c);
+  const overdue = dueSince(c);
   const countdownMs = next ? next.getTime() - Date.now() : 0;
   const lastBatch = [...(c.releases || [])].reverse().find((r) => r.kind !== 'reconcile');
   const lastJob = lastBatch?.jobId ? data.jobSummaries.find((j) => j.id === lastBatch.jobId) : undefined;
@@ -264,10 +265,15 @@ export default function CampaignDetail() {
         </div>
         <div className="stat-card">
           <div className="stat-label">Next batch</div>
-          {next ? (
+          {overdue ? (
+            <>
+              <div className="stat-value" style={{ fontSize: 20, color: 'var(--amber)' }}>due now</div>
+              <div className="stat-sub">waiting {fmtCountdown(Date.now() - overdue.getTime())} for a trigger</div>
+            </>
+          ) : next ? (
             <>
               <div className="stat-value" style={{ fontSize: 20, fontVariantNumeric: 'tabular-nums' }}>
-                {countdownMs <= 0 ? 'due now' : fmtCountdown(countdownMs)}
+                {fmtCountdown(countdownMs)}
               </div>
               <div className="stat-sub">{fmtIst(next)}</div>
             </>
