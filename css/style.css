@@ -804,6 +804,7 @@ thead th.sortable:hover { color:var(--text); }
 .sjw-drag-handle:active { cursor: grabbing; }
 .sjw-header > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sjw-body { padding: 10px 12px; }
+.sjw-body.collapsed { display: none; }
 .sjw-more {
   text-align: center; font-size: 11px; color: var(--text2);
   padding: 4px 0;

@@ -28,10 +28,12 @@ export default function SendJobWidget() {
   const navigate = useNavigate();
   const toast = useToast();
   const [jobs, setJobs] = useState<SendJob[]>([]);
+  const [collapsed, setCollapsed] = useState(true);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const widgetRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const dismissTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const dismissedRef = useRef<Set<string>>(new Set());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isStep3 = location.pathname.startsWith('/send/step3');
@@ -62,7 +64,8 @@ export default function SendJobWidget() {
     try {
       const res = await fetch(`${API_BASE}/api/jobs/active-all`);
       if (!res.ok) return;
-      const active: SendJob[] = await res.json();
+      const activePayload: SendJob[] = await res.json();
+      const active = activePayload.filter(job => !dismissedRef.current.has(job.id));
       const activeIds = new Set(active.map(j => j.id));
 
       setJobs(prev => {
@@ -127,9 +130,10 @@ export default function SendJobWidget() {
     event.preventDefault();
   };
 
-  const close = async (id: string) => {
+  // Hiding the monitor must not cancel a live job.
+  const close = (id: string) => {
+    dismissedRef.current.add(id);
     forget(id);
-    try { await fetch(`${API_BASE}/api/jobs/${id}/cancel`, { method: 'POST' }); } catch { /* best-effort */ }
   };
 
   const togglePause = async (job: SendJob) => {
@@ -197,10 +201,11 @@ export default function SendJobWidget() {
                     <i className={`ti ${pauseIcon}`} />
                   </button>
                 )}
-                <button className="btn btn-xs" onClick={() => close(job.id)} title="Cancel job" type="button"><i className="ti ti-x" /></button>
+                <button className="btn btn-xs" onClick={() => setCollapsed(c => !c)} title={collapsed ? 'Maximise details' : 'Minimise details'} type="button"><i className={`ti ${collapsed ? 'ti-plus' : 'ti-minus'}`} /></button>
+                <button className="btn btn-xs" onClick={() => close(job.id)} title="Hide panel (sending continues)" type="button"><i className="ti ti-x" /></button>
               </div>
             </div>
-            <div className="sjw-body">
+            <div className={`sjw-body${collapsed ? ' collapsed' : ''}`}>
               <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
               <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>
                 {done}/{total} · {failed > 0 ? `${failed} failed` : done > 0 ? 'all good' : 'starting…'}
