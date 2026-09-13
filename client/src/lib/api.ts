@@ -83,6 +83,8 @@ export interface SendJob {
   status: 'pending' | 'processing' | 'paused' | 'done' | 'cancelled';
   sendMode?: 'sequential' | 'bulk' | 'drip' | null;
   ratePerHour?: number;
+  campaignId?: string | null;
+  campaignName?: string | null;
   createdAt: string;
   items: JobItem[];
 }

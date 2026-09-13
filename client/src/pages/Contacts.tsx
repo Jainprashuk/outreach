@@ -29,7 +29,7 @@ export default function Contacts() {
 
   const [tab, setTab] = useState(params.get('tab') || 'all');
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
+  const [statusFilter, setStatusFilter] = useState(params.get('status') || '');
   const [approvalFilter, setApprovalFilter] = useState('');
   const [templateFilter, setTemplateFilter] = useState('');
   const [page, setPage] = useState(1);

@@ -3,7 +3,7 @@
 // Tracks EVERY in-flight job, not just the newest: overlapping drips/batches run
 // concurrently, and a single-job widget silently hid all but the most recent one.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { API_BASE, type SendJob } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 
@@ -25,9 +25,11 @@ const isEffectivelyDone = (j: SendJob) => {
 
 export default function SendJobWidget() {
   const location = useLocation();
+  const navigate = useNavigate();
   const toast = useToast();
   const [jobs, setJobs] = useState<SendJob[]>([]);
   const [collapsed, setCollapsed] = useState(false);
+  const [showJobs, setShowJobs] = useState(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const widgetRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
@@ -132,6 +134,11 @@ export default function SendJobWidget() {
     try { await fetch(`${API_BASE}/api/jobs/${id}/cancel`, { method: 'POST' }); } catch { /* best-effort */ }
   };
 
+  const resetPosition = () => {
+    setPosition(null);
+    try { localStorage.removeItem('outreach-send-widget-position'); } catch { /* ignore */ }
+  };
+
   const togglePause = async (job: SendJob) => {
     const action = job.status === 'paused' ? 'resume' : 'pause';
     try {
@@ -150,13 +157,20 @@ export default function SendJobWidget() {
 
   if (isStep3 || jobs.length === 0) return null;
 
-  const visible = jobs.slice(0, MAX_CARDS);
+  const visible = (jobs.length > 1 && !showJobs ? [] : jobs).slice(0, MAX_CARDS);
   const hidden = jobs.length - visible.length;
+  const activeDrips = jobs.filter(job => job.sendMode === 'drip' && !isEffectivelyDone(job));
+  const remainingAcrossJobs = jobs.reduce((total, job) => total + job.items.filter(item => item.status === 'pending').length, 0);
 
   return (
     <div id="send-job-widget" ref={widgetRef}
       style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
-      {hidden > 0 && <div className="sjw-more">+{hidden} more job{hidden > 1 ? 's' : ''} running</div>}
+      <div className="sjw-widget-tools"><button className="btn-xs" type="button" onClick={resetPosition} title="Snap this panel back to the bottom-right corner"><i className="ti ti-corner-down-right" /> Reset position</button></div>
+      {jobs.length > 1 && <div className="sjw-summary">
+        <span><i className="ti ti-circle-filled sjw-live-dot" /> {activeDrips.length || jobs.length} active drip{(activeDrips.length || jobs.length) === 1 ? '' : 's'} · {remainingAcrossJobs} email{remainingAcrossJobs === 1 ? '' : 's'} remaining</span>
+        <button className="btn-xs" type="button" onClick={() => setShowJobs(open => !open)}>{showJobs ? 'Compact' : 'View jobs'}</button>
+      </div>}
+      {hidden > 0 && showJobs && <div className="sjw-more">+{hidden} more job{hidden > 1 ? 's' : ''} running</div>}
       {visible.map(job => {
         const total = job.items.length;
         const sent = job.items.filter(i => i.status === 'sent').length;
@@ -164,6 +178,10 @@ export default function SendJobWidget() {
         const skipped = job.items.filter(i => i.status === 'skipped').length;
         const done = sent + failed + skipped;
         const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+        const pending = job.items.filter(i => i.status === 'pending').length;
+        const delayMs = Math.round(3_600_000 / (job.ratePerHour || 5));
+        const recent = job.items.reduce<number>((latest, item) => Math.max(latest, item.processedAt ? new Date(item.processedAt).getTime() : 0), 0);
+        const nextIn = job.sendMode === 'drip' && pending > 0 ? Math.max(0, (recent || Date.now()) + delayMs - Date.now()) : 0;
 
         let title: React.ReactNode;
         let showPause = false;
@@ -171,9 +189,7 @@ export default function SendJobWidget() {
         if (isEffectivelyDone(job)) {
           title = <><i className="ti ti-circle-check" /> {sent} sent{failed ? `, ${failed} failed` : ''}{skipped ? `, ${skipped} skipped` : ''}</>;
         } else if (job.sendMode === 'drip') {
-          const remaining = job.items.filter(i => i.status === 'pending').length;
-          const delayMs = Math.round(3_600_000 / (job.ratePerHour || 5));
-          title = <><i className="ti ti-clock" /> Drip {total} · {fmtTime(Math.max(0, (remaining - 1) * delayMs))} left</>;
+          title = <><i className="ti ti-circle-filled sjw-live-dot" /> {job.campaignName || 'Drip mailer'} · Sending {done}/{total}</>;
         } else if (job.status === 'paused') {
           title = <><i className="ti ti-player-pause" /> Paused</>;
           showPause = true; pauseIcon = 'ti-player-play';
@@ -197,11 +213,14 @@ export default function SendJobWidget() {
                 <button className="btn btn-xs" onClick={() => close(job.id)} title="Cancel job" type="button"><i className="ti ti-x" /></button>
               </div>
             </div>
+            {collapsed && <div className="sjw-compact"><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div><span>{done}/{total}</span></div>}
             <div className={`sjw-body${collapsed ? ' collapsed' : ''}`}>
               <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
               <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>
                 {done}/{total} · {failed > 0 ? `${failed} failed` : done > 0 ? 'all good' : 'starting…'}
               </div>
+              {job.sendMode === 'drip' && pending > 0 && <div className="sjw-next-send">Next email {nextIn <= 1000 ? 'shortly' : `in ~${fmtTime(nextIn)}`}</div>}
+              {failed > 0 && <button className="sjw-failures" type="button" onClick={() => navigate('/contacts?status=failed')}><i className="ti ti-alert-triangle" /> {failed} failed · View failed contacts</button>}
             </div>
           </div>
         );

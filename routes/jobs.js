@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const SendJob = require('../models/SendJob');
 const Contact = require('../models/Contact');
+const Campaign = require('../models/Campaign');
 const { inngest } = require('../inngest');
 const mailer = require('../lib/mailer');
 
@@ -93,7 +94,7 @@ router.get('/stats/sent-24h', async (req, res) => {
 });
 
 const ACTIVE_STATUSES = ['pending', 'processing', 'paused'];
-const ACTIVE_PROJECTION = { items: 1, status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1, ratePerHour: 1 };
+const ACTIVE_PROJECTION = { items: 1, status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1, ratePerHour: 1, campaignId: 1 };
 
 // Auto-cancel jobs stuck in pending/processing for over 24h with zero progress.
 // These are ghost jobs where Inngest never ran (e.g. server was down when the event fired).
@@ -131,7 +132,12 @@ router.get('/active-all', async (req, res) => {
       { status: { $in: ACTIVE_STATUSES } },
       ACTIVE_PROJECTION
     ).sort({ createdAt: -1 }).limit(20).lean();
-    res.json(jobs.map(serialize));
+    const campaignIds = jobs.map(j => j.campaignId).filter(Boolean);
+    const campaigns = campaignIds.length
+      ? await Campaign.find({ _id: { $in: campaignIds }, deleted: { $ne: true } }, { name: 1 }).lean()
+      : [];
+    const names = new Map(campaigns.map(c => [String(c._id), c.name]));
+    res.json(jobs.map(job => ({ ...serialize(job), campaignName: job.campaignId ? names.get(String(job.campaignId)) || null : null })));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
