@@ -68,6 +68,9 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
       <NavLink to="/campaigns" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-calendar-repeat" /> Campaigns
       </NavLink>
+      <NavLink to="/logs" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-list-details" /> Logs
+      </NavLink>
 
       <button type="button" className={`nav-item nav-group${inOthers && !othersOpen ? ' has-active' : ''}`}
         aria-expanded={showOthers} aria-controls="nav-others"

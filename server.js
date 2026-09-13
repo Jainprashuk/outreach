@@ -10,6 +10,7 @@ const db = require('./db');
 const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
 const mailer = require('./lib/mailer');
+const { auditHttpMutations } = require('./lib/activityLog');
 
 const app = express();
 app.use(cors());
@@ -216,6 +217,8 @@ app.get('/api/share/contacts', requireDb, requireShareAuth, async (_req, res) =>
   }
 });
 
+app.use('/api', requireDb, auditHttpMutations);
+app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));

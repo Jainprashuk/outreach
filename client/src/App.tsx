@@ -11,6 +11,7 @@ import ExportContacts from './pages/ExportContacts';
 import Templates from './pages/Templates';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
+import Logs from './pages/Logs';
 import Step1 from './pages/send/Step1';
 import Step2 from './pages/send/Step2';
 import Step3 from './pages/send/Step3';
@@ -51,6 +52,7 @@ export default function App() {
       <Route path="/templates" element={owner(<Templates />)} />
       <Route path="/analytics" element={owner(<Analytics />)} />
       <Route path="/settings" element={owner(<Settings />)} />
+      <Route path="/logs" element={owner(<Logs />)} />
       <Route path="/send/step1" element={owner(<Step1 />)} />
       <Route path="/send/step2" element={owner(<Step2 />)} />
       <Route path="/send/step3" element={owner(<Step3 />)} />

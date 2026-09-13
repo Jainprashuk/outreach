@@ -4,6 +4,9 @@
 // server proxies /api → localhost:3000 in dev. Relative URLs work in both.
 export const API_BASE = '';
 
+export interface ActivityLog { id: string; category: string; action: string; message: string; meta: Record<string, unknown>; createdAt: string; }
+export const loadActivityLogsApi = () => apiFetch<ActivityLog[]>('/api/logs?limit=200');
+
 export type ContactStatus =
   | 'queued' | 'in-campaign' | 'sent' | 'follow-up-sent' | 'failed' | 'bounced'
   | 'replied' | 'follow-up-replied' | 'closed' | 'no-openings' | 'in-review';

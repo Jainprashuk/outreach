@@ -6,6 +6,7 @@ const Contact = require('./models/Contact');
 const mailer = require('./lib/mailer');
 const { COOLDOWN_ERROR, COOLDOWN_LABEL, inCooldown, priorStatus } = require('./lib/cooldown');
 const { notifyCampaignJobFinished } = require('./lib/campaignNotifications');
+const { logEvent } = require('./lib/activityLog');
 const db = require('./db');
 
 // A send was skipped for cooldown: make sure the contact isn't left parked at
@@ -173,6 +174,8 @@ const sendSingleEmail = inngest.createFunction(
           },
           $push: { statusHistory: { status: newStatus, changedAt: new Date(), note: isFollowUp ? 'Follow-up email sent' : 'Email sent' } },
         });
+        logEvent({ category: 'email', action: 'sent', message: `Email sent to ${item.to}`, meta: { jobId, contactId } })
+          .catch(err => console.error('Activity log write failed:', err.message));
       } catch (err) {
         await _atomicItemUpdate(jobId, contactId, {
           'items.$.status': 'failed',
@@ -183,6 +186,8 @@ const sendSingleEmail = inngest.createFunction(
           $set: { status: 'failed', failReason: err.message },
           $push: { statusHistory: { status: 'failed', changedAt: new Date(), note: err.message } },
         });
+        logEvent({ category: 'email', action: 'failed', message: `Email failed for ${item.to}`, meta: { jobId, contactId, error: err.message } })
+          .catch(logErr => console.error('Activity log write failed:', logErr.message));
       }
     });
   }
