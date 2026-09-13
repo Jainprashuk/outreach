@@ -205,6 +205,10 @@ export default function SendJobWidget() {
                 <button className="btn btn-xs" onClick={() => close(job.id)} title="Hide panel (sending continues)" type="button"><i className="ti ti-x" /></button>
               </div>
             </div>
+            {collapsed && <div className="sjw-min-progress">
+              <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
+              <span>{done}/{total}</span>
+            </div>}
             <div className={`sjw-body${collapsed ? ' collapsed' : ''}`}>
               <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
               <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>

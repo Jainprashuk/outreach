@@ -805,6 +805,8 @@ thead th.sortable:hover { color:var(--text); }
 .sjw-header > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sjw-body { padding: 10px 12px; }
 .sjw-body.collapsed { display: none; }
+.sjw-min-progress { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 11px; color: var(--text2); }
+.sjw-min-progress .progress-bar { flex: 1; }
 .sjw-more {
   text-align: center; font-size: 11px; color: var(--text2);
   padding: 4px 0;
