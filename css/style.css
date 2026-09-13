@@ -782,7 +782,6 @@ thead th.sortable:hover { color:var(--text); }
   width: 270px; display: flex; flex-direction: column-reverse; gap: 8px;
   max-height: calc(100vh - 40px); overflow-y: auto;
 }
-.sjw-widget-tools { display: flex; justify-content: flex-end; }
 .sjw-live-dot { color: var(--green); font-size: 8px; vertical-align: middle; }
 .sjw-next-send { margin-top: 6px; font-size: 11px; color: var(--text3); }
 .sjw-recipient { margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text2); }

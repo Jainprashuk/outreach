@@ -132,11 +132,6 @@ export default function SendJobWidget() {
     try { await fetch(`${API_BASE}/api/jobs/${id}/cancel`, { method: 'POST' }); } catch { /* best-effort */ }
   };
 
-  const resetPosition = () => {
-    setPosition(null);
-    try { localStorage.removeItem('outreach-send-widget-position'); } catch { /* ignore */ }
-  };
-
   const togglePause = async (job: SendJob) => {
     const action = job.status === 'paused' ? 'resume' : 'pause';
     try {
@@ -161,7 +156,6 @@ export default function SendJobWidget() {
   return (
     <div id="send-job-widget" ref={widgetRef}
       style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
-      <div className="sjw-widget-tools"><button className="btn-xs" type="button" onClick={resetPosition} title="Snap this panel back to the bottom-right corner"><i className="ti ti-corner-down-right" /> Reset position</button></div>
       {hidden > 0 && <div className="sjw-more">+{hidden} more job{hidden > 1 ? 's' : ''} running</div>}
       {visible.map(job => {
         const total = job.items.length;
