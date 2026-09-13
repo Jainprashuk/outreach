@@ -9,6 +9,7 @@ import { useToast } from '../context/ToastContext';
 import { API_BASE, resetForSendApi, type Contact } from '../lib/api';
 import { parseCsvText, readFileText } from '../lib/csv';
 import { SkeletonRows } from '../components/Skeleton';
+import CreateContactCampaignModal from '../components/CreateContactCampaignModal';
 
 const PAGE_SIZE = 25;
 
@@ -38,6 +39,7 @@ export default function Contacts() {
   const [loading, setLoading] = useState(!app.loaded);
   const fileRef = useRef<HTMLInputElement>(null);
   const [failReasons, setFailReasons] = useState<Record<string, string>>({});
+  const [creatingCampaign, setCreatingCampaign] = useState(false);
 
   useEffect(() => {
     app.init().catch(err => setError(err.message)).finally(() => setLoading(false));
@@ -340,10 +342,14 @@ export default function Contacts() {
           ))}
         </select>
         <button className="btn btn-del" onClick={deleteSelected} type="button"><i className="ti ti-trash" /> Delete</button>
+        <button className="btn btn-sm" onClick={() => setCreatingCampaign(true)} type="button">
+          <i className="ti ti-speakerphone" /> Create campaign
+        </button>
         <button className="btn btn-send" onClick={sendSelected} type="button">
           <i className="ti ti-send" /> {tab === 'followup-due' ? 'Send Follow-ups' : 'Send selected'}
         </button>
       </div>
+      {creatingCampaign && <CreateContactCampaignModal contactIds={[...selected]} onClose={() => setCreatingCampaign(false)} />}
     </Layout>
   );
 }

@@ -35,6 +35,8 @@ export const SKIP_REASON_LABEL: Record<CampaignSkipReason, string> = {
   removed_by_user: 'Removed by you',
   queue_failed: 'Could not be queued',
   render_empty: 'Template rendered empty',
+  cooldown: 'Emailed within the last 24 hours',
+  source_contact_missing: 'Contact is no longer available',
 };
 
 export const SKIP_REASON_BADGE: Record<CampaignSkipReason, string> = {
@@ -45,6 +47,8 @@ export const SKIP_REASON_BADGE: Record<CampaignSkipReason, string> = {
   removed_by_user: 'badge-rejected',
   queue_failed: 'badge-rejected',
   render_empty: 'badge-rejected',
+  cooldown: 'badge-pending',
+  source_contact_missing: 'badge-closed',
 };
 
 export const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);

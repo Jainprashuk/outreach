@@ -22,6 +22,10 @@ const campaignRowSchema = new mongoose.Schema({
   company: { type: String, default: '' },
   role:    { type: String, default: '' },
   extras:  { type: [extraSchema], default: [] },
+  // Set only for campaigns created from the Contacts screen. It lets the
+  // runner use the selected, existing Contact rather than treating it as a
+  // duplicate of a spreadsheet import.
+  sourceContactId: { type: String, default: null },
 
   status: {
     // pending  -> not yet considered

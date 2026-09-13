@@ -718,7 +718,7 @@ export type CampaignRowStatus = 'pending' | 'queued' | 'released' | 'skipped' | 
 
 export type CampaignSkipReason =
   | 'blank_email' | 'invalid_email' | 'duplicate_in_file' | 'duplicate_contact'
-  | 'removed_by_user' | 'queue_failed' | 'render_empty';
+  | 'removed_by_user' | 'queue_failed' | 'render_empty' | 'cooldown' | 'source_contact_missing';
 
 export interface CampaignStats {
   total: number; pending: number; released: number; skipped: number; removed: number;
@@ -919,6 +919,14 @@ export const createCampaignApi = (body: {
   runHourIst: number; attachResume: boolean;
   columnMap: CampaignColumnMap; sourceColumns: string[]; headerRow: number; fileName: string;
 }) => apiFetch<Campaign>('/api/campaigns', { method: 'POST', body: JSON.stringify(body) });
+
+/** Create a campaign that sends to existing Contacts without re-importing them. */
+export const createCampaignFromContactsApi = (body: {
+  name: string; templateKey: string; contactIds: string[]; contactsPerDay: number;
+  ratePerHour: number; runHourIst: number; attachResume: boolean;
+}) => apiFetch<Campaign>('/api/campaigns/from-contacts', {
+  method: 'POST', body: JSON.stringify(body),
+});
 
 /** Phase 2: rows, in byte-budgeted chunks. `last: true` flips draft -> running. */
 export const appendCampaignRowsApi = (

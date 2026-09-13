@@ -2,6 +2,7 @@ const express = require('express');
 const mongoose = require('mongoose');
 const Campaign = require('../models/Campaign');
 const CampaignRow = require('../models/CampaignRow');
+const Contact = require('../models/Contact');
 const SendJob = require('../models/SendJob');
 const Template = require('../models/Template');
 const {
@@ -248,6 +249,50 @@ router.post('/', async (req, res) => {
       status: 'draft',
     });
 
+    res.status(201).json(serialize(campaign.toObject()));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/campaigns/from-contacts — a campaign whose rows point at existing
+// contacts. This is intentionally separate from the spreadsheet endpoint: the
+// latter must continue to retire existing contacts as duplicates.
+router.post('/from-contacts', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const name = normText(b.name);
+    if (!name) return res.status(400).json({ error: 'Give the campaign a name.' });
+    const templateKey = String(b.templateKey || '').trim();
+    if (!templateKey || !(await Template.exists({ key: templateKey }))) {
+      return res.status(400).json({ error: 'Pick an existing template.' });
+    }
+    const contactsPerDay = Number(b.contactsPerDay) || 20;
+    const ratePerHour = Number(b.ratePerHour) || 5;
+    const configError = validateConfig({ contactsPerDay, ratePerHour });
+    if (configError) return res.status(400).json({ error: configError });
+    if (!hasEnvCredentials()) return res.status(400).json({ error: 'credentials_missing' });
+
+    const ids = [...new Set(Array.isArray(b.contactIds) ? b.contactIds.filter(mongoose.isValidObjectId) : [])];
+    if (!ids.length) return res.status(400).json({ error: 'Select at least one contact.' });
+    const contacts = await Contact.find({ _id: { $in: ids }, ...BASE_FILTER })
+      .select('name email company role').lean();
+    if (!contacts.length) return res.status(400).json({ error: 'None of the selected contacts are available.' });
+
+    const runHourIst = Number.isInteger(Number(b.runHourIst))
+      ? Math.min(23, Math.max(0, Number(b.runHourIst))) : 9;
+    const campaign = await Campaign.create({
+      name, templateKey, contactsPerDay, ratePerHour, runHourIst,
+      attachResume: !!b.attachResume, fileName: 'Selected contacts',
+      columnMap: { name: 'Contact name', email: 'Contact email', company: 'Contact company', role: 'Contact role' },
+      sourceColumns: ['Contact'], headerRow: -1, status: 'running',
+      stats: { total: contacts.length, pending: contacts.length, released: 0, skipped: 0, removed: 0 },
+    });
+    await CampaignRow.insertMany(contacts.map((c, rowIndex) => ({
+      campaignId: campaign._id, rowIndex, sourceRow: rowIndex + 1,
+      sourceContactId: String(c._id), name: c.name, email: normEmail(c.email),
+      company: c.company || '', role: c.role || '',
+    })));
     res.status(201).json(serialize(campaign.toObject()));
   } catch (err) {
     res.status(500).json({ error: err.message });
