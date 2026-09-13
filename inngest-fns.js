@@ -5,6 +5,7 @@ const SendJob = require('./models/SendJob');
 const Contact = require('./models/Contact');
 const mailer = require('./lib/mailer');
 const { COOLDOWN_ERROR, COOLDOWN_LABEL, inCooldown, priorStatus } = require('./lib/cooldown');
+const { notifyCampaignJobFinished } = require('./lib/campaignNotifications');
 const db = require('./db');
 
 // A send was skipped for cooldown: make sure the contact isn't left parked at
@@ -85,10 +86,13 @@ const _atomicItemUpdate = async (jobId, contactId, fields) => {
   );
   const latest = await SendJob.findById(jobId, 'status items.status').lean();
   if (latest && latest.status === 'processing' && latest.items.every(i => i.status !== 'pending')) {
-    await SendJob.findByIdAndUpdate(jobId, {
+    // Exactly one worker wins this transition, so exactly one batch-result
+    // notification is emitted even when the final sends finish concurrently.
+    const completed = await SendJob.findOneAndUpdate({ _id: jobId, status: 'processing' }, {
       status: 'done',
       processedCount: latest.items.length,
-    });
+    }, { new: true }).lean();
+    if (completed?.campaignId) await notifyCampaignJobFinished(jobId);
   }
 };
 

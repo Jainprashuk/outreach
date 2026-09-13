@@ -13,6 +13,9 @@ const itemSchema = new mongoose.Schema({
 }, { _id: false });
 
 const sendJobSchema = new mongoose.Schema({
+  // Present only for jobs released by a Campaign. Manual Send wizard jobs stay
+  // independent and therefore never produce campaign notifications.
+  campaignId:       { type: String, default: null },
   items:             { type: [itemSchema], default: [] },
   status:            { type: String, enum: ['pending', 'processing', 'paused', 'done', 'cancelled'], default: 'pending' },
   attachResume:      { type: Boolean, default: false },
