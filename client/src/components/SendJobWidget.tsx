@@ -28,6 +28,9 @@ export default function SendJobWidget() {
   const toast = useToast();
   const [jobs, setJobs] = useState<SendJob[]>([]);
   const [collapsed, setCollapsed] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
+  const widgetRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const dismissTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -84,6 +87,46 @@ export default function SendJobWidget() {
     return () => { timers.forEach(t => clearTimeout(t)); timers.clear(); };
   }, []);
 
+  // The widget is useful while a drip runs, but its default bottom-right home
+  // can cover page actions. Keep a deliberately local, per-browser placement.
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('outreach-send-widget-position');
+      if (!saved) return;
+      const parsed = JSON.parse(saved);
+      if (Number.isFinite(parsed?.left) && Number.isFinite(parsed?.top)) setPosition(parsed);
+    } catch { /* a malformed or unavailable storage entry just uses the default */ }
+  }, []);
+
+  const move = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current || !widgetRef.current) return;
+    const { offsetX, offsetY } = dragRef.current;
+    const rect = widgetRef.current.getBoundingClientRect();
+    const left = Math.max(8, Math.min(event.clientX - offsetX, window.innerWidth - rect.width - 8));
+    const top = Math.max(8, Math.min(event.clientY - offsetY, window.innerHeight - rect.height - 8));
+    setPosition({ left, top });
+  };
+
+  const endMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    setPosition(current => {
+      if (current) {
+        try { localStorage.setItem('outreach-send-widget-position', JSON.stringify(current)); } catch { /* ignore */ }
+      }
+      return current;
+    });
+  };
+
+  const startMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest('button') || !widgetRef.current) return;
+    const rect = widgetRef.current.getBoundingClientRect();
+    dragRef.current = { offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
   const close = async (id: string) => {
     forget(id);
     try { await fetch(`${API_BASE}/api/jobs/${id}/cancel`, { method: 'POST' }); } catch { /* best-effort */ }
@@ -111,7 +154,8 @@ export default function SendJobWidget() {
   const hidden = jobs.length - visible.length;
 
   return (
-    <div id="send-job-widget">
+    <div id="send-job-widget" ref={widgetRef}
+      style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
       {hidden > 0 && <div className="sjw-more">+{hidden} more job{hidden > 1 ? 's' : ''} running</div>}
       {visible.map(job => {
         const total = job.items.length;
@@ -140,7 +184,8 @@ export default function SendJobWidget() {
 
         return (
           <div className="sjw-card" key={job.id}>
-            <div className="sjw-header">
+            <div className="sjw-header sjw-drag-handle" title="Drag to move this sending panel"
+              onPointerDown={startMove} onPointerMove={move} onPointerUp={endMove} onPointerCancel={endMove}>
               <span>{title}</span>
               <div style={{ display: 'flex', gap: 6 }}>
                 {showPause && (

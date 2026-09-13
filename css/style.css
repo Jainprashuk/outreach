@@ -795,6 +795,8 @@ thead th.sortable:hover { color:var(--text); }
   font-size: 13px; font-weight: 500;
   border-bottom: 0.5px solid var(--border);
 }
+.sjw-drag-handle { cursor: grab; user-select: none; touch-action: none; }
+.sjw-drag-handle:active { cursor: grabbing; }
 .sjw-header > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sjw-body { padding: 10px 12px; }
 .sjw-body.collapsed { display: none; }
