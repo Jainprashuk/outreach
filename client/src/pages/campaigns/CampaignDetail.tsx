@@ -194,7 +194,13 @@ export default function CampaignDetail() {
           <span><strong>The last release didn't work.</strong> {c.lastError}</span>
         </div>
       )}
-      {c.status === 'completed' && (
+      {c.sending && (
+        <div className="info-box" style={{ background: 'var(--amber-bg)', color: 'var(--amber)', marginBottom: 14 }}>
+          <i className="ti ti-send" />
+          <span>Sending mails — this campaign will show as finished after the current batch completes.</span>
+        </div>
+      )}
+      {c.status === 'completed' && !c.sending && (
         <div className="info-box" style={{ background: 'var(--green-bg)', color: 'var(--green)', marginBottom: 14 }}>
           <i className="ti ti-circle-check" />
           <span>
@@ -280,7 +286,9 @@ export default function CampaignDetail() {
           ) : (
             <>
               <div className="stat-value" style={{ fontSize: 18 }}>
-                <span className={`badge ${CAMPAIGN_STATUS_BADGE[c.status]}`}>{CAMPAIGN_STATUS_LABEL[c.status]}</span>
+                <span className={`badge ${c.sending ? 'badge-sent' : CAMPAIGN_STATUS_BADGE[c.status]}`}>
+                  {c.sending ? 'Sending mails' : CAMPAIGN_STATUS_LABEL[c.status]}
+                </span>
               </div>
               <div className="stat-sub">
                 {c.status === 'running' && s.pending > 0

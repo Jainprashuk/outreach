@@ -201,9 +201,15 @@ router.get('/timeline', async (req, res) => {
 router.get('/', async (_req, res) => {
   try {
     const campaigns = await Campaign.find(BASE_FILTER).sort({ createdAt: -1 }).lean();
-    const byCampaign = await outcomesByCampaign(campaigns.map(c => c._id));
+    const ids = campaigns.map(c => c._id);
+    const [byCampaign, activeJobs] = await Promise.all([
+      outcomesByCampaign(ids),
+      SendJob.find({ campaignId: { $in: ids.map(String) }, status: { $in: ['pending', 'processing'] } }, { campaignId: 1 }).lean(),
+    ]);
+    const sending = new Set(activeJobs.map(job => String(job.campaignId)));
     res.json(campaigns.map(c => ({
       ...serialize(c),
+      sending: sending.has(String(c._id)),
       outcomes: foldOutcomes(byCampaign.get(String(c._id)) || {}),
     })));
   } catch (err) {
@@ -442,10 +448,13 @@ router.get('/:id', async (req, res) => {
     // Outcomes for recent batches, so a drip that failed wholesale is visible
     // instead of silently burning the sheet one day at a time.
     const recent = (campaign.releases || []).slice(-7).filter(r => r.jobId);
-    const jobs = recent.length
-      ? await SendJob.find({ _id: { $in: recent.map(r => r.jobId) } },
+    const [jobs, activeJob] = await Promise.all([
+      recent.length
+        ? SendJob.find({ _id: { $in: recent.map(r => r.jobId) } },
           { items: 1, status: 1, sendMode: 1, ratePerHour: 1, createdAt: 1 }).lean()
-      : [];
+        : [],
+      SendJob.exists({ campaignId: String(campaign._id), status: { $in: ['pending', 'processing'] } }),
+    ]);
     const jobSummaries = jobs.map(j => ({
       id: j._id.toString(),
       status: j.status,
@@ -459,7 +468,7 @@ router.get('/:id', async (req, res) => {
       pending: j.items.filter(i => i.status === 'pending').length,
     }));
 
-    res.json({ campaign: { ...serialize(campaign), stats }, jobSummaries, outcomes });
+    res.json({ campaign: { ...serialize(campaign), stats, sending: !!activeJob }, jobSummaries, outcomes });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

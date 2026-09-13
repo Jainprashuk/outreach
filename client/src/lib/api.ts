@@ -785,6 +785,8 @@ export interface Campaign {
   pausedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** True while a released campaign batch is still sending its emails. */
+  sending?: boolean;
   /** Present on the list endpoint; the detail endpoint returns it alongside. */
   outcomes?: CampaignOutcomes;
 }

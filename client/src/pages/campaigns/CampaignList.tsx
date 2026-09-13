@@ -210,6 +210,7 @@ export default function CampaignList() {
             )}
             {campaigns?.map((c) => {
               const done = c.stats.released + c.stats.skipped;
+              const displayStatus = c.sending ? 'sending' : c.status;
               return (
                 <tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/campaigns/${c.id}`)}>
                   <td>
@@ -226,8 +227,10 @@ export default function CampaignList() {
                     </div>
                   </td>
                   <td>
-                    <span className={`badge ${CAMPAIGN_STATUS_BADGE[c.status]}`}>{CAMPAIGN_STATUS_LABEL[c.status]}</span>
-                    {isCronStale(c) && (
+                    <span className={`badge ${displayStatus === 'sending' ? 'badge-sent' : CAMPAIGN_STATUS_BADGE[c.status]}`}>
+                      {displayStatus === 'sending' ? 'Sending mails' : CAMPAIGN_STATUS_LABEL[c.status]}
+                    </span>
+                    {!c.sending && isCronStale(c) && (
                       <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4 }} title="The scheduled release may have stopped running">
                         <i className="ti ti-alert-triangle" /> no release in 36h
                       </div>
@@ -270,6 +273,9 @@ export default function CampaignList() {
                         );
                       }
                       const n = nextRunAt(c);
+                      if (c.sending) {
+                        return <span style={{ color: 'var(--amber)' }}>sending mails</span>;
+                      }
                       if (!n) {
                         return (
                           <span style={{ color: 'var(--text3)' }}>
