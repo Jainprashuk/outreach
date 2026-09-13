@@ -29,7 +29,7 @@ export default function StatusBadge({ status, contact, onChanged }: {
   const [popup, setPopup] = useState<{ top: number; left: number } | null>(null);
   const [dropdown, setDropdown] = useState<{ top: number; left: number } | null>(null);
 
-  const editable = !!contact;
+  const editable = !!contact && contact.status !== 'in-campaign';
 
   const openHistory = () => {
     if (!editable || dropdown) return;

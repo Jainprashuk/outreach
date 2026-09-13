@@ -103,6 +103,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     if (tab === 'all') return cs;
     if (tab === 'pending') return cs.filter(c => c.approvalStatus === 'pending');
     if (tab === 'sent') return cs.filter(c => c.status === 'sent');
+    if (tab === 'in-campaign') return cs.filter(c => c.status === 'in-campaign');
     if (tab === 'remaining') return cs.filter(c => c.status === 'queued');
     if (tab === 'bounced') return cs.filter(c => c.status === 'bounced');
     if (tab === 'replied') return cs.filter(c => c.status === 'replied');

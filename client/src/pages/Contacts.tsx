@@ -15,6 +15,7 @@ const PAGE_SIZE = 25;
 
 const TABS = [
   ['all', 'All'], ['sent', 'Sent'], ['pending', 'Pending approval'], ['remaining', 'Remaining'],
+  ['in-campaign', 'In campaign'],
   ['bounced', 'Bounced'], ['replied', 'Replied'], ['followup-due', 'Follow-up Due'],
   ['follow-up-sent', 'Follow-up Sent'], ['follow-up-replied', 'Replied after Follow-up'],
   ['closed', 'Closed'], ['no-openings', 'No Openings'], ['in-review', 'In Review'],
@@ -137,8 +138,13 @@ export default function Contacts() {
     try {
       const { contacts, skipped, cooldownLabel } = await resetForSendApi(ids);
       if (skipped.length > 0) {
+        const reserved = skipped.filter(c => c.reason === 'in_campaign').length;
+        const cooldown = skipped.length - reserved;
         toast(
-          `${skipped.length} contact${skipped.length !== 1 ? 's were' : ' was'} skipped — already emailed in the last ${cooldownLabel}. Their status is unchanged.`,
+          [
+            cooldown ? `${cooldown} contact${cooldown !== 1 ? 's were' : ' was'} skipped — already emailed in the last ${cooldownLabel}.` : '',
+            reserved ? `${reserved} contact${reserved !== 1 ? 's are' : ' is'} already reserved by a campaign.` : '',
+          ].filter(Boolean).join(' '),
           contacts.length === 0 ? 'error' : 'info',
         );
         await app.loadContacts();
@@ -204,7 +210,7 @@ export default function Contacts() {
           style={{ flex: 1, minWidth: 180, maxWidth: 280 }} />
         <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); resetPage(); }} style={{ width: 'auto', minWidth: 140 }}>
           <option value="">All statuses</option>
-          <option value="queued">Queued</option><option value="sent">Sent</option>
+          <option value="queued">Queued</option><option value="in-campaign">In campaign</option><option value="sent">Sent</option>
           <option value="failed">Failed</option><option value="bounced">Bounced</option>
           <option value="replied">Replied</option>
         </select>

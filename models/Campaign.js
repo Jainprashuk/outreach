@@ -68,6 +68,11 @@ const campaignSchema = new mongoose.Schema({
   completedAt: { type: Date, default: null },
   pausedAt:    { type: Date, default: null },
 
+  // Campaign operational updates are mailed back to the sender account. Keeping
+  // the first Message-ID lets every update use one Gmail conversation.
+  notificationThreadMessageId: { type: String, default: null },
+  completionNotifiedAt: { type: Date, default: null },
+
   deleted:   { type: Boolean, default: false },
   deletedAt: { type: Date, default: null },
 }, { timestamps: true });

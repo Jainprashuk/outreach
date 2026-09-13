@@ -23,6 +23,7 @@ const buildFilter = (tab) => {
   if (tab === 'bounced')      return { ...BASE_FILTER, status: 'bounced' };
   if (tab === 'replied')      return { ...BASE_FILTER, status: 'replied' };
   if (tab === 'remaining')    return { ...BASE_FILTER, status: 'queued' };
+  if (tab === 'in-campaign')  return { ...BASE_FILTER, status: 'in-campaign' };
   if (tab === 'pending')      return { ...BASE_FILTER, approvalStatus: 'pending' };
   if (tab === 'followup-due') return {
     ...BASE_FILTER,
@@ -124,7 +125,7 @@ router.post('/reset-for-send', async (req, res) => {
     // Contacts emailed inside the cooldown window are left completely alone —
     // they keep their real status instead of being parked at `queued`.
     const all = await Contact.find({ _id: { $in: ids }, deleted: { $ne: true } }).lean();
-    const skipped = all.filter(c => inCooldown(c));
+    const skipped = all.filter(c => c.status === 'in-campaign' || inCooldown(c));
     const skippedIds = new Set(skipped.map(c => String(c._id)));
     const eligibleIds = all.filter(c => !skippedIds.has(String(c._id))).map(c => c._id);
 
@@ -146,6 +147,7 @@ router.post('/reset-for-send', async (req, res) => {
       skipped: skipped.map(c => ({
         id: String(c._id), name: c.name, email: c.email, status: c.status,
         lastSentAt: c.lastSentAt, remainingMs: cooldownRemaining(c),
+        reason: c.status === 'in-campaign' ? 'in_campaign' : 'cooldown',
       })),
     });
   } catch (err) {

@@ -26,6 +26,7 @@ const campaignRowSchema = new mongoose.Schema({
   // runner use the selected, existing Contact rather than treating it as a
   // duplicate of a spreadsheet import.
   sourceContactId: { type: String, default: null },
+  sourceContactStatusBefore: { type: String, default: null },
 
   status: {
     // pending  -> not yet considered

@@ -10,6 +10,7 @@ const {
   reconcileDuplicates, buildTimeline, EMAIL_RE,
 } = require('../lib/campaignRunner');
 const { deadline } = require('../lib/http');
+const { inCooldown } = require('../lib/cooldown');
 
 const router = express.Router();
 
@@ -85,6 +86,19 @@ function validateConfig({ contactsPerDay, ratePerHour }) {
 }
 
 const hasEnvCredentials = () => !!(process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD);
+
+async function restoreReservedContacts(rows, note) {
+  const ops = rows.filter(r => r.sourceContactId).map(r => ({
+    updateOne: {
+      filter: { _id: r.sourceContactId, status: 'in-campaign', deleted: { $ne: true } },
+      update: {
+        $set: { status: r.sourceContactStatusBefore || 'queued' },
+        $push: { statusHistory: { status: r.sourceContactStatusBefore || 'queued', changedAt: new Date(), note } },
+      },
+    },
+  }));
+  if (ops.length) await Contact.bulkWrite(ops, { ordered: false });
+}
 
 // ── Collection-level routes ─────────────────────────────────────────────────
 // Declared BEFORE /:id so Express doesn't read "meta" or "run-due" as an id.
@@ -275,8 +289,9 @@ router.post('/from-contacts', async (req, res) => {
 
     const ids = [...new Set(Array.isArray(b.contactIds) ? b.contactIds.filter(mongoose.isValidObjectId) : [])];
     if (!ids.length) return res.status(400).json({ error: 'Select at least one contact.' });
-    const contacts = await Contact.find({ _id: { $in: ids }, ...BASE_FILTER })
-      .select('name email company role').lean();
+    const candidates = await Contact.find({ _id: { $in: ids }, ...BASE_FILTER, status: { $ne: 'in-campaign' } })
+      .select('name email company role status lastSentAt').lean();
+    const contacts = candidates.filter(c => !inCooldown(c));
     if (!contacts.length) return res.status(400).json({ error: 'None of the selected contacts are available.' });
 
     const runHourIst = Number.isInteger(Number(b.runHourIst))
@@ -291,8 +306,15 @@ router.post('/from-contacts', async (req, res) => {
     await CampaignRow.insertMany(contacts.map((c, rowIndex) => ({
       campaignId: campaign._id, rowIndex, sourceRow: rowIndex + 1,
       sourceContactId: String(c._id), name: c.name, email: normEmail(c.email),
-      company: c.company || '', role: c.role || '',
+      company: c.company || '', role: c.role || '', sourceContactStatusBefore: c.status,
     })));
+    await Contact.updateMany(
+      { _id: { $in: contacts.map(c => c._id) }, status: { $ne: 'in-campaign' } },
+      {
+        $set: { status: 'in-campaign' },
+        $push: { statusHistory: { status: 'in-campaign', changedAt: new Date(), note: `Reserved by campaign "${name}"` } },
+      },
+    );
     res.status(201).json(serialize(campaign.toObject()));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -634,7 +656,7 @@ router.post('/:id/rows/recheck', async (req, res) => {
 // POST /api/campaigns/:id/rows/remove — pull rows out of the upcoming batch.
 router.post('/:id/rows/remove', async (req, res) => {
   try {
-    const campaign = await findCampaign(req.params.id, { _id: 1 });
+    const campaign = await findCampaign(req.params.id, { _id: 1, name: 1 });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
     const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids : [];
@@ -643,6 +665,10 @@ router.post('/:id/rows/remove', async (req, res) => {
 
     // `pending` only: a released row is already an email, and a row claimed by an
     // in-flight release is past the point where pulling it means anything.
+    const rows = await CampaignRow.find(
+      { _id: { $in: valid }, campaignId: campaign._id, status: 'pending' },
+      { sourceContactId: 1, sourceContactStatusBefore: 1 },
+    ).lean();
     const result = await CampaignRow.updateMany(
       { _id: { $in: valid }, campaignId: campaign._id, status: 'pending' },
       { $set: { status: 'removed', skipReason: 'removed_by_user' } }
@@ -655,6 +681,7 @@ router.post('/:id/rows/remove', async (req, res) => {
     }
     await Campaign.updateOne({ _id: campaign._id },
       { $inc: { 'stats.removed': removed, 'stats.pending': -removed } });
+    await restoreReservedContacts(rows, `Removed from campaign "${campaign.name}"`);
     res.json({ ok: true, removed });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -664,13 +691,17 @@ router.post('/:id/rows/remove', async (req, res) => {
 // POST /api/campaigns/:id/rows/restore
 router.post('/:id/rows/restore', async (req, res) => {
   try {
-    const campaign = await findCampaign(req.params.id, { _id: 1 });
+    const campaign = await findCampaign(req.params.id, { _id: 1, name: 1 });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
     const ids = Array.isArray(req.body && req.body.ids) ? req.body.ids : [];
     const valid = ids.filter(id => mongoose.isValidObjectId(id));
     if (valid.length === 0) return res.status(400).json({ error: 'Expected a non-empty ids array.' });
 
+    const rows = await CampaignRow.find(
+      { _id: { $in: valid }, campaignId: campaign._id, status: 'removed' },
+      { sourceContactId: 1 },
+    ).lean();
     const result = await CampaignRow.updateMany(
       { _id: { $in: valid }, campaignId: campaign._id, status: 'removed' },
       { $set: { status: 'pending', skipReason: null } }
@@ -678,6 +709,11 @@ router.post('/:id/rows/restore', async (req, res) => {
     const restored = result.modifiedCount || 0;
     await Campaign.updateOne({ _id: campaign._id },
       { $inc: { 'stats.removed': -restored, 'stats.pending': restored } });
+    const sourceIds = rows.filter(r => r.sourceContactId).map(r => r.sourceContactId);
+    if (sourceIds.length) await Contact.updateMany(
+      { _id: { $in: sourceIds }, deleted: { $ne: true } },
+      { $set: { status: 'in-campaign' }, $push: { statusHistory: { status: 'in-campaign', changedAt: new Date(), note: `Restored to campaign "${campaign.name}"` } } },
+    );
     res.json({ ok: true, restored });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -688,14 +724,19 @@ router.post('/:id/rows/restore', async (req, res) => {
 // alone: those emails were sent and their history is real.
 router.delete('/:id', async (req, res) => {
   try {
-    const campaign = await findCampaign(req.params.id, { _id: 1 });
+    const campaign = await findCampaign(req.params.id, { _id: 1, name: 1 });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
 
     // Forcing 'paused' too is belt and braces, so the runner can never pick it up
     // even if the `deleted` filter ever regresses.
+    const reservedRows = await CampaignRow.find(
+      { campaignId: campaign._id, status: { $in: ['pending', 'removed'] } },
+      { sourceContactId: 1, sourceContactStatusBefore: 1 },
+    ).lean();
     await Campaign.findByIdAndUpdate(campaign._id, {
       $set: { deleted: true, deletedAt: new Date(), status: 'paused' },
     });
+    await restoreReservedContacts(reservedRows, `Campaign "${campaign.name}" deleted`);
 
     let purgedRows = 0;
     if (req.query.purgeRows === '1') {

@@ -17,14 +17,14 @@ export const avatarColor = (name: string): [string, string] =>
 
 export const STATUS_LABELS: Record<string, string> = {
   sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending',
-  queued: 'Queued', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced',
+  queued: 'Queued', 'in-campaign': 'In campaign', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced',
   replied: 'Replied', 'follow-up-replied': 'Replied after Follow-up', closed: 'Closed',
   'no-openings': 'No Openings', 'in-review': 'In Review',
 };
 
 export const BADGE_CLASS: Record<string, string> = {
   sent: 'badge-sent', 'follow-up-sent': 'badge-followup', failed: 'badge-rejected',
-  pending: 'badge-pending', queued: 'badge-queued', approved: 'badge-approved',
+  pending: 'badge-pending', queued: 'badge-queued', 'in-campaign': 'badge-pending', approved: 'badge-approved',
   rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied',
   'follow-up-replied': 'badge-replied', closed: 'badge-closed',
   'no-openings': 'badge-noopenings', 'in-review': 'badge-inreview',

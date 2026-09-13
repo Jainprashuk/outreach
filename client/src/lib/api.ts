@@ -5,7 +5,7 @@
 export const API_BASE = '';
 
 export type ContactStatus =
-  | 'queued' | 'sent' | 'follow-up-sent' | 'failed' | 'bounced'
+  | 'queued' | 'in-campaign' | 'sent' | 'follow-up-sent' | 'failed' | 'bounced'
   | 'replied' | 'follow-up-replied' | 'closed' | 'no-openings' | 'in-review';
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
@@ -130,7 +130,7 @@ export const deleteTemplateApi = (key: string) =>
 
 export interface CooldownSkip {
   id: string; name: string; email: string; status: ContactStatus;
-  lastSentAt: string | null; remainingMs: number;
+  lastSentAt: string | null; remainingMs: number; reason?: 'cooldown' | 'in_campaign';
 }
 
 export interface ResetForSendResult {
