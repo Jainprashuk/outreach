@@ -785,8 +785,6 @@ thead th.sortable:hover { color:var(--text); }
 .sjw-widget-tools { display: flex; justify-content: flex-end; }
 .sjw-summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; background: var(--bg2); border: .5px solid var(--border); border-radius: var(--radius-lg); padding: 9px 10px; font-size: 12px; }
 .sjw-live-dot { color: var(--green); font-size: 8px; vertical-align: middle; }
-.sjw-compact { display: flex; align-items: center; gap: 8px; padding: 7px 12px; font-size: 11px; color: var(--text2); }
-.sjw-compact .progress-bar { flex: 1; }
 .sjw-next-send { margin-top: 6px; font-size: 11px; color: var(--text3); }
 .sjw-failures { margin-top: 8px; padding: 0; border: 0; background: none; color: var(--red); font-size: 12px; cursor: pointer; }
 .sjw-card {
@@ -806,7 +804,6 @@ thead th.sortable:hover { color:var(--text); }
 .sjw-drag-handle:active { cursor: grabbing; }
 .sjw-header > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sjw-body { padding: 10px 12px; }
-.sjw-body.collapsed { display: none; }
 .sjw-more {
   text-align: center; font-size: 11px; color: var(--text2);
   padding: 4px 0;

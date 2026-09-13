@@ -28,7 +28,6 @@ export default function SendJobWidget() {
   const navigate = useNavigate();
   const toast = useToast();
   const [jobs, setJobs] = useState<SendJob[]>([]);
-  const [collapsed, setCollapsed] = useState(false);
   const [showJobs, setShowJobs] = useState(false);
   const [position, setPosition] = useState<{ left: number; top: number } | null>(null);
   const widgetRef = useRef<HTMLDivElement>(null);
@@ -168,7 +167,7 @@ export default function SendJobWidget() {
       <div className="sjw-widget-tools"><button className="btn-xs" type="button" onClick={resetPosition} title="Snap this panel back to the bottom-right corner"><i className="ti ti-corner-down-right" /> Reset position</button></div>
       {jobs.length > 1 && <div className="sjw-summary">
         <span><i className="ti ti-circle-filled sjw-live-dot" /> {activeDrips.length || jobs.length} active drip{(activeDrips.length || jobs.length) === 1 ? '' : 's'} · {remainingAcrossJobs} email{remainingAcrossJobs === 1 ? '' : 's'} remaining</span>
-        <button className="btn-xs" type="button" onClick={() => setShowJobs(open => !open)}>{showJobs ? 'Compact' : 'View jobs'}</button>
+        <button className="btn-xs" type="button" onClick={() => setShowJobs(open => !open)}>{showJobs ? 'Hide jobs' : 'View jobs'}</button>
       </div>}
       {hidden > 0 && showJobs && <div className="sjw-more">+{hidden} more job{hidden > 1 ? 's' : ''} running</div>}
       {visible.map(job => {
@@ -209,12 +208,10 @@ export default function SendJobWidget() {
                     <i className={`ti ${pauseIcon}`} />
                   </button>
                 )}
-                <button className="btn btn-xs" onClick={() => setCollapsed(c => !c)} title="Minimise" type="button"><i className="ti ti-minus" /></button>
                 <button className="btn btn-xs" onClick={() => close(job.id)} title="Cancel job" type="button"><i className="ti ti-x" /></button>
               </div>
             </div>
-            {collapsed && <div className="sjw-compact"><div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div><span>{done}/{total}</span></div>}
-            <div className={`sjw-body${collapsed ? ' collapsed' : ''}`}>
+            <div className="sjw-body">
               <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
               <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>
                 {done}/{total} · {failed > 0 ? `${failed} failed` : done > 0 ? 'all good' : 'starting…'}
