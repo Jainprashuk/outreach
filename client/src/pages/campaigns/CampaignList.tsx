@@ -13,12 +13,15 @@ import {
   fmtHour, fmtIst, fromNow, isCronStale, nextRunAt, pct,
 } from '../../lib/campaigns';
 
+type CampaignTab = 'all' | 'active' | 'finished' | 'sending';
+
 export default function CampaignList() {
   const toast = useToast();
   const navigate = useNavigate();
   const [campaigns, setCampaigns] = useState<Campaign[] | null>(null);
   const [meta, setMeta] = useState<CampaignMeta | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [tab, setTab] = useState<CampaignTab>('active');
   // Ticks the per-row countdowns without re-fetching anything.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -59,6 +62,18 @@ export default function CampaignList() {
   }
 
   const running = (campaigns || []).filter((c) => c.status === 'running');
+  const visibleCampaigns = (campaigns || []).filter(c => {
+    if (tab === 'all') return true;
+    if (tab === 'sending') return !!c.sending;
+    if (tab === 'finished') return c.status === 'completed' && !c.sending;
+    return c.status !== 'completed' || !!c.sending;
+  });
+  const tabCounts = {
+    all: (campaigns || []).length,
+    active: (campaigns || []).filter(c => c.status !== 'completed' || !!c.sending).length,
+    finished: (campaigns || []).filter(c => c.status === 'completed' && !c.sending).length,
+    sending: (campaigns || []).filter(c => !!c.sending).length,
+  };
   const committed = running.reduce((n, c) => n + c.contactsPerDay, 0);
   const overCap = !!meta && committed > meta.dailyCap;
 
@@ -181,8 +196,15 @@ export default function CampaignList() {
       <SendingTimeline />
 
       <div className="section-head" style={{ marginTop: 22 }}>
-        <div className="section-title">All campaigns</div>
-        <span className="contact-count-badge">{campaigns?.length ?? 0}</span>
+        <div className="nav-tabs">
+          {(['all', 'active', 'finished', 'sending'] as CampaignTab[]).map(key => (
+            <div key={key} className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => setTab(key)}>
+              {key === 'all' ? 'All' : key === 'active' ? 'Active' : key === 'finished' ? 'Finished' : 'Sending'}
+              <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{tabCounts[key]}</span>
+            </div>
+          ))}
+        </div>
+        <span className="contact-count-badge">{visibleCampaigns.length}</span>
       </div>
 
       <div className="table-card">
@@ -208,7 +230,12 @@ export default function CampaignList() {
                 </div>
               </td></tr>
             )}
-            {campaigns?.map((c) => {
+            {campaigns && campaigns.length > 0 && visibleCampaigns.length === 0 && (
+              <tr><td colSpan={7}>
+                <div className="empty-state"><i className="ti ti-filter" />No {tab} campaigns</div>
+              </td></tr>
+            )}
+            {visibleCampaigns.map((c) => {
               const done = c.stats.released + c.stats.skipped;
               const displayStatus = c.sending ? 'sending' : c.status;
               return (
