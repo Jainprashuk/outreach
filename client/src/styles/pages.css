@@ -156,7 +156,8 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
   100% { margin-left: 100%; }
 }
 
-/* Assignment sits between the first call and any scheduling talk. Pink was the
-   only palette colour not already spoken for by another badge, so the stage
-   stays distinguishable from the other six at a glance. */
-.badge-assignment { background: var(--pink-bg); color: var(--pink); }
+/* Assignment sits between the first call and any scheduling talk.
+   Teal, not pink: in the light theme --pink is #993556, a dark maroon that
+   reads as red and so wrongly signals failure for a stage that is simply in
+   progress. Teal is unused anywhere in the interview pipeline. */
+.badge-assignment { background: var(--teal-bg); color: var(--teal); }

@@ -59,6 +59,9 @@ export default function Leads() {
   const [error, setError] = useState('');
 
   const [showImport, setShowImport] = useState(false);
+  // Scrape and Import are both full-width panels; showing either replaces the
+  // other rather than stacking two of them above the table.
+  const [showScrape, setShowScrape] = useState(false);
   const [pasted, setPasted] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -305,13 +308,19 @@ export default function Leads() {
       actions={
         <>
           <Link to="/contacts" className="btn btn-sm"><i className="ti ti-users" /> Contacts</Link>
-          <button className="btn btn-primary" type="button" onClick={() => setShowImport(v => !v)}>
+          <button className="btn btn-sm" type="button"
+            onClick={() => { setShowScrape(v => !v); setShowImport(false); }}>
+            <i className={showScrape ? 'ti ti-x' : 'ti ti-brand-linkedin'} /> {showScrape ? 'Close scrape' : 'Scrape'}
+          </button>
+          <button className="btn btn-primary" type="button"
+            onClick={() => { setShowImport(v => !v); setShowScrape(false); }}>
             <i className={showImport ? 'ti ti-x' : 'ti ti-file-code'} /> {showImport ? 'Close import' : 'Import leads'}
           </button>
         </>
       }
     >
-      <ScrapePanel onImported={reload} />
+      <ScrapePanel open={showScrape} onOpen={() => { setShowScrape(true); setShowImport(false); }}
+        onImported={reload} />
 
       {showImport && (
         <div className="section" style={{ marginBottom: 18 }}>

@@ -99,7 +99,14 @@ function HistoryRow({ run }: { run: ScrapeRun }) {
   );
 }
 
-export default function ScrapePanel({ onImported }: { onImported: () => void }) {
+type Props = {
+  /** Panel body is hidden unless open — the leads table is the default view. */
+  open: boolean;
+  onOpen: () => void;
+  onImported: () => void;
+};
+
+export default function ScrapePanel({ open, onOpen, onImported }: Props) {
   const toast = useToast();
   const [status, setStatus] = useState<ScrapeStatus | null>(null);
   const [runs, setRuns] = useState<ScrapeRun[]>([]);
@@ -222,6 +229,34 @@ export default function ScrapePanel({ onImported }: { onImported: () => void }) 
 
   if (!status || !ready) return null;
   const sch = status.schedule;
+
+  // Closed: stay out of the way, but never let a running harvest vanish just
+  // because the panel is shut — losing track of a 20-minute job is worse than
+  // a little clutter.
+  if (!open) {
+    if (!active) return null;
+    return (
+      <div className="section" style={{ marginBottom: 18, cursor: 'pointer' }} onClick={onOpen}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <i className="ti ti-brand-linkedin" />
+          <strong>{active.status === 'queued' ? 'Scrape queued' : 'Harvesting LinkedIn'}</strong>
+          <span className="page-info">
+            {prog && prog.searchesTotal > 0
+              ? `${prog.searchesDone} of ${prog.searchesTotal} searches`
+              : `${active.queries.length} ${active.queries.length === 1 ? 'search' : 'searches'}`}
+            {active.status === 'running' && ` · ${elapsed(active.claimedAt)}`}
+            {prog && prog.new > 0 && ` · ${prog.new} new so far`}
+          </span>
+          <span style={{ flex: 1, minWidth: 120 }}>
+            {pct === null
+              ? <div className="progress-bar"><div className="progress-fill progress-indeterminate" /></div>
+              : <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>}
+          </span>
+          <button className="btn btn-xs" type="button" onClick={onOpen}>View</button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="section" style={{ marginBottom: 18 }}>
