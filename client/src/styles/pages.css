@@ -144,3 +144,14 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
   .iv-reminder-row .iv-reminder-actions { flex: 1 1 100%; }
   .iv-reminder-row .iv-reminder-actions .btn { flex: 1 1 auto; justify-content: center; }
 }
+
+/* A harvest reports only when it finishes, so there is no honest percentage to
+   show mid-run. An indeterminate sweep says "working" without inventing one. */
+.progress-fill.progress-indeterminate {
+  width: 35%;
+  animation: progress-sweep 1.4s var(--ease) infinite;
+}
+@keyframes progress-sweep {
+  0%   { margin-left: -35%; }
+  100% { margin-left: 100%; }
+}

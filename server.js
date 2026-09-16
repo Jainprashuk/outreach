@@ -44,6 +44,12 @@ const EXPORT_TOKEN = EXPORT_PASSWORD ? makeToken('share:' + EXPORT_PASSWORD) : n
 const CRON_SECRET = process.env.CRON_SECRET;
 const CRON_TOKEN  = CRON_SECRET ? makeToken('cron:' + CRON_SECRET) : null;
 
+// ── Fourth independent credential — the LinkedIn scrape worker ──────────────
+// Separate from CRON_SECRET on purpose: that one lives in GitHub Actions, this
+// one lives on a laptop, so they should be revocable independently.
+const WORKER_SECRET = process.env.WORKER_SECRET;
+const WORKER_TOKEN  = WORKER_SECRET ? makeToken('worker:' + WORKER_SECRET) : null;
+
 // Constant-time compare of two hex digests. Both sides are fixed-length here, so
 // the length precheck that stops timingSafeEqual from throwing cannot leak
 // anything about the secret.
@@ -60,11 +66,25 @@ const tokenMatches = (candidate, expected) => {
 // reachable with a cron secret just because the sync endpoint is.
 const CRON_PATHS = new Set(['/api/postings/sync', '/api/check-mailbox', '/api/campaigns/run-due']);
 
+// Same exact-match rule. These carry the run id in the BODY rather than the
+// path precisely so they can be matched exactly — /api/scrapes/:id/... could
+// not be, and a prefix match would expose every scrape endpoint to the worker.
+const WORKER_PATHS = new Set([
+  '/api/scrapes/claim', '/api/scrapes/ingest', '/api/scrapes/finish',
+]);
+
 const isCron = (req) => {
   if (!CRON_TOKEN) return false;   // unset secret => carve-out is inert
   const raw = req.headers['x-cron-secret'];
   if (typeof raw !== 'string' || !raw) return false;
   return tokenMatches(makeToken('cron:' + raw), CRON_TOKEN);
+};
+
+const isWorker = (req) => {
+  if (!WORKER_TOKEN) return false;   // unset secret => carve-out is inert
+  const raw = req.headers['x-worker-secret'];
+  if (typeof raw !== 'string' || !raw) return false;
+  return tokenMatches(makeToken('worker:' + raw), WORKER_TOKEN);
 };
 
 // Read a cookie value from the raw header and constant-time compare to a token.
@@ -98,6 +118,10 @@ const requireAuth = (req, res, next) => {
   // Scheduled jobs have no cookie to send. Gated to two exact paths, and inert
   // unless CRON_SECRET is configured.
   if (CRON_PATHS.has(req.path) && isCron(req)) return next();
+
+  // The scrape worker runs on a Mac and has no cookie either. Same exact-path
+  // rule, inert unless WORKER_SECRET is configured.
+  if (WORKER_PATHS.has(req.path) && isWorker(req)) return next();
 
   if (isOwner(req)) return next();
 
@@ -224,6 +248,7 @@ app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));
 app.use('/api/jobs', requireDb, require('./routes/jobs'));
 app.use('/api/leads', requireDb, require('./routes/leads'));
+app.use('/api/scrapes', requireDb, require('./routes/scrapes'));
 // People who actually got back to you. A separate store from Contact/Lead so the
 // outreach and apply journeys above are never written to — see models/Interview.js.
 app.use('/api/interviews', requireDb, require('./routes/interviews'));

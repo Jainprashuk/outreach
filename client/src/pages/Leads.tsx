@@ -7,6 +7,7 @@ import LeadDetailModal from '../components/LeadDetailModal';
 import LeadFilterPanel from '../components/LeadFilterPanel';
 import InterviewCell from '../components/InterviewCell';
 import { SkeletonRows } from '../components/Skeleton';
+import ScrapePanel from '../components/leads/ScrapePanel';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -310,6 +311,8 @@ export default function Leads() {
         </>
       }
     >
+      <ScrapePanel onImported={reload} />
+
       {showImport && (
         <div className="section" style={{ marginBottom: 18 }}>
           <div className="section-head">

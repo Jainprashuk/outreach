@@ -986,3 +986,79 @@ export const restoreCampaignRowsApi = (id: string, ids: string[]) =>
 export const deleteCampaignApi = (id: string, purgeRows = false) =>
   apiFetch<{ ok: boolean; purgedRows: number }>(
     `/api/campaigns/${id}${purgeRows ? '?purgeRows=1' : ''}`, { method: 'DELETE' });
+
+// ── LinkedIn scrape runs ────────────────────────────────────────────────────
+// The harvest itself runs on a worker on Prashuk's Mac, not on the server —
+// `jl harvest` drives a real logged-in Chrome over CDP and has no headless
+// path. These endpoints are the queue between the two.
+
+export type ScrapeRunStatus = 'queued' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled';
+
+export interface ScrapeRun {
+  id: string;
+  status: ScrapeRunStatus;
+  trigger: 'manual' | 'scheduled';
+  queries: string[];
+  claimedAt: string | null;
+  finishedAt: string | null;
+  workerHost: string;
+  stats: { rendered: number; hiring: number; new: number; seen: number; searches: number };
+  importResult: { created: number; skipped: number; updated: number; skippedInBatch: number };
+  error: string | null;
+  exitCode: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScrapeSchedule {
+  id: string;
+  enabled: boolean;
+  days: number[];          // 0 = Sunday .. 6 = Saturday
+  time: string;            // 'HH:mm', wall clock in `timezone`
+  timezone: string;
+  queries: string[];
+  catchUpHours: number;
+  lastFiredAt: string | null;
+}
+
+export interface ScrapeWorkerState {
+  everSeen: boolean;
+  online: boolean;
+  lastSeenAt: string | null;
+  host: string;
+  chromeUp: boolean;
+  linkedinLoggedIn: boolean;
+  /** Next `pmset` wake, so an offline message can name a time instead of "eventually". */
+  nextWakeAt: string | null;
+}
+
+export interface ScrapeStatus {
+  activeRun: ScrapeRun | null;
+  lastRun: ScrapeRun | null;
+  worker: ScrapeWorkerState;
+  schedule: ScrapeSchedule;
+  nextOccurrence: string | null;
+  /** The worker's config.json query list — what you pick a run's queries from. */
+  defaultQueries: string[];
+  /** Set for 7 days after LinkedIn shows a checkpoint. Nothing may run until it passes. */
+  blockedUntil: string | null;
+  blockedReason: string;
+}
+
+export const scrapeStatusApi = () => apiFetch<ScrapeStatus>('/api/scrapes/status');
+
+export const listScrapeRunsApi = (page = 1, limit = 20) =>
+  apiFetch<{ runs: ScrapeRun[]; total: number; page: number; limit: number; pages: number }>(
+    `/api/scrapes?page=${page}&limit=${limit}`);
+
+/** 409 when a run is already queued or running; 423 while a checkpoint block is active. */
+export const queueScrapeApi = (queries: string[]) =>
+  apiFetch<{ run: ScrapeRun }>('/api/scrapes', { method: 'POST', body: JSON.stringify({ queries }) });
+
+export const cancelScrapeApi = (id: string) =>
+  apiFetch<{ run: ScrapeRun }>(`/api/scrapes/${id}/cancel`, { method: 'POST' });
+
+export const updateScrapeScheduleApi = (patch: Partial<Pick<ScrapeSchedule,
+  'enabled' | 'days' | 'time' | 'timezone' | 'queries' | 'catchUpHours'>>) =>
+  apiFetch<{ schedule: ScrapeSchedule; nextOccurrence: string | null }>(
+    '/api/scrapes/schedule', { method: 'PUT', body: JSON.stringify(patch) });
