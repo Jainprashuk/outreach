@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  scrapeStatusApi, queueScrapeApi, cancelScrapeApi, updateScrapeScheduleApi,
+  scrapeStatusApi, queueScrapeApi, cancelScrapeApi, updateScrapeScheduleApi, listScrapeRunsApi,
   type ScrapeStatus, type ScrapeRun,
 } from '../../lib/api';
 import { useToast } from '../../context/ToastContext';
@@ -12,6 +12,7 @@ import { useToast } from '../../context/ToastContext';
 
 const POLL_MS = 3000;
 const MAX_QUERIES = 20;   // MAX_SEARCHES in scroll_harvest.py — the cap is deliberate
+const HISTORY_LIMIT = 15;
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
 const fmtTime = (iso: string | null) =>
@@ -20,6 +21,9 @@ const fmtTime = (iso: string | null) =>
 const fmtDate = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
 
+const fmtRunTime = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' }) : '';
+
 function elapsed(since: string | null): string {
   if (!since) return '';
   const secs = Math.max(0, Math.floor((Date.now() - new Date(since).getTime()) / 1000));
@@ -27,13 +31,14 @@ function elapsed(since: string | null): string {
   return m < 1 ? `${secs}s` : `${m}m ${secs % 60}s`;
 }
 
-type Readiness = {
-  tone: 'ok' | 'warn' | 'idle';
-  icon: string;
-  text: string;
-  /** What the primary button should say — queueing stays possible when offline. */
-  verb: string;
-};
+function duration(from: string | null, to: string | null): string {
+  if (!from || !to) return '';
+  const secs = Math.max(0, Math.round((new Date(to).getTime() - new Date(from).getTime()) / 1000));
+  const m = Math.floor(secs / 60);
+  return m < 1 ? `${secs}s` : `${m}m`;
+}
+
+type Readiness = { tone: 'ok' | 'warn' | 'idle'; icon: string; text: string; verb: string };
 
 // Never a generic "offline": each state has a different fix, and saying which
 // one is the whole point of the strip.
@@ -59,122 +64,151 @@ function readiness(s: ScrapeStatus): Readiness {
       text: 'Chrome is not running — the worker will launch it automatically.' };
   }
   return { tone: 'ok', icon: 'ti-circle-check', verb: 'Scrape now',
-    text: nextOccurrence ? `Ready — runs immediately. Next scheduled run ${fmtTime(nextOccurrence)}.` : 'Ready — runs immediately.' };
+    text: nextOccurrence ? `Ready. Next scheduled run ${fmtTime(nextOccurrence)}.` : 'Ready — runs immediately.' };
 }
 
-function RunReport({ run }: { run: ScrapeRun }) {
-  if (run.status === 'done') {
-    const r = run.importResult;
-    return (
-      <div className="info-box" style={{ marginTop: 12 }}>
-        <i className="ti ti-circle-check" />
-        <span>
-          <strong>{run.stats.new} new</strong> from {run.stats.hiring} hiring posts
-          {' '}across {run.stats.searches} searches — <strong>{r.created} imported</strong>
-          {r.skipped > 0 && `, ${r.skipped} already known`}
-          {r.updated > 0 && `, ${r.updated} updated`}.
+const RUN_BADGE: Record<ScrapeRun['status'], string> = {
+  done: 'badge-sent', failed: 'badge-rejected', blocked: 'badge-rejected',
+  cancelled: 'badge-closed', queued: 'badge-queued', running: 'badge-pending',
+};
+
+function HistoryRow({ run }: { run: ScrapeRun }) {
+  const r = run.importResult;
+  return (
+    <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap',
+      padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+      <span className={`badge ${RUN_BADGE[run.status]}`}>{run.status}</span>
+      <span style={{ minWidth: 110 }}>{fmtRunTime(run.createdAt)}</span>
+      <span className="page-info">
+        {run.trigger === 'scheduled' ? 'scheduled' : 'manual'} · {run.queries.length}{' '}
+        {run.queries.length === 1 ? 'search' : 'searches'}
+        {run.claimedAt && run.finishedAt && ` · ${duration(run.claimedAt, run.finishedAt)}`}
+      </span>
+      {run.status === 'done' ? (
+        <span className="page-info" style={{ marginLeft: 'auto' }}>
+          {run.stats.rendered} seen · {run.stats.hiring} hiring ·{' '}
+          <strong>{r.created} imported</strong>
+          {r.skipped > 0 && ` · ${r.skipped} known`}
         </span>
-      </div>
-    );
-  }
-  if (run.status === 'failed') {
-    return (
-      <div className="info-box" style={{ marginTop: 12, background: 'var(--amber-bg)', color: 'var(--amber)' }}>
-        <i className="ti ti-alert-triangle" />
-        <span><strong>Last run failed.</strong> {run.error}</span>
-      </div>
-    );
-  }
-  return null;
+      ) : run.error ? (
+        <span className="page-info" style={{ marginLeft: 'auto', maxWidth: '100%', color: 'var(--red)' }}>
+          {run.error.slice(0, 90)}
+        </span>
+      ) : null}
+    </div>
+  );
 }
 
 export default function ScrapePanel({ onImported }: { onImported: () => void }) {
   const toast = useToast();
   const [status, setStatus] = useState<ScrapeStatus | null>(null);
+  const [runs, setRuns] = useState<ScrapeRun[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [primed, setPrimed] = useState(false);
   const [adhoc, setAdhoc] = useState('');
+  const [filter, setFilter] = useState('');
   const [busy, setBusy] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [showSchedule, setShowSchedule] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
   const [, forceTick] = useState(0);
 
-  // Refresh the leads table exactly once, on the transition out of a run —
-  // polling the list every 3s alongside this would be wasteful.
   const prevActive = useRef<string | null>(null);
-
-  // The parent re-creates onImported on every render. Holding it in a ref keeps
-  // `load` stable, so the poll effect below mounts one interval instead of
-  // tearing it down and re-fetching on every state update.
   const onImportedRef = useRef(onImported);
   useEffect(() => { onImportedRef.current = onImported; }, [onImported]);
+
+  const loadRuns = useCallback(() => {
+    listScrapeRunsApi(1, HISTORY_LIMIT).then(r => setRuns(r.runs)).catch(() => {});
+  }, []);
 
   const load = useCallback(async () => {
     try {
       const s = await scrapeStatusApi();
       setStatus(s);
       const activeId = s.activeRun?.id ?? null;
-      if (prevActive.current && !activeId) onImportedRef.current();
+      // Refresh the leads table and the history once, on the way out of a run.
+      if (prevActive.current && !activeId) { onImportedRef.current(); loadRuns(); }
       prevActive.current = activeId;
-      setPicked(prev => {
-        if (prev.size > 0) return prev;
-        return new Set(s.schedule.queries.length ? s.schedule.queries : s.defaultQueries.slice(0, MAX_QUERIES));
+      setPrimed(p => {
+        if (p) return p;
+        setPicked(new Set(s.schedule.queries.length ? s.schedule.queries : s.defaultQueries.slice(0, MAX_QUERIES)));
+        return true;
       });
     } catch { /* a transient poll failure shouldn't blank the panel */ }
-  }, []);
+  }, [loadRuns]);
 
-  useEffect(() => {
-    load();
-    const t = setInterval(load, POLL_MS);
-    return () => clearInterval(t);
-  }, [load]);
+  useEffect(() => { load(); loadRuns(); const t = setInterval(load, POLL_MS); return () => clearInterval(t); },
+    [load, loadRuns]);
 
-  // Drive the elapsed-time readout without re-fetching.
   useEffect(() => {
     if (!status?.activeRun) return;
     const t = setInterval(() => forceTick(n => n + 1), 1000);
     return () => clearInterval(t);
   }, [status?.activeRun?.id]);
 
+  // What each search actually produced most recently. This is the whole answer
+  // to "which of these 20 should I tick?" — without it the list is 20
+  // indistinguishable strings and you may as well leave them all on.
+  const lastYield = useMemo(() => {
+    const map = new Map<string, number>();
+    for (const run of runs) {                  // newest first
+      for (const q of run.progress?.perQuery || []) {
+        if (!map.has(q.query)) map.set(q.query, q.new);
+      }
+    }
+    return map;
+  }, [runs]);
+
   const blockedUntil = status?.blockedUntil ?? null;
   const ready = useMemo(() => (status ? readiness(status) : null), [status]);
   const active = status?.activeRun ?? null;
   const prog = active?.status === 'running' ? active.progress : null;
-  // null => nothing honest to measure yet, so fall back to the sweep animation.
   const pct = prog && prog.searchesTotal > 0
-    ? Math.round((prog.searchesDone / prog.searchesTotal) * 100)
-    : null;
+    ? Math.round((prog.searchesDone / prog.searchesTotal) * 100) : null;
 
-  const queries = useMemo(() => {
-    const extra = adhoc.split(',').map(q => q.trim()).filter(Boolean);
-    return [...new Set([...picked, ...extra])];
-  }, [picked, adhoc]);
+  const extras = useMemo(() => adhoc.split(',').map(q => q.trim()).filter(Boolean), [adhoc]);
+  const queries = useMemo(() => [...new Set([...picked, ...extras])], [picked, extras]);
+
+  const catalogue = status?.defaultQueries ?? [];
+  const visible = useMemo(() => {
+    const f = filter.trim().toLowerCase();
+    const rows = f ? catalogue.filter(q => q.toLowerCase().includes(f)) : catalogue;
+    // Best-performing first, so the useful ones aren't buried.
+    return [...rows].sort((a, b) => (lastYield.get(b) ?? -1) - (lastYield.get(a) ?? -1));
+  }, [catalogue, filter, lastYield]);
 
   const toggle = (q: string) =>
     setPicked(prev => {
       const next = new Set(prev);
       if (next.has(q)) next.delete(q);
-      else if (next.size < MAX_QUERIES) next.add(q);
+      else if (next.size + extras.length < MAX_QUERIES) next.add(q);
       else toast(`That's the cap — ${MAX_QUERIES} searches per run.`, 'error');
       return next;
     });
 
+  const selectAll = () => setPicked(new Set(catalogue.slice(0, MAX_QUERIES - extras.length)));
+  const clearAll = () => setPicked(new Set());
+  const selectBest = () =>
+    setPicked(new Set([...catalogue].sort((a, b) => (lastYield.get(b) ?? -1) - (lastYield.get(a) ?? -1))
+      .filter(q => (lastYield.get(q) ?? 0) > 0).slice(0, MAX_QUERIES - extras.length)));
+
   const submit = async () => {
-    if (queries.length === 0) return toast('Pick at least one query', 'error');
+    if (queries.length === 0) return toast('Pick at least one search', 'error');
     setBusy(true);
     try {
       await queueScrapeApi(queries.slice(0, MAX_QUERIES));
-      // Repeat the asleep warning here — if the Mac is shut, a silent "queued"
-      // toast reads like nothing happened.
       toast(status && !status.worker.online
         ? 'Queued. Your Mac is asleep, so it will run when it next wakes.'
         : 'Scrape started.', 'success');
-      await load();
+      setEditing(false);
+      await load(); loadRuns();
     } catch (err: any) {
       toast(err.message || 'Could not queue the scrape', 'error');
     } finally { setBusy(false); }
   };
 
   const cancel = async (id: string) => {
-    try { await cancelScrapeApi(id); toast('Cancelled', 'success'); await load(); }
+    try { await cancelScrapeApi(id); toast('Cancelled', 'success'); await load(); loadRuns(); }
     catch (err: any) { toast(err.message, 'error'); }
   };
 
@@ -193,9 +227,14 @@ export default function ScrapePanel({ onImported }: { onImported: () => void }) 
     <div className="section" style={{ marginBottom: 18 }}>
       <div className="section-head">
         <span className="section-title">Scrape LinkedIn</span>
-        <button className="btn btn-xs" type="button" onClick={() => setShowSchedule(v => !v)}>
-          <i className="ti ti-clock" /> {showSchedule ? 'Hide schedule' : 'Schedule'}
-        </button>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button className="btn btn-xs" type="button" onClick={() => setShowHistory(v => !v)}>
+            <i className="ti ti-history" /> History{runs.length ? ` (${runs.length})` : ''}
+          </button>
+          <button className="btn btn-xs" type="button" onClick={() => setShowSchedule(v => !v)}>
+            <i className="ti ti-clock" /> Schedule{sch.enabled ? ' · on' : ''}
+          </button>
+        </div>
       </div>
 
       {blockedUntil ? (
@@ -209,14 +248,15 @@ export default function ScrapePanel({ onImported }: { onImported: () => void }) 
         </div>
       ) : (
         <>
-          <div className="info-box" style={ready.tone === 'warn' ? { background: 'var(--amber-bg)', color: 'var(--amber)' } : undefined}>
+          <div className="info-box"
+            style={ready.tone === 'warn' ? { background: 'var(--amber-bg)', color: 'var(--amber)' } : undefined}>
             <i className={`ti ${ready.icon}`} />
             <span>{ready.text}</span>
           </div>
 
           {active ? (
             <div style={{ marginTop: 12 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8, flexWrap: 'wrap' }}>
                 <strong>
                   {active.status === 'queued' ? 'Queued' : 'Harvesting'}
                   {active.trigger === 'scheduled' && ' (scheduled)'}
@@ -231,23 +271,19 @@ export default function ScrapePanel({ onImported }: { onImported: () => void }) 
                   <button className="btn btn-xs" type="button" onClick={() => cancel(active.id)}>Cancel</button>
                 )}
               </div>
+
               {/* Determinate once the first search reports; indeterminate until
                   then, and while merely queued, because there is nothing honest
                   to measure yet. */}
               {pct === null ? (
                 <div className="progress-bar"><div className="progress-fill progress-indeterminate" /></div>
               ) : (
-                <div className="progress-bar">
-                  <div className="progress-fill" style={{ width: `${pct}%` }} />
-                </div>
+                <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
               )}
 
               {prog && prog.currentQuery && (
                 <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'baseline' }}>
-                  <span>
-                    <i className="ti ti-search" style={{ marginRight: 4 }} />
-                    <strong>{prog.currentQuery}</strong>
-                  </span>
+                  <span><i className="ti ti-search" style={{ marginRight: 4 }} /><strong>{prog.currentQuery}</strong></span>
                   <span className="page-info">
                     {prog.rendered} seen · {prog.hiring} hiring · <strong>{prog.new} new</strong>
                   </span>
@@ -274,39 +310,104 @@ export default function ScrapePanel({ onImported }: { onImported: () => void }) 
             </div>
           ) : (
             <>
-              <div style={{ margin: '14px 0 8px', display: 'flex', justifyContent: 'space-between' }}>
-                <strong>Searches</strong>
-                <span className="page-info">{queries.length} / {MAX_QUERIES} selected</span>
-              </div>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-                {status.defaultQueries.map(q => (
-                  <label key={q} className="contact-chip" style={{ cursor: 'pointer', opacity: picked.has(q) ? 1 : 0.55 }}>
-                    <input type="checkbox" checked={picked.has(q)} onChange={() => toggle(q)}
-                      style={{ marginRight: 6 }} />
-                    {q}
-                  </label>
-                ))}
-                {status.defaultQueries.length === 0 && (
-                  <span className="page-info">
-                    No saved searches yet — the worker reports these from the scraper's config.json.
-                  </span>
-                )}
-              </div>
-              <input type="text" style={{ marginTop: 10, width: '100%' }} value={adhoc}
-                onChange={e => setAdhoc(e.target.value)}
-                placeholder="Extra searches for this run, comma separated" />
-
-              <div className="step-footer" style={{ marginTop: 14 }}>
+              {/* The trigger is one line by default. The 20-checkbox list is a
+                  wall that buries the button, so it stays behind "Edit". */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginTop: 12 }}>
                 <button className="btn btn-primary" type="button" disabled={busy || queries.length === 0}
                   onClick={submit}>
                   <i className="ti ti-brand-linkedin" /> {busy ? 'Queueing…' : ready.verb}
                 </button>
+                <span className="page-info">
+                  {queries.length} {queries.length === 1 ? 'search' : 'searches'} selected
+                </span>
+                <button className="btn btn-xs" type="button" onClick={() => setEditing(v => !v)}>
+                  <i className={editing ? 'ti ti-chevron-up' : 'ti ti-adjustments'} />{' '}
+                  {editing ? 'Done' : 'Choose searches'}
+                </button>
               </div>
+
+              {editing && (
+                <div style={{ marginTop: 12, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10 }}>
+                    <button className="btn btn-xs" type="button" onClick={selectAll}>Select all</button>
+                    <button className="btn btn-xs" type="button" onClick={clearAll}>Clear</button>
+                    {lastYield.size > 0 && (
+                      <button className="btn btn-xs" type="button" onClick={selectBest}>
+                        <i className="ti ti-sparkles" /> Best performers
+                      </button>
+                    )}
+                    <span className="page-info" style={{ marginLeft: 'auto' }}>
+                      {queries.length} / {MAX_QUERIES}
+                    </span>
+                  </div>
+
+                  {catalogue.length > 8 && (
+                    <input type="text" value={filter} onChange={e => setFilter(e.target.value)}
+                      placeholder="Filter searches…" style={{ width: '100%', marginBottom: 8 }} />
+                  )}
+
+                  <div style={{ maxHeight: 260, overflowY: 'auto' }}>
+                    {visible.map(q => {
+                      const y = lastYield.get(q);
+                      const on = picked.has(q);
+                      return (
+                        <label key={q} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 2px',
+                          cursor: 'pointer', opacity: on ? 1 : 0.6 }}>
+                          <input type="checkbox" checked={on} onChange={() => toggle(q)} />
+                          <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {q}
+                          </span>
+                          <span className="page-info" style={{ whiteSpace: 'nowrap' }}>
+                            {y === undefined ? '—' : y === 0 ? 'no new last run' : `${y} new last run`}
+                          </span>
+                        </label>
+                      );
+                    })}
+                    {visible.length === 0 && (
+                      <span className="page-info">
+                        {catalogue.length === 0
+                          ? "No saved searches yet — the worker reports these from the scraper's config.json."
+                          : 'Nothing matches that filter.'}
+                      </span>
+                    )}
+                  </div>
+
+                  <input type="text" value={adhoc} onChange={e => setAdhoc(e.target.value)}
+                    placeholder="One-off searches for this run, comma separated"
+                    style={{ width: '100%', marginTop: 10 }} />
+                </div>
+              )}
+
+              {status.lastRun && status.lastRun.status === 'done' && (
+                <div className="info-box" style={{ marginTop: 12 }}>
+                  <i className="ti ti-circle-check" />
+                  <span>
+                    Last run: <strong>{status.lastRun.stats.new} new</strong> from{' '}
+                    {status.lastRun.stats.hiring} hiring posts —{' '}
+                    <strong>{status.lastRun.importResult.created} imported</strong>
+                    {status.lastRun.importResult.skipped > 0 && `, ${status.lastRun.importResult.skipped} already known`}.
+                  </span>
+                </div>
+              )}
+              {status.lastRun && status.lastRun.status === 'failed' && (
+                <div className="info-box" style={{ marginTop: 12, background: 'var(--amber-bg)', color: 'var(--amber)' }}>
+                  <i className="ti ti-alert-triangle" />
+                  <span><strong>Last run failed.</strong> {status.lastRun.error}</span>
+                </div>
+              )}
             </>
           )}
-
-          {!active && status.lastRun && <RunReport run={status.lastRun} />}
         </>
+      )}
+
+      {showHistory && (
+        <div style={{ marginTop: 16, borderTop: '1px solid var(--border)', paddingTop: 12 }}>
+          <strong>Recent harvests</strong>
+          <div style={{ marginTop: 6, maxHeight: 320, overflowY: 'auto' }}>
+            {runs.map(r => <HistoryRow key={r.id} run={r} />)}
+            {runs.length === 0 && <span className="page-info">No harvests yet.</span>}
+          </div>
+        </div>
       )}
 
       {showSchedule && (
@@ -336,9 +437,9 @@ export default function ScrapePanel({ onImported }: { onImported: () => void }) 
           </div>
 
           <div className="page-info" style={{ marginTop: 10 }}>
-            Runs at {sch.time} {sch.timezone}, using the searches ticked above. One run a day is the
-            safe ceiling — the scraper's own caps assume an attended run, and over-running is what
-            gets a LinkedIn account restricted.
+            Runs at {sch.time} {sch.timezone} using the searches selected above. One run a day is the
+            safe ceiling — the scraper's caps assume an attended run, and over-running is what gets a
+            LinkedIn account restricted.
           </div>
 
           {sch.enabled && !status.worker.nextWakeAt && (
