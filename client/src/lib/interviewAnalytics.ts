@@ -19,10 +19,11 @@ const normEmail = (e?: string | null) => (e || '').trim().toLowerCase();
 const PROGRESS: Record<InterviewStatus, number> = {
   rejected: 0,
   'initial-discussion': 1,
-  'asked-to-schedule': 2,
-  scheduled: 3,
-  'in-process': 4,
-  selected: 5,
+  assignment: 2,
+  'asked-to-schedule': 3,
+  scheduled: 4,
+  'in-process': 5,
+  selected: 6,
 };
 
 /** Reached a real round — booked or beyond, rejections included (they got that far). */

@@ -24,6 +24,29 @@ const scrapeRunSchema = new mongoose.Schema({
     searches: { type: Number, default: 0 },
   },
 
+  // Live progress, updated as `jl` prints its per-search events. Unlike
+  // `stats` (written once at the end) this is overwritten throughout the run,
+  // so the panel can show which search is running rather than a spinner.
+  progress: {
+    currentQuery:  { type: String, default: '' },
+    searchesDone:  { type: Number, default: 0 },
+    searchesTotal: { type: Number, default: 0 },
+    rendered:      { type: Number, default: 0 },
+    hiring:        { type: Number, default: 0 },
+    new:           { type: Number, default: 0 },
+    perQuery: {
+      type: [{
+        _id:      false,
+        query:    String,
+        rendered: Number,
+        hiring:   Number,
+        new:      Number,
+      }],
+      default: [],
+    },
+    updatedAt: { type: Date, default: null },
+  },
+
   // Accumulated across the worker's chunked /ingest calls.
   importResult: {
     created:        { type: Number, default: 0 },

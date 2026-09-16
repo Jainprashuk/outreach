@@ -3,11 +3,12 @@
 import type { Interview, InterviewMode, InterviewStatus, WorkMode } from './api';
 
 export const INTERVIEW_STATUS_ORDER: InterviewStatus[] = [
-  'initial-discussion', 'asked-to-schedule', 'scheduled', 'in-process', 'selected', 'rejected',
+  'initial-discussion', 'assignment', 'asked-to-schedule', 'scheduled', 'in-process', 'selected', 'rejected',
 ];
 
 export const INTERVIEW_STATUS_LABELS: Record<InterviewStatus, string> = {
   'initial-discussion': 'Initial Discussion',
+  'assignment':         'Assignment',
   'asked-to-schedule':  'Asked to Schedule Interview',
   'scheduled':          'Interview Scheduled',
   'in-process':         'Interviews in Process',
@@ -26,6 +27,7 @@ export const historyBadgeClass = (s: string) =>
 
 export const INTERVIEW_BADGE_CLASS: Record<InterviewStatus, string> = {
   'initial-discussion': 'badge-queued',
+  'assignment':         'badge-assignment',
   'asked-to-schedule':  'badge-pending',
   'scheduled':          'badge-inreview',
   'in-process':         'badge-iv-process',

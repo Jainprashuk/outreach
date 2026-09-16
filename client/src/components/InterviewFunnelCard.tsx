@@ -9,6 +9,7 @@ import type { InterviewStatus } from '../lib/api';
 // Resolved at render time so the colours follow the active theme.
 const STATUS_FILL: Record<InterviewStatus, () => string> = {
   'initial-discussion': () => cvar('--text3') || '#8a8a8a',
+  'assignment':         () => cvar('--pink') || '#b8226b',
   'asked-to-schedule':  () => cvar('--amber') || '#8a5c00',
   'scheduled':          () => cvar('--indigo') || '#4f46e5',
   'in-process':         () => cvar('--blue') || '#1557a0',

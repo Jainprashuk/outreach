@@ -305,6 +305,51 @@ router.post('/ingest', async (req, res) => {
   }
 });
 
+// POST /api/scrapes/progress — live per-search progress while a harvest runs.
+// Deliberately a plain overwrite with no history: the worker is the only writer,
+// events arrive in order, and a dropped update is corrected by the next one.
+// The worker never blocks the harvest on this call for the same reason.
+router.post('/progress', async (req, res) => {
+  try {
+    const { runId, progress } = req.body || {};
+    if (!runId) return res.status(400).json({ error: 'runId is required' });
+    if (!progress || typeof progress !== 'object') {
+      return res.status(400).json({ error: 'progress object is required' });
+    }
+
+    const perQuery = Array.isArray(progress.perQuery)
+      ? progress.perQuery.slice(0, MAX_QUERIES).map(q => ({
+          query:    String(q && q.query || '').slice(0, 300),
+          rendered: Number(q && q.rendered) || 0,
+          hiring:   Number(q && q.hiring) || 0,
+          new:      Number(q && q.new) || 0,
+        }))
+      : [];
+
+    // Only while the run is actually running — a late event must not resurrect
+    // the progress block of a run that already failed or was cancelled.
+    const run = await ScrapeRun.findOneAndUpdate(
+      { _id: runId, status: 'running', ...BASE_FILTER },
+      { $set: { progress: {
+          currentQuery:  String(progress.currentQuery || '').slice(0, 300),
+          searchesDone:  Number(progress.searchesDone) || 0,
+          searchesTotal: Number(progress.searchesTotal) || 0,
+          rendered:      Number(progress.rendered) || 0,
+          hiring:        Number(progress.hiring) || 0,
+          new:           Number(progress.new) || 0,
+          perQuery,
+          updatedAt:     new Date(),
+        } } },
+      { new: true, projection: { progress: 1, status: 1 } }
+    );
+    if (!run) return res.status(404).json({ error: 'No running run with that id' });
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // POST /api/scrapes/finish — terminal state for a run.
 router.post('/finish', async (req, res) => {
   try {

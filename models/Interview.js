@@ -22,6 +22,9 @@ const fileSchema = new mongoose.Schema({
 
 const INTERVIEW_STATUSES = [
   'initial-discussion',
+  // A take-home task. It lands straight after the first call and gates
+  // everything after it, so it sits before any scheduling talk.
+  'assignment',
   'asked-to-schedule',
   'scheduled',
   'in-process',

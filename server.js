@@ -71,6 +71,7 @@ const CRON_PATHS = new Set(['/api/postings/sync', '/api/check-mailbox', '/api/ca
 // not be, and a prefix match would expose every scrape endpoint to the worker.
 const WORKER_PATHS = new Set([
   '/api/scrapes/claim', '/api/scrapes/ingest', '/api/scrapes/finish',
+  '/api/scrapes/progress',
 ]);
 
 const isCron = (req) => {

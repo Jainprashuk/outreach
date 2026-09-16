@@ -606,7 +606,7 @@ export const deletePostingsApi = (ids: string[]) =>
 // source row keeps its own journey, this record carries the conversation.
 
 export type InterviewStatus =
-  | 'initial-discussion' | 'asked-to-schedule' | 'scheduled'
+  | 'initial-discussion' | 'assignment' | 'asked-to-schedule' | 'scheduled'
   | 'in-process' | 'selected' | 'rejected';
 
 export type InterviewSource = 'contact' | 'lead' | 'manual';
@@ -1003,6 +1003,17 @@ export interface ScrapeRun {
   finishedAt: string | null;
   workerHost: string;
   stats: { rendered: number; hiring: number; new: number; seen: number; searches: number };
+  /** Live, overwritten as the harvest runs. `stats` is only written at the end. */
+  progress: {
+    currentQuery: string;
+    searchesDone: number;
+    searchesTotal: number;
+    rendered: number;
+    hiring: number;
+    new: number;
+    perQuery: Array<{ query: string; rendered: number; hiring: number; new: number }>;
+    updatedAt: string | null;
+  };
   importResult: { created: number; skipped: number; updated: number; skippedInBatch: number };
   error: string | null;
   exitCode: number | null;

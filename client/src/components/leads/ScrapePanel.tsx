@@ -137,6 +137,11 @@ export default function ScrapePanel({ onImported }: { onImported: () => void }) 
   const blockedUntil = status?.blockedUntil ?? null;
   const ready = useMemo(() => (status ? readiness(status) : null), [status]);
   const active = status?.activeRun ?? null;
+  const prog = active?.status === 'running' ? active.progress : null;
+  // null => nothing honest to measure yet, so fall back to the sweep animation.
+  const pct = prog && prog.searchesTotal > 0
+    ? Math.round((prog.searchesDone / prog.searchesTotal) * 100)
+    : null;
 
   const queries = useMemo(() => {
     const extra = adhoc.split(',').map(q => q.trim()).filter(Boolean);
@@ -217,15 +222,52 @@ export default function ScrapePanel({ onImported }: { onImported: () => void }) 
                   {active.trigger === 'scheduled' && ' (scheduled)'}
                 </strong>
                 <span className="page-info">
-                  {active.queries.length} {active.queries.length === 1 ? 'search' : 'searches'}
+                  {prog && prog.searchesTotal > 0
+                    ? `${prog.searchesDone} of ${prog.searchesTotal} searches`
+                    : `${active.queries.length} ${active.queries.length === 1 ? 'search' : 'searches'}`}
                   {active.status === 'running' && ` · ${elapsed(active.claimedAt)} elapsed`}
                 </span>
                 {active.status === 'queued' && (
                   <button className="btn btn-xs" type="button" onClick={() => cancel(active.id)}>Cancel</button>
                 )}
               </div>
-              {/* jl reports only at the end, so there is no honest percentage to show. */}
-              <div className="progress-bar"><div className="progress-fill progress-indeterminate" /></div>
+              {/* Determinate once the first search reports; indeterminate until
+                  then, and while merely queued, because there is nothing honest
+                  to measure yet. */}
+              {pct === null ? (
+                <div className="progress-bar"><div className="progress-fill progress-indeterminate" /></div>
+              ) : (
+                <div className="progress-bar">
+                  <div className="progress-fill" style={{ width: `${pct}%` }} />
+                </div>
+              )}
+
+              {prog && prog.currentQuery && (
+                <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'baseline' }}>
+                  <span>
+                    <i className="ti ti-search" style={{ marginRight: 4 }} />
+                    <strong>{prog.currentQuery}</strong>
+                  </span>
+                  <span className="page-info">
+                    {prog.rendered} seen · {prog.hiring} hiring · <strong>{prog.new} new</strong>
+                  </span>
+                </div>
+              )}
+
+              {prog && prog.perQuery.length > 0 && (
+                <div style={{ marginTop: 10, maxHeight: 150, overflowY: 'auto' }}>
+                  {[...prog.perQuery].reverse().map((q, i) => (
+                    <div key={`${q.query}-${i}`} className="page-info"
+                      style={{ display: 'flex', justifyContent: 'space-between', gap: 12, padding: '2px 0' }}>
+                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <i className="ti ti-check" style={{ marginRight: 4, opacity: 0.6 }} />{q.query}
+                      </span>
+                      <span style={{ whiteSpace: 'nowrap' }}>{q.rendered} seen · {q.hiring} hiring · {q.new} new</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <div className="page-info" style={{ marginTop: 6 }}>
                 Usually 10–20 minutes. Leave the Chrome window open and visible.
               </div>

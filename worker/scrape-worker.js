@@ -16,6 +16,12 @@
 //   npm run scrape-worker          (wraps this in `caffeinate -s`)
 //   worker/install-worker.sh       (same thing, via launchd at login)
 
+const path0 = require('path');
+// Load the outreach repo's .env (WORKER_SECRET, OUTREACH_URL, JL_REPO), the
+// same file server.js reads. Resolved from __dirname, not cwd, so it works
+// from any directory and under launchd.
+require('dotenv').config({ path: path0.join(__dirname, '..', '.env') });
+
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -140,7 +146,15 @@ function holdAwake(seconds) {
 }
 
 // ── the harvest ─────────────────────────────────────────────────────────────
-function runHarvest(queries, briefPath) {
+// `jl` emits two lines per search (scroll_harvest.py on_event):
+//   "search: <query>"                        when it starts one
+//   "  32 posts seen, 19 hiring, 19 new"     when it finishes one
+// Parsing those is what turns the panel's spinner into a real progress bar —
+// searches done out of total — and lets it name the search currently running.
+const RE_SEARCH = /^\s*search:\s*(.+?)\s*$/;
+const RE_TALLY  = /^\s*(\d+)\s+posts seen,\s*(\d+)\s+hiring,\s*(\d+)\s+new\s*$/;
+
+function runHarvest(queries, briefPath, onProgress) {
   return new Promise((resolve) => {
     const args = ['-dimsu', jlBin(), 'harvest'];
     for (const q of queries) args.push('-q', q);
@@ -154,11 +168,44 @@ function runHarvest(queries, briefPath) {
     const child = spawn('caffeinate', args, { cwd: CFG.jlRepo });
 
     let tail = [];
+    const progress = {
+      currentQuery: '', searchesDone: 0, searchesTotal: queries.length,
+      rendered: 0, hiring: 0, new: 0, perQuery: [],
+    };
+
+    // Chunks split mid-line, so buffer until a newline before matching.
+    let pending = '';
+    const handleLine = (line) => {
+      const search = RE_SEARCH.exec(line);
+      if (search) {
+        progress.currentQuery = search[1];
+        return onProgress(progress);
+      }
+      const tally = RE_TALLY.exec(line);
+      if (tally) {
+        const [, rendered, hiring, fresh] = tally.map(Number);
+        // The tally is per-query; the run totals are the running sum.
+        progress.rendered += rendered;
+        progress.hiring   += hiring;
+        progress.new      += fresh;
+        progress.searchesDone += 1;
+        progress.perQuery.push({
+          query: progress.currentQuery, rendered, hiring, new: fresh,
+        });
+        return onProgress(progress);
+      }
+    };
+
     const keep = (buf) => {
       const s = buf.toString();
       process.stdout.write(s);
       tail.push(s);
       if (tail.length > 40) tail = tail.slice(-40);
+
+      pending += s;
+      const lines = pending.split('\n');
+      pending = lines.pop();          // keep the unterminated remainder
+      for (const line of lines) handleLine(line);
     };
     child.stdout.on('data', keep);
     child.stderr.on('data', keep);
@@ -219,7 +266,14 @@ async function executeRun(runDoc) {
       return finish('failed', { error: 'Not logged into LinkedIn. Log in inside the debug Chrome window, then try again.' });
     }
 
-    const { code, output } = await runHarvest(runDoc.queries, briefPath);
+    // Fire-and-forget: a progress POST that fails must never interrupt a
+    // harvest that is working. The next event overwrites it anyway.
+    const postProgress = (progress) => {
+      api('/api/scrapes/progress', { runId: runDoc.id, progress })
+        .catch(err => log('progress update dropped:', err.message));
+    };
+
+    const { code, output } = await runHarvest(runDoc.queries, briefPath, postProgress);
 
     // Exit 2 is a LinkedIn checkpoint. TRACK-SCROLL.md says stop for a week;
     // the server turns this into a 7-day block that the schedule also obeys.

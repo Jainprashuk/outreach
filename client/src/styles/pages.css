@@ -155,3 +155,8 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
   0%   { margin-left: -35%; }
   100% { margin-left: 100%; }
 }
+
+/* Assignment sits between the first call and any scheduling talk. Pink was the
+   only palette colour not already spoken for by another badge, so the stage
+   stays distinguishable from the other six at a glance. */
+.badge-assignment { background: var(--pink-bg); color: var(--pink); }
