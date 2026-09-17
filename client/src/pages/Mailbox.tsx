@@ -85,8 +85,8 @@ export default function Mailbox() {
           <i className="ti ti-history" />
           <span style={{ flex: 1 }}>
             {backfilling
-              ? `Backfilling older replies… ${backfillProgress} done so far.`
-              : `${backfillCount} older repl${backfillCount !== 1 ? 'ies were' : 'y was'} detected before this thread/category view existed — they're missing from the list above until backfilled.`}
+              ? `Backfilling older conversations… ${backfillProgress} done so far.`
+              : `${backfillCount} contact${backfillCount !== 1 ? 's have' : ' has'} sends/replies from before this thread view existed — they're missing from the list above until backfilled.`}
           </span>
           <button className="btn btn-sm" type="button" disabled={backfilling} onClick={runBackfill}>
             {backfilling ? <i className="ti ti-loader" /> : <i className="ti ti-refresh" />} Backfill now

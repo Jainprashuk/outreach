@@ -199,21 +199,21 @@ router.patch('/', async (req, res) => {
   }
 });
 
-// Contacts marked replied/follow-up-replied before the thread/classification pipeline
-// existed have neither a `thread` inbound entry nor a `replyCategory` — this is what
-// still needs a one-time backfill (from the stored replySnippet, since the full body
-// was never captured for these older replies).
-const REPLIED_STATUSES = ['replied', 'follow-up-replied'];
+// Backfill target: anything sent or replied-to before the thread/classification pipeline
+// existed. Deliberately keyed off `lastSentAt`/`repliedAt` rather than `status` — status
+// gets overwritten by manual triage (e.g. a replied contact marked `closed`/`no-openings`/
+// `in-review` after you've read it), but those two timestamp fields never get touched by
+// that, so they're the only reliable signal for "this contact was ever sent to / replied".
 const needsBackfillFilter = {
   ...BASE_FILTER,
-  status: { $in: REPLIED_STATUSES },
   $or: [
-    { replyCategory: null },
-    { thread: { $not: { $elemMatch: { direction: 'inbound' } } } },
+    { lastSentAt: { $ne: null }, thread: { $not: { $elemMatch: { direction: 'outbound' } } } },
+    { repliedAt: { $ne: null }, thread: { $not: { $elemMatch: { direction: 'inbound' } } } },
+    { repliedAt: { $ne: null }, replyCategory: null },
   ],
 };
 
-// GET /api/contacts/backfill-replies/count — how many legacy replies still need backfilling
+// GET /api/contacts/backfill-replies/count — how many legacy sends/replies still need backfilling
 router.get('/backfill-replies/count', async (req, res) => {
   try {
     const count = await Contact.countDocuments(needsBackfillFilter);
@@ -232,9 +232,26 @@ router.post('/backfill-replies', async (req, res) => {
     const contacts = await Contact.find(needsBackfillFilter).limit(limit);
 
     for (const contact of contacts) {
+      const hasOutboundThread = (contact.thread || []).some(t => t.direction === 'outbound');
+      if (contact.lastSentAt && !hasOutboundThread) {
+        // The actual rendered body was never persisted before thread capture existed — only
+        // messageId/sentSubject survive a send. editedBody (a user override made before
+        // sending) is the closest recoverable approximation; otherwise say so plainly rather
+        // than fabricating content.
+        contact.thread.push({
+          direction: 'outbound',
+          subject: contact.sentSubject || '',
+          text: contact.editedBody || '(original message body was not stored — sent before thread capture was added)',
+          html: '',
+          messageId: contact.messageId || null,
+          inReplyTo: null,
+          at: contact.lastSentAt,
+        });
+      }
+
       const hasInboundThread = (contact.thread || []).some(t => t.direction === 'inbound');
       const subject = contact.sentSubject ? `Re: ${contact.sentSubject}` : '';
-      if (!hasInboundThread) {
+      if (contact.repliedAt && !hasInboundThread) {
         contact.thread.push({
           direction: 'inbound',
           subject,
@@ -242,10 +259,10 @@ router.post('/backfill-replies', async (req, res) => {
           html: '',
           messageId: null,
           inReplyTo: contact.messageId || null,
-          at: contact.repliedAt || contact.updatedAt,
+          at: contact.repliedAt,
         });
       }
-      if (!contact.replyCategory) {
+      if (contact.repliedAt && !contact.replyCategory) {
         const { category, reasoning } = await classifyReply({
           subject, body: contact.replySnippet || '',
           contactEmail: contact.email, contactName: contact.name,

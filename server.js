@@ -497,23 +497,23 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   // `thread.messageId` only (not full text/html) keeps this payload small even as threads grow.
   const allContacts = await Contact.find(
     { deleted: { $ne: true } },
-    'email name status bounceReason messageId updatedAt thread.messageId'
+    'email name status bounceReason messageId updatedAt thread.messageId lastSentAt repliedAt'
   ).lean();
 
   // byEmailAll: for bounce matching (any status)
   // byEmail + byMessageId: for reply/sent matching — any contact that has ever been emailed
-  // or has any thread activity, not just ones still awaiting their first reply. This is what
-  // lets a 2nd/3rd reply on an already-`replied` contact keep getting captured.
+  // or replied, or has any thread activity. Deliberately NOT keyed off `status`: you can
+  // manually re-triage a replied contact to closed/no-openings/in-review after reading it,
+  // which would otherwise silently stop the scanner from noticing any further reply from
+  // them. `lastSentAt`/`repliedAt` never get touched by that manual triage.
   const byEmailAll  = new Map();
   const byEmail     = new Map();
   const byMessageId = new Map();
 
-  const THREADABLE_STATUSES = new Set(['sent', 'follow-up-sent', 'replied', 'follow-up-replied']);
-
   for (const c of allContacts) {
     const addr = c.email.toLowerCase();
     byEmailAll.set(addr, c);
-    const isThreadable = THREADABLE_STATUSES.has(c.status) || (c.thread && c.thread.length > 0);
+    const isThreadable = !!(c.lastSentAt || c.repliedAt) || (c.thread && c.thread.length > 0);
     if (isThreadable) {
       byEmail.set(addr, c);
       if (c.messageId) byMessageId.set(c.messageId.replace(/^<|>$/g, ''), c);
