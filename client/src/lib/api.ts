@@ -145,6 +145,15 @@ export interface ContactThread {
 export const loadContactThreadApi = (id: string) =>
   apiFetch<ContactThread>(`/api/contacts/${id}/thread`);
 
+// Backfills thread + category data for replies that were detected before this pipeline
+// existed. One call processes a bounded batch — call repeatedly until `remaining` is 0.
+export const backfillReplyCountApi = () =>
+  apiFetch<{ count: number }>('/api/contacts/backfill-replies/count');
+export const backfillRepliesApi = (limit = 20) =>
+  apiFetch<{ processed: number; remaining: number }>('/api/contacts/backfill-replies', {
+    method: 'POST', body: JSON.stringify({ limit }),
+  });
+
 export const saveSettingsApi = (patch: any) =>
   apiFetch<any>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) });
 

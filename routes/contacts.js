@@ -3,6 +3,7 @@ const Contact = require('../models/Contact');
 const SendJob = require('../models/SendJob');
 const { COOLDOWN_LABEL, inCooldown, cooldownRemaining } = require('../lib/cooldown');
 const { importContacts } = require('../lib/contactImport');
+const { classifyReply } = require('../lib/replyClassifier');
 
 const router = express.Router();
 
@@ -193,6 +194,71 @@ router.patch('/', async (req, res) => {
     });
     await Contact.bulkWrite(ops, { ordered: false });
     res.json({ ok: true, count: ops.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Contacts marked replied/follow-up-replied before the thread/classification pipeline
+// existed have neither a `thread` inbound entry nor a `replyCategory` — this is what
+// still needs a one-time backfill (from the stored replySnippet, since the full body
+// was never captured for these older replies).
+const REPLIED_STATUSES = ['replied', 'follow-up-replied'];
+const needsBackfillFilter = {
+  ...BASE_FILTER,
+  status: { $in: REPLIED_STATUSES },
+  $or: [
+    { replyCategory: null },
+    { thread: { $not: { $elemMatch: { direction: 'inbound' } } } },
+  ],
+};
+
+// GET /api/contacts/backfill-replies/count — how many legacy replies still need backfilling
+router.get('/backfill-replies/count', async (req, res) => {
+  try {
+    const count = await Contact.countDocuments(needsBackfillFilter);
+    res.json({ count });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/contacts/backfill-replies — processes one bounded batch (so a single call
+// can't run past the serverless function timeout); the frontend calls this repeatedly
+// until `remaining` is 0.
+router.post('/backfill-replies', async (req, res) => {
+  try {
+    const limit = Math.min(50, Math.max(1, Number(req.body?.limit) || 20));
+    const contacts = await Contact.find(needsBackfillFilter).limit(limit);
+
+    for (const contact of contacts) {
+      const hasInboundThread = (contact.thread || []).some(t => t.direction === 'inbound');
+      const subject = contact.sentSubject ? `Re: ${contact.sentSubject}` : '';
+      if (!hasInboundThread) {
+        contact.thread.push({
+          direction: 'inbound',
+          subject,
+          text: contact.replySnippet || '',
+          html: '',
+          messageId: null,
+          inReplyTo: contact.messageId || null,
+          at: contact.repliedAt || contact.updatedAt,
+        });
+      }
+      if (!contact.replyCategory) {
+        const { category, reasoning } = await classifyReply({
+          subject, body: contact.replySnippet || '',
+          contactEmail: contact.email, contactName: contact.name,
+        });
+        contact.replyCategory = category;
+        contact.replyCategoryReasoning = reasoning;
+        contact.replyCategorizedAt = new Date();
+      }
+      await contact.save();
+    }
+
+    const remaining = await Contact.countDocuments(needsBackfillFilter);
+    res.json({ processed: contacts.length, remaining });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

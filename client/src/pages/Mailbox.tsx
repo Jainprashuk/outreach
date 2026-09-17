@@ -9,7 +9,7 @@ import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import CategoryBadge from '../components/CategoryBadge';
 import { useApp } from '../context/AppContext';
-import type { Contact, ThreadEntry } from '../lib/api';
+import { backfillReplyCountApi, backfillRepliesApi, type Contact, type ThreadEntry } from '../lib/api';
 
 const fmtDateTime = (d: string) => new Date(d).toLocaleString('en-US', {
   month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -23,10 +23,41 @@ export default function Mailbox() {
   const [loading, setLoading] = useState(!app.loaded);
   const [error, setError] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [backfillCount, setBackfillCount] = useState(0);
+  const [backfilling, setBackfilling] = useState(false);
+  const [backfillProgress, setBackfillProgress] = useState(0);
+
+  const refreshBackfillCount = () => backfillReplyCountApi().then(r => setBackfillCount(r.count)).catch(() => {});
 
   useEffect(() => {
     app.init().catch(err => setError(err.message)).finally(() => setLoading(false));
+    refreshBackfillCount();
   }, []);
+
+  // Older replies (detected before the thread/classification pipeline existed) only have
+  // status + replySnippet — no thread entry, no category. Backfills them in bounded
+  // batches (each a separate request, so a large backlog can't hit a function timeout).
+  const runBackfill = async () => {
+    setBackfilling(true);
+    setBackfillProgress(0);
+    try {
+      let remaining = backfillCount;
+      let processedTotal = 0;
+      while (true) {
+        const { processed, remaining: left } = await backfillRepliesApi(20);
+        processedTotal += processed;
+        remaining = left;
+        setBackfillProgress(processedTotal);
+        if (processed === 0 || remaining === 0) break;
+      }
+      setBackfillCount(remaining);
+      await app.loadContacts();
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setBackfilling(false);
+    }
+  };
 
   const threaded = useMemo(() => {
     return app.contacts
@@ -49,6 +80,19 @@ export default function Mailbox() {
 
   return (
     <Layout title="Mailbox" subtitle={`${threaded.length} conversation${threaded.length !== 1 ? 's' : ''}`}>
+      {backfillCount > 0 && (
+        <div className="info-box" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+          <i className="ti ti-history" />
+          <span style={{ flex: 1 }}>
+            {backfilling
+              ? `Backfilling older replies… ${backfillProgress} done so far.`
+              : `${backfillCount} older repl${backfillCount !== 1 ? 'ies were' : 'y was'} detected before this thread/category view existed — they're missing from the list above until backfilled.`}
+          </span>
+          <button className="btn btn-sm" type="button" disabled={backfilling} onClick={runBackfill}>
+            {backfilling ? <i className="ti ti-loader" /> : <i className="ti ti-refresh" />} Backfill now
+          </button>
+        </div>
+      )}
       {busy ? (
         <div className="empty-state"><i className="ti ti-loader" />Loading…</div>
       ) : error ? (
