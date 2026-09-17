@@ -10,6 +10,7 @@ import Avatar from '../components/Avatar';
 import CategoryBadge from '../components/CategoryBadge';
 import { useApp } from '../context/AppContext';
 import { backfillReplyCountApi, backfillRepliesApi, type Contact, type ThreadEntry } from '../lib/api';
+import { CATEGORY_OPTIONS } from '../lib/format';
 
 const fmtDateTime = (d: string) => new Date(d).toLocaleString('en-US', {
   month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
@@ -27,6 +28,8 @@ export default function Mailbox() {
   const [backfilling, setBackfilling] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState(0);
   const [search, setSearch] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
+  const [unreadOnly, setUnreadOnly] = useState(false);
 
   const refreshBackfillCount = () => backfillReplyCountApi().then(r => setBackfillCount(r.count)).catch(() => {});
 
@@ -68,14 +71,31 @@ export default function Mailbox() {
     [app.contacts],
   );
 
-  const threaded = useMemo(() => {
-    let list = allConversations;
+  // Category counts reflect search (so switching category doesn't re-count against an
+  // unrelated set) but not the category filter itself, so every option's count stays visible
+  // while one is selected.
+  const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (q) list = list.filter(c => (c.name + c.email + c.company).toLowerCase().includes(q));
+    if (!q) return allConversations;
+    return allConversations.filter(c => (c.name + c.email + c.company).toLowerCase().includes(q));
+  }, [allConversations, search]);
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const c of searched) counts[c.replyCategory || 'uncategorized'] = (counts[c.replyCategory || 'uncategorized'] || 0) + 1;
+    return counts;
+  }, [searched]);
+
+  const threaded = useMemo(() => {
+    let list = searched;
+    if (categoryFilter) {
+      list = list.filter(c => (categoryFilter === 'uncategorized' ? !c.replyCategory : c.replyCategory === categoryFilter));
+    }
+    if (unreadOnly) list = list.filter(c => !c.replyRead);
     return list
       .map(c => ({ contact: c, last: lastEntry(c)! }))
       .sort((a, b) => new Date(b.last.at).getTime() - new Date(a.last.at).getTime());
-  }, [allConversations, search]);
+  }, [searched, categoryFilter, unreadOnly]);
 
   // Keeps a selection valid as the (possibly search-filtered) list changes — falls back to
   // the top conversation rather than showing a blank pane for a hidden/missing selection.
@@ -122,9 +142,31 @@ export default function Mailbox() {
               value={search}
               onChange={e => setSearch(e.target.value)}
             />
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <select value={categoryFilter} onChange={e => setCategoryFilter(e.target.value)} style={{ flex: 1, fontSize: 12.5 }}>
+                <option value="">All categories ({searched.length})</option>
+                {CATEGORY_OPTIONS.map(opt => (
+                  <option key={opt.value} value={opt.value} disabled={!categoryCounts[opt.value]}>
+                    {opt.label} ({categoryCounts[opt.value] || 0})
+                  </option>
+                ))}
+                {categoryCounts.uncategorized ? (
+                  <option value="uncategorized">Uncategorized ({categoryCounts.uncategorized})</option>
+                ) : null}
+              </select>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text2)' }}>
+              <input type="checkbox" checked={unreadOnly} onChange={e => setUnreadOnly(e.target.checked)} />
+              Unread only
+            </label>
+            {(search || categoryFilter || unreadOnly) && (
+              <button className="btn btn-sm" type="button" onClick={() => { setSearch(''); setCategoryFilter(''); setUnreadOnly(false); }}>
+                Clear filters
+              </button>
+            )}
             <div className="mailbox-list" style={{ flex: 1 }}>
               {threaded.length === 0 ? (
-                <div className="empty-state"><i className="ti ti-search" />No conversations match "{search}"</div>
+                <div className="empty-state"><i className="ti ti-search" />No conversations match these filters</div>
               ) : threaded.map(({ contact, last }) => (
                 <div
                   key={contact.id}
