@@ -26,6 +26,7 @@ export default function Mailbox() {
   const [backfillCount, setBackfillCount] = useState(0);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState(0);
+  const [search, setSearch] = useState('');
 
   const refreshBackfillCount = () => backfillReplyCountApi().then(r => setBackfillCount(r.count)).catch(() => {});
 
@@ -59,15 +60,28 @@ export default function Mailbox() {
     }
   };
 
+  // Mailbox is a conversation view — only contacts who actually replied belong here.
+  // A contact with only outbound sends and no reply (the vast majority of outreach) has
+  // nothing to show in a "mailbox" sense and would otherwise flood this list.
+  const allConversations = useMemo(
+    () => app.contacts.filter(c => (c.thread || []).some(t => t.direction === 'inbound')),
+    [app.contacts],
+  );
+
   const threaded = useMemo(() => {
-    return app.contacts
-      .filter(c => c.thread && c.thread.length > 0)
+    let list = allConversations;
+    const q = search.trim().toLowerCase();
+    if (q) list = list.filter(c => (c.name + c.email + c.company).toLowerCase().includes(q));
+    return list
       .map(c => ({ contact: c, last: lastEntry(c)! }))
       .sort((a, b) => new Date(b.last.at).getTime() - new Date(a.last.at).getTime());
-  }, [app.contacts]);
+  }, [allConversations, search]);
 
+  // Keeps a selection valid as the (possibly search-filtered) list changes — falls back to
+  // the top conversation rather than showing a blank pane for a hidden/missing selection.
   useEffect(() => {
-    if (!selectedId && threaded.length > 0) setSelectedId(threaded[0].contact.id);
+    if (threaded.length === 0) return;
+    if (!threaded.some(t => t.contact.id === selectedId)) setSelectedId(threaded[0].contact.id);
   }, [threaded, selectedId]);
 
   const selected = threaded.find(t => t.contact.id === selectedId)?.contact || null;
@@ -97,29 +111,39 @@ export default function Mailbox() {
         <div className="empty-state"><i className="ti ti-loader" />Loading…</div>
       ) : error ? (
         <div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div>
-      ) : threaded.length === 0 ? (
-        <div className="empty-state"><i className="ti ti-inbox" />No conversations yet — thread capture starts with your next send or mailbox check.</div>
+      ) : allConversations.length === 0 ? (
+        <div className="empty-state"><i className="ti ti-inbox" />No conversations yet — thread capture starts with your next reply or mailbox check.</div>
       ) : (
         <div className="mailbox-layout">
-          <div className="mailbox-list">
-            {threaded.map(({ contact, last }) => (
-              <div
-                key={contact.id}
-                className={`mailbox-row${contact.id === selectedId ? ' active' : ''}`}
-                onClick={() => setSelectedId(contact.id)}
-              >
-                <Avatar name={contact.name} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                    <span style={{ fontWeight: 600, fontSize: 13 }}>{contact.name}</span>
-                    <span className="mailbox-row-time">{fmtDateTime(last.at)}</span>
+          <div style={{ display: 'flex', flexDirection: 'column', width: 320, flexShrink: 0, gap: 8 }}>
+            <input
+              type="text"
+              placeholder="Search name, email or company…"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+            <div className="mailbox-list" style={{ flex: 1 }}>
+              {threaded.length === 0 ? (
+                <div className="empty-state"><i className="ti ti-search" />No conversations match "{search}"</div>
+              ) : threaded.map(({ contact, last }) => (
+                <div
+                  key={contact.id}
+                  className={`mailbox-row${contact.id === selectedId ? ' active' : ''}`}
+                  onClick={() => setSelectedId(contact.id)}
+                >
+                  <Avatar name={contact.name} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                      <span style={{ fontWeight: 600, fontSize: 13 }}>{contact.name}</span>
+                      <span className="mailbox-row-time">{fmtDateTime(last.at)}</span>
+                    </div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text3)' }}>{contact.company}</div>
+                    <div className="mailbox-row-preview">{last.text || '(no content)'}</div>
+                    <CategoryBadge category={contact.replyCategory} reasoning={contact.replyCategoryReasoning} />
                   </div>
-                  <div style={{ fontSize: 11.5, color: 'var(--text3)' }}>{contact.company}</div>
-                  <div className="mailbox-row-preview">{last.text || '(no content)'}</div>
-                  <CategoryBadge category={contact.replyCategory} reasoning={contact.replyCategoryReasoning} />
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
 
           <div className="mailbox-thread">

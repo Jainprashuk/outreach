@@ -199,17 +199,19 @@ router.patch('/', async (req, res) => {
   }
 });
 
-// Backfill target: anything sent or replied-to before the thread/classification pipeline
-// existed. Deliberately keyed off `lastSentAt`/`repliedAt` rather than `status` — status
-// gets overwritten by manual triage (e.g. a replied contact marked `closed`/`no-openings`/
-// `in-review` after you've read it), but those two timestamp fields never get touched by
-// that, so they're the only reliable signal for "this contact was ever sent to / replied".
+// Backfill target: contacts who ACTUALLY REPLIED before the thread/classification pipeline
+// existed — i.e. `repliedAt` is set. Mailbox is a conversation view, not a sent-mail log, so
+// a contact who was only ever emailed and never replied has nothing to backfill here.
+// Deliberately keyed off `repliedAt` rather than `status` — status gets overwritten by manual
+// triage (e.g. a replied contact marked `closed`/`no-openings`/`in-review` after you've read
+// it), but `repliedAt` never gets touched by that.
 const needsBackfillFilter = {
   ...BASE_FILTER,
+  repliedAt: { $ne: null },
   $or: [
-    { lastSentAt: { $ne: null }, thread: { $not: { $elemMatch: { direction: 'outbound' } } } },
-    { repliedAt: { $ne: null }, thread: { $not: { $elemMatch: { direction: 'inbound' } } } },
-    { repliedAt: { $ne: null }, replyCategory: null },
+    { thread: { $not: { $elemMatch: { direction: 'outbound' } } } },
+    { thread: { $not: { $elemMatch: { direction: 'inbound' } } } },
+    { replyCategory: null },
   ],
 };
 
