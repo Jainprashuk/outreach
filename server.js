@@ -379,7 +379,10 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
   const replySnippet = buildSnippet(parsed.text || parsed.html || '');
   const fullBody = parsed.text || parsed.html || '';
 
-  const { category, reasoning } = await classifyReply({ subject: parsed.subject, body: fullBody });
+  const { category, reasoning } = await classifyReply({
+    subject: parsed.subject, body: fullBody,
+    contactEmail: contact.email, contactName: contact.name,
+  });
 
   const threadEntry = {
     direction: 'inbound',
