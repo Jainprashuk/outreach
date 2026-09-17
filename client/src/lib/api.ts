@@ -13,10 +13,22 @@ export type ContactStatus =
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
+export type ReplyCategory = 'reviewing' | 'stay-in-touch' | 'no' | 'resume-requested' | 'needs-attention' | 'other';
+
 export interface StatusHistoryEntry {
   status: string;
   changedAt: string;
   note?: string;
+}
+
+export interface ThreadEntry {
+  direction: 'outbound' | 'inbound';
+  subject: string;
+  text: string;
+  html: string;
+  messageId: string | null;
+  inReplyTo: string | null;
+  at: string;
 }
 
 export interface Contact {
@@ -37,9 +49,13 @@ export interface Contact {
   repliedAt: string | null;
   replySnippet: string | null;
   replyRead: boolean;
+  replyCategory: ReplyCategory | null;
+  replyCategoryReasoning: string | null;
+  replyCategorizedAt: string | null;
   lastSentAt: string | null;
   followUpSentAt: string | null;
   statusHistory?: StatusHistoryEntry[];
+  thread?: ThreadEntry[];
   createdAt: string;
   updatedAt: string;
 }
@@ -120,6 +136,14 @@ export const deleteContactApi = (id: string) =>
 
 export const checkMailboxApi = () =>
   apiFetch<any>('/api/check-mailbox', { method: 'POST' });
+
+export interface ContactThread {
+  name: string; email: string; company: string;
+  replyCategory: ReplyCategory | null; replyCategoryReasoning: string | null;
+  thread: ThreadEntry[];
+}
+export const loadContactThreadApi = (id: string) =>
+  apiFetch<ContactThread>(`/api/contacts/${id}/thread`);
 
 export const saveSettingsApi = (patch: any) =>
   apiFetch<any>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) });

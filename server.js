@@ -11,6 +11,7 @@ const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
 const mailer = require('./lib/mailer');
 const { auditHttpMutations } = require('./lib/activityLog');
+const { classifyReply } = require('./lib/replyClassifier');
 
 const app = express();
 app.use(cors());
@@ -332,7 +333,18 @@ const buildSnippet = (text) => {
   return snippet;
 };
 
-// tryMatchReply — uses pre-loaded lean maps; writes via findByIdAndUpdate (no doc hydration)
+// Strips angle brackets from a raw Message-ID header value.
+const cleanMsgId = (id) => (id || '').replace(/^<|>$/g, '') || null;
+
+// Has this exact message already been captured in the contact's thread? Lean
+// projections only carry `thread.messageId` here, not the full entries.
+const threadHasMessageId = (contact, messageId) =>
+  !!messageId && (contact.thread || []).some(t => t.messageId === messageId);
+
+// tryMatchReply — uses pre-loaded lean maps; writes via findByIdAndUpdate (no doc hydration).
+// Runs on every scan regardless of whether the contact already has a prior reply, so an
+// ongoing back-and-forth (2nd, 3rd, ... reply) keeps getting captured — de-duped purely on
+// message-id so the same inbound message is never appended to `thread` twice.
 const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
   const parsed = await simpleParser(raw);
   const fromAddr = (parsed.from?.value?.[0]?.address || '').toLowerCase();
@@ -358,22 +370,92 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
     }
   }
 
-  if (!contact || ['replied', 'follow-up-replied'].includes(contact.status)) return;
+  if (!contact) return;
+
+  const inboundMessageId = cleanMsgId(parsed.messageId);
+  if (threadHasMessageId(contact, inboundMessageId)) return; // already captured this exact message
 
   const repliedAt = parsed.date || new Date();
   const replySnippet = buildSnippet(parsed.text || parsed.html || '');
-  // A reply that comes in after we already sent a follow-up is tracked separately from a
-  // reply to the initial email, so it doesn't get treated as still needing a first follow-up.
-  const newStatus = contact.status === 'follow-up-sent' ? 'follow-up-replied' : 'replied';
+  const fullBody = parsed.text || parsed.html || '';
 
-  // Mark in-memory to prevent double-processing in the same batch
+  const { category, reasoning } = await classifyReply({ subject: parsed.subject, body: fullBody });
+
+  const threadEntry = {
+    direction: 'inbound',
+    subject: parsed.subject || '',
+    text: parsed.text || '',
+    html: parsed.html || '',
+    messageId: inboundMessageId,
+    inReplyTo: cleanMsgId(parsed.inReplyTo),
+    at: repliedAt,
+  };
+
+  // A reply that comes in after we already sent a follow-up is tracked separately from a
+  // reply to the initial email. Once a contact is already `replied`/`follow-up-replied`,
+  // later replies keep that status as-is rather than re-deriving it.
+  const newStatus = ['replied', 'follow-up-replied'].includes(contact.status)
+    ? contact.status
+    : (contact.status === 'follow-up-sent' ? 'follow-up-replied' : 'replied');
+
+  // Mark in-memory to prevent double-processing (and re-matching by message-id) in the same batch
   contact.status = newStatus;
+  contact.thread = [...(contact.thread || []), { messageId: inboundMessageId }];
+  if (inboundMessageId) byMessageId.set(inboundMessageId, contact);
 
   await Contact.findByIdAndUpdate(contact._id, {
-    $set: { status: newStatus, repliedAt, replySnippet },
-    $push: { statusHistory: { status: newStatus, changedAt: repliedAt, note: newStatus === 'follow-up-replied' ? 'Reply received after follow-up' : 'Reply received' } },
+    $set: { status: newStatus, repliedAt, replySnippet, replyCategory: category, replyCategoryReasoning: reasoning, replyCategorizedAt: new Date() },
+    $push: {
+      statusHistory: { status: newStatus, changedAt: repliedAt, note: newStatus === 'follow-up-replied' ? 'Reply received after follow-up' : 'Reply received' },
+      thread: threadEntry,
+    },
   });
-  replied.push({ email: contact.email, name: contact.name, repliedAt, snippet: replySnippet });
+  replied.push({ email: contact.email, name: contact.name, repliedAt, snippet: replySnippet, category });
+};
+
+// trySentReply — matches a message found in the Sent folder (i.e. a reply YOU typed
+// directly in Gmail, outside this app) back to a contact via thread message-ids or a
+// Re:-subject + recipient-email fallback, and appends it as an outbound thread entry.
+// No status change, no classification — sent messages are just captured for the thread view.
+// De-duped on message-id, which also naturally skips messages the app already recorded at
+// send time (inngest-fns.js), since those already carry the same Message-ID header.
+const trySentReply = async (raw, byMessageId, byEmail) => {
+  const parsed = await simpleParser(raw);
+  const toAddr = (parsed.to?.value?.[0]?.address || '').toLowerCase();
+  if (!toAddr) return;
+
+  const refTokens = [
+    parsed.inReplyTo,
+    ...(Array.isArray(parsed.references) ? parsed.references : (parsed.references ? [parsed.references] : [])),
+  ].filter(Boolean).map(t => t.replace(/^<|>$/g, ''));
+
+  let contact = null;
+  for (const token of refTokens) {
+    if (byMessageId.has(token)) { contact = byMessageId.get(token); break; }
+  }
+  if (!contact) {
+    const subject = (parsed.subject || '').trim();
+    if (/^re\s*:/i.test(subject)) contact = byEmail.get(toAddr) || null;
+  }
+  if (!contact) return;
+
+  const messageId = cleanMsgId(parsed.messageId);
+  if (threadHasMessageId(contact, messageId)) return;
+
+  const threadEntry = {
+    direction: 'outbound',
+    subject: parsed.subject || '',
+    text: parsed.text || '',
+    html: parsed.html || '',
+    messageId,
+    inReplyTo: cleanMsgId(parsed.inReplyTo),
+    at: parsed.date || new Date(),
+  };
+
+  contact.thread = [...(contact.thread || []), { messageId }];
+  if (messageId) byMessageId.set(messageId, contact);
+
+  await Contact.findByIdAndUpdate(contact._id, { $push: { thread: threadEntry } });
 };
 
 // ── Check mailbox ──────────────────────────────────────────────────────────
@@ -408,24 +490,33 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   const bounced = [];
   const replied = [];
 
-  // Pre-load ALL contacts once with a lean projection — eliminates N+1 queries in the scan loop
+  // Pre-load ALL contacts once with a lean projection — eliminates N+1 queries in the scan loop.
+  // `thread.messageId` only (not full text/html) keeps this payload small even as threads grow.
   const allContacts = await Contact.find(
     { deleted: { $ne: true } },
-    'email name status bounceReason messageId updatedAt'
+    'email name status bounceReason messageId updatedAt thread.messageId'
   ).lean();
 
   // byEmailAll: for bounce matching (any status)
-  // byEmail + byMessageId: for reply matching (sent contacts only)
+  // byEmail + byMessageId: for reply/sent matching — any contact that has ever been emailed
+  // or has any thread activity, not just ones still awaiting their first reply. This is what
+  // lets a 2nd/3rd reply on an already-`replied` contact keep getting captured.
   const byEmailAll  = new Map();
   const byEmail     = new Map();
   const byMessageId = new Map();
 
+  const THREADABLE_STATUSES = new Set(['sent', 'follow-up-sent', 'replied', 'follow-up-replied']);
+
   for (const c of allContacts) {
     const addr = c.email.toLowerCase();
     byEmailAll.set(addr, c);
-    if (c.status === 'sent' || c.status === 'follow-up-sent') {
+    const isThreadable = THREADABLE_STATUSES.has(c.status) || (c.thread && c.thread.length > 0);
+    if (isThreadable) {
       byEmail.set(addr, c);
       if (c.messageId) byMessageId.set(c.messageId.replace(/^<|>$/g, ''), c);
+      for (const t of (c.thread || [])) {
+        if (t.messageId) byMessageId.set(t.messageId, c);
+      }
     }
   }
 
@@ -476,11 +567,31 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     }
   };
 
+  // Scans the Sent folder for replies you typed directly in Gmail (not through this app),
+  // so the thread view has your side of the conversation too. No bounce/reply-status logic
+  // here — just thread capture via trySentReply.
+  const scanSentMailbox = async (mailbox) => {
+    let lock;
+    try { lock = await client.getMailboxLock(mailbox); } catch (_) { return; }
+    try {
+      const uids = await client.search({ since: replySince }, { uid: true });
+      scanned += uids.length;
+      for (const uid of uids) {
+        const msg = await client.fetchOne(uid, { source: true }, { uid: true });
+        if (!msg?.source) continue;
+        await trySentReply(msg.source.toString('utf8'), byMessageId, byEmail);
+      }
+    } finally {
+      lock.release();
+    }
+  };
+
   try {
     await client.connect();
     for (const mailbox of ['INBOX', '[Gmail]/Spam']) {
       await scanMailbox(mailbox);
     }
+    await scanSentMailbox('[Gmail]/Sent');
   } catch (err) {
     return res.status(500).json({ error: 'IMAP check failed', detail: err.message });
   } finally {

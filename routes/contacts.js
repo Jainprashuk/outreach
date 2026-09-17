@@ -198,6 +198,22 @@ router.patch('/', async (req, res) => {
   }
 });
 
+// GET /api/contacts/:id/thread — full mailbox-style conversation (outbound + inbound, in order)
+router.get('/:id/thread', async (req, res) => {
+  try {
+    const contact = await Contact.findById(req.params.id, 'name email company thread replyCategory replyCategoryReasoning').lean();
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    const thread = [...(contact.thread || [])].sort((a, b) => new Date(a.at) - new Date(b.at));
+    res.json({
+      name: contact.name, email: contact.email, company: contact.company,
+      replyCategory: contact.replyCategory, replyCategoryReasoning: contact.replyCategoryReasoning,
+      thread,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/contacts/:id/fail-reason — look up error from SendJob items (for contacts failed before failReason was added to Contact)
 router.get('/:id/fail-reason', async (req, res) => {
   try {

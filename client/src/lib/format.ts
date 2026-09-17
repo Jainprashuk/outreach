@@ -30,6 +30,25 @@ export const BADGE_CLASS: Record<string, string> = {
   'no-openings': 'badge-noopenings', 'in-review': 'badge-inreview',
 };
 
+export const CATEGORY_LABELS: Record<string, string> = {
+  reviewing: 'Reviewing', 'stay-in-touch': 'Stay in touch', no: 'No',
+  'resume-requested': 'Resume requested', 'needs-attention': 'Needs attention', other: 'Other',
+};
+
+export const CATEGORY_BADGE_CLASS: Record<string, string> = {
+  reviewing: 'badge-pending', 'stay-in-touch': 'badge-followup', no: 'badge-rejected',
+  'resume-requested': 'badge-approved', 'needs-attention': 'badge-noopenings', other: 'badge-queued',
+};
+
+export const CATEGORY_OPTIONS = [
+  { value: 'reviewing', label: 'Reviewing' },
+  { value: 'stay-in-touch', label: 'Stay in touch' },
+  { value: 'no', label: 'No' },
+  { value: 'resume-requested', label: 'Resume requested' },
+  { value: 'needs-attention', label: 'Needs attention' },
+  { value: 'other', label: 'Other' },
+] as const;
+
 export const STATUS_OPTIONS = [
   { value: 'queued', label: 'Queued' },
   { value: 'sent', label: 'Sent' },

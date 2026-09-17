@@ -2,6 +2,7 @@ import { type ReactNode } from 'react';
 import { Route, Routes } from 'react-router-dom';
 import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
+import Mailbox from './pages/Mailbox';
 import Leads from './pages/Leads';
 import Jobs from './pages/Jobs';
 import CampaignsRouter from './pages/campaigns/CampaignsRouter';
@@ -47,6 +48,7 @@ export default function App() {
       <Route path="/campaigns/*" element={owner(<CampaignsRouter />)} />
       <Route path="/interviews" element={owner(<Interviews />)} />
       <Route path="/contacts" element={owner(<Contacts />)} />
+      <Route path="/mailbox" element={owner(<Mailbox />)} />
       <Route path="/add-contacts" element={owner(<AddContacts />)} />
       <Route path="/export-contacts" element={<ExportContacts />} />
       <Route path="/templates" element={owner(<Templates />)} />

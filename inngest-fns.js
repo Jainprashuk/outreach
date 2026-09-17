@@ -164,15 +164,22 @@ const sendSingleEmail = inngest.createFunction(
           'items.$.processedAt': new Date(),
         });
         const newStatus = isFollowUp ? 'follow-up-sent' : 'sent';
+        const sentAt = new Date();
         await Contact.findByIdAndUpdate(contactId, {
           $set: {
             status: newStatus,
             messageId: info.messageId || null,
             sentSubject: followUpSubject,
-            lastSentAt: new Date(),
-            ...(isFollowUp ? { followUpSentAt: new Date() } : {}),
+            lastSentAt: sentAt,
+            ...(isFollowUp ? { followUpSentAt: sentAt } : {}),
           },
-          $push: { statusHistory: { status: newStatus, changedAt: new Date(), note: isFollowUp ? 'Follow-up email sent' : 'Email sent' } },
+          $push: {
+            statusHistory: { status: newStatus, changedAt: sentAt, note: isFollowUp ? 'Follow-up email sent' : 'Email sent' },
+            thread: {
+              direction: 'outbound', subject: followUpSubject, text: item.body, html: bodyToHtml(item.body),
+              messageId: info.messageId || null, inReplyTo: threadHeaders.inReplyTo || null, at: sentAt,
+            },
+          },
         });
         logEvent({ category: 'email', action: 'sent', message: `Email sent to ${item.to}`, meta: { jobId, contactId } })
           .catch(err => console.error('Activity log write failed:', err.message));
@@ -300,15 +307,22 @@ const sendEmailBulk = inngest.createFunction(
                 }
               );
               const newStatus = isFollowUp ? 'follow-up-sent' : 'sent';
+              const sentAt = new Date();
               await Contact.findByIdAndUpdate(item.contactId, {
                 $set: {
                   status: newStatus,
                   messageId: info.messageId || null,
                   sentSubject: followUpSubject,
-                  lastSentAt: new Date(),
-                  ...(isFollowUp ? { followUpSentAt: new Date() } : {}),
+                  lastSentAt: sentAt,
+                  ...(isFollowUp ? { followUpSentAt: sentAt } : {}),
                 },
-                $push: { statusHistory: { status: newStatus, changedAt: new Date(), note: isFollowUp ? 'Follow-up email sent' : 'Email sent' } },
+                $push: {
+                  statusHistory: { status: newStatus, changedAt: sentAt, note: isFollowUp ? 'Follow-up email sent' : 'Email sent' },
+                  thread: {
+                    direction: 'outbound', subject: followUpSubject, text: item.body, html: bodyToHtml(item.body),
+                    messageId: info.messageId || null, inReplyTo: threadHeaders.inReplyTo || null, at: sentAt,
+                  },
+                },
               });
             } catch (err) {
               await SendJob.findOneAndUpdate(

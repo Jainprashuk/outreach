@@ -3,10 +3,12 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import StatusBadge from '../components/StatusBadge';
+import CategoryBadge from '../components/CategoryBadge';
 import InterviewCell from '../components/InterviewCell';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { API_BASE, resetForSendApi, type Contact } from '../lib/api';
+import { CATEGORY_OPTIONS } from '../lib/format';
 import { parseCsvText, readFileText } from '../lib/csv';
 import { SkeletonRows } from '../components/Skeleton';
 import CreateContactCampaignModal from '../components/CreateContactCampaignModal';
@@ -32,6 +34,7 @@ export default function Contacts() {
   const [statusFilter, setStatusFilter] = useState(params.get('status') || '');
   const [approvalFilter, setApprovalFilter] = useState('');
   const [templateFilter, setTemplateFilter] = useState('');
+  const [categoryFilter, setCategoryFilter] = useState('');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
@@ -55,8 +58,9 @@ export default function Contacts() {
     if (statusFilter) list = list.filter(c => c.status === statusFilter);
     if (approvalFilter) list = list.filter(c => c.approvalStatus === approvalFilter);
     if (templateFilter) list = list.filter(c => c.template === templateFilter);
+    if (categoryFilter) list = list.filter(c => c.replyCategory === categoryFilter);
     return list;
-  }, [app.contacts, tab, search, statusFilter, approvalFilter, templateFilter]);
+  }, [app.contacts, tab, search, statusFilter, approvalFilter, templateFilter, categoryFilter]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   const safePage = Math.min(page, totalPages);
@@ -223,8 +227,12 @@ export default function Contacts() {
           <option value="">All templates</option>
           {Object.keys(app.templates).map(key => <option key={key} value={key}>{tplName(key)}</option>)}
         </select>
+        <select value={categoryFilter} onChange={e => { setCategoryFilter(e.target.value); resetPage(); }} style={{ width: 'auto', minWidth: 150 }}>
+          <option value="">All reply categories</option>
+          {CATEGORY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+        </select>
         <button className="btn btn-sm" type="button" onClick={() => {
-          setSearch(''); setStatusFilter(''); setApprovalFilter(''); setTemplateFilter(''); setTab('all'); resetPage();
+          setSearch(''); setStatusFilter(''); setApprovalFilter(''); setTemplateFilter(''); setCategoryFilter(''); setTab('all'); resetPage();
         }}>Clear filters</button>
       </div>
 
@@ -268,16 +276,16 @@ export default function Contacts() {
                   ref={el => { if (el) el.indeterminate = !allChecked && someChecked; }}
                   onChange={e => toggleAll(e.target.checked)} title="Select all" />
               </th>
-              <th>Contact</th><th>Company</th><th>Role</th><th>Template</th><th>Status</th><th>Approval</th><th>Interview</th><th></th>
+              <th>Contact</th><th>Company</th><th>Role</th><th>Template</th><th>Status</th><th>Category</th><th>Approval</th><th>Interview</th><th></th>
             </tr>
           </thead>
           <tbody>
             {busy ? (
-              <SkeletonRows rows={8} cols={9} chipCol={1} />
+              <SkeletonRows rows={8} cols={10} chipCol={1} />
             ) : error ? (
-              <tr><td colSpan={9}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
+              <tr><td colSpan={10}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
             ) : paged.length === 0 ? (
-              <tr><td colSpan={9}><div className="empty-state"><i className="ti ti-users" />No contacts found</div></td></tr>
+              <tr><td colSpan={10}><div className="empty-state"><i className="ti ti-users" />No contacts found</div></td></tr>
             ) : paged.map(c => (
               <tr key={c.id}>
                 <td className="cb-col">
@@ -306,6 +314,7 @@ export default function Contacts() {
                     ) : null}
                   </div>
                 </td>
+                <td><CategoryBadge category={c.replyCategory} reasoning={c.replyCategoryReasoning} /></td>
                 <td><StatusBadge status={c.approvalStatus} /></td>
                 <td>
                   {/* Additive: links to the interview record, or starts one.

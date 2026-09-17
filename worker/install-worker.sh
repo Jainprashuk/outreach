@@ -27,8 +27,10 @@ NODE_BIN="$(command -v node)"
 
 mkdir -p "$LOGDIR" "$HOME/Library/LaunchAgents"
 
-# caffeinate -s holds the Mac awake while plugged in, so the worker keeps
-# polling and a queued scrape starts immediately instead of at the next wake.
+# caffeinate -is holds the Mac awake so the worker keeps polling and a queued
+# scrape starts immediately instead of at the next wake. -i prevents idle sleep
+# on ANY power source; -s adds the stronger assertion that is AC-only. Using -s
+# alone would silently do nothing on battery.
 cat > "$PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -38,7 +40,7 @@ cat > "$PLIST" <<PLIST_EOF
   <key>ProgramArguments</key>
   <array>
     <string>/usr/bin/caffeinate</string>
-    <string>-s</string>
+    <string>-is</string>
     <string>$NODE_BIN</string>
     <string>$REPO/worker/scrape-worker.js</string>
   </array>

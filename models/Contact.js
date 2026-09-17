@@ -17,8 +17,23 @@ const contactSchema = new mongoose.Schema({
   repliedAt: { type: Date, default: null },
   replySnippet: { type: String, default: null },
   replyRead: { type: Boolean, default: false },
+  replyCategory: { type: String, enum: ['reviewing', 'stay-in-touch', 'no', 'resume-requested', 'needs-attention', 'other'], default: null },
+  replyCategoryReasoning: { type: String, default: null },
+  replyCategorizedAt: { type: Date, default: null },
   lastSentAt: { type: Date, default: null },
   followUpSentAt: { type: Date, default: null },
+  // Full mailbox-style conversation history — every outbound send (via this app
+  // or your own Sent folder) and every inbound reply, in full (unlike
+  // replySnippet, which is truncated for list-preview use only).
+  thread: [{
+    direction:  { type: String, enum: ['outbound', 'inbound'] },
+    subject:    { type: String, default: '' },
+    text:       { type: String, default: '' },
+    html:       { type: String, default: '' },
+    messageId:  { type: String, default: null },
+    inReplyTo:  { type: String, default: null },
+    at:         { type: Date, default: Date.now },
+  }],
   statusHistory: [{
     status:    { type: String },
     changedAt: { type: Date, default: Date.now },

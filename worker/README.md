@@ -30,10 +30,26 @@ harvest to a datacenter IP with a lifted `li_at` cookie would trade that away.
 
 ## Sleep and wake
 
-Both the npm script and the launchd agent wrap the worker in `caffeinate -s`,
-which prevents idle system sleep **while on AC power**. So with the Mac plugged
-in the worker keeps polling and the portal's button is instant. On battery,
-normal sleep resumes and a queued run simply waits.
+**A sleeping Mac runs nothing.** Sleep halts the CPU, so the worker and Chrome
+both freeze; there is no setting that keeps a process alive through sleep. The
+only way to "keep running" is to not sleep.
+
+Both the npm script and the launchd agent wrap the worker in `caffeinate -is`:
+
+- `-i` prevents idle system sleep on **any** power source.
+- `-s` adds a stronger assertion that is **AC-only** (`man caffeinate`).
+
+`-s` alone was the original mistake: on battery it holds nothing, so the Mac
+slept while the worker sat there looking alive. Check with
+`pmset -g assertions | grep caffeinate` — you want `PreventUserIdleSystemSleep`
+in the list, not just `PreventSystemSleep`.
+
+Two things `caffeinate` cannot do:
+
+- **Closing the lid still sleeps the Mac.** Clamshell sleep is firmware-level;
+  no assertion overrides it. Only an external display plus power keeps a
+  closed-lid Mac awake.
+- **It does not create power.** Holding a laptop awake on battery flattens it.
 
 Each harvest additionally runs under `caffeinate -dimsu`, which holds on battery
 too — a run must not die mid-scroll because you unplugged.
