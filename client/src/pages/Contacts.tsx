@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import StatusBadge from '../components/StatusBadge';
-import CategoryBadge from '../components/CategoryBadge';
+import ClassifierStatus from '../components/ClassifierStatus';
 import InterviewCell from '../components/InterviewCell';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
@@ -314,7 +314,7 @@ export default function Contacts() {
                     ) : null}
                   </div>
                 </td>
-                <td><CategoryBadge category={c.replyCategory} reasoning={c.replyCategoryReasoning} /></td>
+                <td><ClassifierStatus contact={c} /></td>
                 <td><StatusBadge status={c.approvalStatus} /></td>
                 <td>
                   {/* Additive: links to the interview record, or starts one.

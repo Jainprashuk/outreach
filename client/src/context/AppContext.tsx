@@ -4,7 +4,7 @@ import {
   loadContactsApi, loadTemplatesApi, loadSettingsApi,
   createContactsApi, updateContactApi, bulkUpdateContactsApi, deleteContactApi,
   checkMailboxApi, saveSettingsApi, createTemplateApi, updateTemplateApi, deleteTemplateApi,
-  uploadResumeApi, deleteResumeApi,
+  uploadResumeApi, deleteResumeApi, triggerReplyClassificationApi,
 } from '../lib/api';
 import { isFollowUpDue } from '../lib/format';
 
@@ -26,6 +26,7 @@ interface AppStore {
   filterContacts: (tab: string) => Contact[];
   createContacts: (rows: Partial<Contact>[]) => Promise<{ created: Contact[]; skipped: number }>;
   updateContact: (id: string, patch: Partial<Contact>) => Promise<Contact>;
+  classifyReply: (id: string) => Promise<Contact>;
   bulkUpdateContacts: (updates: Array<{ id: string } & Partial<Contact>>) => Promise<any>;
   deleteContact: (id: string) => Promise<void>;
   checkMailbox: () => Promise<any>;
@@ -127,6 +128,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     async updateContact(id, patch) {
       const updated = await updateContactApi(id, patch);
+      setContacts(prev => prev.map(c => (c.id === id ? updated : c)));
+      return updated;
+    },
+    async classifyReply(id) {
+      const updated = await triggerReplyClassificationApi(id);
       setContacts(prev => prev.map(c => (c.id === id ? updated : c)));
       return updated;
     },

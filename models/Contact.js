@@ -20,6 +20,11 @@ const contactSchema = new mongoose.Schema({
   replyCategory: { type: String, enum: ['reviewing', 'stay-in-touch', 'no', 'resume-requested', 'needs-attention', 'other'], default: null },
   replyCategoryReasoning: { type: String, default: null },
   replyCategorizedAt: { type: Date, default: null },
+  // True only when Gemini actually succeeded classifying the CURRENT latest reply — distinct
+  // from replyCategory's value, since a rate-limited/failed call must never look identical to
+  // a genuine "needs-attention" verdict. Reset to false whenever a new reply comes in, so a
+  // fresh message always needs its own successful classification (or a manual retrigger).
+  replyClassifierOk: { type: Boolean, default: false },
   lastSentAt: { type: Date, default: null },
   followUpSentAt: { type: Date, default: null },
   // Full mailbox-style conversation history — every outbound send (via this app

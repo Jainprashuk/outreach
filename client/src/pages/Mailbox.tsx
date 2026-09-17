@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
-import CategoryBadge from '../components/CategoryBadge';
+import ClassifierStatus from '../components/ClassifierStatus';
 import { useApp } from '../context/AppContext';
 import { backfillReplyCountApi, backfillRepliesApi, type Contact, type ThreadEntry } from '../lib/api';
 import { CATEGORY_OPTIONS } from '../lib/format';
@@ -82,14 +82,19 @@ export default function Mailbox() {
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const c of searched) counts[c.replyCategory || 'uncategorized'] = (counts[c.replyCategory || 'uncategorized'] || 0) + 1;
+    for (const c of searched) {
+      const key = c.replyClassifierOk ? (c.replyCategory || 'uncategorized') : 'needs-classification';
+      counts[key] = (counts[key] || 0) + 1;
+    }
     return counts;
   }, [searched]);
 
   const threaded = useMemo(() => {
     let list = searched;
-    if (categoryFilter) {
-      list = list.filter(c => (categoryFilter === 'uncategorized' ? !c.replyCategory : c.replyCategory === categoryFilter));
+    if (categoryFilter === 'needs-classification') {
+      list = list.filter(c => !c.replyClassifierOk);
+    } else if (categoryFilter) {
+      list = list.filter(c => c.replyClassifierOk && c.replyCategory === categoryFilter);
     }
     if (unreadOnly) list = list.filter(c => !c.replyRead);
     return list
@@ -150,8 +155,8 @@ export default function Mailbox() {
                     {opt.label} ({categoryCounts[opt.value] || 0})
                   </option>
                 ))}
-                {categoryCounts.uncategorized ? (
-                  <option value="uncategorized">Uncategorized ({categoryCounts.uncategorized})</option>
+                {categoryCounts['needs-classification'] ? (
+                  <option value="needs-classification">Needs classification ({categoryCounts['needs-classification']})</option>
                 ) : null}
               </select>
             </div>
@@ -181,7 +186,7 @@ export default function Mailbox() {
                     </div>
                     <div style={{ fontSize: 11.5, color: 'var(--text3)' }}>{contact.company}</div>
                     <div className="mailbox-row-preview">{last.text || '(no content)'}</div>
-                    <CategoryBadge category={contact.replyCategory} reasoning={contact.replyCategoryReasoning} />
+                    <ClassifierStatus contact={contact} />
                   </div>
                 </div>
               ))}
@@ -200,7 +205,7 @@ export default function Mailbox() {
                       {selected.email}{selected.company ? ` · ${selected.company}` : ''}
                     </div>
                   </div>
-                  <CategoryBadge category={selected.replyCategory} reasoning={selected.replyCategoryReasoning} />
+                  <ClassifierStatus contact={selected} />
                 </div>
                 {orderedThread.map((m, i) => (
                   <div key={i} className={`mailbox-bubble ${m.direction}`}>

@@ -52,6 +52,10 @@ export interface Contact {
   replyCategory: ReplyCategory | null;
   replyCategoryReasoning: string | null;
   replyCategorizedAt: string | null;
+  // True only once Gemini has SUCCESSFULLY classified the current latest reply — resets to
+  // false whenever a new reply comes in. False (with replyCategory possibly null) means "needs
+  // a Gemini trigger", which is distinct from a real "needs-attention" verdict.
+  replyClassifierOk: boolean;
   lastSentAt: string | null;
   followUpSentAt: string | null;
   statusHistory?: StatusHistoryEntry[];
@@ -153,6 +157,12 @@ export const backfillRepliesApi = (limit = 20) =>
   apiFetch<{ processed: number; remaining: number }>('/api/contacts/backfill-replies', {
     method: 'POST', body: JSON.stringify({ limit }),
   });
+
+// Manually (re)triggers classification for one contact — e.g. after a Gemini free-tier rate
+// limit made the automatic attempt fail (replyClassifierOk: false). Throws on failure (caller
+// should toast the error); replyClassifierOk stays false either way until a call succeeds.
+export const triggerReplyClassificationApi = (id: string) =>
+  apiFetch<Contact>(`/api/contacts/${id}/classify-reply`, { method: 'POST' });
 
 export const saveSettingsApi = (patch: any) =>
   apiFetch<any>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) });

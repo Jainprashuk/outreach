@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import type { Contact } from '../lib/api';
 import Avatar from './Avatar';
-import CategoryBadge from './CategoryBadge';
+import ClassifierStatus from './ClassifierStatus';
 import { useApp } from '../context/AppContext';
 
 export default function ReplyModal({ contact, onClose }: { contact: Contact | null; onClose: () => void }) {
@@ -46,7 +46,7 @@ export default function ReplyModal({ contact, onClose }: { contact: Contact | nu
             <span><i className="ti ti-mail" /> Re: <em>{contact.sentSubject}</em></span>
           ) : null}
           <span><i className="ti ti-calendar" /> Replied on {repliedDate}</span>
-          <CategoryBadge category={contact.replyCategory} reasoning={contact.replyCategoryReasoning} />
+          <ClassifierStatus contact={contact} />
         </div>
         <div className={`reply-bubble${contact.replySnippet ? '' : ' empty'}`}>
           {contact.replySnippet || 'No reply content was captured.'}

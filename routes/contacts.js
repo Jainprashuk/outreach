@@ -199,19 +199,33 @@ router.patch('/', async (req, res) => {
   }
 });
 
+// Best-effort subject/body to (re)classify from: prefers the latest captured inbound
+// thread entry (full body), falling back to the truncated replySnippet for contacts whose
+// thread hasn't been backfilled yet.
+const latestClassifiableContent = (contact) => {
+  const inbound = [...(contact.thread || [])]
+    .filter(t => t.direction === 'inbound')
+    .sort((a, b) => new Date(b.at) - new Date(a.at))[0];
+  return {
+    subject: inbound?.subject || (contact.sentSubject ? `Re: ${contact.sentSubject}` : ''),
+    body: inbound?.text || contact.replySnippet || '',
+  };
+};
+
 // Backfill target: contacts who ACTUALLY REPLIED before the thread/classification pipeline
 // existed — i.e. `repliedAt` is set. Mailbox is a conversation view, not a sent-mail log, so
 // a contact who was only ever emailed and never replied has nothing to backfill here.
 // Deliberately keyed off `repliedAt` rather than `status` — status gets overwritten by manual
 // triage (e.g. a replied contact marked `closed`/`no-openings`/`in-review` after you've read
-// it), but `repliedAt` never gets touched by that.
+// it), but `repliedAt` never gets touched by that. `replyClassifierOk` (not `replyCategory`)
+// is what decides whether classification still needs (re)running — see models/Contact.js.
 const needsBackfillFilter = {
   ...BASE_FILTER,
   repliedAt: { $ne: null },
   $or: [
     { thread: { $not: { $elemMatch: { direction: 'outbound' } } } },
     { thread: { $not: { $elemMatch: { direction: 'inbound' } } } },
-    { replyCategory: null },
+    { replyClassifierOk: { $ne: true } },
   ],
 };
 
@@ -226,8 +240,9 @@ router.get('/backfill-replies/count', async (req, res) => {
 });
 
 // POST /api/contacts/backfill-replies — processes one bounded batch (so a single call
-// can't run past the serverless function timeout); the frontend calls this repeatedly
-// until `remaining` is 0.
+// can't run past the serverless function timeout, and so a Gemini free-tier rate limit only
+// burns through part of the backlog per call instead of failing the whole thing); the
+// frontend calls this repeatedly until `remaining` is 0.
 router.post('/backfill-replies', async (req, res) => {
   try {
     const limit = Math.min(50, Math.max(1, Number(req.body?.limit) || 20));
@@ -252,11 +267,10 @@ router.post('/backfill-replies', async (req, res) => {
       }
 
       const hasInboundThread = (contact.thread || []).some(t => t.direction === 'inbound');
-      const subject = contact.sentSubject ? `Re: ${contact.sentSubject}` : '';
       if (contact.repliedAt && !hasInboundThread) {
         contact.thread.push({
           direction: 'inbound',
-          subject,
+          subject: contact.sentSubject ? `Re: ${contact.sentSubject}` : '',
           text: contact.replySnippet || '',
           html: '',
           messageId: null,
@@ -264,20 +278,53 @@ router.post('/backfill-replies', async (req, res) => {
           at: contact.repliedAt,
         });
       }
-      if (contact.repliedAt && !contact.replyCategory) {
-        const { category, reasoning } = await classifyReply({
-          subject, body: contact.replySnippet || '',
-          contactEmail: contact.email, contactName: contact.name,
+      if (!contact.replyClassifierOk) {
+        const { subject, body } = latestClassifiableContent(contact);
+        const { category, reasoning, success } = await classifyReply({
+          subject, body, contactEmail: contact.email, contactName: contact.name,
         });
-        contact.replyCategory = category;
-        contact.replyCategoryReasoning = reasoning;
-        contact.replyCategorizedAt = new Date();
+        if (success) {
+          contact.replyCategory = category;
+          contact.replyCategoryReasoning = reasoning;
+          contact.replyCategorizedAt = new Date();
+        }
+        contact.replyClassifierOk = success;
       }
       await contact.save();
     }
 
     const remaining = await Contact.countDocuments(needsBackfillFilter);
     res.json({ processed: contacts.length, remaining });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/contacts/:id/classify-reply — manual (re)trigger for a contact whose latest reply
+// hasn't been successfully classified (replyClassifierOk is false) — e.g. it hit a Gemini
+// free-tier rate limit during the automatic attempt. Re-classifies from the latest inbound
+// message and returns the updated contact either way, so the UI can show the new state.
+router.post('/:id/classify-reply', async (req, res) => {
+  try {
+    const contact = await Contact.findById(req.params.id);
+    if (!contact) return res.status(404).json({ error: 'Contact not found' });
+    if (!contact.repliedAt) return res.status(400).json({ error: 'This contact has no reply to classify yet' });
+
+    const { subject, body } = latestClassifiableContent(contact);
+    const { category, reasoning, success } = await classifyReply({
+      subject, body, contactEmail: contact.email, contactName: contact.name,
+    });
+
+    if (success) {
+      contact.replyCategory = category;
+      contact.replyCategoryReasoning = reasoning;
+      contact.replyCategorizedAt = new Date();
+    }
+    contact.replyClassifierOk = success;
+    await contact.save();
+
+    if (!success) return res.status(502).json({ error: 'Gemini classification failed again — it may still be rate-limited. Try again shortly.' });
+    res.json(serialize(contact.toObject()));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

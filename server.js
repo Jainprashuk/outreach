@@ -177,8 +177,32 @@ app.use(express.static(__dirname));
 // on a cold start. Resets on failure so the next request triggers a fresh attempt.
 let _dbConnecting = null;
 
+// One-time, fire-and-forget migration for contacts classified before `replyClassifierOk`
+// existed. `.lean()` reads (used everywhere in this app) never apply Mongoose schema
+// defaults, so every pre-existing contact would otherwise read as replyClassifierOk:
+// undefined — indistinguishable from "needs classification" — even ones that were already
+// correctly classified. The old code path always wrote the literal reasoning "classification
+// failed" on a fallback, so that string is the one reliable signal to tell a real answer
+// apart from a disguised failure, without needing to re-spend Gemini quota re-checking
+// everyone. Runs once per warm instance; the $exists:false queries become no-ops after that.
+let _classifierFlagMigrated = false;
+const migrateClassifierFlagOnce = () => {
+  if (_classifierFlagMigrated) return;
+  _classifierFlagMigrated = true;
+  (async () => {
+    await Contact.updateMany(
+      { replyClassifierOk: { $exists: false }, replyCategory: { $ne: null }, replyCategoryReasoning: { $ne: 'classification failed' } },
+      { $set: { replyClassifierOk: true } },
+    );
+    await Contact.updateMany(
+      { replyClassifierOk: { $exists: false } },
+      { $set: { replyClassifierOk: false } },
+    );
+  })().catch(err => console.error('[migrate] replyClassifierOk backfill failed:', err.message));
+};
+
 const ensureDb = async () => {
-  if (mongoose.connection.readyState === 1) return; // already connected (warm instance)
+  if (mongoose.connection.readyState === 1) { migrateClassifierFlagOnce(); return; } // already connected (warm instance)
   if (!_dbConnecting) {
     _dbConnecting = db.connect().catch(err => {
       _dbConnecting = null; // reset so the next request retries
@@ -186,6 +210,7 @@ const ensureDb = async () => {
     });
   }
   await _dbConnecting;
+  migrateClassifierFlagOnce();
 };
 
 // Awaits the connection instead of returning 503 on the instant of a cold start.
@@ -379,7 +404,7 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
   const replySnippet = buildSnippet(parsed.text || parsed.html || '');
   const fullBody = parsed.text || parsed.html || '';
 
-  const { category, reasoning } = await classifyReply({
+  const { category, reasoning, success } = await classifyReply({
     subject: parsed.subject, body: fullBody,
     contactEmail: contact.email, contactName: contact.name,
   });
@@ -406,14 +431,24 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
   contact.thread = [...(contact.thread || []), { messageId: inboundMessageId }];
   if (inboundMessageId) byMessageId.set(inboundMessageId, contact);
 
+  // A new reply always resets replyClassifierOk to false first (this is the "new reply"
+  // moment) — it only becomes true if THIS classification attempt actually succeeded. On
+  // failure, category/reasoning are left null rather than filled with a fake fallback value,
+  // so the UI can tell "not yet classified" apart from a real (if unconfident) verdict.
   await Contact.findByIdAndUpdate(contact._id, {
-    $set: { status: newStatus, repliedAt, replySnippet, replyCategory: category, replyCategoryReasoning: reasoning, replyCategorizedAt: new Date() },
+    $set: {
+      status: newStatus, repliedAt, replySnippet,
+      replyCategory: success ? category : null,
+      replyCategoryReasoning: success ? reasoning : null,
+      replyCategorizedAt: success ? new Date() : null,
+      replyClassifierOk: success,
+    },
     $push: {
       statusHistory: { status: newStatus, changedAt: repliedAt, note: newStatus === 'follow-up-replied' ? 'Reply received after follow-up' : 'Reply received' },
       thread: threadEntry,
     },
   });
-  replied.push({ email: contact.email, name: contact.name, repliedAt, snippet: replySnippet, category });
+  replied.push({ email: contact.email, name: contact.name, repliedAt, snippet: replySnippet, category: success ? category : null });
 };
 
 // trySentReply — matches a message found in the Sent folder (i.e. a reply YOU typed
