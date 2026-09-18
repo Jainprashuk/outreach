@@ -138,6 +138,14 @@
   .success-title { font-size: 21px; }
   .success-sub { font-size: 13px; margin-bottom: 22px; }
   .empty-state { padding: 36px 16px; }
+
+  /* Mailbox — the fixed 320px sidebar + thread pane never fit side by side on a
+     phone-width viewport, so stack them and let each pane size to its content. */
+  .mailbox-layout { flex-direction: column; height: auto; min-height: 0; }
+  .mailbox-list-panel { width: 100%; }
+  .mailbox-list { max-height: 44vh; }
+  .mailbox-thread { min-height: 50vh; }
+  .mailbox-bubble { max-width: 92%; }
 }
 
 /* ── Small phone ──────────────────────────────────────────────────────────── */

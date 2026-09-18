@@ -12,6 +12,7 @@ const Contact = require('./models/Contact');
 const mailer = require('./lib/mailer');
 const { auditHttpMutations } = require('./lib/activityLog');
 const { classifyReply } = require('./lib/replyClassifier');
+const { runBackfillBatch } = require('./routes/contacts');
 
 const app = express();
 app.use(cors());
@@ -637,7 +638,19 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   }
 
   await Settings.findOneAndUpdate({}, { lastMailboxCheckAt: new Date() });
-  res.json({ ok: true, scanned, bounced, replied, lastCheckedAt: new Date() });
+
+  // Drains the legacy thread/classification backfill in the background, piggybacking on this
+  // cron so the "Backfill now" button on Mailbox is a manual override, not the only way it
+  // ever runs. One bounded batch per 5-minute tick keeps this well under the function timeout;
+  // best-effort — a failure here (e.g. a classifier rate limit) must not fail the mailbox check.
+  let backfill = null;
+  try {
+    backfill = await runBackfillBatch(20);
+  } catch (err) {
+    backfill = { error: err.message };
+  }
+
+  res.json({ ok: true, scanned, bounced, replied, lastCheckedAt: new Date(), backfill });
 });
 
 // ── Send single email (legacy — kept for step3 fallback) ──────────────────

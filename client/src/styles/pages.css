@@ -164,7 +164,8 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
 
 /* ── Mailbox (full-thread inbox view) ── */
 .mailbox-layout { display: flex; gap: 16px; height: calc(100vh - 190px); min-height: 420px; }
-.mailbox-list { width: 320px; flex-shrink: 0; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg); }
+.mailbox-list-panel { width: 320px; flex-shrink: 0; }
+.mailbox-list { overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg); }
 .mailbox-row { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border-bottom: 1px solid var(--border); cursor: pointer; }
 .mailbox-row:last-child { border-bottom: none; }
 .mailbox-row:hover { background: var(--bg2); }

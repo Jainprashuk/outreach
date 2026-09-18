@@ -140,7 +140,7 @@ export default function Mailbox() {
         <div className="empty-state"><i className="ti ti-inbox" />No conversations yet — thread capture starts with your next reply or mailbox check.</div>
       ) : (
         <div className="mailbox-layout">
-          <div style={{ display: 'flex', flexDirection: 'column', width: 320, flexShrink: 0, gap: 8 }}>
+          <div className="mailbox-list-panel" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <input
               type="text"
               placeholder="Search name, email or company…"

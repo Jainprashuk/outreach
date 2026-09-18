@@ -239,62 +239,70 @@ router.get('/backfill-replies/count', async (req, res) => {
   }
 });
 
-// POST /api/contacts/backfill-replies — processes one bounded batch (so a single call
-// can't run past the serverless function timeout, and so a Gemini free-tier rate limit only
-// burns through part of the backlog per call instead of failing the whole thing); the
+// Processes one bounded batch of the backfill backlog (so a single call can't run past the
+// serverless function timeout, and so a Gemini free-tier rate limit only burns through part
+// of the backlog per call instead of failing the whole thing). Shared by the manual
+// "Backfill now" button (POST /backfill-replies below) and the automatic mailbox-check cron
+// (server.js), so the backlog also drains in the background without anyone visiting Mailbox.
+const runBackfillBatch = async (limit) => {
+  const contacts = await Contact.find(needsBackfillFilter).limit(limit);
+
+  for (const contact of contacts) {
+    const hasOutboundThread = (contact.thread || []).some(t => t.direction === 'outbound');
+    if (contact.lastSentAt && !hasOutboundThread) {
+      // The actual rendered body was never persisted before thread capture existed — only
+      // messageId/sentSubject survive a send. editedBody (a user override made before
+      // sending) is the closest recoverable approximation; otherwise say so plainly rather
+      // than fabricating content.
+      contact.thread.push({
+        direction: 'outbound',
+        subject: contact.sentSubject || '',
+        text: contact.editedBody || '(original message body was not stored — sent before thread capture was added)',
+        html: '',
+        messageId: contact.messageId || null,
+        inReplyTo: null,
+        at: contact.lastSentAt,
+      });
+    }
+
+    const hasInboundThread = (contact.thread || []).some(t => t.direction === 'inbound');
+    if (contact.repliedAt && !hasInboundThread) {
+      contact.thread.push({
+        direction: 'inbound',
+        subject: contact.sentSubject ? `Re: ${contact.sentSubject}` : '',
+        text: contact.replySnippet || '',
+        html: '',
+        messageId: null,
+        inReplyTo: contact.messageId || null,
+        at: contact.repliedAt,
+      });
+    }
+    if (!contact.replyClassifierOk) {
+      const { subject, body } = latestClassifiableContent(contact);
+      const { category, reasoning, success } = await classifyReply({
+        subject, body, contactEmail: contact.email, contactName: contact.name,
+      });
+      if (success) {
+        contact.replyCategory = category;
+        contact.replyCategoryReasoning = reasoning;
+        contact.replyCategorizedAt = new Date();
+      }
+      contact.replyClassifierOk = success;
+    }
+    await contact.save();
+  }
+
+  const remaining = await Contact.countDocuments(needsBackfillFilter);
+  return { processed: contacts.length, remaining };
+};
+
+// POST /api/contacts/backfill-replies — processes one bounded batch via runBackfillBatch; the
 // frontend calls this repeatedly until `remaining` is 0.
 router.post('/backfill-replies', async (req, res) => {
   try {
     const limit = Math.min(50, Math.max(1, Number(req.body?.limit) || 20));
-    const contacts = await Contact.find(needsBackfillFilter).limit(limit);
-
-    for (const contact of contacts) {
-      const hasOutboundThread = (contact.thread || []).some(t => t.direction === 'outbound');
-      if (contact.lastSentAt && !hasOutboundThread) {
-        // The actual rendered body was never persisted before thread capture existed — only
-        // messageId/sentSubject survive a send. editedBody (a user override made before
-        // sending) is the closest recoverable approximation; otherwise say so plainly rather
-        // than fabricating content.
-        contact.thread.push({
-          direction: 'outbound',
-          subject: contact.sentSubject || '',
-          text: contact.editedBody || '(original message body was not stored — sent before thread capture was added)',
-          html: '',
-          messageId: contact.messageId || null,
-          inReplyTo: null,
-          at: contact.lastSentAt,
-        });
-      }
-
-      const hasInboundThread = (contact.thread || []).some(t => t.direction === 'inbound');
-      if (contact.repliedAt && !hasInboundThread) {
-        contact.thread.push({
-          direction: 'inbound',
-          subject: contact.sentSubject ? `Re: ${contact.sentSubject}` : '',
-          text: contact.replySnippet || '',
-          html: '',
-          messageId: null,
-          inReplyTo: contact.messageId || null,
-          at: contact.repliedAt,
-        });
-      }
-      if (!contact.replyClassifierOk) {
-        const { subject, body } = latestClassifiableContent(contact);
-        const { category, reasoning, success } = await classifyReply({
-          subject, body, contactEmail: contact.email, contactName: contact.name,
-        });
-        if (success) {
-          contact.replyCategory = category;
-          contact.replyCategoryReasoning = reasoning;
-          contact.replyCategorizedAt = new Date();
-        }
-        contact.replyClassifierOk = success;
-      }
-      await contact.save();
-    }
-
-    const remaining = await Contact.countDocuments(needsBackfillFilter);
-    res.json({ processed: contacts.length, remaining });
+    const result = await runBackfillBatch(limit);
+    res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -402,3 +410,4 @@ router.patch('/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.runBackfillBatch = runBackfillBatch;
