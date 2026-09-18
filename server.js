@@ -19,6 +19,7 @@ const {
 const { auditHttpMutations } = require('./lib/activityLog');
 const { attachUser } = require('./lib/currentUser');
 const { resolveWorkerUser } = require('./lib/workerAuth');
+const { issueShareToken, revokeShareToken, resolveShareUser, hasShareToken } = require('./lib/shareAuth');
 const { usersByStaleness, runForUsers } = require('./lib/fanout');
 const { deadline } = require('./lib/http');
 const { classifyReply } = require('./lib/replyClassifier');
@@ -137,7 +138,10 @@ const requireAuth = async (req, res, next) => {
   // the client renders "Not authorised" for owner-only pages and all owner DATA
   // endpoints below stay gated. The share API self-guards.
   if (req.path === '/app' || req.path.startsWith('/app/')) return next();
-  if (req.path.startsWith('/api/share')) return next();
+  // Trailing slash matters: the carve-out is for the unauthenticated share API
+  // under /api/share/, NOT for /api/share-link, which is owner-only management
+  // and must stay behind auth. A bare /api/share prefix would swallow it.
+  if (req.path.startsWith('/api/share/')) return next();
   // Allow static assets so the login page can load its CSS/JS
   if (/\.(css|js|woff2?|ttf|svg|ico|png|jpg|jpeg)$/.test(req.path)) return next();
 
@@ -315,6 +319,13 @@ const requireDb = async (req, res, next) => {
 // Owner is always allowed; otherwise a valid share cookie is required.
 const requireShareAuth = async (req, res, next) => {
   if (AUTH_OPEN || isLegacyOwner(req) || isShare(req)) return next();
+  // A per-account link token. This is what makes sharing multi-tenant: the token
+  // names WHOSE export is being read, which one global password never could.
+  try {
+    const shareUserId = await resolveShareUser(req.query.s, { legacySecret: null });
+    if (shareUserId) { req.isShareLink = true; req.userId = shareUserId; return next(); }
+  } catch (_) { /* fall through */ }
+
   // A signed-in user may always read their own export.
   try {
     const session = await resolveSession(req);
@@ -338,7 +349,11 @@ app.get('/api/share/session', requireDb, async (req, res) => {
       }
     } catch (_) { /* fall through as signed-out */ }
   }
-  res.json({ owner, share: isShare(req), user });
+  let share = isShare(req);
+  if (!share && req.query.s) {
+    try { share = !!(await resolveShareUser(req.query.s)); } catch (_) { /* not a valid link */ }
+  }
+  res.json({ owner, share, user });
 });
 
 app.post('/api/share/login', (req, res) => {
@@ -352,10 +367,10 @@ app.post('/api/share/login', (req, res) => {
   res.status(401).json({ error: 'Invalid password' });
 });
 
-// Mounted ahead of the `/api` attachUser middleware, so it resolves the account
-// itself. The share password is still one global credential: until phase 3 there
-// is one account to share, and whose contacts these are has to be explicit
-// rather than "whatever is in the collection".
+// Mounted ahead of the `/api` attachUser middleware, so requireShareAuth resolves
+// the account itself — from a link token, a session, or (single-account only) the
+// legacy share cookie. attachUser is the last resort and refuses once there are
+// several accounts, since a global password cannot say whose export it wants.
 app.get('/api/share/contacts', requireDb, requireShareAuth, attachUser, async (req, res) => {
   try {
     const docs = await Contact.find({ userId: req.userId, deleted: { $ne: true } })
@@ -380,6 +395,38 @@ app.get('/api/share/contacts', requireDb, requireShareAuth, attachUser, async (r
 
 // attachUser sits ahead of every /api route so handlers can rely on req.userId.
 // It runs after requireDb because it reads the account from the database.
+// ── Share link management (owner only) ──────────────────────────────────────
+// Deliberately NOT under /api/share, which is the unauthenticated carve-out.
+app.post('/api/share-link', requireDb, attachUser, async (req, res) => {
+  try {
+    if (!req.session) return res.status(401).json({ error: 'Sign in to manage your share link' });
+    const token = await issueShareToken(req.userId);
+    res.json({ token, path: `/app/export-contacts?s=${encodeURIComponent(token)}`,
+      note: 'Anyone with this link can read your contact export. It is shown once; rotate or revoke it here.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/share-link', requireDb, attachUser, async (req, res) => {
+  try {
+    if (!req.session) return res.status(401).json({ error: 'Sign in to manage your share link' });
+    await revokeShareToken(req.userId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/share-link', requireDb, attachUser, async (req, res) => {
+  try {
+    if (!req.session) return res.status(401).json({ error: 'Sign in to manage your share link' });
+    res.json({ registered: await hasShareToken(req.userId) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.use('/api', requireDb, attachUser, auditHttpMutations);
 app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));

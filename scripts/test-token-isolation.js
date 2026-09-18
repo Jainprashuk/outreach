@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * Cross-account isolation for the LinkedIn scrape worker.
+ * Cross-account isolation for the two bearer credentials that identify an
+ * account without a session: the scrape-worker token and the read-only share
+ * link.
  *
  * This exists because the bug it checks for was real: once worker tokens
  * identified an account, /claim still handed out ANY queued run, so a second
@@ -13,7 +15,7 @@
  * fabricated id would not work), then removes it.
  *
  * Dev database ONLY, with the server already up:
- *   node scripts/test-worker-isolation.js --base=http://localhost:4042 \
+ *   node scripts/test-token-isolation.js --base=http://localhost:4042 \
  *     --email=you@example.com --password=...
  */
 require('dotenv').config();
@@ -51,6 +53,8 @@ async function main() {
   const ScrapeWorker = require('../models/ScrapeWorker');
   const { hashPassword } = require('../lib/password');
   const { issueWorkerToken } = require('../lib/workerAuth');
+  const { issueShareToken } = require('../lib/shareAuth');
+  const Contact = require('../models/Contact');
 
   const owner = await User.findOne({ email: email.toLowerCase() });
   if (!owner) throw new Error(`No account for ${email}`);
@@ -107,9 +111,30 @@ async function main() {
       blocked ? bad('the intruder triggered the 7-day LinkedIn block on the owner')
               : ok('no LinkedIn block was inflicted on the owner');
     }
+
+    console.log('\nShare links are per account:');
+    {
+      const intruderShare = await issueShareToken(intruder._id);
+      const marker = `share-isolation-${Date.now()}@example.invalid`;
+      await Contact.create({ userId: intruder._id, name: 'Intruder Contact', email: marker, status: 'queued' });
+
+      const res = await fetch(`${BASE}/api/share/contacts?s=${encodeURIComponent(intruderShare)}`);
+      const data = await res.json().catch(() => ({}));
+      const rows = data.contacts || [];
+      res.status === 200 ? ok('the intruder link resolves to its own account') : bad(`share link returned ${res.status}`);
+      rows.length === 1 && rows[0].email === marker
+        ? ok("it shows only that account's contact")
+        : bad(`it returned ${rows.length} rows — the owner's contacts leaked`);
+
+      const bogus = await fetch(`${BASE}/api/share/contacts?s=sh_not-a-real-token`);
+      bogus.status === 200 ? bad('a forged share token was accepted') : ok(`a forged share token -> ${bogus.status}`);
+
+      await Contact.deleteOne({ email: marker });
+    }
   } finally {
     await ScrapeRun.deleteOne({ _id: run._id });
     await ScrapeWorker.deleteMany({ userId: intruder._id });
+    await Contact.deleteMany({ userId: intruder._id });
     await User.deleteOne({ _id: intruder._id });
     console.log('\nCleaned up the test account and run.');
     await mongoose.connection.close();
