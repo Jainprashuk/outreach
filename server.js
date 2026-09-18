@@ -169,8 +169,6 @@ const requireAuth = async (req, res, next) => {
     }
   }
 
-  if (isLegacyOwner(req)) return next();
-
   // A real per-user session. The lookup needs the database, and this middleware
   // runs ahead of the per-route requireDb, so it connects for itself.
   try {
@@ -183,6 +181,18 @@ const requireAuth = async (req, res, next) => {
     }
   } catch (err) {
     return res.status(503).json({ error: `Database not available: ${err.message}` });
+  }
+
+  // Only once no session was found. The legacy shared password names no account
+  // — it meant "the owner", answerable only while exactly one exists. A signed-in
+  // user carrying a stale outreach_auth cookie must never be judged by it.
+  if (isLegacyOwner(req)) {
+    try {
+      req.userId = await resolveSoleUserId();
+      return next();
+    } catch (err) {
+      return res.status(503).json({ error: `The legacy password cannot identify an account: ${err.message}` });
+    }
   }
 
   if (req.path.startsWith('/api/')) {
