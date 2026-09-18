@@ -37,6 +37,7 @@ const buildFilter = (tab) => {
   if (tab === 'closed')         return { ...BASE_FILTER, status: 'closed' };
   if (tab === 'no-openings') return { ...BASE_FILTER, status: 'no-openings' };
   if (tab === 'in-review')   return { ...BASE_FILTER, status: 'in-review' };
+  if (tab === 'blocked')     return { ...BASE_FILTER, status: 'blocked' };
   return { ...BASE_FILTER };
 };
 
@@ -92,10 +93,11 @@ router.get('/stats', async (req, res) => {
         closed:       { $sum: { $cond: [{ $eq: ['$status', 'closed'] },         1, 0] } },
         noOpenings:  { $sum: { $cond: [{ $eq: ['$status', 'no-openings'] }, 1, 0] } },
         inReview:    { $sum: { $cond: [{ $eq: ['$status', 'in-review'] },   1, 0] } },
+        blocked:     { $sum: { $cond: [{ $eq: ['$status', 'blocked'] },     1, 0] } },
       }},
     ]);
-    const zero = { total: 0, sent: 0, bounced: 0, replied: 0, followUpReplied: 0, failed: 0, pending: 0, remaining: 0, followUpDue: 0, followUpSent: 0, closed: 0, noOpenings: 0, inReview: 0 };
-    res.json(agg ? { total: agg.total, sent: agg.sent, bounced: agg.bounced, replied: agg.replied, followUpReplied: agg.followUpReplied, failed: agg.failed, pending: agg.pending, remaining: agg.remaining, followUpDue: agg.followUpDue, followUpSent: agg.followUpSent, closed: agg.closed, noOpenings: agg.noOpenings, inReview: agg.inReview } : zero);
+    const zero = { total: 0, sent: 0, bounced: 0, replied: 0, followUpReplied: 0, failed: 0, pending: 0, remaining: 0, followUpDue: 0, followUpSent: 0, closed: 0, noOpenings: 0, inReview: 0, blocked: 0 };
+    res.json(agg ? { total: agg.total, sent: agg.sent, bounced: agg.bounced, replied: agg.replied, followUpReplied: agg.followUpReplied, failed: agg.failed, pending: agg.pending, remaining: agg.remaining, followUpDue: agg.followUpDue, followUpSent: agg.followUpSent, closed: agg.closed, noOpenings: agg.noOpenings, inReview: agg.inReview, blocked: agg.blocked } : zero);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -123,10 +125,10 @@ router.post('/reset-for-send', async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'Expected a non-empty ids array' });
     }
-    // Contacts emailed inside the cooldown window are left completely alone —
-    // they keep their real status instead of being parked at `queued`.
+    // Contacts emailed inside the cooldown window, or blocklisted, are left completely
+    // alone — they keep their real status instead of being parked at `queued`.
     const all = await Contact.find({ _id: { $in: ids }, deleted: { $ne: true } }).lean();
-    const skipped = all.filter(c => c.status === 'in-campaign' || inCooldown(c));
+    const skipped = all.filter(c => c.status === 'in-campaign' || c.status === 'blocked' || inCooldown(c));
     const skippedIds = new Set(skipped.map(c => String(c._id)));
     const eligibleIds = all.filter(c => !skippedIds.has(String(c._id))).map(c => c._id);
 
@@ -148,7 +150,7 @@ router.post('/reset-for-send', async (req, res) => {
       skipped: skipped.map(c => ({
         id: String(c._id), name: c.name, email: c.email, status: c.status,
         lastSentAt: c.lastSentAt, remainingMs: cooldownRemaining(c),
-        reason: c.status === 'in-campaign' ? 'in_campaign' : 'cooldown',
+        reason: c.status === 'in-campaign' ? 'in_campaign' : c.status === 'blocked' ? 'blocked' : 'cooldown',
       })),
     });
   } catch (err) {

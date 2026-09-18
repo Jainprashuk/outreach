@@ -19,7 +19,7 @@ export const STATUS_LABELS: Record<string, string> = {
   sent: 'Sent', 'follow-up-sent': 'Follow-up Sent', failed: 'Failed', pending: 'Pending',
   queued: 'Queued', 'in-campaign': 'In campaign', approved: 'Approved', rejected: 'Rejected', bounced: 'Bounced',
   replied: 'Replied', 'follow-up-replied': 'Replied after Follow-up', closed: 'Closed',
-  'no-openings': 'No Openings', 'in-review': 'In Review',
+  'no-openings': 'No Openings', 'in-review': 'In Review', blocked: 'Blocked',
 };
 
 export const BADGE_CLASS: Record<string, string> = {
@@ -27,7 +27,7 @@ export const BADGE_CLASS: Record<string, string> = {
   pending: 'badge-pending', queued: 'badge-queued', 'in-campaign': 'badge-pending', approved: 'badge-approved',
   rejected: 'badge-rejected', bounced: 'badge-bounced', replied: 'badge-replied',
   'follow-up-replied': 'badge-replied', closed: 'badge-closed',
-  'no-openings': 'badge-noopenings', 'in-review': 'badge-inreview',
+  'no-openings': 'badge-noopenings', 'in-review': 'badge-inreview', blocked: 'badge-blocked',
 };
 
 export const CATEGORY_LABELS: Record<string, string> = {
@@ -60,6 +60,7 @@ export const STATUS_OPTIONS = [
   { value: 'closed', label: 'Closed' },
   { value: 'no-openings', label: 'No Openings' },
   { value: 'in-review', label: 'In Review' },
+  { value: 'blocked', label: 'Blocked' },
 ] as const;
 
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;

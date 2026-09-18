@@ -370,6 +370,7 @@ tbody tr:hover { background: var(--bg2); }
 .badge-closed      { background: var(--slate-bg); color: var(--slate); }
 .badge-noopenings  { background: var(--purple-bg); color: var(--purple); }
 .badge-inreview    { background: var(--indigo-bg); color: var(--indigo); }
+.badge-blocked     { background: var(--red-bg); color: var(--red); }
 /* Editable status badges get an affordance on hover */
 .badge[ondblclick] { cursor: pointer; }
 .badge[ondblclick]:hover { filter: brightness(.97); box-shadow: inset 0 0 0 1px var(--border-md); }

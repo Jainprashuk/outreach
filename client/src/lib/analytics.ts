@@ -15,6 +15,7 @@ export const STATUS_META: Record<string, { label: string; c: string }> = {
   closed: { label: 'Closed', c: '--slate' },
   'no-openings': { label: 'No Openings', c: '--purple' },
   'in-review': { label: 'In Review', c: '--indigo' },
+  blocked: { label: 'Blocked', c: '--red' },
 };
 
 export const EMAILED = new Set(['sent', 'follow-up-sent', 'replied', 'follow-up-replied', 'bounced', 'closed', 'no-openings', 'in-review']);
@@ -154,6 +155,7 @@ export const ACTIVITY_META: Array<{ type: string; label: string; c: string; icon
   { type: 'closed', label: 'Closed', c: '--slate', icon: 'ti-circle-check' },
   { type: 'no-openings', label: 'No openings', c: '--purple', icon: 'ti-door-off' },
   { type: 'queued', label: 'Queued for sending', c: '--blue', icon: 'ti-clock' },
+  { type: 'blocked', label: 'Blocked (blocklisted)', c: '--red', icon: 'ti-ban' },
   // Interviews are a separate store, so their events are prefixed to keep them
   // from colliding with the identically-named contact statuses.
   ...INTERVIEW_STATUS_ORDER.map(st => ({

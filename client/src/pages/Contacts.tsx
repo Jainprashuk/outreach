@@ -35,7 +35,7 @@ const TABS = [
   ['in-campaign', 'In campaign'],
   ['bounced', 'Bounced'], ['replied', 'Replied'], ['followup-due', 'Follow-up Due'],
   ['follow-up-sent', 'Follow-up Sent'], ['follow-up-replied', 'Replied after Follow-up'],
-  ['closed', 'Closed'], ['no-openings', 'No Openings'], ['in-review', 'In Review'],
+  ['closed', 'Closed'], ['no-openings', 'No Openings'], ['in-review', 'In Review'], ['blocked', 'Blocked'],
 ] as const;
 
 export default function Contacts() {
@@ -171,11 +171,13 @@ export default function Contacts() {
       const { contacts, skipped, cooldownLabel } = await resetForSendApi(ids);
       if (skipped.length > 0) {
         const reserved = skipped.filter(c => c.reason === 'in_campaign').length;
-        const cooldown = skipped.length - reserved;
+        const blocked = skipped.filter(c => c.reason === 'blocked').length;
+        const cooldown = skipped.length - reserved - blocked;
         toast(
           [
             cooldown ? `${cooldown} contact${cooldown !== 1 ? 's were' : ' was'} skipped — already emailed in the last ${cooldownLabel}.` : '',
             reserved ? `${reserved} contact${reserved !== 1 ? 's are' : ' is'} already reserved by a campaign.` : '',
+            blocked ? `${blocked} contact${blocked !== 1 ? 's are' : ' is'} blocklisted and won't be sent to.` : '',
           ].filter(Boolean).join(' '),
           contacts.length === 0 ? 'error' : 'info',
         );

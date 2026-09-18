@@ -21,6 +21,17 @@ async function restoreAfterSkip(contactDoc, note) {
   });
 }
 
+// A send was skipped because the recipient is on the blocklist: mark the contact
+// `blocked` rather than quietly restoring its old status, so it's visibly flagged
+// and doesn't just re-enter the send queue on the next "Reset for sending".
+async function markBlocked(contactDoc) {
+  if (!contactDoc) return;
+  await Contact.findByIdAndUpdate(contactDoc._id, {
+    $set: { status: 'blocked' },
+    $push: { statusHistory: { status: 'blocked', changedAt: new Date(), note: BLOCKLIST_ERROR } },
+  });
+}
+
 // Converts plain-text template body to HTML.
 // Supports [link text](url) markdown-style links → <a> tags.
 // Newlines → <br>. Everything else is HTML-escaped.
@@ -132,7 +143,7 @@ const sendSingleEmail = inngest.createFunction(
           'items.$.error': BLOCKLIST_ERROR,
           'items.$.processedAt': new Date(),
         });
-        await restoreAfterSkip(contactDoc, 'Send skipped — recipient is on the blocklist; status restored');
+        await markBlocked(contactDoc);
         return;
       }
       const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
@@ -304,7 +315,7 @@ const sendEmailBulk = inngest.createFunction(
                   $inc: { processedCount: 1 },
                 }
               );
-              await restoreAfterSkip(contactDoc, 'Send skipped — recipient is on the blocklist; status restored');
+              await markBlocked(contactDoc);
               continue;
             }
 

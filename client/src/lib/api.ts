@@ -9,7 +9,7 @@ export const loadActivityLogsApi = () => apiFetch<ActivityLog[]>('/api/logs?limi
 
 export type ContactStatus =
   | 'queued' | 'in-campaign' | 'sent' | 'follow-up-sent' | 'failed' | 'bounced'
-  | 'replied' | 'follow-up-replied' | 'closed' | 'no-openings' | 'in-review';
+  | 'replied' | 'follow-up-replied' | 'closed' | 'no-openings' | 'in-review' | 'blocked';
 
 export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
@@ -194,7 +194,7 @@ export const deleteBlocklistEntryApi = (id: string) =>
 
 export interface CooldownSkip {
   id: string; name: string; email: string; status: ContactStatus;
-  lastSentAt: string | null; remainingMs: number; reason?: 'cooldown' | 'in_campaign';
+  lastSentAt: string | null; remainingMs: number; reason?: 'cooldown' | 'in_campaign' | 'blocked';
 }
 
 export interface ResetForSendResult {
