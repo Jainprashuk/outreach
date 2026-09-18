@@ -18,6 +18,8 @@ const {
 } = require('./lib/session');
 const { auditHttpMutations } = require('./lib/activityLog');
 const { attachUser } = require('./lib/currentUser');
+const { usersByStaleness, runForUsers } = require('./lib/fanout');
+const { deadline } = require('./lib/http');
 const { classifyReply } = require('./lib/replyClassifier');
 const { runBackfillBatch } = require('./routes/contacts');
 
@@ -138,8 +140,10 @@ const requireAuth = async (req, res, next) => {
   if (/\.(css|js|woff2?|ttf|svg|ico|png|jpg|jpeg)$/.test(req.path)) return next();
 
   // Scheduled jobs have no cookie to send. Gated to two exact paths, and inert
-  // unless CRON_SECRET is configured.
-  if (CRON_PATHS.has(req.path) && isCron(req)) return next();
+  // unless CRON_SECRET is configured. Flagged explicitly rather than inferred
+  // from "no session", which would also catch legacy-login and AUTH_OPEN
+  // requests and make a person's click behave like a sweep over every account.
+  if (CRON_PATHS.has(req.path) && isCron(req)) { req.isCron = true; return next(); }
 
   // The scrape worker runs on a Mac and has no cookie either. Same exact-path
   // rule, inert unless WORKER_SECRET is configured.
@@ -612,13 +616,15 @@ const BOUNCE_LOOKBACK_DAYS = 7;
 const REPLY_LOOKBACK_DAYS = 30;
 const BUFFER_MS = 5 * 60 * 1000;
 
-app.post('/api/check-mailbox', requireDb, async (req, res) => {
-  const sender = await mailer.getSenderFor(req.userId);
+// One user's mailbox scan. Extracted from the route so the cron can run it for
+// every account: there is no longer a single mailbox to check.
+async function checkMailboxForUser(userId) {
+  const sender = await mailer.getSenderFor(userId);
   if (!sender.email || !sender.appPassword) {
-    return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+    return { ok: false, skipped: 'no_credentials' };
   }
 
-  const settings = await Settings.findOne({ userId: req.userId }, { 'resume.data': 0 });
+  const settings = await Settings.findOne({ userId: userId }, { 'resume.data': 0 });
   const lastChecked = settings?.lastMailboxCheckAt ?? null;
 
   const fallbackBounce = new Date(Date.now() - BOUNCE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
@@ -643,7 +649,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   // Pre-load ALL contacts once with a lean projection — eliminates N+1 queries in the scan loop.
   // `thread.messageId` only (not full text/html) keeps this payload small even as threads grow.
   const allContacts = await Contact.find(
-    { userId: req.userId, deleted: { $ne: true } },
+    { userId: userId, deleted: { $ne: true } },
     'email name status bounceReason messageId updatedAt thread.messageId lastSentAt repliedAt'
   ).lean();
 
@@ -697,20 +703,20 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
 
             if (existing.status !== 'bounced') {
               existing.status = 'bounced'; // in-memory: prevents double-processing
-              await Contact.findOneAndUpdate({ _id: existing._id, userId: req.userId }, {
+              await Contact.findOneAndUpdate({ _id: existing._id, userId: userId }, {
                 $set: { status: 'bounced', bounceReason: reason },
                 $push: { statusHistory: { status: 'bounced', changedAt: new Date(), note: reason || 'Bounce detected' } },
               });
               bounced.push({ email: existing.email, name: existing.name, reason });
             } else if (reason !== existing.bounceReason && reason.length > (existing.bounceReason || '').length) {
               existing.bounceReason = reason;
-              await Contact.findOneAndUpdate({ _id: existing._id, userId: req.userId }, { bounceReason: reason });
+              await Contact.findOneAndUpdate({ _id: existing._id, userId: userId }, { bounceReason: reason });
             }
           }
           continue;
         }
 
-        await tryMatchReply(raw, byMessageId, byEmail, replied, req.userId);
+        await tryMatchReply(raw, byMessageId, byEmail, replied, userId);
       }
     } finally {
       lock.release();
@@ -729,7 +735,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
       for (const uid of uids) {
         const msg = await client.fetchOne(uid, { source: true }, { uid: true });
         if (!msg?.source) continue;
-        await trySentReply(msg.source.toString('utf8'), byMessageId, byEmail, req.userId);
+        await trySentReply(msg.source.toString('utf8'), byMessageId, byEmail, userId);
       }
     } finally {
       lock.release();
@@ -743,12 +749,12 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     }
     await scanSentMailbox('[Gmail]/Sent');
   } catch (err) {
-    return res.status(500).json({ error: 'IMAP check failed', detail: err.message });
+    throw new Error(`IMAP check failed: ${err.message}`);
   } finally {
     try { await client.logout(); } catch (_) {}
   }
 
-  await Settings.findOneAndUpdate({ userId: req.userId }, { lastMailboxCheckAt: new Date() });
+  await Settings.findOneAndUpdate({ userId: userId }, { lastMailboxCheckAt: new Date() });
 
   // Drains the legacy thread/classification backfill in the background, piggybacking on this
   // cron so the "Backfill now" button on Mailbox is a manual override, not the only way it
@@ -756,12 +762,41 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   // best-effort — a failure here (e.g. a classifier rate limit) must not fail the mailbox check.
   let backfill = null;
   try {
-    backfill = await runBackfillBatch(20, req.userId);
+    backfill = await runBackfillBatch(20, userId);
   } catch (err) {
     backfill = { error: err.message };
   }
 
-  res.json({ ok: true, scanned, bounced, replied, lastCheckedAt: new Date(), backfill });
+  return { ok: true, scanned, bounced, replied, lastCheckedAt: new Date(), backfill };
+}
+
+// POST /api/check-mailbox
+// A signed-in person checks their own mailbox. The cron has no session, so it
+// sweeps every account, longest-unchecked first, within a time budget — Vercel
+// kills the function at 60s and a killed sweep reports nothing at all.
+app.post('/api/check-mailbox', requireDb, async (req, res) => {
+  try {
+    if (!req.isCron) {
+      const result = await checkMailboxForUser(req.userId);
+      if (result.skipped === 'no_credentials') {
+        return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+      }
+      return res.json(result);
+    }
+
+    // Measured: a single mailbox scan takes ~50s against a real Gmail account,
+    // and Vercel kills the function at 60s. The budget can only stop the loop
+    // STARTING another account, never interrupt one in flight, so it is set well
+    // below the cost of one scan: in practice a tick handles one account and
+    // defers the rest to the next tick, oldest-first so nobody is starved.
+    // More than a handful of accounts needs the Inngest fan-out (one event per
+    // user, workers in parallel) rather than this serial sweep.
+    const userIds = await usersByStaleness('lastMailboxCheckAt');
+    const report = await runForUsers(userIds, checkMailboxForUser, { budget: deadline(25_000) });
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Send single email (legacy — kept for step3 fallback) ──────────────────

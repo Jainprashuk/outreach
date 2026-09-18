@@ -4,6 +4,8 @@ const JobBoard = require('../models/JobBoard');
 const Settings = require('../models/Settings');
 const boards = require('../lib/boards');
 const { syncAllBoards, MASS_CLOSE_WARN } = require('../lib/postingSync');
+const { usersByStaleness, runForUsers } = require('../lib/fanout');
+const { deadline } = require('../lib/http');
 const { normaliseCriteria, matchesCriteria, DEFAULTS: CRITERIA_DEFAULTS } = require('../lib/criteria');
 const { listCompanies } = require('../lib/boards/museCompanies');
 const { STARTER_BOARDS } = require('../lib/boards/starterBoards');
@@ -339,6 +341,19 @@ router.delete('/boards/:id', async (req, res) => {
 router.post('/sync', async (req, res) => {
   try {
     const { boardIds, dryRun } = req.body || {};
+
+    // A signed-in person syncs their own boards. The cron has no session, so it
+    // sweeps every account, longest-unsynced first, inside a time budget.
+    if (req.isCron) {
+      const userIds = await usersByStaleness('lastPostingSyncAt');
+      const report = await runForUsers(
+        userIds,
+        (userId) => syncAllBoards({ boardIds: null, dryRun: !!dryRun, userId }),
+        { budget: deadline(45_000) },
+      );
+      return res.json({ ...report, massCloseWarnThreshold: MASS_CLOSE_WARN });
+    }
+
     const report = await syncAllBoards({
       boardIds: Array.isArray(boardIds) ? boardIds.map(String) : null,
       dryRun: !!dryRun,
