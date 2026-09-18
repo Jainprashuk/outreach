@@ -25,7 +25,7 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
 
   // The six routes worth reaching in one click stay at the top level; the rest
   // live in a group that remembers whether it was open.
-  const OTHERS = ['/add-contacts', '/jobs', '/templates', '/export-contacts'];
+  const OTHERS = ['/add-contacts', '/jobs', '/templates', '/blocklist', '/export-contacts'];
   const inOthers = OTHERS.some(p => pathname === p || pathname.startsWith(p + '/'));
   const [othersOpen, setOthersOpen] = useState(() => {
     try { return localStorage.getItem('outreach-nav-others') === 'open'; } catch { return false; }
@@ -90,6 +90,9 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
         </NavLink>
         <NavLink to="/templates" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
           <i className="ti ti-file-text" /> Templates
+        </NavLink>
+        <NavLink to="/blocklist" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+          <i className="ti ti-ban" /> Blocklist
         </NavLink>
         <NavLink to="/export-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
           <i className="ti ti-file-export" /> Export Contacts

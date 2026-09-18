@@ -5,18 +5,19 @@ const SendJob = require('./models/SendJob');
 const Contact = require('./models/Contact');
 const mailer = require('./lib/mailer');
 const { COOLDOWN_ERROR, COOLDOWN_LABEL, inCooldown, priorStatus } = require('./lib/cooldown');
+const { BLOCKLIST_ERROR, isBlocked, loadBlocklistSets } = require('./lib/blocklist');
 const { notifyCampaignJobFinished } = require('./lib/campaignNotifications');
 const { logEvent } = require('./lib/activityLog');
 const db = require('./db');
 
-// A send was skipped for cooldown: make sure the contact isn't left parked at
-// `queued` by the "Reset for sending" that preceded the job.
-async function restoreAfterCooldownSkip(contactDoc) {
+// A send was skipped (cooldown or blocklist): make sure the contact isn't left
+// parked at `queued` by the "Reset for sending" that preceded the job.
+async function restoreAfterSkip(contactDoc, note) {
   if (!contactDoc || contactDoc.status !== 'queued') return;
   const status = priorStatus(contactDoc);
   await Contact.findByIdAndUpdate(contactDoc._id, {
     $set: { status, approvalStatus: 'approved' },
-    $push: { statusHistory: { status, changedAt: new Date(), note: `Send skipped — already emailed within the last ${COOLDOWN_LABEL}; status restored` } },
+    $push: { statusHistory: { status, changedAt: new Date(), note } },
   });
 }
 
@@ -120,7 +121,18 @@ const sendSingleEmail = inngest.createFunction(
           'items.$.error': COOLDOWN_ERROR,
           'items.$.processedAt': new Date(),
         });
-        await restoreAfterCooldownSkip(contactDoc);
+        await restoreAfterSkip(contactDoc, `Send skipped — already emailed within the last ${COOLDOWN_LABEL}; status restored`);
+        return;
+      }
+
+      // Blocklist check — skip if the recipient's address or domain is blocklisted
+      if (isBlocked(item.to, await loadBlocklistSets())) {
+        await _atomicItemUpdate(jobId, contactId, {
+          'items.$.status': 'skipped',
+          'items.$.error': BLOCKLIST_ERROR,
+          'items.$.processedAt': new Date(),
+        });
+        await restoreAfterSkip(contactDoc, 'Send skipped — recipient is on the blocklist; status restored');
         return;
       }
       const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
@@ -239,6 +251,7 @@ const sendEmailBulk = inngest.createFunction(
       }
 
       const attachments = await mailer.getResumeAttachment(job.attachResume);
+      const blocklistSets = await loadBlocklistSets();
 
       for (let ci = 0; ci < chunks.length; ci++) {
         const chunk = chunks[ci];
@@ -275,7 +288,23 @@ const sendEmailBulk = inngest.createFunction(
                   $inc: { processedCount: 1 },
                 }
               );
-              await restoreAfterCooldownSkip(contactDoc);
+              await restoreAfterSkip(contactDoc, `Send skipped — already emailed within the last ${COOLDOWN_LABEL}; status restored`);
+              continue;
+            }
+
+            if (isBlocked(item.to, blocklistSets)) {
+              await SendJob.findOneAndUpdate(
+                { _id: jobId, 'items.contactId': item.contactId },
+                {
+                  $set: {
+                    'items.$.status': 'skipped',
+                    'items.$.error': BLOCKLIST_ERROR,
+                    'items.$.processedAt': new Date(),
+                  },
+                  $inc: { processedCount: 1 },
+                }
+              );
+              await restoreAfterSkip(contactDoc, 'Send skipped — recipient is on the blocklist; status restored');
               continue;
             }
 

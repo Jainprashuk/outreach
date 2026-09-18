@@ -176,6 +176,22 @@ export const updateTemplateApi = (key: string, patch: Partial<Template>) =>
 export const deleteTemplateApi = (key: string) =>
   apiFetch<void>(`/api/templates/${key}`, { method: 'DELETE' });
 
+export interface BlocklistEntry {
+  id: string;
+  type: 'email' | 'domain';
+  value: string;
+  reason: string;
+  createdAt: string;
+}
+
+export const loadBlocklistApi = () => apiFetch<BlocklistEntry[]>('/api/blocklist');
+
+export const createBlocklistEntryApi = (data: { type?: 'email' | 'domain'; value: string; reason?: string }) =>
+  apiFetch<BlocklistEntry>('/api/blocklist', { method: 'POST', body: JSON.stringify(data) });
+
+export const deleteBlocklistEntryApi = (id: string) =>
+  apiFetch<{ ok: boolean }>(`/api/blocklist/${id}`, { method: 'DELETE' });
+
 export interface CooldownSkip {
   id: string; name: string; email: string; status: ContactStatus;
   lastSentAt: string | null; remainingMs: number; reason?: 'cooldown' | 'in_campaign';

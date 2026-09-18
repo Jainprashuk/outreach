@@ -284,6 +284,7 @@ app.use('/api/interviews', requireDb, require('./routes/interviews'));
 // the email SendJob routes above, and these are job *postings* anyway.
 app.use('/api/postings', requireDb, require('./routes/postings'));
 app.use('/api/campaigns', requireDb, require('./routes/campaigns'));
+app.use('/api/blocklist', requireDb, require('./routes/blocklist'));
 
 // ── Inngest handler ─────────────────────────────────────────────────────────
 const { serve } = require('inngest/express');

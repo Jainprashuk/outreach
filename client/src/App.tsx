@@ -10,6 +10,7 @@ import Interviews from './pages/Interviews';
 import AddContacts from './pages/AddContacts';
 import ExportContacts from './pages/ExportContacts';
 import Templates from './pages/Templates';
+import Blocklist from './pages/Blocklist';
 import Analytics from './pages/Analytics';
 import Settings from './pages/Settings';
 import Logs from './pages/Logs';
@@ -52,6 +53,7 @@ export default function App() {
       <Route path="/add-contacts" element={owner(<AddContacts />)} />
       <Route path="/export-contacts" element={<ExportContacts />} />
       <Route path="/templates" element={owner(<Templates />)} />
+      <Route path="/blocklist" element={owner(<Blocklist />)} />
       <Route path="/analytics" element={owner(<Analytics />)} />
       <Route path="/settings" element={owner(<Settings />)} />
       <Route path="/logs" element={owner(<Logs />)} />
