@@ -9,7 +9,12 @@ const path = require('path');
 const db = require('./db');
 const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
+const User = require('./models/User');
 const mailer = require('./lib/mailer');
+const { verifyPassword } = require('./lib/password');
+const {
+  createSession, resolveSession, destroySession, setCookieHeader, clearCookieHeader,
+} = require('./lib/session');
 const { auditHttpMutations } = require('./lib/activityLog');
 const { attachUser } = require('./lib/currentUser');
 const { classifyReply } = require('./lib/replyClassifier');
@@ -105,12 +110,24 @@ const cookieMatches = (req, name, expected) => {
   }
 };
 
-const isOwner = (req) => cookieMatches(req, AUTH_COOKIE, AUTH_TOKEN);
+// ── Legacy shared-password login — the rollback path ────────────────────────
+// Phase 3 of the multi-tenant migration replaced this with per-user sessions.
+// It stays reachable for one deploy cycle so a bug in session auth cannot lock
+// the owner out of their own app, but it is OFF unless explicitly switched on:
+// it authenticates "whoever knows the password", which has no place once more
+// than one account exists.
+const LEGACY_LOGIN = process.env.LEGACY_LOGIN === '1' && !!AUTH_TOKEN;
+
+// Escape hatch for local development, replacing the old "no password set means
+// no auth" rule. Explicit, because that rule failed open on a missing env var.
+const AUTH_OPEN = process.env.AUTH_OPEN === '1';
+
+const isLegacyOwner = (req) => LEGACY_LOGIN && cookieMatches(req, AUTH_COOKIE, AUTH_TOKEN);
 const isShare = (req) => cookieMatches(req, EXPORT_COOKIE, EXPORT_TOKEN);
 
-const requireAuth = (req, res, next) => {
-  if (!AUTH_TOKEN) return next(); // no password configured → open (local dev)
-  if (req.path === '/login' || req.path.startsWith('/api/inngest')) return next();
+const requireAuth = async (req, res, next) => {
+  if (AUTH_OPEN) return next();
+  if (req.path === '/login' || req.path.startsWith('/api/auth') || req.path.startsWith('/api/inngest')) return next();
   // The React SPA shell is public so share/unauthenticated visitors can load it;
   // the client renders "Not authorised" for owner-only pages and all owner DATA
   // endpoints below stay gated. The share API self-guards.
@@ -127,7 +144,21 @@ const requireAuth = (req, res, next) => {
   // rule, inert unless WORKER_SECRET is configured.
   if (WORKER_PATHS.has(req.path) && isWorker(req)) return next();
 
-  if (isOwner(req)) return next();
+  if (isLegacyOwner(req)) return next();
+
+  // A real per-user session. The lookup needs the database, and this middleware
+  // runs ahead of the per-route requireDb, so it connects for itself.
+  try {
+    await ensureDb();
+    const session = await resolveSession(req);
+    if (session) {
+      req.session = session;
+      req.userId = session.userId;
+      return next();
+    }
+  } catch (err) {
+    return res.status(503).json({ error: `Database not available: ${err.message}` });
+  }
 
   if (req.path.startsWith('/api/')) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -139,20 +170,59 @@ app.use(requireAuth);
 
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 
-app.post('/login', (req, res) => {
-  const { password } = req.body;
-  if (!AUTH_TOKEN || (password && makeToken(password) === AUTH_TOKEN)) {
-    const token = AUTH_TOKEN || '';
-    res.setHeader('Set-Cookie',
-      `${AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}; Path=/`
-    );
-    return res.redirect('/');
+// Email + password. Signups are deliberately closed: without verified email
+// there is nothing stopping someone registering as anybody, so accounts are
+// created out of band by scripts/set-password.js until OTP lands.
+app.post('/api/auth/login', async (req, res) => {
+  const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+  const password = String((req.body && req.body.password) || '');
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+
+  try {
+    await ensureDb();
+    const user = await User.findOne({ email });
+    // One message and one code for "no such account" and "wrong password", so
+    // this endpoint cannot be used to discover which addresses have accounts.
+    const okPassword = user ? await verifyPassword(password, user.passwordHash) : false;
+    if (!user || !okPassword) return res.status(401).json({ error: 'Incorrect email or password' });
+
+    const token = await createSession(user._id);
+    res.setHeader('Set-Cookie', setCookieHeader(token));
+    await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } });
+    res.json({ ok: true, user: { id: user._id.toString(), email: user.email, name: user.name } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  res.redirect('/login?error=1');
 });
 
-app.get('/logout', (_req, res) => {
-  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; HttpOnly; Max-Age=0; Path=/`);
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    await ensureDb();
+    await destroySession(req);
+  } catch (_) { /* clearing the cookie matters more than tidying the row */ }
+  res.setHeader('Set-Cookie', clearCookieHeader());
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/session', async (req, res) => {
+  try {
+    await ensureDb();
+    const session = await resolveSession(req);
+    if (!session) return res.json({ authenticated: false });
+    const user = await User.findById(session.userId, { email: 1, name: 1 }).lean();
+    if (!user) return res.json({ authenticated: false });
+    res.json({ authenticated: true, user: { id: user._id.toString(), email: user.email, name: user.name } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/logout', async (req, res) => {
+  try {
+    await ensureDb();
+    await destroySession(req);
+  } catch (_) { /* as above */ }
+  res.setHeader('Set-Cookie', clearCookieHeader());
   res.redirect('/login');
 });
 
@@ -227,14 +297,32 @@ const requireDb = async (req, res, next) => {
 
 // ── Public share (read-only export) ──────────────────────────────────────────
 // Owner is always allowed; otherwise a valid share cookie is required.
-const requireShareAuth = (req, res, next) => {
-  if (isOwner(req) || isShare(req)) return next();
+const requireShareAuth = async (req, res, next) => {
+  if (AUTH_OPEN || isLegacyOwner(req) || isShare(req)) return next();
+  // A signed-in user may always read their own export.
+  try {
+    const session = await resolveSession(req);
+    if (session) { req.session = session; req.userId = session.userId; return next(); }
+  } catch (_) { /* fall through to the share-password check */ }
   if (!EXPORT_TOKEN) return res.status(503).json({ error: 'Sharing not configured' });
   return res.status(401).json({ error: 'Unauthorized' });
 };
 
-app.get('/api/share/session', (req, res) => {
-  res.json({ owner: isOwner(req), share: isShare(req) });
+// On the /api/share carve-out, so requireAuth lets it through without resolving
+// a session — it has to do that itself to answer whether the caller is signed in.
+app.get('/api/share/session', requireDb, async (req, res) => {
+  let owner = AUTH_OPEN || isLegacyOwner(req);
+  let user = null;
+  if (!owner) {
+    try {
+      const session = await resolveSession(req);
+      if (session) {
+        const doc = await User.findById(session.userId, { email: 1, name: 1 }).lean();
+        if (doc) { owner = true; user = { id: doc._id.toString(), email: doc.email, name: doc.name }; }
+      }
+    } catch (_) { /* fall through as signed-out */ }
+  }
+  res.json({ owner, share: isShare(req), user });
 });
 
 app.post('/api/share/login', (req, res) => {

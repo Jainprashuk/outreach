@@ -12,22 +12,33 @@
  *
  * Run against a dev database ONLY, with the server already up:
  *   NODE_ENV=dev PORT=4012 node server.js
- *   node scripts/test-tenant-isolation.js --base=http://localhost:4012
+ *   node scripts/test-tenant-isolation.js --base=http://localhost:4012 \
+ *     --email=you@example.com --password=...
  */
 require('dotenv').config();
 const mongoose = require('mongoose');
-const crypto = require('crypto');
 
 const args = process.argv.slice(2);
 const value = (n) => { const h = args.find(a => a.startsWith(`--${n}=`)); return h ? h.slice(n.length + 3) : null; };
 const BASE = value('base') || 'http://localhost:4012';
 const URI = process.env.MONGODB_URI_DEV;
 
-const authCookie = () => {
-  const secret = process.env.AUTH_SECRET || 'outreach-default-secret';
-  if (!process.env.AUTH_PASSWORD) return '';
-  return 'outreach_auth=' + crypto.createHmac('sha256', secret).update(process.env.AUTH_PASSWORD).digest('hex');
-};
+// Signs in for real over HTTP rather than forging a cookie, so the test
+// exercises the same path a browser takes.
+let SESSION_COOKIE = '';
+async function login(email, password) {
+  const res = await fetch(BASE + '/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error(`Login failed (${res.status}) — pass --email and --password`);
+  const setCookie = res.headers.get('set-cookie') || '';
+  SESSION_COOKIE = setCookie.split(';')[0];
+  if (!SESSION_COOKIE) throw new Error('Login returned no session cookie');
+}
+
+const authCookie = () => SESSION_COOKIE;
 
 const INTRUDER = new mongoose.Types.ObjectId();
 let pass = 0, fail = 0;
@@ -59,9 +70,15 @@ async function main() {
   if (!URI) throw new Error('MONGODB_URI_DEV is not set');
   if (/prod/i.test(URI)) throw new Error('Refusing to run against a production URI');
 
-  await mongoose.connect(URI, { serverSelectionTimeoutMS: 10000 });
+  const email = value('email');
+  const password = value('password');
+  if (!email || !password) throw new Error('Pass --email= and --password= for the genuine account');
+  await login(email, password);
+
+  await mongoose.connect(URI, { serverSelectionTimeoutMS: 20000 });
   const db = mongoose.connection.db;
   console.log(`\nDatabase: ${db.databaseName}`);
+  console.log(`Signed in as: ${email}`);
   console.log(`Intruder user id: ${INTRUDER}\n`);
 
   const now = new Date();

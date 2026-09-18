@@ -18,7 +18,7 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
   wide?: boolean; // main content manages its own layout (wizard uses this)
 }) {
   const { toggleTheme } = useTheme(); // applies data-theme + provides the toggle
-  const { owner } = useSession();
+  const { owner, user, logout } = useSession();
   const { reminders } = useInterviews();
   const [menuOpen, setMenuOpen] = useState(false);
   const { pathname } = useLocation();
@@ -117,12 +117,18 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
               <span className="tt-icon"><i className="ti ti-arrow-back-up" />Classic UI</span>
               <i className="ti ti-chevron-right" style={{ fontSize: 12 }} />
             </button>
-            <a
-              href="/logout"
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--text2)', textDecoration: 'none', padding: '6px 0', marginTop: 4 }}
+            {user && (
+              <div style={{ fontSize: 11, color: 'var(--text3)', padding: '6px 0 0', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {user.email}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={logout}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontFamily: 'inherit', color: 'var(--text2)', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0', marginTop: 4 }}
             >
               <i className="ti ti-logout" style={{ fontSize: 14 }} />Sign out
-            </a>
+            </button>
           </>
         )}
       </div>
