@@ -9,8 +9,19 @@ const path = require('path');
 const db = require('./db');
 const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
+const User = require('./models/User');
 const mailer = require('./lib/mailer');
+const { verifyPassword } = require('./lib/password');
+const credentials = require('./lib/credentials');
+const {
+  createSession, resolveSession, destroySession, setCookieHeader, clearCookieHeader,
+} = require('./lib/session');
 const { auditHttpMutations } = require('./lib/activityLog');
+const { attachUser } = require('./lib/currentUser');
+const { resolveWorkerUser } = require('./lib/workerAuth');
+const { issueShareToken, revokeShareToken, resolveShareUser, hasShareToken } = require('./lib/shareAuth');
+const { usersByStaleness, runForUsers } = require('./lib/fanout');
+const { deadline } = require('./lib/http');
 const { classifyReply } = require('./lib/replyClassifier');
 const { runBackfillBatch } = require('./routes/contacts');
 
@@ -49,8 +60,10 @@ const CRON_TOKEN  = CRON_SECRET ? makeToken('cron:' + CRON_SECRET) : null;
 // ── Fourth independent credential — the LinkedIn scrape worker ──────────────
 // Separate from CRON_SECRET on purpose: that one lives in GitHub Actions, this
 // one lives on a laptop, so they should be revocable independently.
+// Now a legacy fallback: per-account worker tokens live on the User document
+// (lib/workerAuth.js), and this one is only honoured while a single account
+// exists, so one shared secret can never claim somebody else's runs.
 const WORKER_SECRET = process.env.WORKER_SECRET;
-const WORKER_TOKEN  = WORKER_SECRET ? makeToken('worker:' + WORKER_SECRET) : null;
 
 // Constant-time compare of two hex digests. Both sides are fixed-length here, so
 // the length precheck that stops timingSafeEqual from throwing cannot leak
@@ -83,12 +96,11 @@ const isCron = (req) => {
   return tokenMatches(makeToken('cron:' + raw), CRON_TOKEN);
 };
 
-const isWorker = (req) => {
-  if (!WORKER_TOKEN) return false;   // unset secret => carve-out is inert
-  const raw = req.headers['x-worker-secret'];
-  if (typeof raw !== 'string' || !raw) return false;
-  return tokenMatches(makeToken('worker:' + raw), WORKER_TOKEN);
-};
+// Resolves the ACCOUNT behind a worker token, not just "is this the worker".
+// A scrape run, the leads it ingests and the 7-day LinkedIn block it can trigger
+// all belong to one user, so the credential has to name them.
+const resolveWorker = (req) =>
+  resolveWorkerUser(req.headers['x-worker-secret'], { legacySecret: WORKER_SECRET || null });
 
 // Read a cookie value from the raw header and constant-time compare to a token.
 const cookieMatches = (req, name, expected) => {
@@ -104,29 +116,69 @@ const cookieMatches = (req, name, expected) => {
   }
 };
 
-const isOwner = (req) => cookieMatches(req, AUTH_COOKIE, AUTH_TOKEN);
+// ── Legacy shared-password login — the rollback path ────────────────────────
+// Phase 3 of the multi-tenant migration replaced this with per-user sessions.
+// It stays reachable for one deploy cycle so a bug in session auth cannot lock
+// the owner out of their own app, but it is OFF unless explicitly switched on:
+// it authenticates "whoever knows the password", which has no place once more
+// than one account exists.
+const LEGACY_LOGIN = process.env.LEGACY_LOGIN === '1' && !!AUTH_TOKEN;
+
+// Escape hatch for local development, replacing the old "no password set means
+// no auth" rule. Explicit, because that rule failed open on a missing env var.
+const AUTH_OPEN = process.env.AUTH_OPEN === '1';
+
+const isLegacyOwner = (req) => LEGACY_LOGIN && cookieMatches(req, AUTH_COOKIE, AUTH_TOKEN);
 const isShare = (req) => cookieMatches(req, EXPORT_COOKIE, EXPORT_TOKEN);
 
-const requireAuth = (req, res, next) => {
-  if (!AUTH_TOKEN) return next(); // no password configured → open (local dev)
-  if (req.path === '/login' || req.path.startsWith('/api/inngest')) return next();
+const requireAuth = async (req, res, next) => {
+  if (AUTH_OPEN) return next();
+  if (req.path === '/login' || req.path.startsWith('/api/auth') || req.path.startsWith('/api/inngest')) return next();
   // The React SPA shell is public so share/unauthenticated visitors can load it;
   // the client renders "Not authorised" for owner-only pages and all owner DATA
   // endpoints below stay gated. The share API self-guards.
   if (req.path === '/app' || req.path.startsWith('/app/')) return next();
-  if (req.path.startsWith('/api/share')) return next();
+  // Trailing slash matters: the carve-out is for the unauthenticated share API
+  // under /api/share/, NOT for /api/share-link, which is owner-only management
+  // and must stay behind auth. A bare /api/share prefix would swallow it.
+  if (req.path.startsWith('/api/share/')) return next();
   // Allow static assets so the login page can load its CSS/JS
   if (/\.(css|js|woff2?|ttf|svg|ico|png|jpg|jpeg)$/.test(req.path)) return next();
 
   // Scheduled jobs have no cookie to send. Gated to two exact paths, and inert
-  // unless CRON_SECRET is configured.
-  if (CRON_PATHS.has(req.path) && isCron(req)) return next();
+  // unless CRON_SECRET is configured. Flagged explicitly rather than inferred
+  // from "no session", which would also catch legacy-login and AUTH_OPEN
+  // requests and make a person's click behave like a sweep over every account.
+  if (CRON_PATHS.has(req.path) && isCron(req)) { req.isCron = true; return next(); }
 
   // The scrape worker runs on a Mac and has no cookie either. Same exact-path
-  // rule, inert unless WORKER_SECRET is configured.
-  if (WORKER_PATHS.has(req.path) && isWorker(req)) return next();
+  // rule. Its token identifies the account, so req.userId is set here and every
+  // handler downstream stays scoped without knowing how the caller authenticated.
+  if (WORKER_PATHS.has(req.path)) {
+    try {
+      await ensureDb();
+      const workerUserId = await resolveWorker(req);
+      if (workerUserId) { req.isWorker = true; req.userId = workerUserId; return next(); }
+    } catch (err) {
+      return res.status(503).json({ error: `Database not available: ${err.message}` });
+    }
+  }
 
-  if (isOwner(req)) return next();
+  if (isLegacyOwner(req)) return next();
+
+  // A real per-user session. The lookup needs the database, and this middleware
+  // runs ahead of the per-route requireDb, so it connects for itself.
+  try {
+    await ensureDb();
+    const session = await resolveSession(req);
+    if (session) {
+      req.session = session;
+      req.userId = session.userId;
+      return next();
+    }
+  } catch (err) {
+    return res.status(503).json({ error: `Database not available: ${err.message}` });
+  }
 
   if (req.path.startsWith('/api/')) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -138,20 +190,59 @@ app.use(requireAuth);
 
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 
-app.post('/login', (req, res) => {
-  const { password } = req.body;
-  if (!AUTH_TOKEN || (password && makeToken(password) === AUTH_TOKEN)) {
-    const token = AUTH_TOKEN || '';
-    res.setHeader('Set-Cookie',
-      `${AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Strict; Max-Age=${COOKIE_MAX_AGE}; Path=/`
-    );
-    return res.redirect('/');
+// Email + password. Signups are deliberately closed: without verified email
+// there is nothing stopping someone registering as anybody, so accounts are
+// created out of band by scripts/set-password.js until OTP lands.
+app.post('/api/auth/login', async (req, res) => {
+  const email = String((req.body && req.body.email) || '').trim().toLowerCase();
+  const password = String((req.body && req.body.password) || '');
+  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
+
+  try {
+    await ensureDb();
+    const user = await User.findOne({ email });
+    // One message and one code for "no such account" and "wrong password", so
+    // this endpoint cannot be used to discover which addresses have accounts.
+    const okPassword = user ? await verifyPassword(password, user.passwordHash) : false;
+    if (!user || !okPassword) return res.status(401).json({ error: 'Incorrect email or password' });
+
+    const token = await createSession(user._id);
+    res.setHeader('Set-Cookie', setCookieHeader(token));
+    await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } });
+    res.json({ ok: true, user: { id: user._id.toString(), email: user.email, name: user.name } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
-  res.redirect('/login?error=1');
 });
 
-app.get('/logout', (_req, res) => {
-  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; HttpOnly; Max-Age=0; Path=/`);
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    await ensureDb();
+    await destroySession(req);
+  } catch (_) { /* clearing the cookie matters more than tidying the row */ }
+  res.setHeader('Set-Cookie', clearCookieHeader());
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/session', async (req, res) => {
+  try {
+    await ensureDb();
+    const session = await resolveSession(req);
+    if (!session) return res.json({ authenticated: false });
+    const user = await User.findById(session.userId, { email: 1, name: 1 }).lean();
+    if (!user) return res.json({ authenticated: false });
+    res.json({ authenticated: true, user: { id: user._id.toString(), email: user.email, name: user.name } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/logout', async (req, res) => {
+  try {
+    await ensureDb();
+    await destroySession(req);
+  } catch (_) { /* as above */ }
+  res.setHeader('Set-Cookie', clearCookieHeader());
   res.redirect('/login');
 });
 
@@ -226,14 +317,43 @@ const requireDb = async (req, res, next) => {
 
 // ── Public share (read-only export) ──────────────────────────────────────────
 // Owner is always allowed; otherwise a valid share cookie is required.
-const requireShareAuth = (req, res, next) => {
-  if (isOwner(req) || isShare(req)) return next();
+const requireShareAuth = async (req, res, next) => {
+  if (AUTH_OPEN || isLegacyOwner(req) || isShare(req)) return next();
+  // A per-account link token. This is what makes sharing multi-tenant: the token
+  // names WHOSE export is being read, which one global password never could.
+  try {
+    const shareUserId = await resolveShareUser(req.query.s, { legacySecret: null });
+    if (shareUserId) { req.isShareLink = true; req.userId = shareUserId; return next(); }
+  } catch (_) { /* fall through */ }
+
+  // A signed-in user may always read their own export.
+  try {
+    const session = await resolveSession(req);
+    if (session) { req.session = session; req.userId = session.userId; return next(); }
+  } catch (_) { /* fall through to the share-password check */ }
   if (!EXPORT_TOKEN) return res.status(503).json({ error: 'Sharing not configured' });
   return res.status(401).json({ error: 'Unauthorized' });
 };
 
-app.get('/api/share/session', (req, res) => {
-  res.json({ owner: isOwner(req), share: isShare(req) });
+// On the /api/share carve-out, so requireAuth lets it through without resolving
+// a session — it has to do that itself to answer whether the caller is signed in.
+app.get('/api/share/session', requireDb, async (req, res) => {
+  let owner = AUTH_OPEN || isLegacyOwner(req);
+  let user = null;
+  if (!owner) {
+    try {
+      const session = await resolveSession(req);
+      if (session) {
+        const doc = await User.findById(session.userId, { email: 1, name: 1 }).lean();
+        if (doc) { owner = true; user = { id: doc._id.toString(), email: doc.email, name: doc.name }; }
+      }
+    } catch (_) { /* fall through as signed-out */ }
+  }
+  let share = isShare(req);
+  if (!share && req.query.s) {
+    try { share = !!(await resolveShareUser(req.query.s)); } catch (_) { /* not a valid link */ }
+  }
+  res.json({ owner, share, user });
 });
 
 app.post('/api/share/login', (req, res) => {
@@ -247,9 +367,13 @@ app.post('/api/share/login', (req, res) => {
   res.status(401).json({ error: 'Invalid password' });
 });
 
-app.get('/api/share/contacts', requireDb, requireShareAuth, async (_req, res) => {
+// Mounted ahead of the `/api` attachUser middleware, so requireShareAuth resolves
+// the account itself — from a link token, a session, or (single-account only) the
+// legacy share cookie. attachUser is the last resort and refuses once there are
+// several accounts, since a global password cannot say whose export it wants.
+app.get('/api/share/contacts', requireDb, requireShareAuth, attachUser, async (req, res) => {
   try {
-    const docs = await Contact.find({ deleted: { $ne: true } })
+    const docs = await Contact.find({ userId: req.userId, deleted: { $ne: true } })
       .select('name email company role status repliedAt lastSentAt')
       .sort({ createdAt: -1 })
       .lean();
@@ -269,7 +393,41 @@ app.get('/api/share/contacts', requireDb, requireShareAuth, async (_req, res) =>
   }
 });
 
-app.use('/api', requireDb, auditHttpMutations);
+// attachUser sits ahead of every /api route so handlers can rely on req.userId.
+// It runs after requireDb because it reads the account from the database.
+// ── Share link management (owner only) ──────────────────────────────────────
+// Deliberately NOT under /api/share, which is the unauthenticated carve-out.
+app.post('/api/share-link', requireDb, attachUser, async (req, res) => {
+  try {
+    if (!req.session) return res.status(401).json({ error: 'Sign in to manage your share link' });
+    const token = await issueShareToken(req.userId);
+    res.json({ token, path: `/app/export-contacts?s=${encodeURIComponent(token)}`,
+      note: 'Anyone with this link can read your contact export. It is shown once; rotate or revoke it here.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete('/api/share-link', requireDb, attachUser, async (req, res) => {
+  try {
+    if (!req.session) return res.status(401).json({ error: 'Sign in to manage your share link' });
+    await revokeShareToken(req.userId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get('/api/share-link', requireDb, attachUser, async (req, res) => {
+  try {
+    if (!req.session) return res.status(401).json({ error: 'Sign in to manage your share link' });
+    res.json({ registered: await hasShareToken(req.userId) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.use('/api', requireDb, attachUser, auditHttpMutations);
 app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
@@ -293,20 +451,33 @@ const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip } = requir
 app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip] }));
 
 // ── Configure Gmail credentials ────────────────────────────────────────────
-app.post('/api/config', (req, res) => {
+app.post('/api/config', requireDb, async (req, res) => {
   const { email, appPassword, name } = req.body;
   if (!email || !appPassword) return res.status(400).json({ error: 'email and appPassword required' });
+  if (!credentials.isConfigured()) {
+    return res.status(503).json({ error: 'CREDENTIAL_KEY is not set, so a Gmail password cannot be stored safely.' });
+  }
 
-  const candidate = mailer.buildTransporter(email, appPassword);
-  candidate.verify((err) => {
-    if (err) {
-      return res.status(400).json({ error: 'Could not connect. Check email/app password.', detail: err.message });
-    }
-    mailer.transporter = candidate;
-    mailer.senderConfig = { email, name: name || 'Prashuk Jain' };
-    mailer.senderAppPassword = appPassword;
+  try {
+    await new Promise((resolve, reject) => {
+      mailer.buildTransporter(email, appPassword).verify(err => (err ? reject(err) : resolve()));
+    });
+  } catch (err) {
+    return res.status(400).json({ error: 'Could not connect. Check email/app password.', detail: err.message });
+  }
+
+  try {
+    // Persisted against this user, encrypted. It used to live in process memory,
+    // which a cron invocation never saw and which every other user's request on
+    // the same warm instance did.
+    const update = { gmailEmail: email, gmailAppPasswordEnc: credentials.encrypt(appPassword) };
+    if (name) update.senderName = name;
+    const settings = await Settings.getForUser(req.userId);
+    await Settings.updateOne({ _id: settings._id, userId: req.userId }, { $set: update });
     res.json({ ok: true, message: `Connected as ${email}` });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Bounce parsing ─────────────────────────────────────────────────────────
@@ -368,11 +539,11 @@ const cleanMsgId = (id) => (id || '').replace(/^<|>$/g, '') || null;
 const threadHasMessageId = (contact, messageId) =>
   !!messageId && (contact.thread || []).some(t => t.messageId === messageId);
 
-// tryMatchReply — uses pre-loaded lean maps; writes via findByIdAndUpdate (no doc hydration).
+// tryMatchReply — uses pre-loaded lean maps; writes via findOneAndUpdate (no doc hydration).
 // Runs on every scan regardless of whether the contact already has a prior reply, so an
 // ongoing back-and-forth (2nd, 3rd, ... reply) keeps getting captured — de-duped purely on
 // message-id so the same inbound message is never appended to `thread` twice.
-const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
+const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
   const parsed = await simpleParser(raw);
   const fromAddr = (parsed.from?.value?.[0]?.address || '').toLowerCase();
   if (!fromAddr || /mailer-daemon|postmaster/i.test(fromAddr)) return;
@@ -437,7 +608,7 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
   // moment) — it only becomes true if THIS classification attempt actually succeeded. On
   // failure, category/reasoning are left null rather than filled with a fake fallback value,
   // so the UI can tell "not yet classified" apart from a real (if unconfident) verdict.
-  await Contact.findByIdAndUpdate(contact._id, {
+  await Contact.findOneAndUpdate({ _id: contact._id, userId }, {
     $set: {
       status: newStatus, repliedAt, replySnippet,
       replyCategory: success ? category : null,
@@ -459,7 +630,7 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
 // No status change, no classification — sent messages are just captured for the thread view.
 // De-duped on message-id, which also naturally skips messages the app already recorded at
 // send time (inngest-fns.js), since those already carry the same Message-ID header.
-const trySentReply = async (raw, byMessageId, byEmail) => {
+const trySentReply = async (raw, byMessageId, byEmail, userId) => {
   const parsed = await simpleParser(raw);
   const toAddr = (parsed.to?.value?.[0]?.address || '').toLowerCase();
   if (!toAddr) return;
@@ -495,7 +666,7 @@ const trySentReply = async (raw, byMessageId, byEmail) => {
   contact.thread = [...(contact.thread || []), { messageId }];
   if (messageId) byMessageId.set(messageId, contact);
 
-  await Contact.findByIdAndUpdate(contact._id, { $push: { thread: threadEntry } });
+  await Contact.findOneAndUpdate({ _id: contact._id, userId }, { $push: { thread: threadEntry } });
 };
 
 // ── Check mailbox ──────────────────────────────────────────────────────────
@@ -503,12 +674,15 @@ const BOUNCE_LOOKBACK_DAYS = 7;
 const REPLY_LOOKBACK_DAYS = 30;
 const BUFFER_MS = 5 * 60 * 1000;
 
-app.post('/api/check-mailbox', requireDb, async (req, res) => {
-  if (!mailer.senderConfig.email || !mailer.senderAppPassword) {
-    return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+// One user's mailbox scan. Extracted from the route so the cron can run it for
+// every account: there is no longer a single mailbox to check.
+async function checkMailboxForUser(userId) {
+  const sender = await mailer.getSenderFor(userId);
+  if (!sender.email || !sender.appPassword) {
+    return { ok: false, skipped: 'no_credentials' };
   }
 
-  const settings = await Settings.findOne({}, { 'resume.data': 0 });
+  const settings = await Settings.findOne({ userId: userId }, { 'resume.data': 0 });
   const lastChecked = settings?.lastMailboxCheckAt ?? null;
 
   const fallbackBounce = new Date(Date.now() - BOUNCE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
@@ -522,7 +696,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
 
   const client = new ImapFlow({
     host: 'imap.gmail.com', port: 993, secure: true,
-    auth: { user: mailer.senderConfig.email, pass: mailer.senderAppPassword },
+    auth: { user: sender.email, pass: sender.appPassword },
     logger: false,
   });
 
@@ -533,7 +707,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   // Pre-load ALL contacts once with a lean projection — eliminates N+1 queries in the scan loop.
   // `thread.messageId` only (not full text/html) keeps this payload small even as threads grow.
   const allContacts = await Contact.find(
-    { deleted: { $ne: true } },
+    { userId: userId, deleted: { $ne: true } },
     'email name status bounceReason messageId updatedAt thread.messageId lastSentAt repliedAt'
   ).lean();
 
@@ -587,20 +761,20 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
 
             if (existing.status !== 'bounced') {
               existing.status = 'bounced'; // in-memory: prevents double-processing
-              await Contact.findByIdAndUpdate(existing._id, {
+              await Contact.findOneAndUpdate({ _id: existing._id, userId: userId }, {
                 $set: { status: 'bounced', bounceReason: reason },
                 $push: { statusHistory: { status: 'bounced', changedAt: new Date(), note: reason || 'Bounce detected' } },
               });
               bounced.push({ email: existing.email, name: existing.name, reason });
             } else if (reason !== existing.bounceReason && reason.length > (existing.bounceReason || '').length) {
               existing.bounceReason = reason;
-              await Contact.findByIdAndUpdate(existing._id, { bounceReason: reason });
+              await Contact.findOneAndUpdate({ _id: existing._id, userId: userId }, { bounceReason: reason });
             }
           }
           continue;
         }
 
-        await tryMatchReply(raw, byMessageId, byEmail, replied);
+        await tryMatchReply(raw, byMessageId, byEmail, replied, userId);
       }
     } finally {
       lock.release();
@@ -619,7 +793,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
       for (const uid of uids) {
         const msg = await client.fetchOne(uid, { source: true }, { uid: true });
         if (!msg?.source) continue;
-        await trySentReply(msg.source.toString('utf8'), byMessageId, byEmail);
+        await trySentReply(msg.source.toString('utf8'), byMessageId, byEmail, userId);
       }
     } finally {
       lock.release();
@@ -633,12 +807,12 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     }
     await scanSentMailbox('[Gmail]/Sent');
   } catch (err) {
-    return res.status(500).json({ error: 'IMAP check failed', detail: err.message });
+    throw new Error(`IMAP check failed: ${err.message}`);
   } finally {
     try { await client.logout(); } catch (_) {}
   }
 
-  await Settings.findOneAndUpdate({}, { lastMailboxCheckAt: new Date() });
+  await Settings.findOneAndUpdate({ userId: userId }, { lastMailboxCheckAt: new Date() });
 
   // Drains the legacy thread/classification backfill in the background, piggybacking on this
   // cron so the "Backfill now" button on Mailbox is a manual override, not the only way it
@@ -646,24 +820,54 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   // best-effort — a failure here (e.g. a classifier rate limit) must not fail the mailbox check.
   let backfill = null;
   try {
-    backfill = await runBackfillBatch(20);
+    backfill = await runBackfillBatch(20, userId);
   } catch (err) {
     backfill = { error: err.message };
   }
 
-  res.json({ ok: true, scanned, bounced, replied, lastCheckedAt: new Date(), backfill });
+  return { ok: true, scanned, bounced, replied, lastCheckedAt: new Date(), backfill };
+}
+
+// POST /api/check-mailbox
+// A signed-in person checks their own mailbox. The cron has no session, so it
+// sweeps every account, longest-unchecked first, within a time budget — Vercel
+// kills the function at 60s and a killed sweep reports nothing at all.
+app.post('/api/check-mailbox', requireDb, async (req, res) => {
+  try {
+    if (!req.isCron) {
+      const result = await checkMailboxForUser(req.userId);
+      if (result.skipped === 'no_credentials') {
+        return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+      }
+      return res.json(result);
+    }
+
+    // Measured: a single mailbox scan takes ~50s against a real Gmail account,
+    // and Vercel kills the function at 60s. The budget can only stop the loop
+    // STARTING another account, never interrupt one in flight, so it is set well
+    // below the cost of one scan: in practice a tick handles one account and
+    // defers the rest to the next tick, oldest-first so nobody is starved.
+    // More than a handful of accounts needs the Inngest fan-out (one event per
+    // user, workers in parallel) rather than this serial sweep.
+    const userIds = await usersByStaleness('lastMailboxCheckAt');
+    const report = await runForUsers(userIds, checkMailboxForUser, { budget: deadline(25_000) });
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Send single email (legacy — kept for step3 fallback) ──────────────────
-app.post('/api/send', async (req, res) => {
-  if (!mailer.transporter) return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+app.post('/api/send', requireDb, async (req, res) => {
   const { to, subject, body, attachResume } = req.body;
   if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body are required' });
 
   try {
-    const attachments = await mailer.getResumeAttachment(attachResume);
-    const info = await mailer.transporter.sendMail({
-      from: `"${mailer.senderConfig.name}" <${mailer.senderConfig.email}>`,
+    const sender = await mailer.getTransporterFor(req.userId);
+    if (!sender) return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+    const attachments = await mailer.getResumeAttachment(attachResume, req.userId);
+    const info = await sender.transporter.sendMail({
+      from: `"${sender.name}" <${sender.email}>`,
       to, subject, text: body,
       ...(attachments ? { attachments } : {}),
     });
@@ -674,8 +878,13 @@ app.post('/api/send', async (req, res) => {
 });
 
 // ── Status ──────────────────────────────────────────────────────────────────
-app.get('/api/status', (req, res) => {
-  res.json({ configured: !!mailer.transporter, email: mailer.senderConfig.email, name: mailer.senderConfig.name });
+app.get('/api/status', requireDb, async (req, res) => {
+  try {
+    const sender = await mailer.getSenderFor(req.userId);
+    res.json({ configured: !!(sender.email && sender.appPassword), email: sender.email, name: sender.name });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Global error handler — catches unhandled throws in any route ─────────────

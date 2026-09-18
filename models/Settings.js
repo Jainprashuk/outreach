@@ -13,11 +13,15 @@ const resumeSchema = new mongoose.Schema({
   uploadedAt: { type: Date, default: Date.now },
 }, { _id: false });
 
-// Singleton document — there is only ever one settings record.
+// One record per user.
 const settingsSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   senderName: { type: String, default: 'Your Name' },
   senderCompany: { type: String, default: 'Your Company' },
   gmailEmail: { type: String, default: '' },
+  // AES-256-GCM ciphertext, never the password itself — see lib/credentials.js.
+  // Stripped in toJSON below so it cannot reach the browser even by accident.
+  gmailAppPasswordEnc: { type: String, default: '' },
   customVariables: { type: [variableSchema], default: [] },
   resume: { type: resumeSchema, default: null },
   lastMailboxCheckAt: { type: Date, default: null },
@@ -45,6 +49,9 @@ settingsSchema.set('toJSON', {
     ret.id = ret._id.toString();
     delete ret._id;
     delete ret.__v;
+    // The client only ever needs to know whether one is set, never its value.
+    ret.hasGmailAppPassword = !!ret.gmailAppPasswordEnc;
+    delete ret.gmailAppPasswordEnc;
     if (ret.resume) {
       ret.resume = {
         filename: ret.resume.filename,
@@ -57,9 +64,9 @@ settingsSchema.set('toJSON', {
   }
 });
 
-settingsSchema.statics.getSingleton = async function () {
-  let doc = await this.findOne();
-  if (!doc) doc = await this.create({});
+settingsSchema.statics.getForUser = async function (userId) {
+  let doc = await this.findOne({ userId });
+  if (!doc) doc = await this.create({ userId });
   return doc;
 };
 

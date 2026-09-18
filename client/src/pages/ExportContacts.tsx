@@ -40,7 +40,10 @@ const COLUMNS: ColumnDef[] = [
 export default function ExportContacts() {
   const session = useSession();
   const toast = useToast();
-  const authed = session.owner || session.share;
+  // A share LINK carries its own credential in ?s=. It names the account whose
+  // export this is, which the old single global password could not do.
+  const shareToken = new URLSearchParams(window.location.search).get('s') || '';
+  const authed = session.owner || session.share || !!shareToken;
 
   const [contacts, setContacts] = useState<ShareContact[]>([]);
   const [loading, setLoading] = useState(false);
@@ -62,7 +65,10 @@ export default function ExportContacts() {
     setLoading(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/api/share/contacts`);
+      const url = shareToken
+        ? `${API_BASE}/api/share/contacts?s=${encodeURIComponent(shareToken)}`
+        : `${API_BASE}/api/share/contacts`;
+      const res = await fetch(url);
       if (res.status === 401) { return; } // not authed — gate will show
       if (res.status === 503) { setNotConfigured(true); return; }
       if (!res.ok) throw new Error(`Request failed (${res.status})`);

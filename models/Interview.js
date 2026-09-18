@@ -37,6 +37,7 @@ const INTERVIEW_STATUSES = [
 const TERMINAL_STATUSES = ['selected', 'rejected'];
 
 const interviewSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   // ── Where this came from ──────────────────────────────────────────────────
   // 'manual' exists so an interview that arrived by phone, with no matching row
   // in either store, can still be tracked.

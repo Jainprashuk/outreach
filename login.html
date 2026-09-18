@@ -74,20 +74,45 @@
   </div>
   <div class="login-title">Sign in</div>
   <div class="login-sub">Personal access only</div>
-  <form method="POST" action="/login">
+  <form id="form">
+    <label class="login-label" for="email">Email</label>
+    <input class="login-input" type="email" id="email" name="email" autofocus autocomplete="username" required
+           style="margin-bottom:14px">
     <label class="login-label" for="pw">Password</label>
-    <input class="login-input" type="password" id="pw" name="password" autofocus autocomplete="current-password" required>
-    <button class="login-btn" type="submit">Continue</button>
+    <input class="login-input" type="password" id="pw" name="password" autocomplete="current-password" required>
+    <button class="login-btn" id="btn" type="submit">Continue</button>
   </form>
   <div id="err" class="login-error" style="display:none"></div>
 </div>
 <script>
-  const p = new URLSearchParams(location.search);
-  if (p.get('error')) {
-    const el = document.getElementById('err');
-    el.textContent = 'Incorrect password. Try again.';
-    el.style.display = '';
-  }
+  const form = document.getElementById('form');
+  const btn  = document.getElementById('btn');
+  const err  = document.getElementById('err');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    err.style.display = 'none';
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: document.getElementById('email').value,
+          password: document.getElementById('pw').value,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Sign in failed');
+      location.href = '/';
+    } catch (e2) {
+      err.textContent = e2.message;
+      err.style.display = '';
+      btn.disabled = false;
+      btn.textContent = 'Continue';
+    }
+  });
 </script>
 </body>
 </html>

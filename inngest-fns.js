@@ -12,10 +12,10 @@ const db = require('./db');
 
 // A send was skipped (cooldown or blocklist): make sure the contact isn't left
 // parked at `queued` by the "Reset for sending" that preceded the job.
-async function restoreAfterSkip(contactDoc, note) {
+async function restoreAfterSkip(contactDoc, note, userId) {
   if (!contactDoc || contactDoc.status !== 'queued') return;
   const status = priorStatus(contactDoc);
-  await Contact.findByIdAndUpdate(contactDoc._id, {
+  await Contact.findOneAndUpdate({ _id: contactDoc._id, userId }, {
     $set: { status, approvalStatus: 'approved' },
     $push: { statusHistory: { status, changedAt: new Date(), note } },
   });
@@ -24,9 +24,9 @@ async function restoreAfterSkip(contactDoc, note) {
 // A send was skipped because the recipient is on the blocklist: mark the contact
 // `blocked` rather than quietly restoring its old status, so it's visibly flagged
 // and doesn't just re-enter the send queue on the next "Reset for sending".
-async function markBlocked(contactDoc) {
+async function markBlocked(contactDoc, userId) {
   if (!contactDoc) return;
-  await Contact.findByIdAndUpdate(contactDoc._id, {
+  await Contact.findOneAndUpdate({ _id: contactDoc._id, userId }, {
     $set: { status: 'blocked' },
     $push: { statusHistory: { status: 'blocked', changedAt: new Date(), note: BLOCKLIST_ERROR } },
   });
@@ -92,16 +92,16 @@ const sendEmailBatch = inngest.createFunction(
 // Atomically mark one item on a job and check if all items are now done.
 // Using findOneAndUpdate with positional $ avoids the concurrent-save race condition
 // where multiple sendSingleEmail workers overwrite each other's item updates.
-const _atomicItemUpdate = async (jobId, contactId, fields) => {
+const _atomicItemUpdate = async (jobId, contactId, fields, userId) => {
   await SendJob.findOneAndUpdate(
-    { _id: jobId, 'items.contactId': contactId },
+    { _id: jobId, userId, 'items.contactId': contactId },
     { $set: fields, $inc: { processedCount: 1 } }
   );
   const latest = await SendJob.findById(jobId, 'status items.status').lean();
   if (latest && latest.status === 'processing' && latest.items.every(i => i.status !== 'pending')) {
     // Exactly one worker wins this transition, so exactly one batch-result
     // notification is emitted even when the final sends finish concurrently.
-    const completed = await SendJob.findOneAndUpdate({ _id: jobId, status: 'processing' }, {
+    const completed = await SendJob.findOneAndUpdate({ _id: jobId, userId, status: 'processing' }, {
       status: 'done',
       processedCount: latest.items.length,
     }, { new: true }).lean();
@@ -125,33 +125,38 @@ const sendSingleEmail = inngest.createFunction(
       if (!item) return; // already handled by a concurrent worker or a retry
 
       // Cooldown check — skip if this contact was emailed inside the cooldown window
-      const contactDoc = await Contact.findById(contactId).lean();
+      const contactDoc = await Contact.findOne({ _id: contactId, userId: job.userId }).lean();
       if (inCooldown(contactDoc)) {
         await _atomicItemUpdate(jobId, contactId, {
           'items.$.status': 'skipped',
           'items.$.error': COOLDOWN_ERROR,
           'items.$.processedAt': new Date(),
-        });
-        await restoreAfterSkip(contactDoc, `Send skipped — already emailed within the last ${COOLDOWN_LABEL}; status restored`);
+        }, job.userId);
+        await restoreAfterSkip(contactDoc, `Send skipped — already emailed within the last ${COOLDOWN_LABEL}; status restored`, job.userId);
         return;
       }
 
       // Blocklist check — skip if the recipient's address or domain is blocklisted
-      if (isBlocked(item.to, await loadBlocklistSets())) {
+      if (isBlocked(item.to, await loadBlocklistSets(job.userId))) {
         await _atomicItemUpdate(jobId, contactId, {
           'items.$.status': 'skipped',
           'items.$.error': BLOCKLIST_ERROR,
           'items.$.processedAt': new Date(),
-        });
-        await markBlocked(contactDoc);
+        }, job.userId);
+        await markBlocked(contactDoc, job.userId);
         return;
       }
       const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
 
       // Credentials stored in job at creation time; fall back to mailer (env vars)
-      const senderEmail    = job.senderEmail    || mailer.senderConfig.email;
-      const senderName     = job.senderName     || mailer.senderConfig.name;
-      const senderPassword = job.senderAppPassword || mailer.senderAppPassword;
+      // The job carries its own credentials so a Vercel worker never depends on
+      // process state; the owner's stored settings are the fallback.
+      const fallback = (job.senderEmail && job.senderAppPassword)
+        ? { email: '', name: '', appPassword: '' }
+        : await mailer.getSenderFor(job.userId);
+      const senderEmail    = job.senderEmail       || fallback.email;
+      const senderName     = job.senderName        || fallback.name;
+      const senderPassword = job.senderAppPassword || fallback.appPassword;
 
       if (!senderEmail || !senderPassword) {
         throw new Error('No Gmail credentials stored in job. Please re-send via the dashboard → Resume sending.');
@@ -165,7 +170,7 @@ const sendSingleEmail = inngest.createFunction(
       });
 
       try {
-        const attachments = await mailer.getResumeAttachment(job.attachResume);
+        const attachments = await mailer.getResumeAttachment(job.attachResume, job.userId);
         const threadHeaders = (isFollowUp && contactDoc?.messageId)
           ? { inReplyTo: contactDoc.messageId, references: contactDoc.messageId }
           : {};
@@ -185,10 +190,10 @@ const sendSingleEmail = inngest.createFunction(
           'items.$.status': 'sent',
           'items.$.messageId': info.messageId || null,
           'items.$.processedAt': new Date(),
-        });
+        }, job.userId);
         const newStatus = isFollowUp ? 'follow-up-sent' : 'sent';
         const sentAt = new Date();
-        await Contact.findByIdAndUpdate(contactId, {
+        await Contact.findOneAndUpdate({ _id: contactId, userId: job.userId }, {
           $set: {
             status: newStatus,
             messageId: info.messageId || null,
@@ -204,19 +209,19 @@ const sendSingleEmail = inngest.createFunction(
             },
           },
         });
-        logEvent({ category: 'email', action: 'sent', message: `Email sent to ${item.to}`, meta: { jobId, contactId } })
+        logEvent({ userId: job.userId, category: 'email', action: 'sent', message: `Email sent to ${item.to}`, meta: { jobId, contactId } })
           .catch(err => console.error('Activity log write failed:', err.message));
       } catch (err) {
         await _atomicItemUpdate(jobId, contactId, {
           'items.$.status': 'failed',
           'items.$.error': err.message,
           'items.$.processedAt': new Date(),
-        });
-        await Contact.findByIdAndUpdate(contactId, {
+        }, job.userId);
+        await Contact.findOneAndUpdate({ _id: contactId, userId: job.userId }, {
           $set: { status: 'failed', failReason: err.message },
           $push: { statusHistory: { status: 'failed', changedAt: new Date(), note: err.message } },
         });
-        logEvent({ category: 'email', action: 'failed', message: `Email failed for ${item.to}`, meta: { jobId, contactId, error: err.message } })
+        logEvent({ userId: job.userId, category: 'email', action: 'failed', message: `Email failed for ${item.to}`, meta: { jobId, contactId, error: err.message } })
           .catch(logErr => console.error('Activity log write failed:', logErr.message));
       }
     });
@@ -247,9 +252,14 @@ const sendEmailBulk = inngest.createFunction(
         return;
       }
 
-      const senderEmail    = job.senderEmail    || mailer.senderConfig.email;
-      const senderName     = job.senderName     || mailer.senderConfig.name;
-      const senderPassword = job.senderAppPassword || mailer.senderAppPassword;
+      // The job carries its own credentials so a Vercel worker never depends on
+      // process state; the owner's stored settings are the fallback.
+      const fallback = (job.senderEmail && job.senderAppPassword)
+        ? { email: '', name: '', appPassword: '' }
+        : await mailer.getSenderFor(job.userId);
+      const senderEmail    = job.senderEmail       || fallback.email;
+      const senderName     = job.senderName        || fallback.name;
+      const senderPassword = job.senderAppPassword || fallback.appPassword;
 
       if (!senderEmail || !senderPassword) {
         throw new Error('No Gmail credentials stored in job. Please re-send via the dashboard → Resume sending.');
@@ -261,8 +271,8 @@ const sendEmailBulk = inngest.createFunction(
         chunks.push(pendingItems.slice(i, i + chunkSize));
       }
 
-      const attachments = await mailer.getResumeAttachment(job.attachResume);
-      const blocklistSets = await loadBlocklistSets();
+      const attachments = await mailer.getResumeAttachment(job.attachResume, job.userId);
+      const blocklistSets = await loadBlocklistSets(job.userId);
 
       for (let ci = 0; ci < chunks.length; ci++) {
         const chunk = chunks[ci];
@@ -285,11 +295,11 @@ const sendEmailBulk = inngest.createFunction(
         try {
           for (const item of chunk) {
             // Cooldown check — skip if emailed inside the cooldown window
-            const contactDoc = await Contact.findById(item.contactId).lean();
+            const contactDoc = await Contact.findOne({ _id: item.contactId, userId: job.userId }).lean();
             const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
             if (inCooldown(contactDoc)) {
               await SendJob.findOneAndUpdate(
-                { _id: jobId, 'items.contactId': item.contactId },
+                { _id: jobId, userId: job.userId, 'items.contactId': item.contactId },
                 {
                   $set: {
                     'items.$.status': 'skipped',
@@ -305,7 +315,7 @@ const sendEmailBulk = inngest.createFunction(
 
             if (isBlocked(item.to, blocklistSets)) {
               await SendJob.findOneAndUpdate(
-                { _id: jobId, 'items.contactId': item.contactId },
+                { _id: jobId, userId: job.userId, 'items.contactId': item.contactId },
                 {
                   $set: {
                     'items.$.status': 'skipped',
@@ -336,7 +346,7 @@ const sendEmailBulk = inngest.createFunction(
                 ...(attachments ? { attachments } : {}),
               });
               await SendJob.findOneAndUpdate(
-                { _id: jobId, 'items.contactId': item.contactId },
+                { _id: jobId, userId: job.userId, 'items.contactId': item.contactId },
                 {
                   $set: {
                     'items.$.status': 'sent',
@@ -348,7 +358,7 @@ const sendEmailBulk = inngest.createFunction(
               );
               const newStatus = isFollowUp ? 'follow-up-sent' : 'sent';
               const sentAt = new Date();
-              await Contact.findByIdAndUpdate(item.contactId, {
+              await Contact.findOneAndUpdate({ _id: item.contactId, userId: job.userId }, {
                 $set: {
                   status: newStatus,
                   messageId: info.messageId || null,
@@ -366,7 +376,7 @@ const sendEmailBulk = inngest.createFunction(
               });
             } catch (err) {
               await SendJob.findOneAndUpdate(
-                { _id: jobId, 'items.contactId': item.contactId },
+                { _id: jobId, userId: job.userId, 'items.contactId': item.contactId },
                 {
                   $set: {
                     'items.$.status': 'failed',
@@ -376,7 +386,7 @@ const sendEmailBulk = inngest.createFunction(
                   $inc: { processedCount: 1 },
                 }
               );
-              await Contact.findByIdAndUpdate(item.contactId, {
+              await Contact.findOneAndUpdate({ _id: item.contactId, userId: job.userId }, {
                 $set: { status: 'failed', failReason: err.message },
                 $push: { statusHistory: { status: 'failed', changedAt: new Date(), note: err.message } },
               });

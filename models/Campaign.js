@@ -18,6 +18,7 @@ const releaseSchema = new mongoose.Schema({
 }, { _id: false });
 
 const campaignSchema = new mongoose.Schema({
+  userId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   name:        { type: String, required: true },
   fileName:    { type: String, default: '' },
   // ONE template for the whole campaign (Template.key). Not a per-row column.

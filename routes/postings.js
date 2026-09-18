@@ -4,6 +4,8 @@ const JobBoard = require('../models/JobBoard');
 const Settings = require('../models/Settings');
 const boards = require('../lib/boards');
 const { syncAllBoards, MASS_CLOSE_WARN } = require('../lib/postingSync');
+const { usersByStaleness, runForUsers } = require('../lib/fanout');
+const { deadline } = require('../lib/http');
 const { normaliseCriteria, matchesCriteria, DEFAULTS: CRITERIA_DEFAULTS } = require('../lib/criteria');
 const { listCompanies } = require('../lib/boards/museCompanies');
 const { STARTER_BOARDS } = require('../lib/boards/starterBoards');
@@ -60,18 +62,18 @@ const escapeRegExp = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 // Specific routes are declared before /:id, or '/meta' would be read as an id.
 
 // GET /api/postings/meta — the header numbers, without shipping every row.
-router.get('/meta', async (_req, res) => {
+router.get('/meta', async (req, res) => {
   try {
-    const settings = await Settings.findOne({}, { lastPostingSyncAt: 1, postingSyncLockAt: 1 }).lean();
+    const settings = await Settings.findOne({ userId: req.userId }, { lastPostingSyncAt: 1, postingSyncLockAt: 1 }).lean();
     const lastSyncAt = (settings && settings.lastPostingSyncAt) || null;
     const lockAt = (settings && settings.postingSyncLockAt) || null;
 
     const [open, closed, tracked, newSinceLastSync] = await Promise.all([
-      JobPosting.countDocuments({ ...BASE_FILTER, listingStatus: 'open' }),
-      JobPosting.countDocuments({ ...BASE_FILTER, listingStatus: 'closed' }),
-      JobPosting.countDocuments({ ...BASE_FILTER, applyStatus: { $ne: 'not-applied' } }),
+      JobPosting.countDocuments({ userId: req.userId, ...BASE_FILTER, listingStatus: 'open' }),
+      JobPosting.countDocuments({ userId: req.userId, ...BASE_FILTER, listingStatus: 'closed' }),
+      JobPosting.countDocuments({ userId: req.userId, ...BASE_FILTER, applyStatus: { $ne: 'not-applied' } }),
       lastSyncAt
-        ? JobPosting.countDocuments({ ...BASE_FILTER, firstSeenAt: { $gte: lastSyncAt } })
+        ? JobPosting.countDocuments({ userId: req.userId, ...BASE_FILTER, firstSeenAt: { $gte: lastSyncAt } })
         : Promise.resolve(0),
     ]);
 
@@ -91,9 +93,9 @@ router.get('/meta', async (_req, res) => {
 // Applied when a sync decides what to STORE, so a 600-role board only keeps the
 // roles you would actually read. See lib/criteria.js.
 
-router.get('/criteria', async (_req, res) => {
+router.get('/criteria', async (req, res) => {
   try {
-    const s = await Settings.findOne({}, { jobCriteria: 1 }).lean();
+    const s = await Settings.findOne({ userId: req.userId }, { jobCriteria: 1 }).lean();
     res.json({
       criteria: normaliseCriteria(s && s.jobCriteria),
       defaults: CRITERIA_DEFAULTS,
@@ -106,10 +108,10 @@ router.get('/criteria', async (_req, res) => {
 router.put('/criteria', async (req, res) => {
   try {
     const criteria = normaliseCriteria(req.body || {});
-    // Scoped to the real singleton and never upserted — Settings has no unique
-    // index, so an upsert whose filter misses would insert a second one.
-    const singleton = await Settings.getSingleton();
-    await Settings.updateOne({ _id: singleton._id }, { $set: { jobCriteria: criteria } });
+    // Targeted by _id and never upserted — Settings has no unique index, so an
+    // upsert whose filter misses would insert a second record for this user.
+    const settings = await Settings.getForUser(req.userId);
+    await Settings.updateOne({ _id: settings._id, userId: req.userId }, { $set: { jobCriteria: criteria } });
     res.json({ criteria });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -121,7 +123,7 @@ router.put('/criteria', async (req, res) => {
 router.post('/criteria/test', async (req, res) => {
   try {
     const criteria = normaliseCriteria({ ...(req.body || {}), enabled: true });
-    const rows = await JobPosting.find(BASE_FILTER,
+    const rows = await JobPosting.find({ userId: req.userId, ...BASE_FILTER },
       { title: 1, company: 1, department: 1, team: 1, remote: 1, location: 1, locations: 1 }).lean();
     const kept = rows.filter(r => matchesCriteria(r, criteria));
     const dropped = rows.filter(r => !matchesCriteria(r, criteria));
@@ -188,9 +190,9 @@ router.get('/starter-boards', (_req, res) => {
 
 // ── Boards ──────────────────────────────────────────────────────────────────
 
-router.get('/boards', async (_req, res) => {
+router.get('/boards', async (req, res) => {
   try {
-    const rows = await JobBoard.find(BASE_FILTER).sort({ createdAt: 1 }).lean();
+    const rows = await JobBoard.find({ userId: req.userId, ...BASE_FILTER }).sort({ createdAt: 1 }).lean();
     res.json({ boards: rows.map(serializeBoard) });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -252,15 +254,15 @@ router.post('/boards', async (req, res) => {
     // Adding the same board twice would double every one of its postings, so
     // this is checked in the application layer (there is no unique index — a
     // soft-deleted board has to be re-addable).
-    const existing = await JobBoard.findOne({ source, token: clean }).lean();
+    const existing = await JobBoard.findOne({ userId: req.userId, source, token: clean }).lean();
     if (existing && existing.deleted !== true) {
       return res.status(409).json({ error: 'That board is already tracked', board: serializeBoard(existing) });
     }
     if (existing) {
       // Revive rather than insert a second row, so its postings and their
       // tracking history reconnect to it.
-      const revived = await JobBoard.findByIdAndUpdate(
-        existing._id,
+      const revived = await JobBoard.findOneAndUpdate(
+        { _id: existing._id, userId: req.userId },
         {
           $set: {
             deleted: false, deletedAt: null, enabled: true,
@@ -274,6 +276,7 @@ router.post('/boards', async (req, res) => {
     }
 
     const board = await JobBoard.create({
+      userId: req.userId,
       source, token: clean,
       label: boards.normText(label) || boards.titleCaseSlug(clean),
       query,
@@ -293,7 +296,7 @@ router.patch('/boards/:id', async (req, res) => {
     if (Object.keys(patch).length === 0) {
       return res.status(400).json({ error: 'No updatable fields provided' });
     }
-    const board = await JobBoard.findByIdAndUpdate(req.params.id, { $set: patch }, { new: true });
+    const board = await JobBoard.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, { $set: patch }, { new: true });
     if (!board) return res.status(404).json({ error: 'Board not found' });
     res.json({ board });
   } catch (err) {
@@ -306,13 +309,13 @@ router.patch('/boards/:id', async (req, res) => {
 // which is yours and unrelated to whether you still watch the board.
 router.delete('/boards/:id', async (req, res) => {
   try {
-    const board = await JobBoard.findById(req.params.id);
+    const board = await JobBoard.findOne({ _id: req.params.id, userId: req.userId });
     if (!board || board.deleted === true) return res.status(404).json({ error: 'Board not found' });
 
     let postingsDeleted = 0;
     if (req.query.postings === 'delete') {
       const out = await JobPosting.updateMany(
-        { source: board.source, boardToken: board.token, deleted: { $ne: true } },
+        { userId: req.userId, source: board.source, boardToken: board.token, deleted: { $ne: true } },
         { $set: { deleted: true, deletedAt: new Date() } }
       );
       postingsDeleted = out.modifiedCount || 0;
@@ -338,9 +341,23 @@ router.delete('/boards/:id', async (req, res) => {
 router.post('/sync', async (req, res) => {
   try {
     const { boardIds, dryRun } = req.body || {};
+
+    // A signed-in person syncs their own boards. The cron has no session, so it
+    // sweeps every account, longest-unsynced first, inside a time budget.
+    if (req.isCron) {
+      const userIds = await usersByStaleness('lastPostingSyncAt');
+      const report = await runForUsers(
+        userIds,
+        (userId) => syncAllBoards({ boardIds: null, dryRun: !!dryRun, userId }),
+        { budget: deadline(45_000) },
+      );
+      return res.json({ ...report, massCloseWarnThreshold: MASS_CLOSE_WARN });
+    }
+
     const report = await syncAllBoards({
       boardIds: Array.isArray(boardIds) ? boardIds.map(String) : null,
       dryRun: !!dryRun,
+      userId: req.userId,
     });
     res.json({ ...report, massCloseWarnThreshold: MASS_CLOSE_WARN });
   } catch (err) {
@@ -355,7 +372,7 @@ router.post('/sync', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { listingStatus, applyStatus, source, boardToken, q, ids, page, limit } = req.query;
-    const filter = { ...BASE_FILTER };
+    const filter = { userId: req.userId, ...BASE_FILTER };
 
     if (listingStatus && listingStatus !== 'all') filter.listingStatus = listingStatus;
     else if (!listingStatus) filter.listingStatus = 'open';
@@ -432,7 +449,7 @@ router.patch('/', async (req, res) => {
     }
     const ids = updates.filter(u => u && u.id).map(u => String(u.id));
     const prevById = new Map(
-      (await JobPosting.find({ _id: { $in: ids } }, { appliedAt: 1 }).lean())
+      (await JobPosting.find({ _id: { $in: ids }, userId: req.userId }, { appliedAt: 1 }).lean())
         .map(d => [String(d._id), d])
     );
     const ops = updates
@@ -442,7 +459,7 @@ router.patch('/', async (req, res) => {
         if (Object.keys(patch).length === 0) return null;
         return {
           updateOne: {
-            filter: { _id: u.id },
+            filter: { _id: u.id, userId: req.userId },
             update: buildOp(patch, u.note, prevById.get(String(u.id))),
           },
         };
@@ -464,7 +481,7 @@ router.post('/bulk-delete', async (req, res) => {
       return res.status(400).json({ error: 'Expected a non-empty ids array' });
     }
     const out = await JobPosting.updateMany(
-      { _id: { $in: ids } },
+      { _id: { $in: ids }, userId: req.userId },
       { $set: { deleted: true, deletedAt: new Date() } }
     );
     res.json({ ok: true, deleted: out.modifiedCount || 0 });
@@ -479,10 +496,10 @@ router.patch('/:id', async (req, res) => {
     if (Object.keys(patch).length === 0) {
       return res.status(400).json({ error: 'No updatable fields provided' });
     }
-    const prev = await JobPosting.findById(req.params.id, { appliedAt: 1 }).lean();
+    const prev = await JobPosting.findOne({ _id: req.params.id, userId: req.userId }, { appliedAt: 1 }).lean();
     if (!prev) return res.status(404).json({ error: 'Posting not found' });
-    const posting = await JobPosting.findByIdAndUpdate(
-      req.params.id, buildOp(patch, req.body.note, prev), { new: true }
+    const posting = await JobPosting.findOneAndUpdate(
+      { _id: req.params.id, userId: req.userId }, buildOp(patch, req.body.note, prev), { new: true }
     );
     res.json(posting);
   } catch (err) {
@@ -492,8 +509,8 @@ router.patch('/:id', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const posting = await JobPosting.findByIdAndUpdate(
-      req.params.id,
+    const posting = await JobPosting.findOneAndUpdate(
+      { _id: req.params.id, userId: req.userId },
       { $set: { deleted: true, deletedAt: new Date() } },
       { new: true }
     );

@@ -71,7 +71,7 @@ const pickPatch = (src) => {
 // nature (these are people who actually called you back), so no pagination.
 router.get('/', async (req, res) => {
   try {
-    const rows = await Interview.find(BASE_FILTER, NO_BINARIES)
+    const rows = await Interview.find({ userId: req.userId, ...BASE_FILTER }, NO_BINARIES)
       .sort({ interviewAt: 1, lastActivityAt: -1 });
     res.json(rows);
   } catch (err) {
@@ -94,7 +94,7 @@ router.post('/', async (req, res) => {
     // One live interview per source row. Re-flagging the same person should open
     // the record they already have, not fork a second history.
     if (sourceId) {
-      const existing = await Interview.findOne({ sourceType, sourceId, ...BASE_FILTER }, NO_BINARIES);
+      const existing = await Interview.findOne({ userId: req.userId, sourceType, sourceId, ...BASE_FILTER }, NO_BINARIES);
       if (existing) {
         return res.status(409).json({ error: 'This person is already being tracked in Interviews', interview: existing });
       }
@@ -104,11 +104,11 @@ router.post('/', async (req, res) => {
     // sent explicitly wins, because the move dialog lets you correct it first.
     let seed = {};
     if (sourceType === 'contact' && sourceId) {
-      const c = await Contact.findById(sourceId).lean();
+      const c = await Contact.findOne({ _id: sourceId, userId: req.userId }).lean();
       if (!c) return res.status(404).json({ error: 'Contact not found' });
       seed = { name: c.name, email: c.email, company: c.company, role: c.role };
     } else if (sourceType === 'lead' && sourceId) {
-      const l = await Lead.findById(sourceId).lean();
+      const l = await Lead.findOne({ _id: sourceId, userId: req.userId }).lean();
       if (!l) return res.status(404).json({ error: 'Lead not found' });
       seed = { name: l.authorName, email: l.email || '', company: l.company, role: l.role };
     }
@@ -121,6 +121,7 @@ router.post('/', async (req, res) => {
     const now = new Date();
 
     const doc = await Interview.create({
+      userId: req.userId,
       ...seed,
       ...patch,
       name,
@@ -133,7 +134,7 @@ router.post('/', async (req, res) => {
     });
 
     // Re-read without the (empty) binaries so the response shape matches GET.
-    const created = await Interview.findById(doc._id, NO_BINARIES);
+    const created = await Interview.findOne({ _id: doc._id, userId: req.userId }, NO_BINARIES);
     res.status(201).json(created);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -146,7 +147,7 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const body = req.body || {};
-    const prev = await Interview.findOne({ _id: req.params.id, ...BASE_FILTER }, NO_BINARIES);
+    const prev = await Interview.findOne({ _id: req.params.id, userId: req.userId, ...BASE_FILTER }, NO_BINARIES);
     if (!prev) return res.status(404).json({ error: 'Interview not found' });
 
     const patch = pickPatch(body);
@@ -181,7 +182,7 @@ router.patch('/:id', async (req, res) => {
       };
     }
 
-    const updated = await Interview.findByIdAndUpdate(req.params.id, op, {
+    const updated = await Interview.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, op, {
       new: true, projection: NO_BINARIES,
     });
     res.json(updated);
@@ -196,7 +197,7 @@ router.post('/:id/followed-up', async (req, res) => {
   try {
     const now = new Date();
     const updated = await Interview.findOneAndUpdate(
-      { _id: req.params.id, ...BASE_FILTER },
+      { _id: req.params.id, userId: req.userId, ...BASE_FILTER },
       {
         $set: { lastActivityAt: now },
         $push: { statusHistory: { status: 'followed-up', changedAt: now, note: normText((req.body || {}).note) || 'Followed up' } },
@@ -223,7 +224,7 @@ router.post('/:id/file/:kind', (req, res) => {
     try {
       const now = new Date();
       const updated = await Interview.findOneAndUpdate(
-        { _id: req.params.id, ...BASE_FILTER },
+        { _id: req.params.id, userId: req.userId, ...BASE_FILTER },
         {
           $set: {
             [kind]: {
@@ -251,7 +252,7 @@ router.get('/:id/file/:kind', async (req, res) => {
   const { kind } = req.params;
   if (!isKind(kind)) return res.status(400).json({ error: 'File kind must be "cv" or "jd"' });
   try {
-    const doc = await Interview.findOne({ _id: req.params.id, ...BASE_FILTER });
+    const doc = await Interview.findOne({ _id: req.params.id, userId: req.userId, ...BASE_FILTER });
     if (!doc) return res.status(404).json({ error: 'Interview not found' });
     const file = doc[kind];
     if (!file || !file.data) return res.status(404).json({ error: `No ${kind.toUpperCase()} uploaded` });
@@ -269,7 +270,7 @@ router.delete('/:id/file/:kind', async (req, res) => {
   if (!isKind(kind)) return res.status(400).json({ error: 'File kind must be "cv" or "jd"' });
   try {
     const updated = await Interview.findOneAndUpdate(
-      { _id: req.params.id, ...BASE_FILTER },
+      { _id: req.params.id, userId: req.userId, ...BASE_FILTER },
       { $set: { [kind]: null, lastActivityAt: new Date() } },
       { new: true, projection: NO_BINARIES },
     );
@@ -283,8 +284,8 @@ router.delete('/:id/file/:kind', async (req, res) => {
 // DELETE /api/interviews/:id — soft delete, matching Contact and Lead.
 router.delete('/:id', async (req, res) => {
   try {
-    const doc = await Interview.findByIdAndUpdate(
-      req.params.id,
+    const doc = await Interview.findOneAndUpdate(
+      { _id: req.params.id, userId: req.userId },
       { $set: { deleted: true, deletedAt: new Date() } },
       { new: true, projection: NO_BINARIES },
     );

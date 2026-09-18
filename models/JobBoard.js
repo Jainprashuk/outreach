@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 // the Settings singleton holds a resume Buffer, and a sync racing a settings
 // save would clobber it.
 const jobBoardSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   source: { type: String, enum: ['greenhouse', 'lever', 'ashby', 'muse', 'jobicy'], required: true },
   // For a company board this is the ATS slug. For a 'search' source it is just a
   // name for the saved search — the real parameters live in `query` below.

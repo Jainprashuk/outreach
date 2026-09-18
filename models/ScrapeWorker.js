@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-// Singleton heartbeat for the worker process on the Mac. Written on every
+// Per-user heartbeat for the worker process on the Mac. Written on every
 // /api/scrapes/claim; read by /api/scrapes/status so the portal can say
 // "ready", "your Mac is asleep", or "log back into LinkedIn" *before* you
 // trigger a run rather than after one fails.
@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 // Its own collection rather than fields on Settings, for the same reason
 // JobBoard is: per-poll writes would race the resume Buffer in that singleton.
 const scrapeWorkerSchema = new mongoose.Schema({
+  userId:           { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   lastSeenAt:       { type: Date, default: null },
   host:             { type: String, default: '' },
   chromeUp:         { type: Boolean, default: false },
@@ -24,9 +25,9 @@ const scrapeWorkerSchema = new mongoose.Schema({
   blockedReason:    { type: String, default: '' },
 }, { timestamps: true });
 
-scrapeWorkerSchema.statics.getSingleton = async function () {
-  let doc = await this.findOne();
-  if (!doc) doc = await this.create({});
+scrapeWorkerSchema.statics.getForUser = async function (userId) {
+  let doc = await this.findOne({ userId });
+  if (!doc) doc = await this.create({ userId });
   return doc;
 };
 

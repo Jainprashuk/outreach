@@ -4,6 +4,8 @@ const ScrapeSchedule = require('../models/ScrapeSchedule');
 const ScrapeWorker = require('../models/ScrapeWorker');
 const { importLeads, isUsableSourceLead } = require('../lib/leadImport');
 const { dueOccurrence, nextOccurrence, parseTime } = require('../lib/scrapeSchedule');
+const { issueWorkerToken, revokeWorkerToken } = require('../lib/workerAuth');
+const User = require('../models/User');
 
 const router = express.Router();
 
@@ -45,9 +47,9 @@ const cleanQueries = (input, limit = MAX_QUERIES) => {
 
 // A run left 'running' by a worker that was killed mid-harvest would block the
 // queue forever, since /claim only ever starts one at a time.
-const failStaleRuns = () =>
+const failStaleRuns = (userId) =>
   ScrapeRun.updateMany(
-    { status: 'running', claimedAt: { $lt: new Date(Date.now() - STALE_RUN_MS) }, ...BASE_FILTER },
+    { ...(userId ? { userId } : {}), status: 'running', claimedAt: { $lt: new Date(Date.now() - STALE_RUN_MS) }, ...BASE_FILTER },
     { $set: { status: 'failed', error: 'Worker stopped responding mid-run', finishedAt: new Date() } }
   );
 
@@ -66,12 +68,12 @@ const blockedUntilOf = (worker) => {
 // you trigger a run, rather than leaving a queued row looking broken.
 router.get('/status', async (req, res) => {
   try {
-    await failStaleRuns();
+    await failStaleRuns(req.userId);
     const [worker, schedule, activeRun, lastRun] = await Promise.all([
-      ScrapeWorker.getSingleton(),
-      ScrapeSchedule.getSingleton(),
-      ScrapeRun.findOne({ status: { $in: ACTIVE }, ...BASE_FILTER }).sort({ createdAt: 1 }).lean(),
-      ScrapeRun.findOne({ status: { $nin: ACTIVE }, ...BASE_FILTER }).sort({ createdAt: -1 }).lean(),
+      ScrapeWorker.getForUser(req.userId),
+      ScrapeSchedule.getForUser(req.userId),
+      ScrapeRun.findOne({ userId: req.userId, status: { $in: ACTIVE }, ...BASE_FILTER }).sort({ createdAt: 1 }).lean(),
+      ScrapeRun.findOne({ userId: req.userId, status: { $nin: ACTIVE }, ...BASE_FILTER }).sort({ createdAt: -1 }).lean(),
     ]);
 
     const lastSeenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt) : null;
@@ -100,7 +102,7 @@ router.get('/status', async (req, res) => {
 
 router.get('/schedule', async (req, res) => {
   try {
-    const schedule = await ScrapeSchedule.getSingleton();
+    const schedule = await ScrapeSchedule.getForUser(req.userId);
     res.json({ schedule: schedule.toJSON(), nextOccurrence: nextOccurrence(schedule, new Date()) });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -110,7 +112,7 @@ router.get('/schedule', async (req, res) => {
 router.put('/schedule', async (req, res) => {
   try {
     const { enabled, days, time, timezone, queries, catchUpHours } = req.body || {};
-    const schedule = await ScrapeSchedule.getSingleton();
+    const schedule = await ScrapeSchedule.getForUser(req.userId);
 
     if (time !== undefined) {
       if (!parseTime(time)) return res.status(400).json({ error: 'time must be HH:mm' });
@@ -159,8 +161,8 @@ router.get('/', async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
     const [runs, total] = await Promise.all([
-      ScrapeRun.find(BASE_FILTER).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-      ScrapeRun.countDocuments(BASE_FILTER),
+      ScrapeRun.find({ userId: req.userId, ...BASE_FILTER }).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      ScrapeRun.countDocuments({ userId: req.userId, ...BASE_FILTER }),
     ]);
     res.json({ runs: runs.map(serialize), total, page, limit, pages: Math.ceil(total / limit) });
   } catch (err) {
@@ -175,7 +177,7 @@ router.post('/', async (req, res) => {
     const queries = cleanQueries((req.body || {}).queries);
     if (queries.length === 0) return res.status(400).json({ error: 'Pick at least one query' });
 
-    const worker = await ScrapeWorker.getSingleton();
+    const worker = await ScrapeWorker.getForUser(req.userId);
     const blockedUntil = blockedUntilOf(worker);
     if (blockedUntil) {
       return res.status(423).json({
@@ -185,13 +187,13 @@ router.post('/', async (req, res) => {
       });
     }
 
-    await failStaleRuns();
-    const active = await ScrapeRun.findOne({ status: { $in: ACTIVE }, ...BASE_FILTER }).lean();
+    await failStaleRuns(req.userId);
+    const active = await ScrapeRun.findOne({ userId: req.userId, status: { $in: ACTIVE }, ...BASE_FILTER }).lean();
     if (active) {
       return res.status(409).json({ error: 'A scrape is already ' + active.status, run: serialize(active) });
     }
 
-    const run = await ScrapeRun.create({ queries, trigger: 'manual' });
+    const run = await ScrapeRun.create({ userId: req.userId, queries, trigger: 'manual' });
     res.status(201).json({ run: run.toJSON() });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -203,7 +205,7 @@ router.post('/:id/cancel', async (req, res) => {
     // Only a queued run can be cancelled — a running one is a live Chrome
     // session on the Mac that this process cannot reach.
     const run = await ScrapeRun.findOneAndUpdate(
-      { _id: req.params.id, status: 'queued', ...BASE_FILTER },
+      { _id: req.params.id, userId: req.userId, status: 'queued', ...BASE_FILTER },
       { $set: { status: 'cancelled', finishedAt: new Date() } },
       { new: true }
     );
@@ -223,7 +225,7 @@ router.post('/claim', async (req, res) => {
   try {
     const { host, chromeUp, linkedinLoggedIn, nextWakeAt, defaultQueries } = req.body || {};
 
-    const worker = await ScrapeWorker.getSingleton();
+    const worker = await ScrapeWorker.getForUser(req.userId);
     worker.lastSeenAt = new Date();
     if (host !== undefined) worker.host = String(host).slice(0, 200);
     if (chromeUp !== undefined) worker.chromeUp = !!chromeUp;
@@ -239,15 +241,15 @@ router.post('/claim', async (req, res) => {
       return res.json({ run: null, blockedUntil: worker.blockedUntil });
     }
 
-    await failStaleRuns();
+    await failStaleRuns(req.userId);
 
     // Materialise a scheduled run if one is due and nothing is already active.
-    const schedule = await ScrapeSchedule.getSingleton();
+    const schedule = await ScrapeSchedule.getForUser(req.userId);
     const due = dueOccurrence(schedule, new Date());
     if (due) {
-      const active = await ScrapeRun.findOne({ status: { $in: ACTIVE }, ...BASE_FILTER }).lean();
+      const active = await ScrapeRun.findOne({ userId: req.userId, status: { $in: ACTIVE }, ...BASE_FILTER }).lean();
       if (!active) {
-        await ScrapeRun.create({ queries: cleanQueries(schedule.queries), trigger: 'scheduled' });
+        await ScrapeRun.create({ userId: req.userId, queries: cleanQueries(schedule.queries), trigger: 'scheduled' });
       }
       // Stamp lastFiredAt to the OCCURRENCE, not to now, so a late catch-up
       // doesn't drag tomorrow's slot forward. Stamped even when a run was
@@ -256,8 +258,10 @@ router.post('/claim', async (req, res) => {
       await schedule.save();
     }
 
+    // Scoped to this worker's own account: a worker must only ever claim runs
+    // belonging to the account whose token it presented.
     const run = await ScrapeRun.findOneAndUpdate(
-      { status: 'queued', ...BASE_FILTER },
+      { userId: req.userId, status: 'queued', ...BASE_FILTER },
       { $set: { status: 'running', claimedAt: new Date(), workerHost: String(host || '').slice(0, 200) } },
       { sort: { createdAt: 1 }, new: true }
     );
@@ -277,15 +281,15 @@ router.post('/ingest', async (req, res) => {
     if (!runId) return res.status(400).json({ error: 'runId is required' });
     if (!Array.isArray(leads)) return res.status(400).json({ error: 'leads must be an array' });
 
-    const run = await ScrapeRun.findOne({ _id: runId, ...BASE_FILTER });
+    const run = await ScrapeRun.findOne({ _id: runId, userId: req.userId, ...BASE_FILTER });
     if (!run) return res.status(404).json({ error: 'No such run' });
 
     const source = leads.filter(isUsableSourceLead);
-    const result = await importLeads(source, { ignoredRows: leads.length - source.length });
+    const result = await importLeads(source, { ignoredRows: leads.length - source.length, userId: req.userId });
 
     // $inc rather than save() — chunks arrive sequentially but the run doc may
     // also be read by /status between them.
-    await ScrapeRun.updateOne({ _id: runId }, {
+    await ScrapeRun.updateOne({ _id: runId, userId: req.userId }, {
       $inc: {
         'importResult.created':        result.created.length,
         'importResult.skipped':        result.skipped,
@@ -329,7 +333,7 @@ router.post('/progress', async (req, res) => {
     // Only while the run is actually running — a late event must not resurrect
     // the progress block of a run that already failed or was cancelled.
     const run = await ScrapeRun.findOneAndUpdate(
-      { _id: runId, status: 'running', ...BASE_FILTER },
+      { _id: runId, userId: req.userId, status: 'running', ...BASE_FILTER },
       { $set: { progress: {
           currentQuery:  String(progress.currentQuery || '').slice(0, 300),
           searchesDone:  Number(progress.searchesDone) || 0,
@@ -372,7 +376,7 @@ router.post('/finish', async (req, res) => {
       };
     }
 
-    const run = await ScrapeRun.findOneAndUpdate({ _id: runId, ...BASE_FILTER }, { $set: update }, { new: true });
+    const run = await ScrapeRun.findOneAndUpdate({ _id: runId, userId: req.userId, ...BASE_FILTER }, { $set: update }, { new: true });
     if (!run) return res.status(404).json({ error: 'No such run' });
 
     // A checkpoint means LinkedIn challenged the session. TRACK-SCROLL.md is
@@ -380,13 +384,55 @@ router.post('/finish', async (req, res) => {
     // rather than in the worker — a restarted worker must not be able to
     // shrug it off, and neither must the schedule.
     if (status === 'blocked') {
-      const worker = await ScrapeWorker.getSingleton();
+      const worker = await ScrapeWorker.getForUser(req.userId);
       worker.blockedUntil = new Date(Date.now() + 7 * 24 * 3600 * 1000);
       worker.blockedReason = 'LinkedIn showed a checkpoint during a harvest';
       await worker.save();
     }
 
     res.json({ run: run.toJSON() });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Worker registration ─────────────────────────────────────────────────────
+// The harvest drives a real, logged-in Chrome on a real machine, which is what
+// keeps the LinkedIn account from being restricted. That does not generalise to
+// a shared pool, so scraping is opt-in per account: you register YOUR machine
+// and it claims only YOUR runs.
+
+// POST /api/scrapes/worker-token — issue or rotate this account's token.
+// The raw value is returned exactly once; only its hash is stored.
+router.post('/worker-token', async (req, res) => {
+  try {
+    if (req.isWorker) return res.status(403).json({ error: 'A worker cannot rotate its own token' });
+    const token = await issueWorkerToken(req.userId);
+    res.json({
+      token,
+      note: 'Save this now — it is not shown again. Put it in the worker machine\'s .env as WORKER_SECRET.',
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/scrapes/worker-token — revoke it, e.g. a lost laptop.
+router.delete('/worker-token', async (req, res) => {
+  try {
+    if (req.isWorker) return res.status(403).json({ error: 'A worker cannot revoke its own token' });
+    await revokeWorkerToken(req.userId);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/scrapes/worker-token — whether one is registered, never the value.
+router.get('/worker-token', async (req, res) => {
+  try {
+    const user = await User.findById(req.userId, { workerTokenHash: 1 }).lean();
+    res.json({ registered: !!(user && user.workerTokenHash) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

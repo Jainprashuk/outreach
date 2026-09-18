@@ -10,6 +10,7 @@ const mongoose = require('mongoose');
 // tracking must have: trustworthiness. Same vocabulary, same UI grammar, no
 // shared rows. Please don't "fix" this.
 const jobPostingSchema = new mongoose.Schema({
+  userId:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   // ── identity ───────────────────────────────────────────────────────────────
   source:     { type: String, enum: ['greenhouse', 'lever', 'ashby', 'muse', 'jobicy'], required: true },
   boardToken: { type: String, required: true },
@@ -86,7 +87,7 @@ const jobPostingSchema = new mongoose.Schema({
   deletedAt: { type: Date, default: null },
 }, { timestamps: true });
 
-jobPostingSchema.index({ sourceKey: 1 });                               // the upsert key
+jobPostingSchema.index({ userId: 1, sourceKey: 1 });                    // the upsert key
 jobPostingSchema.index({ source: 1, boardToken: 1, listingStatus: 1 }); // the per-board close scan
 jobPostingSchema.index({ listingStatus: 1, postedAt: -1 });             // default list order
 jobPostingSchema.index({ firstSeenAt: -1 });                            // "new since last sync"

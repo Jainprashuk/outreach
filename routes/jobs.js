@@ -25,13 +25,16 @@ router.post('/', async (req, res) => {
     const mode = ['bulk', 'drip'].includes(sendMode) ? sendMode : 'sequential';
 
     // Prefer credentials sent from the browser (guaranteed same-request values).
-    // Fall back to in-memory mailer state for local dev where a single process handles all requests.
+    // Credentials are stamped onto the job so every Vercel instance that picks
+    // it up can send, regardless of which one received this request.
+    const creds = await mailer.getSenderFor(req.userId);
     const job = await SendJob.create({
+      userId: req.userId,
       items,
       attachResume:      !!attachResume,
-      senderEmail:       senderEmail       || mailer.senderConfig.email || '',
-      senderName:        senderName        || mailer.senderConfig.name  || '',
-      senderAppPassword: senderAppPassword || mailer.senderAppPassword  || '',
+      senderEmail:       senderEmail       || creds.email       || '',
+      senderName:        senderName        || creds.name        || '',
+      senderAppPassword: senderAppPassword || creds.appPassword || '',
       sendMode:          mode,
       chunkSize:         (mode === 'bulk' && Number(chunkSize) > 0) ? Number(chunkSize) : 20,
       ratePerHour:       (mode === 'drip' && Number(req.body.ratePerHour) > 0) ? Number(req.body.ratePerHour) : 5,
@@ -44,7 +47,7 @@ router.post('/', async (req, res) => {
       // The job row already exists but nothing will ever process it (bad/missing event key,
       // Inngest unreachable). Cancel it so /active doesn't hand this ghost to the widget,
       // which would then sit at "Sending emails…" forever.
-      await SendJob.findByIdAndUpdate(job.id, { status: 'cancelled' });
+      await SendJob.findOneAndUpdate({ _id: job.id, userId: req.userId }, { status: 'cancelled' });
       return res.status(502).json({ error: `Could not queue the send: ${err.message}` });
     }
     res.json(job.toJSON());
@@ -69,7 +72,7 @@ router.get('/stats/sent-24h', async (req, res) => {
     }));
 
     const jobs = await SendJob.find(
-      { 'items.processedAt': { $gte: since } },
+      { userId: req.userId, 'items.processedAt': { $gte: since } },
       { items: 1 }
     ).lean();
 
@@ -98,10 +101,10 @@ const ACTIVE_PROJECTION = { items: 1, status: 1, processedCount: 1, attachResume
 
 // Auto-cancel jobs stuck in pending/processing for over 24h with zero progress.
 // These are ghost jobs where Inngest never ran (e.g. server was down when the event fired).
-const cancelStaleJobs = () => {
+const cancelStaleJobs = (userId) => {
   const staleThreshold = new Date(Date.now() - 24 * 60 * 60 * 1000);
   return SendJob.updateMany(
-    { status: { $in: ['pending', 'processing'] }, processedCount: 0, createdAt: { $lt: staleThreshold } },
+    { userId, status: { $in: ['pending', 'processing'] }, processedCount: 0, createdAt: { $lt: staleThreshold } },
     { $set: { status: 'cancelled' } }
   );
 };
@@ -109,10 +112,10 @@ const cancelStaleJobs = () => {
 // IMPORTANT: /active and /active-all must be defined before /:id
 router.get('/active', async (req, res) => {
   try {
-    await cancelStaleJobs();
+    await cancelStaleJobs(req.userId);
 
     const job = await SendJob.findOne(
-      { status: { $in: ACTIVE_STATUSES } },
+      { userId: req.userId, status: { $in: ACTIVE_STATUSES } },
       ACTIVE_PROJECTION
     ).sort({ createdAt: -1 }).lean();
     res.json(job ? serialize(job) : null);
@@ -126,15 +129,15 @@ router.get('/active', async (req, res) => {
 // set; /active only ever surfaced the newest, hiding the others while they sent.
 router.get('/active-all', async (req, res) => {
   try {
-    await cancelStaleJobs();
+    await cancelStaleJobs(req.userId);
 
     const jobs = await SendJob.find(
-      { status: { $in: ACTIVE_STATUSES } },
+      { userId: req.userId, status: { $in: ACTIVE_STATUSES } },
       ACTIVE_PROJECTION
     ).sort({ createdAt: -1 }).limit(20).lean();
     const campaignIds = jobs.map(j => j.campaignId).filter(Boolean);
     const campaigns = campaignIds.length
-      ? await Campaign.find({ _id: { $in: campaignIds }, deleted: { $ne: true } }, { name: 1 }).lean()
+      ? await Campaign.find({ _id: { $in: campaignIds }, userId: req.userId, deleted: { $ne: true } }, { name: 1 }).lean()
       : [];
     const names = new Map(campaigns.map(c => [String(c._id), c.name]));
     res.json(jobs.map(job => ({ ...serialize(job), campaignName: job.campaignId ? names.get(String(job.campaignId)) || null : null })));
@@ -146,7 +149,7 @@ router.get('/active-all', async (req, res) => {
 // GET /api/jobs/latest — most recent job (any status); used by done.html to find jobId
 router.get('/latest', async (req, res) => {
   try {
-    const job = await SendJob.findOne().sort({ createdAt: -1 }).lean();
+    const job = await SendJob.findOne({ userId: req.userId }).sort({ createdAt: -1 }).lean();
     res.json(job ? serialize(job) : null);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -158,7 +161,7 @@ router.get('/latest', async (req, res) => {
 // Does NOT fire Inngest — credentials must be re-entered at send time.
 router.post('/:id/retry-failed', async (req, res) => {
   try {
-    const job = await SendJob.findById(req.params.id).lean();
+    const job = await SendJob.findOne({ _id: req.params.id, userId: req.userId }).lean();
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
     const failedItems = job.items.filter(i => i.status === 'failed');
@@ -168,12 +171,12 @@ router.post('/:id/retry-failed', async (req, res) => {
 
     // Reset contacts: queued + approved so "Resume sending" picks them up
     await Contact.updateMany(
-      { _id: { $in: failedContactIds } },
+      { _id: { $in: failedContactIds }, userId: req.userId },
       { $set: { status: 'queued', approvalStatus: 'approved' } }
     );
 
     // Return the full contact docs so the frontend can build the approved list for step3
-    const contacts = await Contact.find({ _id: { $in: failedContactIds } }).lean();
+    const contacts = await Contact.find({ _id: { $in: failedContactIds }, userId: req.userId }).lean();
     res.json({ ok: true, retried: failedItems.length, contacts });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -184,11 +187,11 @@ router.post('/:id/retry-failed', async (req, res) => {
 // Called automatically by the widget when it detects this inconsistency.
 router.post('/:id/repair', async (req, res) => {
   try {
-    const job = await SendJob.findById(req.params.id, 'status items.status').lean();
+    const job = await SendJob.findOne({ _id: req.params.id, userId: req.userId }, 'status items.status').lean();
     if (!job) return res.status(404).json({ error: 'Job not found' });
     if (job.status !== 'processing') return res.json({ ok: true, repaired: false, status: job.status });
     if (job.items.every(i => i.status !== 'pending')) {
-      await SendJob.findByIdAndUpdate(req.params.id, {
+      await SendJob.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, {
         status: 'done',
         processedCount: job.items.filter(i => i.status !== 'pending').length,
       });
@@ -202,7 +205,7 @@ router.post('/:id/repair', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const job = await SendJob.findById(req.params.id).lean();
+    const job = await SendJob.findOne({ _id: req.params.id, userId: req.userId }).lean();
     if (!job) return res.status(404).json({ error: 'Job not found' });
     res.json(serialize(job));
   } catch (err) {
@@ -212,7 +215,7 @@ router.get('/:id', async (req, res) => {
 
 router.post('/:id/pause', async (req, res) => {
   try {
-    const job = await SendJob.findByIdAndUpdate(req.params.id, { status: 'paused' }, { new: true, lean: true });
+    const job = await SendJob.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, { status: 'paused' }, { new: true, lean: true });
     if (!job) return res.status(404).json({ error: 'Job not found' });
     res.json(serialize(job));
   } catch (err) {
@@ -223,7 +226,7 @@ router.post('/:id/pause', async (req, res) => {
 router.post('/:id/resume', async (req, res) => {
   try {
     // Check credentials before updating status so we don't leave a stuck 'processing' job
-    const existing = await SendJob.findById(req.params.id).lean();
+    const existing = await SendJob.findOne({ _id: req.params.id, userId: req.userId }).lean();
     if (!existing) return res.status(404).json({ error: 'Job not found' });
     if (!existing.senderEmail || !existing.senderAppPassword) {
       return res.status(400).json({
@@ -232,8 +235,8 @@ router.post('/:id/resume', async (req, res) => {
       });
     }
 
-    const job = await SendJob.findByIdAndUpdate(
-      req.params.id,
+    const job = await SendJob.findOneAndUpdate(
+      { _id: req.params.id, userId: req.userId },
       { status: 'processing' },
       { new: true, lean: true }
     );
@@ -253,7 +256,7 @@ router.post('/:id/resume', async (req, res) => {
         })));
       }
     } else {
-      await SendJob.findByIdAndUpdate(req.params.id, { status: 'done' });
+      await SendJob.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, { status: 'done' });
       job.status = 'done';
     }
     res.json(serialize(job));
@@ -264,7 +267,7 @@ router.post('/:id/resume', async (req, res) => {
 
 router.post('/:id/cancel', async (req, res) => {
   try {
-    const job = await SendJob.findByIdAndUpdate(req.params.id, { status: 'cancelled' }, { new: true, lean: true });
+    const job = await SendJob.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, { status: 'cancelled' }, { new: true, lean: true });
     if (!job) return res.status(404).json({ error: 'Job not found' });
     res.json(serialize(job));
   } catch (err) {

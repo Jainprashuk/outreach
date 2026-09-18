@@ -45,7 +45,7 @@ const buildFilter = (tab) => {
 router.get('/', async (req, res) => {
   try {
     const { tab, page, limit, ids } = req.query;
-    const filter = buildFilter(tab);
+    const filter = { ...buildFilter(tab), userId: req.userId };
     if (ids) {
       const idList = ids.split(',').filter(Boolean);
       filter._id = { $in: idList };
@@ -73,7 +73,7 @@ router.get('/', async (req, res) => {
 router.get('/stats', async (req, res) => {
   try {
     const [agg] = await Contact.aggregate([
-      { $match: BASE_FILTER },
+      { $match: { ...BASE_FILTER, userId: req.userId } },
       { $group: {
         _id: null,
         total:        { $sum: 1 },
@@ -106,10 +106,10 @@ router.get('/stats', async (req, res) => {
 // POST /api/contacts/retry-failed — reset all failed contacts to queued
 router.post('/retry-failed', async (req, res) => {
   try {
-    const failedContacts = await Contact.find({ ...BASE_FILTER, status: 'failed' }).lean();
+    const failedContacts = await Contact.find({ ...BASE_FILTER, userId: req.userId, status: 'failed' }).lean();
     if (failedContacts.length === 0) return res.json({ ok: true, retried: 0 });
     await Contact.updateMany(
-      { _id: { $in: failedContacts.map(c => c._id) } },
+      { _id: { $in: failedContacts.map(c => c._id) }, userId: req.userId },
       { $set: { status: 'queued', approvalStatus: 'approved' } }
     );
     res.json({ ok: true, retried: failedContacts.length });
@@ -127,14 +127,14 @@ router.post('/reset-for-send', async (req, res) => {
     }
     // Contacts emailed inside the cooldown window, or blocklisted, are left completely
     // alone — they keep their real status instead of being parked at `queued`.
-    const all = await Contact.find({ _id: { $in: ids }, deleted: { $ne: true } }).lean();
+    const all = await Contact.find({ _id: { $in: ids }, userId: req.userId, deleted: { $ne: true } }).lean();
     const skipped = all.filter(c => c.status === 'in-campaign' || c.status === 'blocked' || inCooldown(c));
     const skippedIds = new Set(skipped.map(c => String(c._id)));
     const eligibleIds = all.filter(c => !skippedIds.has(String(c._id))).map(c => c._id);
 
     if (eligibleIds.length > 0) {
       await Contact.updateMany(
-        { _id: { $in: eligibleIds } },
+        { _id: { $in: eligibleIds }, userId: req.userId },
         {
           $set: { status: 'queued', approvalStatus: 'pending', editedSubject: null, editedBody: null },
           $push: { statusHistory: { status: 'queued', changedAt: new Date(), note: 'Reset for sending' } },
@@ -142,7 +142,7 @@ router.post('/reset-for-send', async (req, res) => {
       );
     }
 
-    const contacts = await Contact.find({ _id: { $in: eligibleIds } }).lean();
+    const contacts = await Contact.find({ _id: { $in: eligibleIds }, userId: req.userId }).lean();
     res.json({
       ok: true,
       contacts: contacts.map(serialize),
@@ -171,7 +171,7 @@ router.post('/', async (req, res) => {
 
     // Dedupe + insert live in lib/contactImport.js so /api/leads/move-to-outreach
     // applies exactly the same rules.
-    const { created } = await importContacts(rows);
+    const { created } = await importContacts(rows, req.userId);
 
     res.status(201).json({ created, skipped: rows.length - created.length });
   } catch (err) {
@@ -192,7 +192,7 @@ router.patch('/', async (req, res) => {
       for (const key of Object.keys(rest)) {
         if (allowed.has(key)) patch[key] = rest[key];
       }
-      return { updateOne: { filter: { _id: id }, update: { $set: patch } } };
+      return { updateOne: { filter: { _id: id, userId: req.userId }, update: { $set: patch } } };
     });
     await Contact.bulkWrite(ops, { ordered: false });
     res.json({ ok: true, count: ops.length });
@@ -234,7 +234,7 @@ const needsBackfillFilter = {
 // GET /api/contacts/backfill-replies/count — how many legacy sends/replies still need backfilling
 router.get('/backfill-replies/count', async (req, res) => {
   try {
-    const count = await Contact.countDocuments(needsBackfillFilter);
+    const count = await Contact.countDocuments({ ...needsBackfillFilter, userId: req.userId });
     res.json({ count });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -246,8 +246,8 @@ router.get('/backfill-replies/count', async (req, res) => {
 // of the backlog per call instead of failing the whole thing). Shared by the manual
 // "Backfill now" button (POST /backfill-replies below) and the automatic mailbox-check cron
 // (server.js), so the backlog also drains in the background without anyone visiting Mailbox.
-const runBackfillBatch = async (limit) => {
-  const contacts = await Contact.find(needsBackfillFilter).limit(limit);
+const runBackfillBatch = async (limit, userId) => {
+  const contacts = await Contact.find({ ...needsBackfillFilter, userId }).limit(limit);
 
   for (const contact of contacts) {
     const hasOutboundThread = (contact.thread || []).some(t => t.direction === 'outbound');
@@ -294,7 +294,7 @@ const runBackfillBatch = async (limit) => {
     await contact.save();
   }
 
-  const remaining = await Contact.countDocuments(needsBackfillFilter);
+  const remaining = await Contact.countDocuments({ ...needsBackfillFilter, userId });
   return { processed: contacts.length, remaining };
 };
 
@@ -303,7 +303,7 @@ const runBackfillBatch = async (limit) => {
 router.post('/backfill-replies', async (req, res) => {
   try {
     const limit = Math.min(50, Math.max(1, Number(req.body?.limit) || 20));
-    const result = await runBackfillBatch(limit);
+    const result = await runBackfillBatch(limit, req.userId);
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -316,7 +316,7 @@ router.post('/backfill-replies', async (req, res) => {
 // message and returns the updated contact either way, so the UI can show the new state.
 router.post('/:id/classify-reply', async (req, res) => {
   try {
-    const contact = await Contact.findById(req.params.id);
+    const contact = await Contact.findOne({ _id: req.params.id, userId: req.userId });
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     if (!contact.repliedAt) return res.status(400).json({ error: 'This contact has no reply to classify yet' });
 
@@ -343,7 +343,7 @@ router.post('/:id/classify-reply', async (req, res) => {
 // GET /api/contacts/:id/thread — full mailbox-style conversation (outbound + inbound, in order)
 router.get('/:id/thread', async (req, res) => {
   try {
-    const contact = await Contact.findById(req.params.id, 'name email company thread replyCategory replyCategoryReasoning').lean();
+    const contact = await Contact.findOne({ _id: req.params.id, userId: req.userId }, 'name email company thread replyCategory replyCategoryReasoning').lean();
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     const thread = [...(contact.thread || [])].sort((a, b) => new Date(a.at) - new Date(b.at));
     res.json({
@@ -359,16 +359,16 @@ router.get('/:id/thread', async (req, res) => {
 // GET /api/contacts/:id/fail-reason — look up error from SendJob items (for contacts failed before failReason was added to Contact)
 router.get('/:id/fail-reason', async (req, res) => {
   try {
-    const contact = await Contact.findById(req.params.id, 'status failReason').lean();
+    const contact = await Contact.findOne({ _id: req.params.id, userId: req.userId }, 'status failReason').lean();
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     if (contact.failReason) return res.json({ reason: contact.failReason });
     const job = await SendJob.findOne(
-      { items: { $elemMatch: { contactId: req.params.id, status: 'failed' } } },
+      { userId: req.userId, items: { $elemMatch: { contactId: req.params.id, status: 'failed' } } },
       { 'items.$': 1 }
     ).lean();
     const reason = job?.items?.[0]?.error || null;
     if (reason) {
-      await Contact.findByIdAndUpdate(req.params.id, { failReason: reason });
+      await Contact.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, { failReason: reason });
     }
     res.json({ reason });
   } catch (err) {
@@ -379,8 +379,8 @@ router.get('/:id/fail-reason', async (req, res) => {
 // DELETE /api/contacts/:id — soft-delete (sets deleted: true, hides from all queries)
 router.delete('/:id', async (req, res) => {
   try {
-    const contact = await Contact.findByIdAndUpdate(
-      req.params.id,
+    const contact = await Contact.findOneAndUpdate(
+      { _id: req.params.id, userId: req.userId },
       { deleted: true, deletedAt: new Date() },
       { new: true, lean: true }
     );
@@ -403,7 +403,7 @@ router.patch('/:id', async (req, res) => {
     if (update.status) {
       op.$push = { statusHistory: { status: update.status, changedAt: new Date(), note: 'Manual status change' } };
     }
-    const contact = await Contact.findByIdAndUpdate(req.params.id, op, { new: true, lean: true });
+    const contact = await Contact.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, op, { new: true, lean: true });
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     res.json(serialize(contact));
   } catch (err) {
