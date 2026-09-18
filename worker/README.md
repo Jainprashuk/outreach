@@ -17,7 +17,21 @@ harvest to a datacenter IP with a lifted `li_at` cookie would trade that away.
 
 ## Setup
 
-1. Put the same `WORKER_SECRET` in `.env` here and in the Vercel env.
+1. Register this machine against your account and put the token it returns in
+   `.env` here as `WORKER_SECRET`:
+
+   ```
+   curl -X POST https://your-app.vercel.app/api/scrapes/worker-token \
+     -H "Cookie: outreach_session=<your session cookie>"
+   ```
+
+   The value is shown once. It identifies **which account's** runs this worker
+   claims — a run, the leads it ingests and the 7-day LinkedIn block it can
+   trigger all belong to one account. Rotate or revoke it from the same endpoint
+   if the machine is lost.
+
+   (A single-owner deployment can still use the old shared `WORKER_SECRET` env
+   var on the server, but only while exactly one account exists.)
 2. Log into LinkedIn once in the debug Chrome profile:
    ```bash
    ~/Desktop/linkdin-post/chrome-debug.sh

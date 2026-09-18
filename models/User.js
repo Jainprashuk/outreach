@@ -5,9 +5,16 @@ const userSchema = new mongoose.Schema({
   passwordHash: { type: String, required: true },
   name: { type: String, default: '' },
   lastLoginAt: { type: Date, default: null },
+  // SHA-256 of this account's scrape-worker token. The worker on the Mac has no
+  // cookie, so it authenticates with a bearer token that identifies WHICH
+  // account's runs it is claiming — see lib/workerAuth.js.
+  workerTokenHash: { type: String, default: null },
 }, { timestamps: true });
 
 userSchema.index({ email: 1 }, { unique: true });
+// Sparse: most accounts never register a worker, and several nulls must not
+// collide under a unique index.
+userSchema.index({ workerTokenHash: 1 }, { unique: true, sparse: true });
 
 userSchema.set('toJSON', {
   transform: (doc, ret) => {
@@ -15,6 +22,8 @@ userSchema.set('toJSON', {
     delete ret._id;
     delete ret.__v;
     delete ret.passwordHash;
+    ret.hasWorkerToken = !!ret.workerTokenHash;
+    delete ret.workerTokenHash;
     return ret;
   }
 });

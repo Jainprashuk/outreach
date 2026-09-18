@@ -18,6 +18,7 @@ const {
 } = require('./lib/session');
 const { auditHttpMutations } = require('./lib/activityLog');
 const { attachUser } = require('./lib/currentUser');
+const { resolveWorkerUser } = require('./lib/workerAuth');
 const { usersByStaleness, runForUsers } = require('./lib/fanout');
 const { deadline } = require('./lib/http');
 const { classifyReply } = require('./lib/replyClassifier');
@@ -58,8 +59,10 @@ const CRON_TOKEN  = CRON_SECRET ? makeToken('cron:' + CRON_SECRET) : null;
 // ── Fourth independent credential — the LinkedIn scrape worker ──────────────
 // Separate from CRON_SECRET on purpose: that one lives in GitHub Actions, this
 // one lives on a laptop, so they should be revocable independently.
+// Now a legacy fallback: per-account worker tokens live on the User document
+// (lib/workerAuth.js), and this one is only honoured while a single account
+// exists, so one shared secret can never claim somebody else's runs.
 const WORKER_SECRET = process.env.WORKER_SECRET;
-const WORKER_TOKEN  = WORKER_SECRET ? makeToken('worker:' + WORKER_SECRET) : null;
 
 // Constant-time compare of two hex digests. Both sides are fixed-length here, so
 // the length precheck that stops timingSafeEqual from throwing cannot leak
@@ -92,12 +95,11 @@ const isCron = (req) => {
   return tokenMatches(makeToken('cron:' + raw), CRON_TOKEN);
 };
 
-const isWorker = (req) => {
-  if (!WORKER_TOKEN) return false;   // unset secret => carve-out is inert
-  const raw = req.headers['x-worker-secret'];
-  if (typeof raw !== 'string' || !raw) return false;
-  return tokenMatches(makeToken('worker:' + raw), WORKER_TOKEN);
-};
+// Resolves the ACCOUNT behind a worker token, not just "is this the worker".
+// A scrape run, the leads it ingests and the 7-day LinkedIn block it can trigger
+// all belong to one user, so the credential has to name them.
+const resolveWorker = (req) =>
+  resolveWorkerUser(req.headers['x-worker-secret'], { legacySecret: WORKER_SECRET || null });
 
 // Read a cookie value from the raw header and constant-time compare to a token.
 const cookieMatches = (req, name, expected) => {
@@ -146,8 +148,17 @@ const requireAuth = async (req, res, next) => {
   if (CRON_PATHS.has(req.path) && isCron(req)) { req.isCron = true; return next(); }
 
   // The scrape worker runs on a Mac and has no cookie either. Same exact-path
-  // rule, inert unless WORKER_SECRET is configured.
-  if (WORKER_PATHS.has(req.path) && isWorker(req)) return next();
+  // rule. Its token identifies the account, so req.userId is set here and every
+  // handler downstream stays scoped without knowing how the caller authenticated.
+  if (WORKER_PATHS.has(req.path)) {
+    try {
+      await ensureDb();
+      const workerUserId = await resolveWorker(req);
+      if (workerUserId) { req.isWorker = true; req.userId = workerUserId; return next(); }
+    } catch (err) {
+      return res.status(503).json({ error: `Database not available: ${err.message}` });
+    }
+  }
 
   if (isLegacyOwner(req)) return next();
 
