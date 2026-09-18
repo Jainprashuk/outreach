@@ -579,7 +579,7 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
 
   const { category, reasoning, success } = await classifyReply({
     subject: parsed.subject, body: fullBody,
-    contactEmail: contact.email, contactName: contact.name,
+    contactEmail: contact.email, contactName: contact.name, userId,
   });
 
   const threadEntry = {

@@ -282,7 +282,7 @@ const runBackfillBatch = async (limit, userId) => {
     if (!contact.replyClassifierOk) {
       const { subject, body } = latestClassifiableContent(contact);
       const { category, reasoning, success } = await classifyReply({
-        subject, body, contactEmail: contact.email, contactName: contact.name,
+        subject, body, contactEmail: contact.email, contactName: contact.name, userId,
       });
       if (success) {
         contact.replyCategory = category;
@@ -322,7 +322,7 @@ router.post('/:id/classify-reply', async (req, res) => {
 
     const { subject, body } = latestClassifiableContent(contact);
     const { category, reasoning, success } = await classifyReply({
-      subject, body, contactEmail: contact.email, contactName: contact.name,
+      subject, body, contactEmail: contact.email, contactName: contact.name, userId: req.userId,
     });
 
     if (success) {
