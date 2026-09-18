@@ -57,7 +57,10 @@ export default function ContactDateFilterPanel({ filters, onChange, onReset, mat
 
   return (
     <div ref={ref} className="filter-panel" style={{
-      position: 'absolute', top: 'calc(100% + 6px)', left: 0, zIndex: 220,
+      // Anchored from the right, not the left — this trigger sits near the right edge of the
+      // filter row, so a left-anchored panel spills past the viewport edge (the "to" date
+      // inputs were getting clipped).
+      position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 220,
       width: 'min(420px, calc(100vw - 32px))',
       background: 'var(--bg)', border: '0.5px solid var(--border-md)',
       borderRadius: 'var(--radius-xl)', boxShadow: 'var(--shadow-lg)',
