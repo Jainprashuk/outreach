@@ -149,9 +149,14 @@ const sendSingleEmail = inngest.createFunction(
       const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
 
       // Credentials stored in job at creation time; fall back to mailer (env vars)
-      const senderEmail    = job.senderEmail    || mailer.senderConfig.email;
-      const senderName     = job.senderName     || mailer.senderConfig.name;
-      const senderPassword = job.senderAppPassword || mailer.senderAppPassword;
+      // The job carries its own credentials so a Vercel worker never depends on
+      // process state; the owner's stored settings are the fallback.
+      const fallback = (job.senderEmail && job.senderAppPassword)
+        ? { email: '', name: '', appPassword: '' }
+        : await mailer.getSenderFor(job.userId);
+      const senderEmail    = job.senderEmail       || fallback.email;
+      const senderName     = job.senderName        || fallback.name;
+      const senderPassword = job.senderAppPassword || fallback.appPassword;
 
       if (!senderEmail || !senderPassword) {
         throw new Error('No Gmail credentials stored in job. Please re-send via the dashboard → Resume sending.');
@@ -247,9 +252,14 @@ const sendEmailBulk = inngest.createFunction(
         return;
       }
 
-      const senderEmail    = job.senderEmail    || mailer.senderConfig.email;
-      const senderName     = job.senderName     || mailer.senderConfig.name;
-      const senderPassword = job.senderAppPassword || mailer.senderAppPassword;
+      // The job carries its own credentials so a Vercel worker never depends on
+      // process state; the owner's stored settings are the fallback.
+      const fallback = (job.senderEmail && job.senderAppPassword)
+        ? { email: '', name: '', appPassword: '' }
+        : await mailer.getSenderFor(job.userId);
+      const senderEmail    = job.senderEmail       || fallback.email;
+      const senderName     = job.senderName        || fallback.name;
+      const senderPassword = job.senderAppPassword || fallback.appPassword;
 
       if (!senderEmail || !senderPassword) {
         throw new Error('No Gmail credentials stored in job. Please re-send via the dashboard → Resume sending.');

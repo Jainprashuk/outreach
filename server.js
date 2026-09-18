@@ -12,6 +12,7 @@ const Contact = require('./models/Contact');
 const User = require('./models/User');
 const mailer = require('./lib/mailer');
 const { verifyPassword } = require('./lib/password');
+const credentials = require('./lib/credentials');
 const {
   createSession, resolveSession, destroySession, setCookieHeader, clearCookieHeader,
 } = require('./lib/session');
@@ -388,20 +389,33 @@ const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip } = requir
 app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip] }));
 
 // ── Configure Gmail credentials ────────────────────────────────────────────
-app.post('/api/config', (req, res) => {
+app.post('/api/config', requireDb, async (req, res) => {
   const { email, appPassword, name } = req.body;
   if (!email || !appPassword) return res.status(400).json({ error: 'email and appPassword required' });
+  if (!credentials.isConfigured()) {
+    return res.status(503).json({ error: 'CREDENTIAL_KEY is not set, so a Gmail password cannot be stored safely.' });
+  }
 
-  const candidate = mailer.buildTransporter(email, appPassword);
-  candidate.verify((err) => {
-    if (err) {
-      return res.status(400).json({ error: 'Could not connect. Check email/app password.', detail: err.message });
-    }
-    mailer.transporter = candidate;
-    mailer.senderConfig = { email, name: name || 'Prashuk Jain' };
-    mailer.senderAppPassword = appPassword;
+  try {
+    await new Promise((resolve, reject) => {
+      mailer.buildTransporter(email, appPassword).verify(err => (err ? reject(err) : resolve()));
+    });
+  } catch (err) {
+    return res.status(400).json({ error: 'Could not connect. Check email/app password.', detail: err.message });
+  }
+
+  try {
+    // Persisted against this user, encrypted. It used to live in process memory,
+    // which a cron invocation never saw and which every other user's request on
+    // the same warm instance did.
+    const update = { gmailEmail: email, gmailAppPasswordEnc: credentials.encrypt(appPassword) };
+    if (name) update.senderName = name;
+    const settings = await Settings.getForUser(req.userId);
+    await Settings.updateOne({ _id: settings._id, userId: req.userId }, { $set: update });
     res.json({ ok: true, message: `Connected as ${email}` });
-  });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Bounce parsing ─────────────────────────────────────────────────────────
@@ -599,7 +613,8 @@ const REPLY_LOOKBACK_DAYS = 30;
 const BUFFER_MS = 5 * 60 * 1000;
 
 app.post('/api/check-mailbox', requireDb, async (req, res) => {
-  if (!mailer.senderConfig.email || !mailer.senderAppPassword) {
+  const sender = await mailer.getSenderFor(req.userId);
+  if (!sender.email || !sender.appPassword) {
     return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
   }
 
@@ -617,7 +632,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
 
   const client = new ImapFlow({
     host: 'imap.gmail.com', port: 993, secure: true,
-    auth: { user: mailer.senderConfig.email, pass: mailer.senderAppPassword },
+    auth: { user: sender.email, pass: sender.appPassword },
     logger: false,
   });
 
@@ -750,15 +765,16 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
 });
 
 // ── Send single email (legacy — kept for step3 fallback) ──────────────────
-app.post('/api/send', async (req, res) => {
-  if (!mailer.transporter) return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+app.post('/api/send', requireDb, async (req, res) => {
   const { to, subject, body, attachResume } = req.body;
   if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body are required' });
 
   try {
+    const sender = await mailer.getTransporterFor(req.userId);
+    if (!sender) return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
     const attachments = await mailer.getResumeAttachment(attachResume, req.userId);
-    const info = await mailer.transporter.sendMail({
-      from: `"${mailer.senderConfig.name}" <${mailer.senderConfig.email}>`,
+    const info = await sender.transporter.sendMail({
+      from: `"${sender.name}" <${sender.email}>`,
       to, subject, text: body,
       ...(attachments ? { attachments } : {}),
     });
@@ -769,8 +785,13 @@ app.post('/api/send', async (req, res) => {
 });
 
 // ── Status ──────────────────────────────────────────────────────────────────
-app.get('/api/status', (req, res) => {
-  res.json({ configured: !!mailer.transporter, email: mailer.senderConfig.email, name: mailer.senderConfig.name });
+app.get('/api/status', requireDb, async (req, res) => {
+  try {
+    const sender = await mailer.getSenderFor(req.userId);
+    res.json({ configured: !!(sender.email && sender.appPassword), email: sender.email, name: sender.name });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // ── Global error handler — catches unhandled throws in any route ─────────────

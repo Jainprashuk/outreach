@@ -11,6 +11,7 @@ const {
 } = require('../lib/campaignRunner');
 const { deadline } = require('../lib/http');
 const { inCooldown } = require('../lib/cooldown');
+const mailer = require('../lib/mailer');
 
 const router = express.Router();
 
@@ -85,7 +86,12 @@ function validateConfig({ contactsPerDay, ratePerHour }) {
   return null;
 }
 
-const hasEnvCredentials = () => !!(process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD);
+// Campaigns release unattended, so the owner's credentials must already be
+// stored — there is nobody at the keyboard to supply them at send time.
+const hasSendCredentials = async (userId) => {
+  const sender = await mailer.getSenderFor(userId);
+  return !!(sender.email && sender.appPassword);
+};
 
 async function restoreReservedContacts(rows, note, userId) {
   const ops = rows.filter(r => r.sourceContactId).map(r => ({
@@ -131,7 +137,7 @@ router.get('/meta', async (req, res) => {
     res.json({
       ...headroom,
       cronConfigured: !!process.env.CRON_SECRET,
-      credentialSource: hasEnvCredentials() ? 'env' : 'none',
+      credentialSource: (await hasSendCredentials(req.userId)) ? 'stored' : 'none',
       running, paused,
       dailyCommitment: active.reduce((n, c) => n + (c.contactsPerDay || 0), 0),
     });
@@ -247,11 +253,11 @@ router.post('/', async (req, res) => {
     // campaign happily produces jobs where every item throws "No Gmail
     // credentials stored in job" through all its retries — a silent, invisible
     // failure discovered a week and several hundred contacts later.
-    if (!hasEnvCredentials()) {
+    if (!await hasSendCredentials(req.userId)) {
       return res.status(400).json({
         error: 'credentials_missing',
-        detail: 'Campaigns send unattended, so GMAIL_EMAIL and GMAIL_APP_PASSWORD '
-              + 'must be set in the server environment. Add them and restart.',
+        detail: 'Campaigns send unattended, so your Gmail credentials must be saved '
+              + 'first. Add them on the Send screen, then create the campaign.',
       });
     }
 
@@ -292,7 +298,7 @@ router.post('/from-contacts', async (req, res) => {
     const ratePerHour = Number(b.ratePerHour) || 5;
     const configError = validateConfig({ contactsPerDay, ratePerHour });
     if (configError) return res.status(400).json({ error: configError });
-    if (!hasEnvCredentials()) return res.status(400).json({ error: 'credentials_missing' });
+    if (!await hasSendCredentials(req.userId)) return res.status(400).json({ error: 'credentials_missing' });
 
     const ids = [...new Set(Array.isArray(b.contactIds) ? b.contactIds.filter(mongoose.isValidObjectId) : [])];
     if (!ids.length) return res.status(400).json({ error: 'Select at least one contact.' });

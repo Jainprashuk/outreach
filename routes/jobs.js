@@ -25,14 +25,16 @@ router.post('/', async (req, res) => {
     const mode = ['bulk', 'drip'].includes(sendMode) ? sendMode : 'sequential';
 
     // Prefer credentials sent from the browser (guaranteed same-request values).
-    // Fall back to in-memory mailer state for local dev where a single process handles all requests.
+    // Credentials are stamped onto the job so every Vercel instance that picks
+    // it up can send, regardless of which one received this request.
+    const creds = await mailer.getSenderFor(req.userId);
     const job = await SendJob.create({
       userId: req.userId,
       items,
       attachResume:      !!attachResume,
-      senderEmail:       senderEmail       || mailer.senderConfig.email || '',
-      senderName:        senderName        || mailer.senderConfig.name  || '',
-      senderAppPassword: senderAppPassword || mailer.senderAppPassword  || '',
+      senderEmail:       senderEmail       || creds.email       || '',
+      senderName:        senderName        || creds.name        || '',
+      senderAppPassword: senderAppPassword || creds.appPassword || '',
       sendMode:          mode,
       chunkSize:         (mode === 'bulk' && Number(chunkSize) > 0) ? Number(chunkSize) : 20,
       ratePerHour:       (mode === 'drip' && Number(req.body.ratePerHour) > 0) ? Number(req.body.ratePerHour) : 5,
