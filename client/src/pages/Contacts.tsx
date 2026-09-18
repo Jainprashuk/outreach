@@ -12,6 +12,21 @@ import { CATEGORY_OPTIONS } from '../lib/format';
 import { parseCsvText, readFileText } from '../lib/csv';
 import { SkeletonRows } from '../components/Skeleton';
 import CreateContactCampaignModal from '../components/CreateContactCampaignModal';
+import ContactDateFilterPanel, {
+  countActiveDateFilters, DEFAULT_DATE_FILTERS, type ContactDateFilters,
+} from '../components/ContactDateFilterPanel';
+
+// A local yyyy-mm-dd (from <input type="date">) compared against an ISO timestamp. `to` is
+// inclusive of the whole day, so picking the same date for from/to still matches contacts
+// updated at any time on that day rather than only at midnight.
+const inDateRange = (iso: string | null | undefined, from: string, to: string) => {
+  if (!from && !to) return true;
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  if (from && t < new Date(`${from}T00:00:00`).getTime()) return false;
+  if (to && t > new Date(`${to}T23:59:59.999`).getTime()) return false;
+  return true;
+};
 
 const PAGE_SIZE = 25;
 
@@ -35,6 +50,8 @@ export default function Contacts() {
   const [approvalFilter, setApprovalFilter] = useState('');
   const [templateFilter, setTemplateFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [dateFilters, setDateFilters] = useState<ContactDateFilters>(DEFAULT_DATE_FILTERS);
+  const [showDateFilters, setShowDateFilters] = useState(false);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [dragOver, setDragOver] = useState(false);
@@ -59,8 +76,19 @@ export default function Contacts() {
     if (approvalFilter) list = list.filter(c => c.approvalStatus === approvalFilter);
     if (templateFilter) list = list.filter(c => c.template === templateFilter);
     if (categoryFilter) list = list.filter(c => c.replyCategory === categoryFilter);
+    if (dateFilters.createdFrom || dateFilters.createdTo) {
+      list = list.filter(c => inDateRange(c.createdAt, dateFilters.createdFrom, dateFilters.createdTo));
+    }
+    if (dateFilters.sentFrom || dateFilters.sentTo) {
+      list = list.filter(c => inDateRange(c.lastSentAt, dateFilters.sentFrom, dateFilters.sentTo));
+    }
+    if (dateFilters.repliedFrom || dateFilters.repliedTo) {
+      list = list.filter(c => inDateRange(c.repliedAt, dateFilters.repliedFrom, dateFilters.repliedTo));
+    }
     return list;
-  }, [app.contacts, tab, search, statusFilter, approvalFilter, templateFilter, categoryFilter]);
+  }, [app.contacts, tab, search, statusFilter, approvalFilter, templateFilter, categoryFilter, dateFilters]);
+
+  const dateFilterCount = countActiveDateFilters(dateFilters);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   const safePage = Math.min(page, totalPages);
@@ -231,8 +259,22 @@ export default function Contacts() {
           <option value="">All reply categories</option>
           {CATEGORY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
+        <div style={{ position: 'relative' }}>
+          <button className={`btn btn-sm${showDateFilters || dateFilterCount > 0 ? ' btn-primary' : ''}`} type="button"
+            data-filter-trigger onClick={() => setShowDateFilters(v => !v)}>
+            <i className="ti ti-calendar" /> Dates
+            {dateFilterCount > 0 && <span className="contact-count-badge" style={{ marginLeft: 6 }}>{dateFilterCount}</span>}
+            <i className={`ti ti-chevron-${showDateFilters ? 'up' : 'down'}`} style={{ marginLeft: 4, fontSize: 12 }} />
+          </button>
+          {showDateFilters && (
+            <ContactDateFilterPanel filters={dateFilters} onChange={patch => { setDateFilters(prev => ({ ...prev, ...patch })); resetPage(); }}
+              onReset={() => { setDateFilters(DEFAULT_DATE_FILTERS); resetPage(); }}
+              matched={filtered.length} total={app.contacts.length} onClose={() => setShowDateFilters(false)} />
+          )}
+        </div>
         <button className="btn btn-sm" type="button" onClick={() => {
-          setSearch(''); setStatusFilter(''); setApprovalFilter(''); setTemplateFilter(''); setCategoryFilter(''); setTab('all'); resetPage();
+          setSearch(''); setStatusFilter(''); setApprovalFilter(''); setTemplateFilter(''); setCategoryFilter('');
+          setDateFilters(DEFAULT_DATE_FILTERS); setTab('all'); resetPage();
         }}>Clear filters</button>
       </div>
 
