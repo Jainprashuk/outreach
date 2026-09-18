@@ -17,7 +17,7 @@ const {
   createSession, resolveSession, destroySession, setCookieHeader, clearCookieHeader,
 } = require('./lib/session');
 const { auditHttpMutations } = require('./lib/activityLog');
-const { attachUser } = require('./lib/currentUser');
+const { attachUser, resolveSoleUserId } = require('./lib/currentUser');
 const { resolveWorkerUser } = require('./lib/workerAuth');
 const { issueShareToken, revokeShareToken, resolveShareUser, hasShareToken } = require('./lib/shareAuth');
 const { usersByStaleness, runForUsers } = require('./lib/fanout');
@@ -132,7 +132,12 @@ const isLegacyOwner = (req) => LEGACY_LOGIN && cookieMatches(req, AUTH_COOKIE, A
 const isShare = (req) => cookieMatches(req, EXPORT_COOKIE, EXPORT_TOKEN);
 
 const requireAuth = async (req, res, next) => {
-  if (AUTH_OPEN) return next();
+  // Local-development bypass. It resolves the owner here, beside the bypass, so
+  // that attachUser can stay strict for every real request.
+  if (AUTH_OPEN) {
+    try { await ensureDb(); req.userId = await resolveSoleUserId(); } catch (_) { /* no account yet */ }
+    return next();
+  }
   if (req.path === '/login' || req.path.startsWith('/api/auth') || req.path.startsWith('/api/inngest')) return next();
   // The React SPA shell is public so share/unauthenticated visitors can load it;
   // the client renders "Not authorised" for owner-only pages and all owner DATA
@@ -331,6 +336,15 @@ const requireShareAuth = async (req, res, next) => {
     const session = await resolveSession(req);
     if (session) { req.session = session; req.userId = session.userId; return next(); }
   } catch (_) { /* fall through to the share-password check */ }
+
+  // The legacy global share password names no account, so it can only mean
+  // anything while exactly one exists. Resolved explicitly here rather than
+  // left for attachUser to guess at.
+  if (isShare(req)) {
+    try { req.userId = await resolveSoleUserId(); return next(); }
+    catch (err) { return res.status(503).json({ error: `The share password cannot identify an account: ${err.message}` }); }
+  }
+
   if (!EXPORT_TOKEN) return res.status(503).json({ error: 'Sharing not configured' });
   return res.status(401).json({ error: 'Unauthorized' });
 };
