@@ -4,6 +4,7 @@ const mongoose = require('mongoose');
 // from the schedule when a worker polls, then claimed and executed by the
 // worker on Prashuk's Mac — the harvest cannot run on Vercel, see worker/README.
 const scrapeRunSchema = new mongoose.Schema({
+  userId:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   status:  { type: String, enum: ['queued', 'running', 'done', 'failed', 'blocked', 'cancelled'], default: 'queued' },
   trigger: { type: String, enum: ['manual', 'scheduled'], default: 'manual' },
   // Capped at MAX_SEARCHES (20) in scroll_harvest.py. The cap is deliberate.

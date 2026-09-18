@@ -15,6 +15,7 @@ const resumeSchema = new mongoose.Schema({
 
 // Singleton document — there is only ever one settings record.
 const settingsSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   senderName: { type: String, default: 'Your Name' },
   senderCompany: { type: String, default: 'Your Company' },
   gmailEmail: { type: String, default: '' },

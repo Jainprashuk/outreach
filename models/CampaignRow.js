@@ -10,6 +10,7 @@ const extraSchema = new mongoose.Schema({
 }, { _id: false });
 
 const campaignRowSchema = new mongoose.Schema({
+  userId:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   campaignId: { type: mongoose.Schema.Types.ObjectId, ref: 'Campaign', required: true },
 
   // Position in the sheet. THE release order — "N per day, top down" is literally

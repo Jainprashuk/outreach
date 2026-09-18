@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 // no emails becomes a single doc with email: null. Leads are intentionally
 // unrelated to Contact until promoted via POST /api/leads/move-to-outreach.
 const leadSchema = new mongoose.Schema({
+  userId:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   authorName: { type: String, required: true },  // author_name (sometimes junk marketing text)
   authorUrl:  { type: String, default: null },
   email:      { type: String, default: null },   // ONE email, lowercased; null when the source had none
@@ -54,7 +55,7 @@ const leadSchema = new mongoose.Schema({
 // Default list order: best fit first, so hard rejects sink to the bottom.
 leadSchema.index({ fitScore: -1, createdAt: -1 });
 leadSchema.index({ status: 1, fitScore: -1 });
-leadSchema.index({ dedupeKey: 1 });
+leadSchema.index({ userId: 1, dedupeKey: 1 });
 leadSchema.index({ email: 1 });
 leadSchema.index({ queries: 1 });
 leadSchema.index({ applyStatus: 1 });

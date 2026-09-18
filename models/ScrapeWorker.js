@@ -8,6 +8,7 @@ const mongoose = require('mongoose');
 // Its own collection rather than fields on Settings, for the same reason
 // JobBoard is: per-poll writes would race the resume Buffer in that singleton.
 const scrapeWorkerSchema = new mongoose.Schema({
+  userId:           { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   lastSeenAt:       { type: Date, default: null },
   host:             { type: String, default: '' },
   chromeUp:         { type: Boolean, default: false },

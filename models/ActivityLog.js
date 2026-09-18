@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const activityLogSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   category: { type: String, required: true, index: true },
   action: { type: String, required: true },
   message: { type: String, required: true },

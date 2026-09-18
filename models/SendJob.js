@@ -13,6 +13,7 @@ const itemSchema = new mongoose.Schema({
 }, { _id: false });
 
 const sendJobSchema = new mongoose.Schema({
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   // Present only for jobs released by a Campaign. Manual Send wizard jobs stay
   // independent and therefore never produce campaign notifications.
   campaignId:       { type: String, default: null },

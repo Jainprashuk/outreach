@@ -6,6 +6,7 @@ const mongoose = require('mongoose');
 // assume roughly one attended run a day, and over-running is what gets a
 // LinkedIn account restricted.
 const scrapeScheduleSchema = new mongoose.Schema({
+  userId:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   enabled:  { type: Boolean, default: false },
   // 0 = Sunday .. 6 = Saturday
   days:     { type: [Number], default: [0, 1, 2, 3, 4, 5, 6] },
