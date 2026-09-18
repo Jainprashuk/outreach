@@ -19,7 +19,7 @@ const serialize = (doc) => {
 // GET /api/templates
 router.get('/', async (req, res) => {
   try {
-    const templates = await Template.find().sort({ createdAt: 1 }).lean();
+    const templates = await Template.find({ userId: req.userId }).sort({ createdAt: 1 }).lean();
     res.json(templates.map(serialize));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -37,10 +37,10 @@ router.post('/', async (req, res) => {
     if (!base) return res.status(400).json({ error: 'Could not derive a key from the template name' });
 
     let key = base, n = 1;
-    while (await Template.exists({ key })) {
+    while (await Template.exists({ userId: req.userId, key })) {
       key = `${base}-${++n}`;
     }
-    const tpl = await Template.create({ key, name, subject, body });
+    const tpl = await Template.create({ userId: req.userId, key, name, subject, body });
     res.json(tpl);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -55,7 +55,7 @@ router.patch('/:key', async (req, res) => {
     for (const field of allowed) {
       if (field in req.body) update[field] = req.body[field];
     }
-    const tpl = await Template.findOneAndUpdate({ key: req.params.key }, update, { new: true, lean: true });
+    const tpl = await Template.findOneAndUpdate({ userId: req.userId, key: req.params.key }, update, { new: true, lean: true });
     if (!tpl) return res.status(404).json({ error: 'Template not found' });
     res.json(serialize(tpl));
   } catch (err) {
@@ -66,7 +66,7 @@ router.patch('/:key', async (req, res) => {
 // DELETE /api/templates/:key
 router.delete('/:key', async (req, res) => {
   try {
-    const tpl = await Template.findOneAndDelete({ key: req.params.key }, { lean: true });
+    const tpl = await Template.findOneAndDelete({ userId: req.userId, key: req.params.key }, { lean: true });
     if (!tpl) return res.status(404).json({ error: 'Template not found' });
     res.json({ ok: true });
   } catch (err) {

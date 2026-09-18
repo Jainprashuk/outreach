@@ -11,6 +11,7 @@ const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
 const mailer = require('./lib/mailer');
 const { auditHttpMutations } = require('./lib/activityLog');
+const { attachUser } = require('./lib/currentUser');
 const { classifyReply } = require('./lib/replyClassifier');
 const { runBackfillBatch } = require('./routes/contacts');
 
@@ -247,9 +248,13 @@ app.post('/api/share/login', (req, res) => {
   res.status(401).json({ error: 'Invalid password' });
 });
 
-app.get('/api/share/contacts', requireDb, requireShareAuth, async (_req, res) => {
+// Mounted ahead of the `/api` attachUser middleware, so it resolves the account
+// itself. The share password is still one global credential: until phase 3 there
+// is one account to share, and whose contacts these are has to be explicit
+// rather than "whatever is in the collection".
+app.get('/api/share/contacts', requireDb, requireShareAuth, attachUser, async (req, res) => {
   try {
-    const docs = await Contact.find({ deleted: { $ne: true } })
+    const docs = await Contact.find({ userId: req.userId, deleted: { $ne: true } })
       .select('name email company role status repliedAt lastSentAt')
       .sort({ createdAt: -1 })
       .lean();
@@ -269,7 +274,9 @@ app.get('/api/share/contacts', requireDb, requireShareAuth, async (_req, res) =>
   }
 });
 
-app.use('/api', requireDb, auditHttpMutations);
+// attachUser sits ahead of every /api route so handlers can rely on req.userId.
+// It runs after requireDb because it reads the account from the database.
+app.use('/api', requireDb, attachUser, auditHttpMutations);
 app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
@@ -368,11 +375,11 @@ const cleanMsgId = (id) => (id || '').replace(/^<|>$/g, '') || null;
 const threadHasMessageId = (contact, messageId) =>
   !!messageId && (contact.thread || []).some(t => t.messageId === messageId);
 
-// tryMatchReply — uses pre-loaded lean maps; writes via findByIdAndUpdate (no doc hydration).
+// tryMatchReply — uses pre-loaded lean maps; writes via findOneAndUpdate (no doc hydration).
 // Runs on every scan regardless of whether the contact already has a prior reply, so an
 // ongoing back-and-forth (2nd, 3rd, ... reply) keeps getting captured — de-duped purely on
 // message-id so the same inbound message is never appended to `thread` twice.
-const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
+const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
   const parsed = await simpleParser(raw);
   const fromAddr = (parsed.from?.value?.[0]?.address || '').toLowerCase();
   if (!fromAddr || /mailer-daemon|postmaster/i.test(fromAddr)) return;
@@ -437,7 +444,7 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
   // moment) — it only becomes true if THIS classification attempt actually succeeded. On
   // failure, category/reasoning are left null rather than filled with a fake fallback value,
   // so the UI can tell "not yet classified" apart from a real (if unconfident) verdict.
-  await Contact.findByIdAndUpdate(contact._id, {
+  await Contact.findOneAndUpdate({ _id: contact._id, userId }, {
     $set: {
       status: newStatus, repliedAt, replySnippet,
       replyCategory: success ? category : null,
@@ -459,7 +466,7 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied) => {
 // No status change, no classification — sent messages are just captured for the thread view.
 // De-duped on message-id, which also naturally skips messages the app already recorded at
 // send time (inngest-fns.js), since those already carry the same Message-ID header.
-const trySentReply = async (raw, byMessageId, byEmail) => {
+const trySentReply = async (raw, byMessageId, byEmail, userId) => {
   const parsed = await simpleParser(raw);
   const toAddr = (parsed.to?.value?.[0]?.address || '').toLowerCase();
   if (!toAddr) return;
@@ -495,7 +502,7 @@ const trySentReply = async (raw, byMessageId, byEmail) => {
   contact.thread = [...(contact.thread || []), { messageId }];
   if (messageId) byMessageId.set(messageId, contact);
 
-  await Contact.findByIdAndUpdate(contact._id, { $push: { thread: threadEntry } });
+  await Contact.findOneAndUpdate({ _id: contact._id, userId }, { $push: { thread: threadEntry } });
 };
 
 // ── Check mailbox ──────────────────────────────────────────────────────────
@@ -508,7 +515,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
   }
 
-  const settings = await Settings.findOne({}, { 'resume.data': 0 });
+  const settings = await Settings.findOne({ userId: req.userId }, { 'resume.data': 0 });
   const lastChecked = settings?.lastMailboxCheckAt ?? null;
 
   const fallbackBounce = new Date(Date.now() - BOUNCE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
@@ -533,7 +540,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   // Pre-load ALL contacts once with a lean projection — eliminates N+1 queries in the scan loop.
   // `thread.messageId` only (not full text/html) keeps this payload small even as threads grow.
   const allContacts = await Contact.find(
-    { deleted: { $ne: true } },
+    { userId: req.userId, deleted: { $ne: true } },
     'email name status bounceReason messageId updatedAt thread.messageId lastSentAt repliedAt'
   ).lean();
 
@@ -587,20 +594,20 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
 
             if (existing.status !== 'bounced') {
               existing.status = 'bounced'; // in-memory: prevents double-processing
-              await Contact.findByIdAndUpdate(existing._id, {
+              await Contact.findOneAndUpdate({ _id: existing._id, userId: req.userId }, {
                 $set: { status: 'bounced', bounceReason: reason },
                 $push: { statusHistory: { status: 'bounced', changedAt: new Date(), note: reason || 'Bounce detected' } },
               });
               bounced.push({ email: existing.email, name: existing.name, reason });
             } else if (reason !== existing.bounceReason && reason.length > (existing.bounceReason || '').length) {
               existing.bounceReason = reason;
-              await Contact.findByIdAndUpdate(existing._id, { bounceReason: reason });
+              await Contact.findOneAndUpdate({ _id: existing._id, userId: req.userId }, { bounceReason: reason });
             }
           }
           continue;
         }
 
-        await tryMatchReply(raw, byMessageId, byEmail, replied);
+        await tryMatchReply(raw, byMessageId, byEmail, replied, req.userId);
       }
     } finally {
       lock.release();
@@ -619,7 +626,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
       for (const uid of uids) {
         const msg = await client.fetchOne(uid, { source: true }, { uid: true });
         if (!msg?.source) continue;
-        await trySentReply(msg.source.toString('utf8'), byMessageId, byEmail);
+        await trySentReply(msg.source.toString('utf8'), byMessageId, byEmail, req.userId);
       }
     } finally {
       lock.release();
@@ -638,7 +645,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     try { await client.logout(); } catch (_) {}
   }
 
-  await Settings.findOneAndUpdate({}, { lastMailboxCheckAt: new Date() });
+  await Settings.findOneAndUpdate({ userId: req.userId }, { lastMailboxCheckAt: new Date() });
 
   // Drains the legacy thread/classification backfill in the background, piggybacking on this
   // cron so the "Backfill now" button on Mailbox is a manual override, not the only way it
@@ -646,7 +653,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
   // best-effort — a failure here (e.g. a classifier rate limit) must not fail the mailbox check.
   let backfill = null;
   try {
-    backfill = await runBackfillBatch(20);
+    backfill = await runBackfillBatch(20, req.userId);
   } catch (err) {
     backfill = { error: err.message };
   }
@@ -661,7 +668,7 @@ app.post('/api/send', async (req, res) => {
   if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body are required' });
 
   try {
-    const attachments = await mailer.getResumeAttachment(attachResume);
+    const attachments = await mailer.getResumeAttachment(attachResume, req.userId);
     const info = await mailer.transporter.sendMail({
       from: `"${mailer.senderConfig.name}" <${mailer.senderConfig.email}>`,
       to, subject, text: body,

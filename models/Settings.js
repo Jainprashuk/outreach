@@ -13,7 +13,7 @@ const resumeSchema = new mongoose.Schema({
   uploadedAt: { type: Date, default: Date.now },
 }, { _id: false });
 
-// Singleton document — there is only ever one settings record.
+// One record per user.
 const settingsSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   senderName: { type: String, default: 'Your Name' },
@@ -58,9 +58,9 @@ settingsSchema.set('toJSON', {
   }
 });
 
-settingsSchema.statics.getSingleton = async function () {
-  let doc = await this.findOne();
-  if (!doc) doc = await this.create({});
+settingsSchema.statics.getForUser = async function (userId) {
+  let doc = await this.findOne({ userId });
+  if (!doc) doc = await this.create({ userId });
   return doc;
 };
 

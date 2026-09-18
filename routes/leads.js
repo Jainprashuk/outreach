@@ -33,11 +33,11 @@ const HARD_REJECT = -999;
 // null and an id-based join would miss most of them.
 router.get('/outcomes', async (req, res) => {
   try {
-    const emails = await Lead.distinct('email', { email: { $ne: null }, ...BASE_FILTER });
+    const emails = await Lead.distinct('email', { userId: req.userId, email: { $ne: null }, ...BASE_FILTER });
     if (emails.length === 0) return res.json({ outcomes: {}, count: 0 });
 
     const contacts = await Contact.find(
-      { email: { $in: emails }, deleted: { $ne: true } },
+      { userId: req.userId, email: { $in: emails }, deleted: { $ne: true } },
       {
         email: 1, status: 1, approvalStatus: 1, template: 1, lastSentAt: 1,
         followUpSentAt: 1, repliedAt: 1, replySnippet: 1, bounceReason: 1, failReason: 1,
@@ -80,7 +80,7 @@ router.post('/import', async (req, res) => {
     const updatedAt = body && body.updated_at;
     const batchUpdatedAt = Number.isFinite(updatedAt) ? new Date(updatedAt * 1000) : null;
 
-    const result = await importLeads(source, { ignoredRows, batchUpdatedAt });
+    const result = await importLeads(source, { ignoredRows, batchUpdatedAt, userId: req.userId });
     res.status(201).json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -100,7 +100,7 @@ router.post('/move-to-outreach', async (req, res) => {
     const edits = new Map(leads.filter(l => l && l.id).map(l => [String(l.id), l]));
     if (edits.size === 0) return res.status(400).json({ error: 'Expected leads with ids' });
 
-    const docs = await Lead.find({ _id: { $in: [...edits.keys()] }, ...BASE_FILTER }).lean();
+    const docs = await Lead.find({ _id: { $in: [...edits.keys()] }, userId: req.userId, ...BASE_FILTER }).lean();
     if (docs.length === 0) return res.status(404).json({ error: 'No matching leads found' });
 
     // Email-less leads can never become contacts (Contact.email is required). The
@@ -126,7 +126,7 @@ router.post('/move-to-outreach', async (req, res) => {
       };
     });
 
-    const { created } = await importContacts(rows);
+    const { created } = await importContacts(rows, req.userId);
 
     const contactIdByEmail = new Map(created.map(c => [c.email, String(c._id)]));
     const now = new Date();
@@ -134,7 +134,7 @@ router.post('/move-to-outreach', async (req, res) => {
     try {
       await Lead.bulkWrite(rows.map(r => ({
         updateOne: {
-          filter: { _id: r._leadId },
+          filter: { _id: r._leadId, userId: req.userId },
           update: { $set: {
             status: 'added-to-outreach',
             promotedAt: now,
@@ -171,7 +171,7 @@ router.post('/bulk-delete', async (req, res) => {
       return res.status(400).json({ error: 'Expected a non-empty ids array' });
     }
     const r = await Lead.updateMany(
-      { _id: { $in: ids } },
+      { _id: { $in: ids }, userId: req.userId },
       { $set: { deleted: true, deletedAt: new Date() } }
     );
     res.json({ ok: true, deleted: r.modifiedCount });
@@ -184,7 +184,7 @@ router.post('/bulk-delete', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { status, hideRejects, ids, page, limit } = req.query;
-    const filter = { ...BASE_FILTER };
+    const filter = { userId: req.userId, ...BASE_FILTER };
     if (status && status !== 'all') filter.status = status;
     if (hideRejects === '1') filter.fitScore = { $ne: HARD_REJECT };
     if (ids) filter._id = { $in: ids.split(',').filter(Boolean) };
@@ -243,7 +243,7 @@ router.patch('/', async (req, res) => {
     }
     const ids = updates.filter(u => u && u.id).map(u => String(u.id));
     const prevById = new Map(
-      (await Lead.find({ _id: { $in: ids } }, { appliedAt: 1 }).lean())
+      (await Lead.find({ _id: { $in: ids }, userId: req.userId }, { appliedAt: 1 }).lean())
         .map(d => [String(d._id), d])
     );
     const ops = updates
@@ -251,7 +251,7 @@ router.patch('/', async (req, res) => {
       .map(u => {
         const patch = pickPatch(u);
         if (Object.keys(patch).length === 0) return null;
-        return { updateOne: { filter: { _id: u.id }, update: buildOp(patch, u.note, prevById.get(String(u.id))) } };
+        return { updateOne: { filter: { _id: u.id, userId: req.userId }, update: buildOp(patch, u.note, prevById.get(String(u.id))) } };
       })
       .filter(Boolean);
 
@@ -270,10 +270,10 @@ router.patch('/:id', async (req, res) => {
     if (Object.keys(patch).length === 0) {
       return res.status(400).json({ error: 'No updatable fields provided' });
     }
-    const prev = await Lead.findById(req.params.id, { appliedAt: 1 }).lean();
+    const prev = await Lead.findOne({ _id: req.params.id, userId: req.userId }, { appliedAt: 1 }).lean();
     if (!prev) return res.status(404).json({ error: 'Lead not found' });
-    const lead = await Lead.findByIdAndUpdate(
-      req.params.id, buildOp(patch, req.body.note, prev), { new: true }
+    const lead = await Lead.findOneAndUpdate(
+      { _id: req.params.id, userId: req.userId }, buildOp(patch, req.body.note, prev), { new: true }
     );
     res.json(lead);
   } catch (err) {
@@ -284,8 +284,8 @@ router.patch('/:id', async (req, res) => {
 // DELETE /api/leads/:id — soft delete
 router.delete('/:id', async (req, res) => {
   try {
-    const lead = await Lead.findByIdAndUpdate(
-      req.params.id,
+    const lead = await Lead.findOneAndUpdate(
+      { _id: req.params.id, userId: req.userId },
       { $set: { deleted: true, deletedAt: new Date() } },
       { new: true }
     );

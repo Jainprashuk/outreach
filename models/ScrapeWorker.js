@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-// Singleton heartbeat for the worker process on the Mac. Written on every
+// Per-user heartbeat for the worker process on the Mac. Written on every
 // /api/scrapes/claim; read by /api/scrapes/status so the portal can say
 // "ready", "your Mac is asleep", or "log back into LinkedIn" *before* you
 // trigger a run rather than after one fails.
@@ -25,9 +25,9 @@ const scrapeWorkerSchema = new mongoose.Schema({
   blockedReason:    { type: String, default: '' },
 }, { timestamps: true });
 
-scrapeWorkerSchema.statics.getSingleton = async function () {
-  let doc = await this.findOne();
-  if (!doc) doc = await this.create({});
+scrapeWorkerSchema.statics.getForUser = async function (userId) {
+  let doc = await this.findOne({ userId });
+  if (!doc) doc = await this.create({ userId });
   return doc;
 };
 

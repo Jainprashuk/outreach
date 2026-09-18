@@ -27,8 +27,8 @@ const upload = multer({
 // GET /api/settings — excludes resume binary from DB fetch
 router.get('/', async (req, res) => {
   try {
-    let settings = await Settings.findOne({}, { 'resume.data': 0 });
-    if (!settings) settings = await Settings.getSingleton();
+    let settings = await Settings.findOne({ userId: req.userId }, { 'resume.data': 0 });
+    if (!settings) settings = await Settings.getForUser(req.userId);
     res.json(settings);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -63,8 +63,8 @@ router.put('/', async (req, res) => {
     }
 
     const settings = await Settings.findOneAndUpdate(
-      {},
-      { $set: update },
+      { userId: req.userId },
+      { $set: { ...update, userId: req.userId } },
       { new: true, upsert: true, setDefaultsOnInsert: true, projection: { 'resume.data': 0 } }
     );
     res.json(settings);
@@ -79,7 +79,7 @@ router.post('/resume', (req, res) => {
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     try {
-      const settings = await Settings.getSingleton();
+      const settings = await Settings.getForUser(req.userId);
       settings.resume = {
         filename: req.file.originalname,
         contentType: req.file.mimetype,
@@ -98,7 +98,7 @@ router.post('/resume', (req, res) => {
 // GET /api/settings/resume — stream binary
 router.get('/resume', async (req, res) => {
   try {
-    const settings = await Settings.getSingleton();
+    const settings = await Settings.getForUser(req.userId);
     if (!settings.resume) return res.status(404).json({ error: 'No resume uploaded' });
     res.set('Content-Type', settings.resume.contentType);
     res.set('Content-Disposition', `attachment; filename="${settings.resume.filename.replace(/"/g, '')}"`);
@@ -111,7 +111,7 @@ router.get('/resume', async (req, res) => {
 // DELETE /api/settings/resume
 router.delete('/resume', async (req, res) => {
   try {
-    await Settings.findOneAndUpdate({}, { $unset: { resume: '' } });
+    await Settings.findOneAndUpdate({ userId: req.userId }, { $unset: { resume: '' } });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -9,7 +9,7 @@ const DOMAIN_RE = /^[a-z0-9-]+(\.[a-z0-9-]+)+$/i;
 // GET /api/blocklist
 router.get('/', async (req, res) => {
   try {
-    const entries = await Blocklist.find().sort({ createdAt: -1 });
+    const entries = await Blocklist.find({ userId: req.userId }).sort({ createdAt: -1 });
     res.json(entries);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -35,7 +35,7 @@ router.post('/', async (req, res) => {
       return res.status(400).json({ error: 'Not a valid domain' });
     }
 
-    const entry = await Blocklist.create({ type, value, reason: (reason || '').trim() });
+    const entry = await Blocklist.create({ userId: req.userId, type, value, reason: (reason || '').trim() });
     res.json(entry);
   } catch (err) {
     if (err.code === 11000) return res.status(409).json({ error: 'Already on the blocklist' });
@@ -46,7 +46,7 @@ router.post('/', async (req, res) => {
 // DELETE /api/blocklist/:id
 router.delete('/:id', async (req, res) => {
   try {
-    const entry = await Blocklist.findByIdAndDelete(req.params.id);
+    const entry = await Blocklist.findOneAndDelete({ _id: req.params.id, userId: req.userId });
     if (!entry) return res.status(404).json({ error: 'Blocklist entry not found' });
     res.json({ ok: true });
   } catch (err) {

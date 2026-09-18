@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-// Singleton. When a worker polls, the server checks whether an occurrence is
+// One per user. When a worker polls, the server checks whether an occurrence is
 // due and materialises a ScrapeRun for it — see lib/scrapeSchedule.js. There is
 // deliberately no sub-daily frequency: the harvest caps in scroll_harvest.py
 // assume roughly one attended run a day, and over-running is what gets a
@@ -20,9 +20,9 @@ const scrapeScheduleSchema = new mongoose.Schema({
   lastFiredAt:  { type: Date, default: null },
 }, { timestamps: true });
 
-scrapeScheduleSchema.statics.getSingleton = async function () {
-  let doc = await this.findOne();
-  if (!doc) doc = await this.create({});
+scrapeScheduleSchema.statics.getForUser = async function (userId) {
+  let doc = await this.findOne({ userId });
+  if (!doc) doc = await this.create({ userId });
   return doc;
 };
 

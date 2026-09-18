@@ -1,5 +1,4 @@
 const mongoose = require('mongoose');
-const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
 
 async function backfillStatusHistory() {
@@ -129,10 +128,6 @@ async function backfillFollowUpReplied() {
   console.log(`✅  Reclassified ${result.modifiedCount} contacts as follow-up-replied`);
 }
 
-// No template seeding — templates are yours to create in the Templates page.
-async function seed() {
-  await Settings.getSingleton();
-}
 
 async function connect() {
   const env = process.env.NODE_ENV === 'prod' ? 'prod' : 'dev';
@@ -152,7 +147,6 @@ async function connect() {
     socketTimeoutMS: 45000,
   });
   console.log(`✅  Connected to MongoDB (${env} database)`);
-  await seed();
   await backfillStatusHistory();
   await backfillSendTimestamps();
   await backfillFollowUpReplied();
