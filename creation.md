@@ -1,0 +1,1 @@
+node scripts/set-password.js --email=admin@gmail.com --create

@@ -451,6 +451,17 @@ app.get('/api/share-link', requireDb, attachUser, async (req, res) => {
   }
 });
 
+// ── Inngest handler ─────────────────────────────────────────────────────────
+// Mounted ABOVE the `/api` owner guard below. Inngest calls this endpoint from
+// its own servers with no cookie and no user, so attachUser would 401 it and
+// every queued send would sit untouched for ever. It is not unguarded: serve()
+// verifies each request against INNGEST_SIGNING_KEY, and each function reads its
+// owner from the SendJob it was handed, never from the request.
+const { serve } = require('inngest/express');
+const { inngest } = require('./inngest');
+const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip } = require('./inngest-fns');
+app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip] }));
+
 app.use('/api', requireDb, attachUser, auditHttpMutations);
 app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
@@ -467,12 +478,6 @@ app.use('/api/interviews', requireDb, require('./routes/interviews'));
 app.use('/api/postings', requireDb, require('./routes/postings'));
 app.use('/api/campaigns', requireDb, require('./routes/campaigns'));
 app.use('/api/blocklist', requireDb, require('./routes/blocklist'));
-
-// ── Inngest handler ─────────────────────────────────────────────────────────
-const { serve } = require('inngest/express');
-const { inngest } = require('./inngest');
-const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip } = require('./inngest-fns');
-app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip] }));
 
 // ── Configure Gmail credentials ────────────────────────────────────────────
 app.post('/api/config', requireDb, async (req, res) => {
