@@ -25,7 +25,7 @@ require('dotenv').config({ path: path0.join(__dirname, '..', '.env') });
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, execFile } = require('child_process');
+const { spawn, spawnSync, execFile } = require('child_process');
 
 const CFG = {
   outreachUrl:  (process.env.OUTREACH_URL || 'http://localhost:3000').replace(/\/+$/, ''),
@@ -43,6 +43,64 @@ const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const jlBin = () => path.join(CFG.jlRepo, '.venv', 'bin', 'jl');
 
+// ── harvest teardown ────────────────────────────────────────────────────────
+// A harvest that outlives its worker is worse than no harvest. Nothing reads
+// its stdout, so the portal's progress freezes; nothing reads its brief, so the
+// leads never land; and the run stays 'running' until the server's 90-minute
+// reaper gives up, blocking every later run. It also keeps driving the same
+// Chrome a restarted worker is about to drive.
+
+const sleepSync = (ms) => {
+  // Atomics.wait because the exit handler cannot await anything.
+  try { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms); } catch (_) {}
+};
+
+const isAlive = (pid) => {
+  try { process.kill(pid, 0); } catch (_) { return false; }
+  // Signal 0 also succeeds for a zombie. killTree runs synchronously from the
+  // exit handler, so node never gets to reap its own child, and a caffeinate
+  // that has already died would otherwise look alive for the full grace period
+  // and earn a bogus "ignored SIGTERM". `ps` tells the two apart.
+  const { stdout } = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8' });
+  const state = String(stdout || '').trim();
+  return state !== '' && !state.startsWith('Z');
+};
+
+// SIGTERM, a grace period, then SIGKILL. `jl` can be mid-CDP-call, so give it a
+// chance to close the browser context cleanly before insisting.
+function killTree(pid, label) {
+  if (!isAlive(pid)) return;
+  log(`stopping ${label} (pid ${pid})`);
+  // Negative pid signals the whole process group: `caffeinate` forks `jl`
+  // rather than exec'ing it, so signalling the direct child alone would leave
+  // the Python process orphaned — which is exactly the bug this prevents.
+  try { process.kill(-pid, 'SIGTERM'); } catch (_) { try { process.kill(pid, 'SIGTERM'); } catch (_) {} }
+  for (let waited = 0; waited < 5000 && isAlive(pid); waited += 200) sleepSync(200);
+  if (!isAlive(pid)) return;
+  log(`${label} ignored SIGTERM — sending SIGKILL`);
+  try { process.kill(-pid, 'SIGKILL'); } catch (_) { try { process.kill(pid, 'SIGKILL'); } catch (_) {} }
+}
+
+// The harvest this worker started, while it is running.
+let liveHarvest = null;
+const killLiveHarvest = () => {
+  const child = liveHarvest;
+  liveHarvest = null;
+  if (child && child.exitCode === null && child.signalCode === null) killTree(child.pid, 'harvest');
+};
+
+// A worker killed without running its exit handler (SIGKILL, a crashed
+// terminal, a panic) leaves its harvest reparented to launchd and spinning.
+// Clear any such ghost before taking the lock.
+function reapStrayHarvest() {
+  const { stdout } = spawnSync('pgrep', ['-f', `${jlBin()} harvest`], { encoding: 'utf8' });
+  const pids = String(stdout || '').split('\n')
+    .map(n => Number(n.trim()))
+    .filter(n => Number.isInteger(n) && n > 0 && n !== process.pid);
+  for (const pid of pids) killTree(pid, 'orphaned harvest from a previous worker');
+  return pids.length;
+}
+
 // ── single instance ─────────────────────────────────────────────────────────
 // `jl` rewrites data/leads.json wholesale with no locking, so two concurrent
 // workers would clobber each other's store.
@@ -57,11 +115,19 @@ function claimLock() {
       process.exit(1);
     }
     log(`Removing stale lock from dead pid ${pid}`);
+    // That worker may have died mid-harvest. Its `jl` would still be running.
+    const reaped = reapStrayHarvest();
+    if (reaped) {
+      log(`reaped ${reaped} stray harvest process(es). The run they belonged to `
+        + `will be failed by the server's stale-run sweep; re-queue it from the portal.`);
+    }
   }
   fs.writeFileSync(LOCK_FILE, String(process.pid));
   const release = () => { try { fs.unlinkSync(LOCK_FILE); } catch (_) {} };
-  process.on('exit', release);
-  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { release(); process.exit(0); });
+  process.on('exit', () => { killLiveHarvest(); release(); });
+  for (const sig of ['SIGINT', 'SIGTERM']) {
+    process.on(sig, () => { killLiveHarvest(); release(); process.exit(0); });
+  }
 }
 
 // ── portal API ──────────────────────────────────────────────────────────────
@@ -165,7 +231,13 @@ function runHarvest(queries, briefPath, onProgress) {
     args.push('--brief', briefPath);
 
     log(`harvest: ${queries.length} queries`);
-    const child = spawn('caffeinate', args, { cwd: CFG.jlRepo });
+    // `detached` puts caffeinate and its `jl` child in their own process group,
+    // so killTree can signal the pair as a unit. It also means a Ctrl-C aimed
+    // at the worker no longer reaches the harvest by accident — the SIGINT
+    // handler tears it down deliberately instead, which is the only path that
+    // also reports the run as failed.
+    const child = spawn('caffeinate', args, { cwd: CFG.jlRepo, detached: true });
+    liveHarvest = child;
 
     let tail = [];
     const progress = {
@@ -212,15 +284,17 @@ function runHarvest(queries, briefPath, onProgress) {
 
     const timer = setTimeout(() => {
       log('harvest exceeded the timeout — killing it');
-      child.kill('SIGKILL');
+      killTree(child.pid, 'timed-out harvest');
     }, HARVEST_TIMEOUT_MS);
 
     child.on('error', (err) => {
       clearTimeout(timer);
+      liveHarvest = null;
       resolve({ code: -1, output: `Could not start jl: ${err.message}` });
     });
     child.on('close', (code) => {
       clearTimeout(timer);
+      liveHarvest = null;
       resolve({ code, output: tail.join('') });
     });
   });
@@ -376,4 +450,8 @@ async function main() {
   }
 }
 
-main().catch((err) => { console.error(err); process.exit(1); });
+if (require.main === module) {
+  main().catch((err) => { console.error(err); process.exit(1); });
+}
+
+module.exports = { isAlive, killTree, reapStrayHarvest };

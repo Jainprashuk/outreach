@@ -1,7 +1,7 @@
-// Wraps CategoryBadge with the "needs a Gemini trigger" state: when a contact has a reply
-// but replyClassifierOk is false (never attempted, or the automatic attempt failed — e.g. a
-// free-tier rate limit), shows a distinct warning badge plus a manual retry button instead of
-// pretending a category exists.
+// Wraps CategoryBadge with the "needs a manual trigger" state: when a contact has a reply
+// but replyClassifierOk is false (never attempted, or every configured provider failed — e.g.
+// they were all rate-limited), shows a distinct warning badge plus a manual retry button
+// instead of pretending a category exists.
 import { useState } from 'react';
 import CategoryBadge from './CategoryBadge';
 import { useApp } from '../context/AppContext';
@@ -24,7 +24,7 @@ export default function ClassifierStatus({ contact }: { contact: Contact }) {
     try {
       await app.classifyReply(contact.id);
     } catch (err: any) {
-      toast('Gemini classification failed: ' + err.message, 'error');
+      toast('Reply classification failed: ' + err.message, 'error');
     } finally {
       setBusy(false);
     }
@@ -32,7 +32,7 @@ export default function ClassifierStatus({ contact }: { contact: Contact }) {
 
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-      <span className="badge badge-noopenings" title="Gemini hasn't classified this reply yet — may be rate-limited (common on a free-tier key). Trigger manually.">
+      <span className="badge badge-noopenings" title="This reply hasn't been classified yet — every provider may be rate-limited (common on free-tier keys). Trigger manually.">
         <i className="ti ti-alert-triangle" /> Needs classification
       </span>
       <button

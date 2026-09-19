@@ -526,5 +526,8 @@ Simple and reliable for a personal tool. GitHub Actions provides reliable cron w
 | `SENDER_NAME` | server.js | No |
 | `INNGEST_EVENT_KEY` | inngest.js | Yes (prod) |
 | `INNGEST_SIGNING_KEY` | inngest-fns.js | Yes (prod) |
-| `GEMINI_API_KEY` | (unused) | No |
+| `GEMINI_API_KEY` | lib/classify/providers/gemini.js | No (classification is skipped without a provider) |
+| `GROQ_API_KEY` | lib/classify/providers/groq.js | No (fallback provider) |
+| `CEREBRAS_API_KEY` | lib/classify/providers/cerebras.js | No (fallback provider) |
+| `CLASSIFIER_PROVIDER_ORDER` | lib/classify/providers/index.js | No (groq,gemini,cerebras) |
 | `PORT` | server.js | No (3000) |

@@ -4,6 +4,7 @@ const SendJob = require('../models/SendJob');
 const { COOLDOWN_LABEL, inCooldown, cooldownRemaining } = require('../lib/cooldown');
 const { importContacts } = require('../lib/contactImport');
 const { classifyReply } = require('../lib/replyClassifier');
+const { deadline } = require('../lib/http');
 
 const router = express.Router();
 
@@ -242,14 +243,24 @@ router.get('/backfill-replies/count', async (req, res) => {
 });
 
 // Processes one bounded batch of the backfill backlog (so a single call can't run past the
-// serverless function timeout, and so a Gemini free-tier rate limit only burns through part
-// of the backlog per call instead of failing the whole thing). Shared by the manual
-// "Backfill now" button (POST /backfill-replies below) and the automatic mailbox-check cron
-// (server.js), so the backlog also drains in the background without anyone visiting Mailbox.
+// serverless function timeout, and so a classifier rate limit only burns through part of the
+// backlog per call instead of failing the whole thing). Shared by the manual "Backfill now"
+// button (POST /backfill-replies below) and the automatic mailbox-check cron (server.js), so
+// the backlog also drains in the background without anyone visiting Mailbox.
+//
+// `limit` alone is not a time bound — 50 contacts at a few seconds each overruns the 60s
+// serverless cap on its own — so the batch also runs against a wall clock and returns short.
+// The caller already loops until `remaining` is 0, so a partial batch just means one more
+// round trip, whereas a killed function means the work done so far is lost.
+const BACKFILL_BUDGET_MS = 20_000;
+
 const runBackfillBatch = async (limit, userId) => {
   const contacts = await Contact.find({ ...needsBackfillFilter, userId }).limit(limit);
+  const budget = deadline(BACKFILL_BUDGET_MS);
+  let processed = 0;
 
   for (const contact of contacts) {
+    if (budget.expired()) break;
     const hasOutboundThread = (contact.thread || []).some(t => t.direction === 'outbound');
     if (contact.lastSentAt && !hasOutboundThread) {
       // The actual rendered body was never persisted before thread capture existed — only
@@ -281,21 +292,23 @@ const runBackfillBatch = async (limit, userId) => {
     }
     if (!contact.replyClassifierOk) {
       const { subject, body } = latestClassifiableContent(contact);
-      const { category, reasoning, success } = await classifyReply({
+      const { category, reasoning, success, provider } = await classifyReply({
         subject, body, contactEmail: contact.email, contactName: contact.name, userId,
-      });
+      }, { signal: budget.signal });
       if (success) {
         contact.replyCategory = category;
         contact.replyCategoryReasoning = reasoning;
         contact.replyCategorizedAt = new Date();
+        contact.classifiedBy = provider;
       }
       contact.replyClassifierOk = success;
     }
     await contact.save();
+    processed++;
   }
 
   const remaining = await Contact.countDocuments({ ...needsBackfillFilter, userId });
-  return { processed: contacts.length, remaining };
+  return { processed, remaining };
 };
 
 // POST /api/contacts/backfill-replies — processes one bounded batch via runBackfillBatch; the
@@ -311,9 +324,9 @@ router.post('/backfill-replies', async (req, res) => {
 });
 
 // POST /api/contacts/:id/classify-reply — manual (re)trigger for a contact whose latest reply
-// hasn't been successfully classified (replyClassifierOk is false) — e.g. it hit a Gemini
-// free-tier rate limit during the automatic attempt. Re-classifies from the latest inbound
-// message and returns the updated contact either way, so the UI can show the new state.
+// hasn't been successfully classified (replyClassifierOk is false) — e.g. every configured
+// provider was rate-limited during the automatic attempt. Re-classifies from the latest
+// inbound message and returns the updated contact either way, so the UI can show the new state.
 router.post('/:id/classify-reply', async (req, res) => {
   try {
     const contact = await Contact.findOne({ _id: req.params.id, userId: req.userId });
@@ -321,7 +334,7 @@ router.post('/:id/classify-reply', async (req, res) => {
     if (!contact.repliedAt) return res.status(400).json({ error: 'This contact has no reply to classify yet' });
 
     const { subject, body } = latestClassifiableContent(contact);
-    const { category, reasoning, success } = await classifyReply({
+    const { category, reasoning, success, provider } = await classifyReply({
       subject, body, contactEmail: contact.email, contactName: contact.name, userId: req.userId,
     });
 
@@ -329,11 +342,12 @@ router.post('/:id/classify-reply', async (req, res) => {
       contact.replyCategory = category;
       contact.replyCategoryReasoning = reasoning;
       contact.replyCategorizedAt = new Date();
+      contact.classifiedBy = provider;
     }
     contact.replyClassifierOk = success;
     await contact.save();
 
-    if (!success) return res.status(502).json({ error: 'Gemini classification failed again — it may still be rate-limited. Try again shortly.' });
+    if (!success) return res.status(502).json({ error: 'Every classifier provider failed — they may all still be rate-limited. Try again shortly.' });
     res.json(serialize(contact.toObject()));
   } catch (err) {
     res.status(500).json({ error: err.message });

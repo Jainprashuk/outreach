@@ -83,8 +83,8 @@ The activity chart in settings.html renders hours in IST regardless of where the
 
 ---
 
-### 10. Gemini API Key Advertised But Never Wired
-`GEMINI_API_KEY` appears in the environment but does nothing. When a user discovers it (e.g., reading the env file), they may expect AI features that don't exist. Dead env vars either become zombie maintenance burden or mislead future developers into thinking AI is "already built".
+### 10. Gemini API Key Advertised But Never Wired — RESOLVED
+`GEMINI_API_KEY` is now the first provider in the reply classifier's chain (`lib/replyClassifier.js`), alongside `GROQ_API_KEY` and `CEREBRAS_API_KEY`. Leaving any of them unset degrades gracefully: the deterministic rule pass still runs, and anything it can't settle is simply left unclassified rather than mis-categorised.
 
 ---
 

@@ -21,10 +21,17 @@ const contactSchema = new mongoose.Schema({
   replyCategory: { type: String, enum: ['reviewing', 'stay-in-touch', 'no', 'resume-requested', 'needs-attention', 'other'], default: null },
   replyCategoryReasoning: { type: String, default: null },
   replyCategorizedAt: { type: Date, default: null },
-  // True only when Gemini actually succeeded classifying the CURRENT latest reply — distinct
+  // What produced replyCategory: a deterministic rule, or one of the LLM providers. Null on
+  // rows classified before this was tracked, which simply means unknown. It exists so a
+  // change to the rules can invalidate exactly the verdicts those rules produced
+  // (updateMany({classifiedBy:'rules'}, {$set:{replyClassifierOk:false}})) without
+  // re-spending a request on every contact that a model already answered.
+  classifiedBy: { type: String, enum: ['rules', 'gemini', 'groq', 'cerebras', null], default: null },
+  // True only when classification of the CURRENT latest reply actually succeeded — distinct
   // from replyCategory's value, since a rate-limited/failed call must never look identical to
-  // a genuine "needs-attention" verdict. Reset to false whenever a new reply comes in, so a
-  // fresh message always needs its own successful classification (or a manual retrigger).
+  // a genuine "needs-attention" verdict. A rules verdict counts as success: it is a real,
+  // deterministic answer, so re-running it later would only reproduce itself. Reset to false
+  // whenever a new reply comes in, so a fresh message always needs its own classification.
   replyClassifierOk: { type: Boolean, default: false },
   lastSentAt: { type: Date, default: null },
   followUpSentAt: { type: Date, default: null },

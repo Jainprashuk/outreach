@@ -31,8 +31,8 @@
 
 ---
 
-### 1.4 AI Email Draft Generation (Gemini API key is already in env)
-**Problem:** `GEMINI_API_KEY` is set but unused. Writing cold email copy is the hardest part.  
+### 1.4 AI Email Draft Generation (a provider chain is already wired)
+**Problem:** Writing cold email copy is the hardest part. The reply classifier already ships a working multi-provider chain (`lib/classify/providers/`), so drafting would reuse it rather than add an integration.  
 **Solution:** On templates.html, add "Generate with AI" button. Pass role, company, sender context to Gemini Flash. Return 3 subject + body variants. Let user pick + edit.  
 **Impact:** Dramatically reduces time-to-first-send for new users.  
 **Complexity:** Low (API key already available; single fetch call).  
@@ -188,6 +188,5 @@
 | Remove in-memory credential storage (`mailer.transporter`) | Vercel multi-instance: env set on instance A is not visible on instance B | Low (already partially solved by per-job credential snapshot) |
 | Sequential mode deprecation warning | Sequential has fundamental Gmail auth limit flaw; UI should steer users to Bulk | Low |
 | Replace hardcoded IST timezone | Any user outside India sees wrong chart | Low |
-| `GEMINI_API_KEY` env var — use or remove | Dead env vars confuse future developers | Low |
 | Add `userId` scaffold now | Retrofitting multi-user on existing schemas is expensive | Medium |
 | Move `senderAppPassword` to encrypted field | Plain-text in MongoDB is a risk if DB is ever exposed | Medium |

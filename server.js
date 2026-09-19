@@ -606,7 +606,7 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
   const replySnippet = buildSnippet(parsed.text || parsed.html || '');
   const fullBody = parsed.text || parsed.html || '';
 
-  const { category, reasoning, success } = await classifyReply({
+  const { category, reasoning, success, provider } = await classifyReply({
     subject: parsed.subject, body: fullBody,
     contactEmail: contact.email, contactName: contact.name, userId,
   });
@@ -643,6 +643,7 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
       replyCategory: success ? category : null,
       replyCategoryReasoning: success ? reasoning : null,
       replyCategorizedAt: success ? new Date() : null,
+      classifiedBy: success ? provider : null,
       replyClassifierOk: success,
     },
     $push: {
