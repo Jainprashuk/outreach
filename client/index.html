@@ -1,14 +1,30 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta charset="UTF-8">
+<!-- viewport-fit=cover lets the fixed furniture (bulk bar, send widget, toasts)
+     pad itself past the iPhone home indicator via env(safe-area-inset-*). -->
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Outreach</title>
-<script>(function(){try{document.documentElement.setAttribute('data-theme',localStorage.getItem('outreach-theme')||'light');}catch(e){}})();</script>
+<!-- Paints the mobile browser chrome to match the canvas instead of leaving a
+     white bar above a dark app. The theme is a stored choice, not a system one,
+     so the value is set from localStorage below and kept in sync by useTheme. -->
+<meta name="theme-color" id="theme-color" content="#f3f4f8">
+<meta name="color-scheme" content="light dark">
+<meta name="apple-mobile-web-app-title" content="Outreach">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23635bff'/%3E%3Cpath d='M8 16.5l16-7-6 16-3.2-6.3L8 16.5z' fill='%23fff'/%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('outreach-theme')||'light';document.documentElement.setAttribute('data-theme',t);var m=document.getElementById('theme-color');if(m)m.setAttribute('content',t==='dark'?'#0a0b0f':'#f3f4f8');}catch(e){}})();</script>
 <!-- Same physical stylesheet as the classic UI — pixel-identical, zero divergence -->
 <link rel="stylesheet" href="/css/style.css">
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<!-- The icon font and the webfont come from two other origins; opening those
+     connections in parallel with the CSS keeps icon glyphs from popping in late. -->
+<link rel="preconnect" href="https://cdn.jsdelivr.net">
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..700&display=swap" rel="stylesheet">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@latest/dist/tabler-icons.min.css">
+<!-- 400..800: the UI asks for 650/680/720 on headings and stat values, which a
+     400..700 range silently clamped to 700. -->
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet">
 </head>
 <body>
 <div id="root"></div>

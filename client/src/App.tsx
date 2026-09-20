@@ -52,9 +52,13 @@ export default function App() {
   const { loading } = useSession();
 
   if (loading) {
+    // The session check is the first thing a cold load waits on, so this is the
+    // whole screen for a moment. A bare icon on an empty page reads as a broken
+    // render; the mark plus a line of text reads as the app starting.
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--text2)' }}>
-        <i className="ti ti-loader" style={{ fontSize: 28 }} />
+      <div className="boot-screen" role="status" aria-live="polite">
+        <div className="sidebar-logo-icon"><i className="ti ti-send" /></div>
+        <span>Loading your workspace…</span>
       </div>
     );
   }

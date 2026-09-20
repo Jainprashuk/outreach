@@ -316,12 +316,12 @@ export default function CampaignDetail() {
       <div className="section-head" style={{ marginTop: 18 }}>
         <div className="nav-tabs">
           {TABS.map(([key, label, count]) => (
-            <div key={key} className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => setTab(key)}>
+            <button type="button" key={key} className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => setTab(key)}>
               {label}
               {count !== null && count > 0 && (
                 <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{count}</span>
               )}
-            </div>
+            </button>
           ))}
         </div>
       </div>

@@ -415,19 +415,19 @@ export default function Leads() {
       <div className="section-head">
         <div className="nav-tabs">
           {TABS.map(key => (
-            <div key={key} className={`nav-tab${filters.status === key ? ' active' : ''}`}
+            <button type="button" key={key} className={`nav-tab${filters.status === key ? ' active' : ''}`}
               onClick={() => setFilter({ status: key })}
               title={key === 'direct-apply' ? 'Leads with a real application link — apply yourself instead of emailing' : undefined}>
               {key === 'direct-apply' && <i className="ti ti-file-check" style={{ marginRight: 4 }} />}
               {TAB_LABELS[key]}
               <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{counts[key]}</span>
-            </div>
+            </button>
           ))}
         </div>
         <span className="contact-count-badge">{filtered.length} leads</span>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+      <div className="filter-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <input type="text" placeholder="Search name, email, company, links..." value={filters.search}
           onChange={e => setFilter({ search: e.target.value })}
           style={{ flex: 1, minWidth: 180, maxWidth: 280 }} />
@@ -450,7 +450,7 @@ export default function Leads() {
         </button>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+      <div className="quick-select" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ fontSize: 12, color: 'var(--text3)' }}>Quick select:</span>
         {[25, 50, 100].map(n => (
           <button key={n} className="btn btn-sm" type="button" disabled={filtered.length === 0}
@@ -490,8 +490,7 @@ export default function Leads() {
               {c.label} <i className="ti ti-x" style={{ marginLeft: 2 }} />
             </button>
           ))}
-          <button className="btn btn-xs" type="button" onClick={clearFilters}
-            style={{ color: 'var(--red)', borderColor: 'var(--red-bg)' }}>
+          <button className="btn btn-xs" type="button" onClick={clearFilters}>
             <i className="ti ti-filter-off" /> Clear all
           </button>
         </div>
@@ -629,9 +628,7 @@ export default function Leads() {
                   </div>
                 </td>
                 <td>
-                  <button className="btn btn-sm" onClick={() => confirmDelete(l)} title="Delete lead" type="button">
-                    <i className="ti ti-trash" />
-                  </button>
+                  <button aria-label="Delete lead" className="btn btn-sm" onClick={() => confirmDelete(l)} title="Delete lead" type="button"><i className="ti ti-trash" /></button>
                 </td>
               </tr>
             ))}

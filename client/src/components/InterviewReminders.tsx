@@ -67,7 +67,7 @@ export default function InterviewReminders() {
 
   return (
     <div className="edit-modal-wrap open">
-      <div className="edit-modal" style={{ maxWidth: 620, maxHeight: '85vh', overflowY: 'auto' }}>
+      <div className="edit-modal" role="dialog" aria-modal="true" style={{ maxWidth: 620, maxHeight: '85vh', overflowY: 'auto' }}>
         <div className="reply-modal-header">
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 15 }}>
@@ -80,9 +80,7 @@ export default function InterviewReminders() {
               {stale.length > 0 && `${stale.length} with no update in ${STALE_DAYS}+ days`}
             </div>
           </div>
-          <button className="btn btn-sm" type="button" onClick={store.dismissReminders}>
-            <i className="ti ti-x" />
-          </button>
+          <button aria-label="Close" className="btn btn-sm" type="button" onClick={store.dismissReminders}><i className="ti ti-x" /></button>
         </div>
 
         {soon.length > 0 && (

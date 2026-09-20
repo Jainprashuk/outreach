@@ -198,10 +198,10 @@ export default function CampaignList() {
       <div className="section-head" style={{ marginTop: 22 }}>
         <div className="nav-tabs">
           {(['all', 'active', 'finished', 'sending'] as CampaignTab[]).map(key => (
-            <div key={key} className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => setTab(key)}>
+            <button type="button" key={key} className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => setTab(key)}>
               {key === 'all' ? 'All' : key === 'active' ? 'Active' : key === 'finished' ? 'Finished' : 'Sending'}
               <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{tabCounts[key]}</span>
-            </div>
+            </button>
           ))}
         </div>
         <span className="contact-count-badge">{visibleCampaigns.length}</span>

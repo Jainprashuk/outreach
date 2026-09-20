@@ -28,7 +28,7 @@ export default function ReplyModal({ contact, onClose }: { contact: Contact | nu
 
   return (
     <div className="edit-modal-wrap open" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="edit-modal" style={{ maxWidth: 540 }}>
+      <div className="edit-modal" role="dialog" aria-modal="true" style={{ maxWidth: 540 }}>
         <div className="reply-modal-header">
           <div className="contact-chip">
             <Avatar name={contact.name} />
@@ -39,7 +39,7 @@ export default function ReplyModal({ contact, onClose }: { contact: Contact | nu
               </div>
             </div>
           </div>
-          <button className="btn btn-sm" onClick={onClose} style={{ flexShrink: 0 }} type="button"><i className="ti ti-x" /></button>
+          <button aria-label="Close" className="btn btn-sm" onClick={onClose} style={{ flexShrink: 0 }} type="button"><i className="ti ti-x" /></button>
         </div>
         <div className="reply-meta">
           {contact.sentSubject ? (

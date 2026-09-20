@@ -268,8 +268,8 @@ export default function Settings() {
                 </div>
               </div>
               <a className="btn btn-xs" href={`${API_BASE}/api/settings/resume`} target="_blank" rel="noreferrer" title="Download"><i className="ti ti-download" /></a>
-              <button className="btn btn-xs" onClick={() => resumeInputRef.current?.click()} type="button" title="Replace"><i className="ti ti-replace" /></button>
-              <button className="btn btn-xs" style={{ color: 'var(--red)', borderColor: 'var(--red-bg)' }} onClick={removeResume} type="button" title="Remove"><i className="ti ti-trash" /></button>
+              <button aria-label="Replace" className="btn btn-xs" onClick={() => resumeInputRef.current?.click()} type="button" title="Replace"><i className="ti ti-replace" /></button>
+              <button aria-label="Remove" className="btn btn-xs btn-danger-ghost" onClick={removeResume} type="button" title="Remove"><i className="ti ti-trash" /></button>
             </div>
           )}
           <input ref={resumeInputRef} type="file" accept=".pdf,.doc,.docx" style={{ display: 'none' }}
@@ -298,7 +298,7 @@ export default function Settings() {
                 onChange={e => setVarRows(rows => rows.map((r, j) => (j === i ? { ...r, key: e.target.value } : r)))} />
               <input type="text" placeholder="Value" value={row.value} style={{ flex: 2 }}
                 onChange={e => setVarRows(rows => rows.map((r, j) => (j === i ? { ...r, value: e.target.value } : r)))} />
-              <button className="btn btn-xs" style={{ color: 'var(--red)', borderColor: 'var(--red-bg)' }} type="button"
+              <button aria-label="Delete" className="btn btn-xs btn-danger-ghost" type="button"
                 onClick={() => setVarRows(rows => rows.filter((_, j) => j !== i))}><i className="ti ti-trash" /></button>
             </div>
           ))}

@@ -57,13 +57,13 @@ export default function LeadFilterPanel({ leads, filters, onChange, onReset, mat
         borderBottom: '0.5px solid var(--border)', flexShrink: 0,
       }}>
         <div className="nav-tabs" style={{ marginBottom: 0 }}>
-          <div className={`nav-tab${tab === 'basic' ? ' active' : ''}`} onClick={() => setTab('basic')}>Basic</div>
-          <div className={`nav-tab${tab === 'advanced' ? ' active' : ''}`} onClick={() => setTab('advanced')}>
+          <button type="button" className={`nav-tab${tab === 'basic' ? ' active' : ''}`} onClick={() => setTab('basic')}>Basic</button>
+          <button type="button" className={`nav-tab${tab === 'advanced' ? ' active' : ''}`} onClick={() => setTab('advanced')}>
             Advanced{advCount > 0 ? ` (${advCount})` : ''}
-          </div>
+          </button>
         </div>
         <span className="contact-count-badge" style={{ marginLeft: 'auto' }}>{matched} of {leads.length}</span>
-        <button className="btn btn-xs" type="button" onClick={onClose}><i className="ti ti-x" /></button>
+        <button aria-label="Close" className="btn btn-xs" type="button" onClick={onClose}><i className="ti ti-x" /></button>
       </div>
 
       <div style={{ padding: '14px', overflowY: 'auto', flex: 1 }}>

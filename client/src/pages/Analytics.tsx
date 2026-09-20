@@ -526,12 +526,12 @@ export default function Analytics() {
   const switcher = (
     <div className="section-head" style={{ marginBottom: 14 }}>
       <div className="nav-tabs">
-        <div className={`nav-tab${view === 'outreach' ? ' active' : ''}`} onClick={() => setView('outreach')}>
+        <button type="button" className={`nav-tab${view === 'outreach' ? ' active' : ''}`} onClick={() => setView('outreach')}>
           <i className="ti ti-send" /> Outreach
-        </div>
-        <div className={`nav-tab${view === 'leads' ? ' active' : ''}`} onClick={() => setView('leads')}>
+        </button>
+        <button type="button" className={`nav-tab${view === 'leads' ? ' active' : ''}`} onClick={() => setView('leads')}>
           <i className="ti ti-target-arrow" /> Leads
-        </div>
+        </button>
       </div>
     </div>
   );

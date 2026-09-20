@@ -72,7 +72,7 @@ export default function ContactDateFilterPanel({ filters, onChange, onReset, mat
       }}>
         <strong style={{ fontSize: 13 }}>Date filters</strong>
         <span className="contact-count-badge" style={{ marginLeft: 'auto' }}>{matched} of {total}</span>
-        <button className="btn btn-xs" type="button" onClick={onClose}><i className="ti ti-x" /></button>
+        <button aria-label="Close" className="btn btn-xs" type="button" onClick={onClose}><i className="ti ti-x" /></button>
       </div>
 
       <div style={{ padding: '14px', overflowY: 'auto', flex: 1 }}>

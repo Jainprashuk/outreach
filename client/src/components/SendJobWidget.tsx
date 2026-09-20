@@ -202,7 +202,7 @@ export default function SendJobWidget() {
                   </button>
                 )}
                 <button className="btn btn-xs" onClick={() => setCollapsed(c => !c)} title={collapsed ? 'Maximise details' : 'Minimise details'} type="button"><i className={`ti ${collapsed ? 'ti-plus' : 'ti-minus'}`} /></button>
-                <button className="btn btn-xs" onClick={() => close(job.id)} title="Hide panel (sending continues)" type="button"><i className="ti ti-x" /></button>
+                <button aria-label="Hide panel (sending continues)" className="btn btn-xs" onClick={() => close(job.id)} title="Hide panel (sending continues)" type="button"><i className="ti ti-x" /></button>
               </div>
             </div>
             {collapsed && <div className="sjw-min-progress">

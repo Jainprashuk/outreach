@@ -114,16 +114,16 @@ export default function Interviews() {
       <div className="section-head">
         <div className="nav-tabs">
           {TABS.map(t => (
-            <div key={t} className={`nav-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
+            <button type="button" key={t} className={`nav-tab${tab === t ? ' active' : ''}`} onClick={() => setTab(t)}>
               {TAB_LABELS[t]}
               <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{counts[t]}</span>
-            </div>
+            </button>
           ))}
         </div>
         <span className="contact-count-badge">{filtered.length} tracked</span>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+      <div className="filter-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <input type="text" placeholder="Search name, email, phone, company…" value={search}
           onChange={e => setSearch(e.target.value)} style={{ flex: 1, minWidth: 180, maxWidth: 300 }} />
         <select value={statusFilter} onChange={e => setStatusFilter(e.target.value as '' | InterviewStatus)}>

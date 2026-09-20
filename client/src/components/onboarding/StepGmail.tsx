@@ -24,7 +24,7 @@ export default function StepGmail({ status, onDone }: {
   // than as a toast, because the user can do nothing about it themselves.
   if (!status.credentialKeyConfigured) {
     return (
-      <div className="info-box" style={{ borderColor: 'var(--red)' }}>
+      <div className="info-box danger">
         <strong>This deployment cannot store credentials yet.</strong>
         <p style={{ margin: '8px 0 0', color: 'var(--text2)' }}>
           The server has no <code>CREDENTIAL_KEY</code> set, so a Gmail App Password

@@ -145,7 +145,7 @@ export default function Step1() {
           <div key={i} style={{ background: 'var(--bg)', border: '0.5px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 16, marginBottom: 12, position: 'relative' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
               <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text2)' }}>Contact {i + 1}</span>
-              <button className="btn btn-xs" style={{ color: 'var(--red)', borderColor: 'var(--red-bg)' }}
+              <button aria-label="Delete" className="btn btn-xs btn-danger-ghost"
                 onClick={() => setRows(rs => rs.filter((_, j) => j !== i))} type="button"><i className="ti ti-trash" /></button>
             </div>
             <div className="form-grid">

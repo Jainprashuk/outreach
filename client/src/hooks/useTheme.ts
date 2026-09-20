@@ -7,6 +7,10 @@ export function useTheme() {
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
+    // Keeps the mobile browser chrome the same colour as the canvas. Values
+    // mirror --canvas for each theme in styles/theme.css.
+    document.getElementById('theme-color')
+      ?.setAttribute('content', theme === 'dark' ? '#0a0b0f' : '#f3f4f8');
   }, [theme]);
 
   const toggleTheme = useCallback(() => {

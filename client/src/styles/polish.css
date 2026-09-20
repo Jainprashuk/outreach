@@ -1,0 +1,423 @@
+/* ============================================================================
+   OUTREACH — detail pass
+   Loads last. Fixes the small things the base sheet, the Aurora theme and the
+   mobile sheet each left open: inert spinners, unstyled date inputs, native
+   blue checkboxes, fixed furniture that stacks on top of itself, and a set of
+   affordances (scroll hints, focus rings, tap targets) that were missing.
+   Pure presentation — no class names, IDs or behaviour hooks are changed.
+   ============================================================================ */
+
+/* ── Loading spinners ──────────────────────────────────────────────────────
+   Every busy state in the app renders a Tabler loader glyph, but only some of
+   them carried an inline `animation: spin`, so half the app's spinners sat
+   frozen. The glyph itself means "loading" nowhere else, so animating it by
+   name is safe and removes the need to remember the inline style. */
+.ti-loader, .ti-loader-2, .ti-loader-3 {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}
+
+/* ── Form controls ─────────────────────────────────────────────────────────
+   Checkboxes, radios and range inputs were painting themselves the OS blue
+   next to a violet UI. */
+input[type=checkbox], input[type=radio], input[type=range], progress {
+  accent-color: var(--accent);
+}
+input[type=checkbox], input[type=radio] { cursor: pointer; }
+
+/* Date and time fields now pick up the shared input styling (see css/style.css),
+   which leaves only the native calendar/clock button, still drawn in the OS
+   colour. Tinting it to the text colour keeps it from reading as a second,
+   competing accent. */
+input[type=date], input[type=time], input[type=datetime-local], input[type=month] {
+  min-height: 34px;                      /* native pickers ignore padding alone */
+}
+input[type=date]::-webkit-calendar-picker-indicator,
+input[type=time]::-webkit-calendar-picker-indicator,
+input[type=month]::-webkit-calendar-picker-indicator,
+input[type=datetime-local]::-webkit-calendar-picker-indicator {
+  opacity: .55; cursor: pointer;
+  filter: grayscale(1);
+  transition: opacity .12s var(--ease);
+}
+input[type=date]:hover::-webkit-calendar-picker-indicator,
+input[type=time]:hover::-webkit-calendar-picker-indicator,
+input[type=month]:hover::-webkit-calendar-picker-indicator,
+input[type=datetime-local]:hover::-webkit-calendar-picker-indicator { opacity: 1; }
+[data-theme="dark"] input[type=date]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type=time]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type=month]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type=datetime-local]::-webkit-calendar-picker-indicator {
+  filter: grayscale(1) invert(1);
+}
+
+/* A disabled control should look inert to the pointer as well as the eye. */
+input:disabled, select:disabled, textarea:disabled { cursor: not-allowed; }
+
+/* Matches the hover affordance every other control has. */
+textarea:hover:not(:focus) { border-color: var(--text3); }
+
+/* ── Buttons ───────────────────────────────────────────────────────────────
+   Icon-only and text buttons sat at different heights because the icon line
+   box is taller than the label's. A floor on each size keeps a toolbar row
+   optically level. */
+.btn { min-height: 34px; }
+.btn-sm { min-height: 30px; }
+.btn-xs { min-height: 26px; }
+/* .btn-xs was the one size that rendered in --text2; the family is --text. */
+.btn-xs { color: var(--text); }
+
+/* Removes the grey flash iOS/Android paint over any tapped control, and the
+   300ms double-tap-zoom delay on the ones that are clearly single-tap. */
+.btn, .nav-item, .nav-tab, .stat-card, .mode-option, .upload-strip, .upload-zone,
+.mailbox-row, .theme-toggle, .var-pill, .badge, .mobile-menu-btn, button, a {
+  -webkit-tap-highlight-color: transparent;
+}
+.btn, .nav-item, .nav-tab, .mobile-menu-btn, .theme-toggle, .mode-option { touch-action: manipulation; }
+
+/* ── Tabs ──────────────────────────────────────────────────────────────────
+   The tab strips are now <button>s so they can be reached by keyboard. The
+   browser's own button styling has to be undone for them to look unchanged. */
+button.nav-tab {
+  appearance: none; background: none; border: 0;
+  border-bottom: 2px solid transparent;
+  font: inherit; font-size: 13px; line-height: 1.5;
+  color: var(--text2); cursor: pointer;
+  display: inline-flex; align-items: center;
+}
+.nav-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* ── Tables ────────────────────────────────────────────────────────────────
+   A table wider than its card scrolls sideways with nothing to say so. These
+   are the classic shadow-cover pairs: the shadow shows only while there is
+   still content past that edge. */
+.table-card {
+  background-image:
+    linear-gradient(to right, var(--bg) 30%, transparent),
+    linear-gradient(to left,  var(--bg) 30%, transparent),
+    linear-gradient(to right, rgba(20,22,34,.10), transparent 12px),
+    linear-gradient(to left,  rgba(20,22,34,.10), transparent 12px);
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-repeat: no-repeat;
+  background-size: 28px 100%, 28px 100%, 12px 100%, 12px 100%;
+  background-attachment: local, local, scroll, scroll;
+}
+[data-theme="dark"] .table-card {
+  background-image:
+    linear-gradient(to right, var(--bg) 30%, transparent),
+    linear-gradient(to left,  var(--bg) 30%, transparent),
+    linear-gradient(to right, rgba(0,0,0,.45), transparent 12px),
+    linear-gradient(to left,  rgba(0,0,0,.45), transparent 12px);
+}
+
+/* Numbers in a column should line up digit for digit. */
+td.num, th.num, .page-info, .stat-value, .kpi-value, .sh-date, .af-when {
+  font-variant-numeric: tabular-nums;
+}
+
+/* A long address used to stretch the row rather than wrap. */
+.contact-chip > div { min-width: 0; }
+.contact-chip .name, .contact-chip .email {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 30ch;
+}
+
+/* ── Stat values ───────────────────────────────────────────────────────────
+   Dashboard carried one KPI tinted with a literal hex, which stayed a dark
+   blue on the dark canvas. These are the token-backed versions. */
+.stat-value.blue   { color: var(--blue); }
+.stat-value.indigo { color: var(--indigo); }
+.stat-value.purple { color: var(--purple); }
+
+/* ── Empty states ──────────────────────────────────────────────────────────
+   The icon sat hard against the text with no breathing room. */
+.empty-state i { display: block; margin: 0 auto 10px; }
+.empty-state { line-height: 1.6; }
+
+/* ── Selection bar ─────────────────────────────────────────────────────────
+   The bar is fixed to the bottom edge, so whatever it covered — the last table
+   rows and the pager — was unreachable while a selection was live. Reserving
+   the space only while it is visible keeps the page from jumping otherwise. */
+.section:has(.bulk-bar.visible) { padding-bottom: 88px; }
+/* Dashboard renders the bar as a sibling of its section, not inside it. */
+.main:has(> .bulk-bar.visible) > .section { padding-bottom: 88px; }
+
+.bulk-bar {
+  padding-bottom: calc(14px + env(safe-area-inset-bottom));
+}
+/* `.bulk-bar .btn` recoloured the text to white but left `.btn`'s own
+   background in place, so an unadorned button on the bar was white-on-white in
+   the light theme and invisible. The bar is a dark surface in both themes, so
+   its buttons are ghosts on that surface. */
+.bulk-bar .btn {
+  background: rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.22);
+  color: #fff;
+}
+.bulk-bar .btn:hover { background: rgba(255,255,255,.18); color: #fff; }
+.bulk-bar .btn:disabled { background: rgba(255,255,255,.06); color: rgba(255,255,255,.5); }
+
+/* On the near-black bar the light theme's --red (#c0392b) and --blue sit at
+   roughly 4:1 against the fill. These are the same hues stepped for a dark
+   surface, so the bar reads the same in both themes. */
+.bulk-bar .btn-del  { color: #ff8a80; border-color: rgba(255,138,128,.45); background: transparent; }
+.bulk-bar .btn-del:hover { background: rgba(255,138,128,.14); }
+.bulk-bar .btn-send { background: var(--accent); border-color: transparent; color: #fff; }
+.bulk-bar .btn-send:hover { filter: brightness(1.08); background: var(--accent); }
+.bulk-bar select {
+  background: rgba(255,255,255,.08); color: #fff; border-color: rgba(255,255,255,.22);
+}
+.bulk-bar select option { color: var(--text); background: var(--bg); }
+
+/* ── Floating furniture ────────────────────────────────────────────────────
+   The send-job widget and the toasts both anchor to the bottom-right, and the
+   selection bar lands on top of both. Each gets out of the other's way.
+   Keyed off <body>, not .app-shell: the toast container is mounted by the
+   provider *outside* the shell, so a shell-scoped :has() would never see it. */
+#send-job-widget { bottom: calc(20px + env(safe-area-inset-bottom)); }
+.toast-container { bottom: calc(20px + env(safe-area-inset-bottom)); }
+body:has(.bulk-bar.visible) #send-job-widget,
+body:has(.bulk-bar.visible) .toast-container {
+  bottom: calc(84px + env(safe-area-inset-bottom));
+}
+
+/* ── Sidebar ───────────────────────────────────────────────────────────────
+   Off-canvas on a phone it runs edge to edge, including under the notch and
+   the home indicator. */
+.sidebar {
+  padding-top: calc(18px + env(safe-area-inset-top));
+  padding-bottom: calc(20px + env(safe-area-inset-bottom));
+  overscroll-behavior: contain;
+}
+/* Aurora drops the active bar for a filled pill; the base sheet's ::before
+   still paints a stub outside the pill on the group's children. */
+.nav-children .nav-item.active::before { display: none; }
+
+/* ── Main scroll ───────────────────────────────────────────────────────────
+   Stops an over-scroll at the end of a long table from rubber-banding the
+   whole page on iOS. */
+.main { overscroll-behavior-y: contain; }
+
+/* ── Mailbox ───────────────────────────────────────────────────────────────
+   The selected thread was marked by fill alone, which the unread rows also
+   use. A rail on the active row separates the two meanings. */
+.mailbox-row { position: relative; transition: background-color .12s var(--ease); }
+.mailbox-row.active::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: var(--accent);
+}
+.mailbox-list, .mailbox-thread { overscroll-behavior: contain; }
+
+/* ── Modals ────────────────────────────────────────────────────────────────
+   A tall modal scrolls inside itself; without this the heading scrolls away
+   and there is no visible edge where the content is cut. */
+.edit-modal, .mode-picker { overscroll-behavior: contain; }
+
+/* ── Upload strip ──────────────────────────────────────────────────────────
+   It is a click target, so it needs the same focus ring as a button. */
+.upload-strip:focus-visible, .upload-zone:focus-visible {
+  outline: 2px solid var(--accent); outline-offset: 2px;
+}
+/* The "Browse" button inside the strip is decoration — the whole strip is the
+   control — so it must not look interactive on its own. */
+.upload-strip .btn[style*="pointer-events"] { box-shadow: none; }
+
+/* ── Toasts ────────────────────────────────────────────────────────────────
+   Three toasts in a row all looked alike at a glance; the type colour was only
+   on the icon. A hairline down the leading edge carries it to the whole card. */
+.toast { border-left: 3px solid var(--border-md); }
+.toast.success { border-left-color: var(--green); }
+.toast.error   { border-left-color: var(--red); }
+.toast.info    { border-left-color: var(--blue); }
+
+/* ── Motion ────────────────────────────────────────────────────────────────
+   The reduced-motion block in the base sheet zeroes durations, which would
+   leave a spinner frozen mid-rotation and reading as a stuck UI. Hiding the
+   rotation entirely is the honest version. */
+@media (prefers-reduced-motion: reduce) {
+  .ti-loader, .ti-loader-2, .ti-loader-3 { animation: none; opacity: .6; }
+  .btn:hover, .stat-card:hover { transform: none; }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   MOBILE
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Filter rows ───────────────────────────────────────────────────────────
+   Search plus four dropdowns, each with a 140–150px floor, stacks into five
+   full-width rows on a phone — the table is then two screens down. Two up, and
+   the search keeps its own line because it is the one people actually type in. */
+@media (max-width: 700px) {
+  .filter-row { gap: 8px; }
+  .filter-row > input[type=text],
+  .filter-row > input[type=search] { flex: 1 1 100% !important; max-width: none !important; }
+  .filter-row > select {
+    flex: 1 1 calc(50% - 4px) !important;
+    min-width: 0 !important; width: auto !important;
+  }
+  .filter-row > button,
+  .filter-row > div { flex: 1 1 calc(50% - 4px); min-width: 0; }
+  .filter-row > div > button { width: 100%; justify-content: center; }
+}
+
+@media (max-width: 700px) {
+  /* The iOS zoom-on-focus floor missed the date and time fields, which is where
+     it is most disruptive — the picker opens on a zoomed page. */
+  input[type=date], input[type=time], input[type=month] { font-size: 16px !important; }
+
+  /* Comfortable targets for the icon-only buttons that sit in table rows. */
+  .btn { min-height: 38px; }
+  .btn-sm { min-height: 36px; }
+  .btn-xs { min-height: 32px; }
+  td .btn-sm, td .btn-xs { min-width: 36px; justify-content: center; }
+
+  /* A wrapped selection bar is two or three rows tall, so it hides more of the
+     page than the desktop reserve allows for. */
+  .section:has(.bulk-bar.visible),
+  .main:has(> .bulk-bar.visible) > .section { padding-bottom: 132px; }
+  body:has(.bulk-bar.visible) #send-job-widget,
+  body:has(.bulk-bar.visible) .toast-container {
+    bottom: calc(128px + env(safe-area-inset-bottom));
+  }
+
+  /* Quick-select strips ("First 50 / 100 / 200…") are a row of equal chips;
+     letting them share the width beats a ragged two-and-a-bit-per-line wrap. */
+  .quick-select { gap: 6px; }
+  .quick-select .btn { flex: 1 1 auto; justify-content: center; }
+
+  /* Topbar buttons stretch to share the row; a lone one stretching full width
+     looks like a banner rather than a button. */
+  .topbar-actions > *:only-child { flex: 0 1 auto; }
+
+  /* Fixed furniture clears the home indicator. */
+  #send-job-widget { bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .toast-container { bottom: calc(12px + env(safe-area-inset-bottom)); }
+  .bulk-bar { padding-bottom: calc(10px + env(safe-area-inset-bottom)); }
+
+  /* The pager is the one control people hit repeatedly on a phone. */
+  .pagination-bar { padding: 16px 0 6px; }
+  .pagination-bar .btn { min-height: 40px; }
+}
+
+@media (max-width: 480px) {
+  /* Below this the two-up dropdowns are narrower than their own labels. */
+  .filter-row > select { flex: 1 1 100% !important; }
+}
+
+/* ── Landscape phone ───────────────────────────────────────────────────────
+   A 380px-tall viewport cannot spare 200px of KPI tiles above the table. */
+@media (max-height: 460px) and (max-width: 900px) {
+  .stat-grid { padding: 10px 14px 0; gap: 8px; }
+  .stat-card { padding: 10px 12px; }
+  .stat-value, .kpi-value { font-size: 19px; }
+  .kpi-ico { display: none; }
+  .topbar { padding: 8px 14px; }
+}
+
+/* ── Layout plumbing ───────────────────────────────────────────────────────
+   The page content now sits in a real <main> inside the scroll column, so that
+   element has to carry the growth the section used to get directly. Without
+   this a short page stops filling the viewport and the wizard's footer, which
+   is pushed down by margin-top:auto, rides up under the content. */
+.main > main {
+  flex: 1; display: flex; flex-direction: column; min-height: 0;
+}
+
+/* ── Theme toggle ──────────────────────────────────────────────────────────
+   The control now names the mode it is in rather than pointing at a submenu
+   that does not exist. */
+.theme-toggle .tt-state {
+  font-size: 11px; font-weight: 600; letter-spacing: .02em;
+  color: var(--text3); text-transform: uppercase;
+}
+.theme-toggle:hover .tt-state { color: var(--text2); }
+
+/* ── Boot screen ───────────────────────────────────────────────────────────
+   Shown only while the session request is in flight. */
+.boot-screen {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 14px; height: 100vh; height: 100dvh;
+  background: var(--canvas); color: var(--text2); font-size: 13px;
+  animation: bootIn .5s var(--ease) .15s both;     /* a flash on a fast load is worse than nothing */
+}
+.boot-screen .sidebar-logo-icon { width: 44px; height: 44px; font-size: 21px; }
+@keyframes bootIn { from { opacity: 0; } to { opacity: 1; } }
+
+/* ── Action cells ──────────────────────────────────────────────────────────
+   These cells were `display: flex`, which takes the element out of the table's
+   cell model: it stops contributing to column width and no longer aligns with
+   the rest of the row. Inline children plus a gutter give the same look while
+   the cell stays a cell. */
+td.cell-actions { white-space: nowrap; }
+td.cell-actions > * { vertical-align: middle; }
+td.cell-actions > * + * { margin-left: 4px; }
+.kpi-ico.indigo { background: var(--indigo-bg); color: var(--indigo); }
+.kpi-ico.blue   { background: var(--blue-bg);   color: var(--blue); }
+.kpi-ico.purple { background: var(--purple-bg); color: var(--purple); }
+
+/* ── Destructive actions ───────────────────────────────────────────────────
+   Nine screens repeated the same inline pair for a delete button:
+   `color: var(--red); border-color: var(--red-bg)`. The second half painted
+   the border with the *fill* token — a near-invisible tint — so the control
+   read as an ordinary button that happened to have red text. One class, a
+   border in the red hue itself, and a fill that only appears on hover, which
+   is where a destructive action should announce itself. */
+.btn-danger-ghost {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 32%, transparent);
+  background: var(--bg);
+}
+.btn-danger-ghost:hover {
+  background: var(--red-bg);
+  border-color: color-mix(in srgb, var(--red) 48%, transparent);
+  color: var(--red);
+}
+.btn-danger-ghost:focus-visible { outline-color: var(--red); }
+
+/* ── Error boxes ───────────────────────────────────────────────────────────
+   `.info-box` is blue by definition; the error cases overrode only the border
+   and text, leaving red type on a blue fill. This makes the whole box red. */
+.info-box.danger {
+  background: var(--red-bg);
+  border-color: color-mix(in srgb, var(--red) 30%, transparent);
+  color: var(--red);
+}
+.info-box.danger i { color: var(--red); }
+
+/* ── Mobile, second pass ───────────────────────────────────────────────────
+   Corrections from rendering the real pages at 390px. */
+@media (max-width: 700px) {
+  /* The count badge was sharing the row with the tab strip, so the strip lost
+     a third of its width to it and the tabs scrolled underneath. The badge
+     takes its own line above; the strip keeps its full width and its rule. */
+  .section-head { flex-wrap: wrap; }
+  .section-head .contact-count-badge { order: -1; margin-left: auto; }
+  .section-head .nav-tabs { flex: 1 1 100%; }
+
+  /* The upload strip had its description pushed below the icon AND the button,
+     which read as "icon, Browse, then some text". Icon and description stay
+     together; the button takes the second line. */
+  .upload-strip { flex-wrap: wrap; row-gap: 10px; }
+  .upload-strip .us-icon { order: 0; }
+  .upload-strip .us-text { order: 1; flex: 1 1 0 !important; min-width: 0; }
+  .upload-strip .btn { order: 2; flex: 1 1 100%; justify-content: center; }
+}
+
+/* ── Upload zones ──────────────────────────────────────────────────────────
+   Most .upload-zone blocks are drop targets with their own "Browse" button —
+   clicking the zone itself does nothing, so the pointer cursor was promising
+   something that never happened. The ones that really are click targets carry
+   role="button" and keep the cursor. */
+.upload-zone:not([role="button"]) { cursor: default; }
+.upload-zone:not([role="button"]) .btn { cursor: pointer; }
+
+/* ── Drawer backdrop ───────────────────────────────────────────────────────
+   The base sheet fades it with opacity but flips `display` at the same time,
+   and display is not animatable — so the transition never ran and the sheet
+   appeared instantly. Visibility can be animated alongside opacity. */
+@media (max-width: 700px) {
+  .sidebar-backdrop {
+    display: block; visibility: hidden; opacity: 0;
+    transition: opacity .22s var(--ease), visibility .22s var(--ease);
+  }
+  .sidebar-backdrop.open { visibility: visible; opacity: 1; }
+}

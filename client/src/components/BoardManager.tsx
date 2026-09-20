@@ -210,11 +210,9 @@ export default function BoardManager({ boards, postings, leads, onChanged, onSyn
                         title={b.enabled ? 'Included in syncs' : 'Skipped by syncs'} />
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      <button className="btn btn-sm" type="button" disabled={syncing || !b.enabled}
-                        onClick={() => onSyncBoard(b.id)} title="Sync just this board">
-                        <i className="ti ti-refresh" />
-                      </button>
-                      <button className="btn btn-sm" type="button" onClick={() => remove(b)}
+                      <button aria-label="Sync just this board" className="btn btn-sm" type="button" disabled={syncing || !b.enabled}
+                        onClick={() => onSyncBoard(b.id)} title="Sync just this board"><i className="ti ti-refresh" /></button>
+                      <button aria-label="Stop tracking this board" className="btn btn-sm" type="button" onClick={() => remove(b)}
                         title="Stop tracking this board" style={{ marginLeft: 4 }}>
                         <i className="ti ti-trash" />
                       </button>

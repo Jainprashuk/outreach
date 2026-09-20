@@ -10,6 +10,7 @@ import InterviewReminders from './components/InterviewReminders';
 import './styles/pages.css';
 import './styles/theme.css';
 import './styles/responsive.css';
+import './styles/polish.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

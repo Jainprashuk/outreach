@@ -48,11 +48,11 @@ export default function CreateContactCampaignModal({ contactIds, onClose }: {
 
   return createPortal(
     <div className="edit-modal-wrap open" onClick={e => { if (e.target === e.currentTarget && !saving) onClose(); }}>
-      <div className="edit-modal" style={{ maxWidth: 540, maxHeight: '85vh', overflowY: 'auto' }}>
+      <div className="edit-modal" role="dialog" aria-modal="true" style={{ maxWidth: 540, maxHeight: '85vh', overflowY: 'auto' }}>
         <div className="reply-modal-header">
           <div><div style={{ fontWeight: 600, fontSize: 15 }}>Create campaign from selected contacts</div>
             <div style={{ fontSize: 12, color: 'var(--text2)' }}>{contactIds.length} contact{contactIds.length === 1 ? '' : 's'} selected</div></div>
-          <button className="btn btn-sm" onClick={onClose} disabled={saving} type="button"><i className="ti ti-x" /></button>
+          <button aria-label="Close" className="btn btn-sm" onClick={onClose} disabled={saving} type="button"><i className="ti ti-x" /></button>
         </div>
         <div className="info-box" style={{ marginTop: 12 }}><i className="ti ti-info-circle" /><span>
           This schedules only the selected contacts. Their contact records stay in place; campaign sending follows the usual 24-hour send safeguard.

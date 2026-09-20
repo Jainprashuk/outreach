@@ -27,6 +27,14 @@ export default function Templates() {
       .catch(err => setError(err.message)).finally(() => setLoading(false));
   }, []);
 
+  // Every other modal in the app closes on Escape; this one did not.
+  useEffect(() => {
+    if (!modalOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setModalOpen(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [modalOpen]);
+
   const openModal = (key?: string) => {
     setEditingKey(key || null);
     if (key) {
@@ -113,8 +121,8 @@ export default function Templates() {
             <span className="tpl-head-name">{tpl.name}</span>
             <div className="tpl-head-actions">
               <span className="tpl-key">{key}</span>
-              <button className="btn btn-xs" onClick={() => openModal(key)} title="Edit" type="button"><i className="ti ti-edit" /></button>
-              <button className="btn btn-xs" style={{ color: 'var(--red)', borderColor: 'var(--red-bg)' }} onClick={() => remove(key)} title="Delete" type="button"><i className="ti ti-trash" /></button>
+              <button aria-label="Edit" className="btn btn-xs" onClick={() => openModal(key)} title="Edit" type="button"><i className="ti ti-edit" /></button>
+              <button aria-label="Delete" className="btn btn-xs btn-danger-ghost" onClick={() => remove(key)} title="Delete" type="button"><i className="ti ti-trash" /></button>
             </div>
           </div>
           <div className="tpl-card-body">
@@ -126,7 +134,7 @@ export default function Templates() {
 
       {modalOpen && (
         <div className="edit-modal-wrap open" onClick={e => { if (e.target === e.currentTarget) setModalOpen(false); }}>
-          <div className="edit-modal">
+          <div className="edit-modal" role="dialog" aria-modal="true">
             <h2>{editingKey ? 'Edit template' : 'New template'}</h2>
             <div className="form-group">
               <label className="form-label">Template name</label>

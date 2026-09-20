@@ -105,7 +105,7 @@ export default function Blocklist() {
                   <td style={{ color: 'var(--text2)' }}>{e.reason || '—'}</td>
                   <td style={{ color: 'var(--text2)' }}>{new Date(e.createdAt).toLocaleDateString()}</td>
                   <td>
-                    <button className="btn btn-xs" style={{ color: 'var(--red)', borderColor: 'var(--red-bg)' }}
+                    <button aria-label="Remove" className="btn btn-xs btn-danger-ghost"
                       onClick={() => remove(e)} title="Remove" type="button">
                       <i className="ti ti-trash" />
                     </button>

@@ -83,7 +83,7 @@ export default function MoveToInterviewModal({ seed, onClose, onCreated }: {
   // and clip it with overflow-x. Same reason StatusBadge portals its popups.
   return createPortal(
     <div className="edit-modal-wrap open" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="edit-modal" style={{ maxWidth: 520, maxHeight: '85vh', overflowY: 'auto' }}>
+      <div className="edit-modal" role="dialog" aria-modal="true" style={{ maxWidth: 520, maxHeight: '85vh', overflowY: 'auto' }}>
         <div className="reply-modal-header">
           <div className="contact-chip" style={{ minWidth: 0 }}>
             <Avatar name={name || seed.name || '?'} />
@@ -94,7 +94,7 @@ export default function MoveToInterviewModal({ seed, onClose, onCreated }: {
               </div>
             </div>
           </div>
-          <button className="btn btn-sm" onClick={onClose} type="button"><i className="ti ti-x" /></button>
+          <button aria-label="Close" className="btn btn-sm" onClick={onClose} type="button"><i className="ti ti-x" /></button>
         </div>
 
         <div className="info-box" style={{ marginTop: 12 }}>

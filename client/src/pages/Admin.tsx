@@ -153,7 +153,7 @@ export default function Admin() {
             {/* Only appears when it is actually true: the unique index on
                 Settings.userId is gone and someone has two rows. */}
             {data.totals.duplicateSettings > 0 && (
-              <div className="info-box" style={{ borderColor: 'var(--red)', marginBottom: 14 }}>
+              <div className="info-box danger" style={{ marginBottom: 14 }}>
                 <strong>{data.totals.duplicateSettings} account(s) have duplicate settings documents.</strong>{' '}
                 The unique index on <code>settings.userId</code> is missing — run{' '}
                 <code>scripts/dedupe-settings.js</code>.
@@ -367,13 +367,11 @@ export default function Admin() {
                           <div style={{ fontSize: 11, color: 'var(--text3)' }}>{u.activeSessions} session(s)</div>
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }}>
-                          <button
+                          <button aria-label="Sign this account out on every device"
                             className="btn btn-xs" type="button" disabled={busy || u.activeSessions === 0}
                             title="Sign this account out on every device"
                             onClick={() => act(u, () => adminRevokeSessionsApi(u.id!), 'Sessions ended')}
-                          >
-                            <i className="ti ti-logout" />
-                          </button>{' '}
+                          ><i className="ti ti-logout" /></button>{' '}
                           {u.status === 'disabled' ? (
                             <button
                               className="btn btn-xs" type="button" disabled={busy}

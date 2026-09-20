@@ -73,7 +73,7 @@ export default function MoveToOutreachModal({ leads, onClose, onDone }: {
 
   return (
     <div className="edit-modal-wrap open" onClick={(e) => { if (e.target === e.currentTarget && !saving) onClose(); }}>
-      <div className="edit-modal" style={{ maxWidth: 760, maxHeight: '85vh', overflowY: 'auto' }}>
+      <div className="edit-modal" role="dialog" aria-modal="true" style={{ maxWidth: 760, maxHeight: '85vh', overflowY: 'auto' }}>
         <div className="reply-modal-header">
           <div>
             <div style={{ fontWeight: 600, fontSize: 15 }}>
@@ -84,7 +84,7 @@ export default function MoveToOutreachModal({ leads, onClose, onDone }: {
               edited after this, so correct anything off here — or leave a lead out with “Skip”.
             </div>
           </div>
-          <button className="btn btn-sm" onClick={onClose} style={{ flexShrink: 0 }} type="button" disabled={saving}>
+          <button aria-label="Close" className="btn btn-sm" onClick={onClose} style={{ flexShrink: 0 }} type="button" disabled={saving}>
             <i className="ti ti-x" />
           </button>
         </div>
@@ -137,8 +137,7 @@ export default function MoveToOutreachModal({ leads, onClose, onDone }: {
                       </div>
                     </div>
                   </div>
-                  <button className="btn btn-xs" type="button" disabled={saving}
-                    style={isSkipped ? undefined : { color: 'var(--red)', borderColor: 'var(--red-bg)' }}
+                  <button className={`btn btn-xs${isSkipped ? '' : ' btn-danger-ghost'}`} type="button" disabled={saving}
                     onClick={() => toggleExcluded(l.id)}
                     title={isSkipped ? 'Include this lead again' : "Leave this lead out — it stays in your leads as 'new'"}>
                     <i className={isSkipped ? 'ti ti-rotate' : 'ti ti-minus'} /> {isSkipped ? 'Include' : 'Skip'}
@@ -181,7 +180,7 @@ export default function MoveToOutreachModal({ leads, onClose, onDone }: {
           )}
 
           {error && (
-            <div className="info-box" style={{ borderColor: 'var(--red)', color: 'var(--red)' }}>
+            <div className="info-box danger">
               <i className="ti ti-alert-triangle" /> {error}
             </div>
           )}

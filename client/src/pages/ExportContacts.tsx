@@ -211,16 +211,16 @@ export default function ExportContacts() {
           <div className="section-head">
             <div className="nav-tabs">
               {PRESETS.map(p => (
-                <div key={p.key} className={`nav-tab${preset === p.key ? ' active' : ''}`}
+                <button type="button" key={p.key} className={`nav-tab${preset === p.key ? ' active' : ''}`}
                   onClick={() => { setPreset(p.key); resetPage(); }}>
                   {p.label}
-                </div>
+                </button>
               ))}
             </div>
             <span className="contact-count-badge">{filtered.length} contacts</span>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+          <div className="filter-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
             <input type="text" placeholder="Search name, email or company..." value={search}
               onChange={e => { setSearch(e.target.value); resetPage(); }}
               style={{ flex: 1, minWidth: 180, maxWidth: 280 }} />

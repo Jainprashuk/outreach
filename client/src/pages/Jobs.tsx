@@ -226,7 +226,7 @@ export default function Jobs() {
       }
     >
       {error && (
-        <div className="info-box" style={{ borderColor: 'var(--red)', color: 'var(--red)', marginBottom: 12 }}>
+        <div className="info-box danger" style={{ marginBottom: 12 }}>
           <i className="ti ti-alert-triangle" /> {error}
         </div>
       )}
@@ -236,7 +236,7 @@ export default function Jobs() {
       {/* GitHub disables scheduled workflows after 60 days of repo inactivity,
           and the sync would then just stop. This is the only honest way to notice. */}
       {stale && !report && (
-        <div className="info-box" style={{ marginBottom: 12, borderColor: 'var(--red)' }}>
+        <div className="info-box danger" style={{ marginBottom: 12 }}>
           <i className="ti ti-alert-triangle" style={{ color: 'var(--red)' }} />
           <span>
             Last synced {relativeTime(meta?.lastSyncAt ?? null)} — over {SYNC_STALE_HOURS} hours.
@@ -263,7 +263,7 @@ export default function Jobs() {
           <div className="section-head">
             <div className="nav-tabs">
               {TABS.map(key => (
-                <div key={key} className={`nav-tab${filters.tab === key ? ' active' : ''}`}
+                <button type="button" key={key} className={`nav-tab${filters.tab === key ? ' active' : ''}`}
                   onClick={() => setFilter({ tab: key as PostingTab })}
                   title={key === 'tracked'
                     ? 'Anything you saved or applied to, open or closed'
@@ -271,13 +271,13 @@ export default function Jobs() {
                   {key === 'new' && <i className="ti ti-sparkles" style={{ marginRight: 4 }} />}
                   {TAB_LABELS[key]}
                   <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{counts[key]}</span>
-                </div>
+                </button>
               ))}
             </div>
             <span className="contact-count-badge">{filtered.length} postings</span>
           </div>
 
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+          <div className="filter-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
             <input type="text" placeholder="Search title, company, team, location..." value={filters.search}
               onChange={e => setFilter({ search: e.target.value })}
               style={{ flex: 1, minWidth: 180, maxWidth: 280 }} />
@@ -321,8 +321,7 @@ export default function Jobs() {
                   {c.label} <i className="ti ti-x" style={{ marginLeft: 2 }} />
                 </button>
               ))}
-              <button className="btn btn-xs" type="button" onClick={clearFilters}
-                style={{ color: 'var(--red)', borderColor: 'var(--red-bg)' }}>
+              <button className="btn btn-xs" type="button" onClick={clearFilters}>
                 <i className="ti ti-filter-off" /> Clear all
               </button>
             </div>
@@ -425,7 +424,7 @@ export default function Jobs() {
                             <i className="ti ti-external-link" />
                           </a>
                         )}
-                        <button className="btn btn-sm" type="button" onClick={() => confirmDelete(p)}
+                        <button aria-label="Delete posting" className="btn btn-sm" type="button" onClick={() => confirmDelete(p)}
                           title="Delete posting" style={{ marginLeft: 4 }}>
                           <i className="ti ti-trash" />
                         </button>

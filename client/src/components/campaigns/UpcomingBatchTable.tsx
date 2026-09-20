@@ -250,17 +250,13 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
                   <td>{r.company || '—'}</td>
                   <td>{r.role || '—'}</td>
                   <td style={{ color: 'var(--text3)' }}>{r.row}</td>
-                  <td style={{ display: 'flex', gap: 6 }}>
+                  <td className="cell-actions">
                     {/* The exact subject/body that will send — same renderer, so
                         this is the email, not a preview of it. */}
-                    <button className="btn btn-xs" type="button" title="See the email"
-                      onClick={() => setExpanded(expanded === r.id ? null : r.id)}>
-                      <i className="ti ti-mail" />
-                    </button>
-                    <button className="btn btn-xs" type="button" disabled={busy}
-                      title="Remove from the campaign" onClick={() => remove([r.id])}>
-                      <i className="ti ti-trash" />
-                    </button>
+                    <button aria-label="See the email" className="btn btn-xs" type="button" title="See the email"
+                      onClick={() => setExpanded(expanded === r.id ? null : r.id)}><i className="ti ti-mail" /></button>
+                    <button aria-label="Remove from the campaign" className="btn btn-xs" type="button" disabled={busy}
+                      title="Remove from the campaign" onClick={() => remove([r.id])}><i className="ti ti-trash" /></button>
                   </td>
                 </tr>
                 {expanded === r.id && (

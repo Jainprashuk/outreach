@@ -20,7 +20,7 @@ export default function SyncReportBanner({ report, onDismiss }: {
           A sync is already running{report.since ? ` (started ${new Date(report.since).toLocaleTimeString()})` : ''}.
           Nothing was done twice — try again in a moment.
         </span>
-        <button className="btn btn-xs" type="button" style={{ marginLeft: 'auto' }} onClick={onDismiss}>
+        <button aria-label="Close" className="btn btn-xs" type="button" style={{ marginLeft: 'auto' }} onClick={onDismiss}>
           <i className="ti ti-x" />
         </button>
       </div>
@@ -32,7 +32,7 @@ export default function SyncReportBanner({ report, onDismiss }: {
       <div className="info-box" style={{ marginBottom: 12 }}>
         <i className="ti ti-info-circle" />
         <span>No enabled boards to sync yet — add one below.</span>
-        <button className="btn btn-xs" type="button" style={{ marginLeft: 'auto' }} onClick={onDismiss}>
+        <button aria-label="Close" className="btn btn-xs" type="button" style={{ marginLeft: 'auto' }} onClick={onDismiss}>
           <i className="ti ti-x" />
         </button>
       </div>
@@ -105,7 +105,7 @@ export default function SyncReportBanner({ report, onDismiss }: {
           </div>
         )}
       </div>
-      <button className="btn btn-xs" type="button" onClick={onDismiss}><i className="ti ti-x" /></button>
+      <button aria-label="Close" className="btn btn-xs" type="button" onClick={onDismiss}><i className="ti ti-x" /></button>
     </div>
   );
 }

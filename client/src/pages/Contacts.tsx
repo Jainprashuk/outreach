@@ -229,16 +229,16 @@ export default function Contacts() {
       <div className="section-head">
         <div className="nav-tabs">
           {TABS.map(([key, label]) => (
-            <div key={key} className={`nav-tab${tab === key ? ' active' : ''}`}
+            <button type="button" key={key} className={`nav-tab${tab === key ? ' active' : ''}`}
               onClick={() => { setTab(key); resetPage(); }}>
               {label}
-            </div>
+            </button>
           ))}
         </div>
         <span className="contact-count-badge">{filtered.length} contacts</span>
       </div>
 
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+      <div className="filter-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
         <input type="text" placeholder="Search name, email or company..." value={search}
           onChange={e => { setSearch(e.target.value); resetPage(); }}
           style={{ flex: 1, minWidth: 180, maxWidth: 280 }} />
@@ -284,6 +284,9 @@ export default function Contacts() {
       <div
         className={`upload-strip${dragOver ? ' drag-over' : ''}`}
         style={importOk ? { borderColor: 'var(--green)', background: 'var(--green-bg)' } : undefined}
+        role="button" tabIndex={0}
+        aria-label="Upload a CSV of contacts"
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileRef.current?.click(); } }}
         onClick={() => fileRef.current?.click()}
         onDragOver={e => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
@@ -291,12 +294,12 @@ export default function Contacts() {
       >
         <i className="ti ti-table-import us-icon" />
         <div className="us-text"><strong>Upload CSV</strong> — drag &amp; drop or click to browse. Columns: Name, Email, Company, Role</div>
-        <button className="btn btn-sm" style={{ pointerEvents: 'none' }} type="button"><i className="ti ti-upload" /> Browse</button>
+        <button className="btn btn-sm" style={{ pointerEvents: 'none' }} type="button" tabIndex={-1} aria-hidden="true"><i className="ti ti-upload" /> Browse</button>
         <input ref={fileRef} type="file" accept=".csv" style={{ display: 'none' }}
           onChange={e => { const f = e.target.files?.[0]; if (f) processFile(f); e.target.value = ''; }} />
       </div>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '14px 0 10px' }}>
+      <div className="quick-select" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '14px 0 10px' }}>
         <span style={{ fontSize: 12, color: 'var(--text3)' }}>Quick select:</span>
         {[50, 100, 200, 500].map(n => (
           <button key={n} className="btn btn-sm" type="button" disabled={filtered.length === 0}
@@ -369,9 +372,7 @@ export default function Contacts() {
                   }} />
                 </td>
                 <td>
-                  <button className="btn btn-sm" onClick={() => confirmDelete(c)} title="Delete contact" type="button">
-                    <i className="ti ti-trash" />
-                  </button>
+                  <button aria-label="Delete contact" className="btn btn-sm" onClick={() => confirmDelete(c)} title="Delete contact" type="button"><i className="ti ti-trash" /></button>
                 </td>
               </tr>
             ))}

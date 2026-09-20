@@ -185,7 +185,7 @@ export default function InterviewDetailModal({ interview, onClose }: {
               <i className="ti ti-upload" /> {file ? 'Replace' : 'Upload'}
             </button>
             {file && (
-              <button className="btn btn-sm" type="button" disabled={busyKind === kind}
+              <button aria-label="Delete" className="btn btn-sm" type="button" disabled={busyKind === kind}
                 onClick={() => dropFile(kind)} style={{ color: 'var(--red)' }}>
                 <i className="ti ti-trash" />
               </button>
@@ -201,7 +201,7 @@ export default function InterviewDetailModal({ interview, onClose }: {
   // Portalled for the same reason as MoveToInterviewModal — see the note there.
   return createPortal(
     <div className="edit-modal-wrap open" onClick={e => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="edit-modal" style={{ maxWidth: 720, maxHeight: '88vh', overflowY: 'auto' }}>
+      <div className="edit-modal" role="dialog" aria-modal="true" style={{ maxWidth: 720, maxHeight: '88vh', overflowY: 'auto' }}>
         <div className="reply-modal-header">
           <div className="contact-chip" style={{ minWidth: 0 }}>
             <Avatar name={live.name} />
@@ -216,7 +216,7 @@ export default function InterviewDetailModal({ interview, onClose }: {
             <span className={`badge ${INTERVIEW_BADGE_CLASS[live.status]}`}>
               {INTERVIEW_STATUS_LABELS[live.status]}
             </span>
-            <button className="btn btn-sm" onClick={onClose} type="button"><i className="ti ti-x" /></button>
+            <button aria-label="Close" className="btn btn-sm" onClick={onClose} type="button"><i className="ti ti-x" /></button>
           </div>
         </div>
 

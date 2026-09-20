@@ -91,7 +91,7 @@ export default function CriteriaPanel({ onSaved, onClose }: {
             Filters what a sync <strong>stores</strong>. A board with 600 roles only keeps the ones that match.
           </p>
         </div>
-        <button className="btn btn-xs" type="button" onClick={onClose}><i className="ti ti-x" /></button>
+        <button aria-label="Close" className="btn btn-xs" type="button" onClick={onClose}><i className="ti ti-x" /></button>
       </div>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer', marginBottom: 12 }}>

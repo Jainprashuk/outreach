@@ -26,6 +26,14 @@ export default function Step2() {
   const [error, setError] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [editing, setEditing] = useState<number | null>(null);
+
+  // Matches every other modal in the app: Escape backs out of the edit.
+  useEffect(() => {
+    if (editing === null) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setEditing(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [editing]);
   const [editSubject, setEditSubject] = useState('');
   const [editBody, setEditBody] = useState('');
 
@@ -182,7 +190,7 @@ export default function Step2() {
 
       {editing !== null && (
         <div className="edit-modal-wrap open" onClick={e => { if (e.target === e.currentTarget) setEditing(null); }}>
-          <div className="edit-modal">
+          <div className="edit-modal" role="dialog" aria-modal="true">
             <h2>Edit email</h2>
             <div className="form-group">
               <label className="form-label">Subject</label>

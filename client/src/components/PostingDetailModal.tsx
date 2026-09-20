@@ -55,7 +55,7 @@ export default function PostingDetailModal({ posting, onSaved, onClose, onDelete
 
   return (
     <div className="edit-modal-wrap open" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
-      <div className="edit-modal" style={{ maxWidth: 640, maxHeight: '85vh', overflowY: 'auto' }}>
+      <div className="edit-modal" role="dialog" aria-modal="true" style={{ maxWidth: 640, maxHeight: '85vh', overflowY: 'auto' }}>
         <div className="reply-modal-header">
           <div style={{ minWidth: 0 }}>
             <div style={{ fontWeight: 600, fontSize: 15, whiteSpace: 'normal' }}>{posting.title}</div>
@@ -64,7 +64,7 @@ export default function PostingDetailModal({ posting, onSaved, onClose, onDelete
               {posting.location ? ` · ${posting.location}` : ''}
             </div>
           </div>
-          <button className="btn btn-sm" onClick={onClose} style={{ flexShrink: 0 }} type="button">
+          <button aria-label="Close" className="btn btn-sm" onClick={onClose} style={{ flexShrink: 0 }} type="button">
             <i className="ti ti-x" />
           </button>
         </div>
@@ -181,7 +181,7 @@ export default function PostingDetailModal({ posting, onSaved, onClose, onDelete
           )}
 
           {saveErr && (
-            <div className="info-box" style={{ borderColor: 'var(--red)', color: 'var(--red)', marginTop: 10 }}>
+            <div className="info-box danger" style={{ marginTop: 10 }}>
               <i className="ti ti-alert-triangle" /> {saveErr}
             </div>
           )}
@@ -193,8 +193,8 @@ export default function PostingDetailModal({ posting, onSaved, onClose, onDelete
         </div>
 
         <div className="reply-modal-footer">
-          <button className="btn btn-sm" type="button" onClick={() => onDelete(posting)}
-            style={{ color: 'var(--red)', borderColor: 'var(--red-bg)', marginRight: 'auto' }}>
+          <button className="btn btn-sm btn-danger-ghost" type="button" onClick={() => onDelete(posting)}
+            style={{ marginRight: 'auto' }}>
             <i className="ti ti-trash" /> Delete
           </button>
           <button className="btn btn-sm" onClick={onClose} type="button"><i className="ti ti-x" /> Close</button>

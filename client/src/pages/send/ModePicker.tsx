@@ -13,7 +13,7 @@ export default function ModePicker({ open, mode, onPick, onConfirm, dripRate, on
   if (!open) return null;
   return (
     <div className="mode-picker-wrap open">
-      <div className="mode-picker">
+      <div className="mode-picker" role="dialog" aria-modal="true">
         <h2>Choose send mode</h2>
         <p>How should emails be sent in this batch?</p>
         <div className="mode-options">

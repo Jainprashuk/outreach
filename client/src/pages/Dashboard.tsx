@@ -203,7 +203,9 @@ export default function Dashboard() {
     { label: 'Sent', value: stats.sent, cls: 'green', icon: 'ti-send', ico: 'green' },
     { label: 'Bounced', value: stats.bounced, cls: 'red', icon: 'ti-alert-triangle', ico: 'red' },
     { label: 'Follow-up Due', value: stats.followUpDue, cls: 'amber', link: true, icon: 'ti-clock-hour-4', ico: 'amber' },
-    { label: 'In Review', value: stats.inReview, cls: '', style: { color: '#2563eb' }, icon: 'ti-eye', ico: 'teal' },
+    // Token, not a literal: #2563eb is the light-theme indigo and stayed that
+    // dark blue on the dark canvas. The chip matches the number's hue.
+    { label: 'In Review', value: stats.inReview, cls: 'indigo', icon: 'ti-eye', ico: 'indigo' },
   ];
 
   return (
@@ -237,7 +239,7 @@ export default function Dashboard() {
           <div key={k.label} className="stat-card">
             <div className={`kpi-ico ${k.ico}`}><i className={`ti ${k.icon}`} /></div>
             <div className="stat-label">{k.label}</div>
-            {busy ? <Skeleton w="42%" h={28} style={{ marginTop: 2 }} /> : <div className={`stat-value ${k.cls}`} style={k.style}>{k.value}</div>}
+            {busy ? <Skeleton w="42%" h={28} style={{ marginTop: 2 }} /> : <div className={`stat-value ${k.cls}`}>{k.value}</div>}
           </div>
         ))}
       </div>
@@ -246,17 +248,17 @@ export default function Dashboard() {
         <div className="section-head">
           <div className="nav-tabs">
             {TABS.map(([key, label]) => (
-              <div key={key} className={`nav-tab${tab === key ? ' active' : ''}`}
+              <button type="button" key={key} className={`nav-tab${tab === key ? ' active' : ''}`}
                 onClick={() => { setTab(key); setPage(1); setSortCol('createdAt'); setSortDir('desc'); setSelectedFu(new Set()); }}>
                 {key === 'replied' && unreadCount > 0 ? <>Replied <span className="tab-badge">{unreadCount}</span></> : label}
-              </div>
+              </button>
             ))}
           </div>
           <span className="contact-count-badge">{filtered.length} contacts</span>
         </div>
 
         {isFuTab && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
+          <div className="quick-select" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 500 }}>Quick select:</span>
             {[10, 25, 50, 100].map(n => (
               <button key={n} className="btn btn-xs" onClick={() => selectLastN(n)} type="button">Last {n}</button>
@@ -266,7 +268,7 @@ export default function Dashboard() {
           </div>
         )}
 
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
+        <div className="filter-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
           <input type="text" placeholder="Search name, email or company..." value={search}
             onChange={e => { setSearch(e.target.value); setPage(1); }}
             style={{ flex: 1, minWidth: 200, maxWidth: 320 }} />
@@ -324,13 +326,13 @@ export default function Dashboard() {
                       <td style={{ color: 'var(--text2)' }}>{c.company || '—'}</td>
                       <td className="reply-snippet-cell">{snippet || <span style={{ color: 'var(--text3)' }}>No preview</span>}</td>
                       <td style={{ fontSize: 12, whiteSpace: 'nowrap', color: 'var(--text2)' }}>{fmtDate}</td>
-                      <td style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                      <td className="cell-actions">
                         <StatusBadge status={c.status} contact={c} />
                         {isNew ? <span className="badge badge-new">New</span> : null}
                       </td>
-                      <td style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <td className="cell-actions">
                         <button className="btn btn-sm" onClick={() => setReplyContactId(c.id)} type="button"><i className="ti ti-message" /> View</button>
-                        <button className="btn btn-sm" onClick={async () => {
+                        <button aria-label="Delete contact" className="btn btn-sm" onClick={async () => {
                           if (!confirm(`Delete ${c.name} (${c.email})?\nThis will hide the contact from all views.`)) return;
                           try { await app.deleteContact(c.id); toast(`${c.name} deleted.`, 'success'); }
                           catch (err: any) { toast(err.message, 'error'); }
@@ -380,7 +382,7 @@ export default function Dashboard() {
                       <td style={{ color: 'var(--text2)' }}>{c.company}</td>
                       <td style={{ color: 'var(--text2)' }}>{daysAgo === null ? '—' : `${daysAgo}d ago`}</td>
                       <td><StatusBadge status={c.status} contact={c} /></td>
-                      <td style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                      <td className="cell-actions">
                         {c.status === 'replied'
                           ? <button className="btn btn-sm" onClick={() => setReplyContactId(c.id)} type="button"><i className="ti ti-message" /> View reply</button>
                           : <button className="btn btn-sm" onClick={() => showDetail(c)} type="button">View</button>}
@@ -415,7 +417,7 @@ export default function Dashboard() {
                     <td style={{ color: 'var(--text2)' }}>{app.templates[c.template]?.name || c.template}</td>
                     <td><StatusBadge status={c.status} contact={c} /></td>
                     <td><StatusBadge status={c.approvalStatus} /></td>
-                    <td style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+                    <td className="cell-actions">
                       {c.status === 'failed'
                         ? <button className="btn btn-sm btn-primary" onClick={async () => {
                             // Match classic retriggerContact: re-queue as approved (keep edits) → step3
@@ -427,7 +429,7 @@ export default function Dashboard() {
                         : c.approvalStatus === 'pending'
                           ? <Link to="/send/step2" className="btn btn-sm">Review</Link>
                           : <button className="btn btn-sm" onClick={() => showDetail(c)} type="button">View</button>}
-                      <button className="btn btn-sm" onClick={async () => {
+                      <button aria-label="Delete contact" className="btn btn-sm" onClick={async () => {
                         if (!confirm(`Delete ${c.name} (${c.email})?\nThis will hide the contact from all views.`)) return;
                         try { await app.deleteContact(c.id); toast(`${c.name} deleted.`, 'success'); }
                         catch (err: any) { toast(err.message, 'error'); }

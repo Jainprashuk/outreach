@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useTheme } from '../hooks/useTheme';
 import { useSession } from '../context/SessionContext';
@@ -16,11 +16,23 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
    *  showing links that do not work is worse than showing none. */
   minimal?: boolean;
 }) {
-  const { toggleTheme } = useTheme(); // applies data-theme + provides the toggle
+  const { theme, toggleTheme } = useTheme(); // applies data-theme + provides the toggle
   const { owner, user, isAdmin, logout } = useSession();
   const { reminders } = useInterviews();
   const [menuOpen, setMenuOpen] = useState(false);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
   const { pathname } = useLocation();
+
+  // A drawer that covers the page has to be dismissable from the keyboard, and
+  // focus has to come back to the control that opened it.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setMenuOpen(false); menuBtnRef.current?.focus(); }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   // The six routes worth reaching in one click stay at the top level; the rest
   // live in a group that remembers whether it was open.
@@ -112,9 +124,10 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
       )}
       </>)}
       <div className="sidebar-bottom">
-        <button className="theme-toggle" type="button" onClick={toggleTheme}>
+        <button className="theme-toggle" type="button" onClick={toggleTheme}
+          aria-label={`Appearance: ${theme === 'dark' ? 'dark' : 'light'}. Switch to ${theme === 'dark' ? 'light' : 'dark'}.`}>
           <span className="tt-icon"><i className="ti ti-sun" /><i className="ti ti-moon" />Appearance</span>
-          <i className="ti ti-chevron-right" style={{ fontSize: 12 }} />
+          <span className="tt-state">{theme === 'dark' ? 'Dark' : 'Light'}</span>
         </button>
         {owner && (
           <>
@@ -138,12 +151,16 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
 
   return (
     <div className="app-shell">
-      <aside className={`sidebar${menuOpen ? ' open' : ''}`}>{nav}</aside>
-      {menuOpen && <div className="sidebar-backdrop open" onClick={() => setMenuOpen(false)} />}
+      <aside id="sidebar-nav" className={`sidebar${menuOpen ? ' open' : ''}`} aria-label="Main">{nav}</aside>
+      {/* Always mounted: a backdrop that only appears with .open already applied
+          has nothing to transition from, so the fade never ran. */}
+      <div className={`sidebar-backdrop${menuOpen ? ' open' : ''}`} onClick={() => setMenuOpen(false)} aria-hidden="true" />
       <div className="main">
         <div className="topbar">
           <div className="topbar-left">
-            <button className="mobile-menu-btn" type="button" aria-label="Menu" onClick={() => setMenuOpen(o => !o)}>
+            <button className="mobile-menu-btn" type="button" ref={menuBtnRef}
+              aria-label={menuOpen ? 'Close menu' : 'Open menu'} aria-expanded={menuOpen} aria-controls="sidebar-nav"
+              onClick={() => setMenuOpen(o => !o)}>
               <i className="ti ti-menu-2" />
             </button>
             <div>
@@ -153,7 +170,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
           </div>
           {actions ? <div className="topbar-actions">{actions}</div> : null}
         </div>
-        {wide ? children : <div className="section" style={{ flex: 1 }}>{children}</div>}
+        <main id="main">{wide ? children : <div className="section" style={{ flex: 1 }}>{children}</div>}</main>
       </div>
       <SendJobWidget />
     </div>
