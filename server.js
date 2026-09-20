@@ -6,6 +6,7 @@ const { simpleParser } = require('mailparser');
 const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
+const fs = require('fs');
 const db = require('./db');
 const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
@@ -246,6 +247,24 @@ app.get('/app/*', (req, res, next) => {
   // let it 404 instead of returning index.html with a text/html MIME type.
   if (/\.\w+$/.test(req.path)) return next();
   res.sendFile(path.join(__dirname, 'client/dist/index.html'));
+});
+
+// Telemetry loader (Clarity + BugTrace). Registered ahead of express.static so
+// this wins over the file on disk: the on-disk copy carries a placeholder and
+// the real BugTrace key is substituted here, from the environment. Read once
+// and cached — the file never changes between requests within a process.
+let _telemetryJs = null;
+app.get('/js/telemetry.js', (_req, res) => {
+  if (_telemetryJs === null) {
+    _telemetryJs = fs
+      .readFileSync(path.join(__dirname, 'js/telemetry.js'), 'utf8')
+      .replaceAll('__BUGTRACE_API_KEY__', process.env.BUGTRACE_API_KEY || '');
+  }
+  res.type('application/javascript');
+  // Short cache: long enough to stay off the server on every page hop, short
+  // enough that rotating the key takes effect without a cache-busting rename.
+  res.setHeader('Cache-Control', 'public, max-age=300');
+  res.send(_telemetryJs);
 });
 
 app.use(express.static(__dirname));
