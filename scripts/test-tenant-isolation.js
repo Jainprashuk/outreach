@@ -13,7 +13,10 @@
  * Run against a dev database ONLY, with the server already up:
  *   NODE_ENV=dev PORT=4012 node server.js
  *   node scripts/test-tenant-isolation.js --base=http://localhost:4012 \
- *     --email=you@example.com --password=...
+ *     --email=you@example.com
+ *
+ * Sign-in is an emailed code now, so there is no --password. The helper drives
+ * the real endpoints and reads the issued row from the database.
  */
 require('dotenv').config();
 const mongoose = require('mongoose');
@@ -25,18 +28,8 @@ const URI = process.env.MONGODB_URI_DEV;
 
 // Signs in for real over HTTP rather than forging a cookie, so the test
 // exercises the same path a browser takes.
+const { loginViaOtp } = require('./test-helpers');
 let SESSION_COOKIE = '';
-async function login(email, password) {
-  const res = await fetch(BASE + '/api/auth/login', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email, password }),
-  });
-  if (!res.ok) throw new Error(`Login failed (${res.status}) — pass --email and --password`);
-  const setCookie = res.headers.get('set-cookie') || '';
-  SESSION_COOKIE = setCookie.split(';')[0];
-  if (!SESSION_COOKIE) throw new Error('Login returned no session cookie');
-}
 
 const authCookie = () => SESSION_COOKIE;
 
@@ -71,12 +64,13 @@ async function main() {
   if (/prod/i.test(URI)) throw new Error('Refusing to run against a production URI');
 
   const email = value('email');
-  const password = value('password');
-  if (!email || !password) throw new Error('Pass --email= and --password= for the genuine account');
-  await login(email, password);
+  if (!email) throw new Error('Pass --email= for the genuine account');
 
+  // Connect BEFORE signing in: the OTP helper reads the issued code out of the
+  // database, so it cannot run against a closed connection.
   await mongoose.connect(URI, { serverSelectionTimeoutMS: 20000 });
   const db = mongoose.connection.db;
+  SESSION_COOKIE = await loginViaOtp({ base: BASE, email });
   console.log(`\nDatabase: ${db.databaseName}`);
   console.log(`Signed in as: ${email}`);
   console.log(`Intruder user id: ${INTRUDER}\n`);

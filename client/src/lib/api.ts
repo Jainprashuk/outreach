@@ -1132,3 +1132,114 @@ export const updateScrapeScheduleApi = (patch: Partial<Pick<ScrapeSchedule,
   'enabled' | 'days' | 'time' | 'timezone' | 'queries' | 'catchUpHours'>>) =>
   apiFetch<{ schedule: ScrapeSchedule; nextOccurrence: string | null }>(
     '/api/scrapes/schedule', { method: 'PUT', body: JSON.stringify(patch) });
+
+// ── First-run setup ──────────────────────────────────────────────────────────
+
+export interface OnboardingStatus {
+  complete: boolean;
+  step: number;
+  skipped: string[];
+  steps: string[];
+  required: string[];
+  checks: { gmail: boolean; identity: boolean; templates: boolean; resume: boolean };
+  gmailEmail: string;
+  senderName: string;
+  senderCompany: string;
+  templateCount: number;
+  /** False when the server has no CREDENTIAL_KEY, which makes the Gmail step —
+   *  and therefore onboarding — impossible until an operator sets one. */
+  credentialKeyConfigured: boolean;
+}
+
+export const onboardingStatusApi = () => apiFetch<OnboardingStatus>('/api/onboarding/status');
+
+export const onboardingStepApi = (step: number) =>
+  apiFetch<{ ok: true }>('/api/onboarding/step', { method: 'PUT', body: JSON.stringify({ step }) });
+
+export const onboardingSkipApi = (step: string) =>
+  apiFetch<{ ok: true }>('/api/onboarding/skip', { method: 'POST', body: JSON.stringify({ step }) });
+
+export const onboardingSeedTemplatesApi = () =>
+  apiFetch<{ created: number; total: number }>('/api/onboarding/templates', { method: 'POST' });
+
+export const onboardingStarterTemplatesApi = () =>
+  apiFetch<Array<{ key: string; name: string; subject: string; body: string }>>('/api/onboarding/starter-templates');
+
+export const onboardingCompleteApi = () =>
+  apiFetch<{ ok: true }>('/api/onboarding/complete', { method: 'POST' });
+
+/** Verifies the credential over SMTP before storing it, so a failure here means
+ *  the App Password genuinely does not work — not that saving failed. */
+export const connectGmailApi = (email: string, appPassword: string, name?: string) =>
+  apiFetch<{ ok: true; message: string }>('/api/config', {
+    method: 'POST', body: JSON.stringify({ email, appPassword, name }),
+  });
+
+export const disconnectGmailApi = () =>
+  apiFetch<{ ok: true }>('/api/settings/gmail', { method: 'DELETE' });
+
+// ── Admin (fleet-wide) ───────────────────────────────────────────────────────
+// Everything here is behind requireAdmin on the server. The client's own
+// isAdmin check only decides whether to render the link.
+
+export interface AdminCount { total: number; by: Record<string, number> }
+
+export interface AdminUserRow {
+  id: string | null;
+  email: string;
+  name: string;
+  isAdmin: boolean;
+  status: 'active' | 'invited' | 'disabled' | 'n/a';
+  createdAt: string | null;
+  lastLoginAt: string | null;
+  activeSessions: number;
+  onboarding: { completedAt: string | null; step: number; skipped: string[]; current: boolean };
+  config: {
+    hasGmail: boolean; hasResume: boolean; settingsDocs: number; templates: number;
+    hasWorkerToken: boolean; hasShareToken: boolean; lastMailboxCheckAt: string | null;
+  };
+  contacts: AdminCount & { everSent: number; everReplied: number; everFollowedUp: number; lastSentAt: string | null };
+  campaigns: AdminCount;
+  leads: AdminCount;
+  scrapes: AdminCount & { lastRunAt: string | null };
+  sendJobs: AdminCount;
+  interviews: AdminCount;
+  activity: { events: number; events30d: number; lastEventAt: string | null };
+}
+
+export interface AdminOverview {
+  generatedAt: string;
+  days: number;
+  users: AdminUserRow[];
+  /** Documents with no userId — they predate the multi-tenant backfill and are
+   *  invisible to every account, so only an admin will ever see them. */
+  unassigned: AdminUserRow | null;
+  totals: {
+    users: number; active: number; invited: number; disabled: number;
+    onboarded: number; withGmail: number; contacts: number;
+    everSent: number; everReplied: number; replyRate: number;
+    leads: number; campaigns: number; interviews: number;
+    activeSessions: number; scrapeFailures: number; duplicateSettings: number;
+  };
+  series: Array<{ day: string; sent: number; replied: number }>;
+  signups: Array<{ month: string; n: number }>;
+}
+
+export const adminOverviewApi = (days = 30) =>
+  apiFetch<AdminOverview>(`/api/admin/users?days=${days}`);
+
+export const adminInviteApi = (email: string, name?: string, isAdmin?: boolean) =>
+  apiFetch<{ ok: true; id: string; email: string; status: string }>('/api/admin/users', {
+    method: 'POST', body: JSON.stringify({ email, name, isAdmin }),
+  });
+
+export const adminUpdateUserApi = (id: string, patch: { status?: string; isAdmin?: boolean }) =>
+  apiFetch<{ ok: true; revoked: number }>(`/api/admin/users/${id}`, {
+    method: 'PATCH', body: JSON.stringify(patch),
+  });
+
+export const adminRevokeSessionsApi = (id: string) =>
+  apiFetch<{ ok: true; revoked: number }>(`/api/admin/users/${id}/revoke-sessions`, { method: 'POST' });
+
+export const adminOtpHealthApi = () =>
+  apiFetch<{ since: string; failures: Array<{ email: string; error: string; at: string }> }>('/api/admin/otp-health');

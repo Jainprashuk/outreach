@@ -118,4 +118,18 @@ router.delete('/resume', async (req, res) => {
   }
 });
 
+// DELETE /api/settings/gmail
+// The honest counterpart to storing the App Password: it IS stored (encrypted),
+// so the reassurance that matters is being able to remove it. Clears the
+// credential but keeps the address, which is also the IMAP username and is not
+// a secret.
+router.delete('/gmail', async (req, res) => {
+  try {
+    await Settings.findOneAndUpdate({ userId: req.userId }, { $set: { gmailAppPasswordEnc: '' } });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

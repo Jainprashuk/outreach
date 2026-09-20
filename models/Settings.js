@@ -15,7 +15,9 @@ const resumeSchema = new mongoose.Schema({
 
 // One record per user.
 const settingsSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
+  // Indexed by the unique index declared below, not here — declaring both makes
+  // mongoose build two indexes on the same key.
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   senderName: { type: String, default: 'Your Name' },
   senderCompany: { type: String, default: 'Your Company' },
   gmailEmail: { type: String, default: '' },
@@ -64,10 +66,27 @@ settingsSchema.set('toJSON', {
   }
 });
 
+// One settings document per account. Added late: getForUser used to be a
+// read-then-create, so two concurrent first-time requests could each miss and
+// each insert. scripts/dedupe-settings.js collapses any existing duplicates and
+// MUST have been run against a database before this index can build there.
+settingsSchema.index({ userId: 1 }, { unique: true });
+
 settingsSchema.statics.getForUser = async function (userId) {
-  let doc = await this.findOne({ userId });
-  if (!doc) doc = await this.create({ userId });
-  return doc;
+  try {
+    // Upsert rather than find-then-create: the old form raced, and the onboarding
+    // wizard mounting several panels at once is exactly the trigger.
+    return await this.findOneAndUpdate(
+      { userId },
+      { $setOnInsert: { userId } },
+      { new: true, upsert: true, setDefaultsOnInsert: true },
+    );
+  } catch (err) {
+    // Two concurrent upserts under the unique index: one inserts, the other gets
+    // E11000. The document exists by now, so a plain read is the correct retry.
+    if (err && err.code === 11000) return this.findOne({ userId });
+    throw err;
+  }
 };
 
 module.exports = mongoose.model('Settings', settingsSchema);

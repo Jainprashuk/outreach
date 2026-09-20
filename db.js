@@ -1,5 +1,8 @@
 const mongoose = require('mongoose');
 const Contact = require('./models/Contact');
+const User = require('./models/User');
+const Settings = require('./models/Settings');
+const { ONBOARDING_VERSION } = require('./lib/onboarding');
 
 async function backfillStatusHistory() {
   const contacts = await Contact.find({
@@ -129,6 +132,56 @@ async function backfillFollowUpReplied() {
 }
 
 
+// Shape migration for accounts that predate OTP sign-in.
+//
+// scripts/migrate-otp-auth.js is the real migration and is meant to run before
+// this code deploys. This exists because the cost of getting that order wrong is
+// not a warning — an existing user with no onboarding field reads as
+// un-onboarded, gets redirected into a first-run wizard they do not need, and is
+// blocked from sending. Matched on the field being ABSENT, so it goes inert
+// after one pass and never touches a user again: every account created since
+// gets the subdocument from schema defaults and can never match.
+async function backfillOnboarding() {
+  const users = await User.find({ onboarding: { $exists: false } }, { createdAt: 1 }).lean();
+  if (users.length === 0) return;
+
+  // Anyone with a working Gmail credential was already set up before the wizard
+  // existed. The env-fallback case (the original single-owner install, still
+  // sending via GMAIL_APP_PASSWORD) counts too — keying on the stored credential
+  // alone would trap exactly the person least in need of onboarding.
+  const ids = users.map(u => u._id);
+  const configured = await Settings.find(
+    { userId: { $in: ids }, gmailAppPasswordEnc: { $nin: [null, ''] } },
+    { userId: 1 },
+  ).lean();
+  const done = new Set(configured.map(s => String(s.userId)));
+
+  const totalUsers = await User.countDocuments();
+  const envFallbackLive = !!(process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD) && totalUsers === 1;
+
+  const ops = users.map((u) => {
+    const complete = done.has(String(u._id)) || envFallbackLive;
+    return {
+      updateOne: {
+        filter: { _id: u._id },
+        update: {
+          $set: {
+            onboarding: complete
+              // Backdated, so the record does not claim they completed a wizard
+              // that did not exist when they signed up.
+              ? { startedAt: u.createdAt || null, completedAt: u.createdAt || new Date(), step: 99, skipped: [], version: ONBOARDING_VERSION }
+              : { startedAt: null, completedAt: null, step: 0, skipped: [], version: 0 },
+          },
+        },
+      },
+    };
+  });
+
+  const result = await User.bulkWrite(ops, { ordered: false });
+  console.log(`✅  Backfilled onboarding state for ${result.modifiedCount} account(s)`);
+}
+
+
 async function connect() {
   const env = process.env.NODE_ENV === 'prod' ? 'prod' : 'dev';
   const uri = env === 'prod' ? process.env.MONGODB_URI_PROD : process.env.MONGODB_URI_DEV;
@@ -150,6 +203,7 @@ async function connect() {
   await backfillStatusHistory();
   await backfillSendTimestamps();
   await backfillFollowUpReplied();
+  await backfillOnboarding();
 }
 
 module.exports = { connect };

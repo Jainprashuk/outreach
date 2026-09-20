@@ -16,7 +16,11 @@
  *
  * Dev database ONLY, with the server already up:
  *   node scripts/test-token-isolation.js --base=http://localhost:4042 \
- *     --email=you@example.com --password=...
+ *     --email=you@example.com
+ *
+ * No --password: sign-in is an emailed code now. This suite authenticates with
+ * bearer tokens rather than cookies, so it only needs the owner's account to
+ * exist, not to sign in as them.
  */
 require('dotenv').config();
 const mongoose = require('mongoose');
@@ -51,7 +55,6 @@ async function main() {
   const User = require('../models/User');
   const ScrapeRun = require('../models/ScrapeRun');
   const ScrapeWorker = require('../models/ScrapeWorker');
-  const { hashPassword } = require('../lib/password');
   const { issueWorkerToken } = require('../lib/workerAuth');
   const { issueShareToken } = require('../lib/shareAuth');
   const Contact = require('../models/Contact');
@@ -59,9 +62,12 @@ async function main() {
   const owner = await User.findOne({ email: email.toLowerCase() });
   if (!owner) throw new Error(`No account for ${email}`);
 
+  // A real row, because worker auth resolves users by token. No password: there
+  // is no such field any more, and an invited account has never signed in.
   const intruder = await User.create({
     email: `worker-isolation-${Date.now()}@example.invalid`,
-    passwordHash: await hashPassword('x'.repeat(16)),
+    status: 'active',
+    isAdmin: false,
   });
   const intruderToken = await issueWorkerToken(intruder._id);
   const run = await ScrapeRun.create({

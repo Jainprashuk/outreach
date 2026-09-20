@@ -11,13 +11,14 @@ const Settings = require('./models/Settings');
 const Contact = require('./models/Contact');
 const User = require('./models/User');
 const mailer = require('./lib/mailer');
-const { verifyPassword } = require('./lib/password');
 const credentials = require('./lib/credentials');
-const {
-  createSession, resolveSession, destroySession, setCookieHeader, clearCookieHeader,
-} = require('./lib/session');
+// createSession/setCookieHeader moved to routes/auth.js with the sign-in flow.
+const { resolveSession, destroySession, clearCookieHeader } = require('./lib/session');
 const { auditHttpMutations } = require('./lib/activityLog');
 const { attachUser, resolveSoleUserId } = require('./lib/currentUser');
+const { isOnboarded } = require('./lib/onboarding');
+const { requireOnboarded } = require('./lib/onboardingGuard');
+const { requireAdmin } = require('./lib/requireAdmin');
 const { resolveWorkerUser } = require('./lib/workerAuth');
 const { issueShareToken, revokeShareToken, resolveShareUser, hasShareToken } = require('./lib/shareAuth');
 const { usersByStaleness, runForUsers } = require('./lib/fanout');
@@ -131,6 +132,17 @@ const AUTH_OPEN = process.env.AUTH_OPEN === '1';
 const isLegacyOwner = (req) => LEGACY_LOGIN && cookieMatches(req, AUTH_COOKIE, AUTH_TOKEN);
 const isShare = (req) => cookieMatches(req, EXPORT_COOKIE, EXPORT_TOKEN);
 
+// Exactly the endpoints that cannot require a session, because they are how one
+// is obtained. An exact set, matching the CRON_PATHS / WORKER_PATHS discipline
+// above rather than the prefix this used to be: a prefix would silently make a
+// future /api/auth/users public the day somebody adds it.
+const PUBLIC_AUTH_PATHS = new Set([
+  '/api/auth/request-code',
+  '/api/auth/verify-code',
+  '/api/auth/logout',
+  '/api/auth/session',
+]);
+
 const requireAuth = async (req, res, next) => {
   // Local-development bypass. It resolves the owner here, beside the bypass, so
   // that attachUser can stay strict for every real request.
@@ -138,7 +150,7 @@ const requireAuth = async (req, res, next) => {
     try { await ensureDb(); req.userId = await resolveSoleUserId(); } catch (_) { /* no account yet */ }
     return next();
   }
-  if (req.path === '/login' || req.path.startsWith('/api/auth') || req.path.startsWith('/api/inngest')) return next();
+  if (req.path === '/login' || PUBLIC_AUTH_PATHS.has(req.path) || req.path.startsWith('/api/inngest')) return next();
   // The React SPA shell is public so share/unauthenticated visitors can load it;
   // the client renders "Not authorised" for owner-only pages and all owner DATA
   // endpoints below stay gated. The share API self-guards.
@@ -204,53 +216,6 @@ const requireAuth = async (req, res, next) => {
 app.use(requireAuth);
 
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, 'login.html')));
-
-// Email + password. Signups are deliberately closed: without verified email
-// there is nothing stopping someone registering as anybody, so accounts are
-// created out of band by scripts/set-password.js until OTP lands.
-app.post('/api/auth/login', async (req, res) => {
-  const email = String((req.body && req.body.email) || '').trim().toLowerCase();
-  const password = String((req.body && req.body.password) || '');
-  if (!email || !password) return res.status(400).json({ error: 'Email and password are required' });
-
-  try {
-    await ensureDb();
-    const user = await User.findOne({ email });
-    // One message and one code for "no such account" and "wrong password", so
-    // this endpoint cannot be used to discover which addresses have accounts.
-    const okPassword = user ? await verifyPassword(password, user.passwordHash) : false;
-    if (!user || !okPassword) return res.status(401).json({ error: 'Incorrect email or password' });
-
-    const token = await createSession(user._id);
-    res.setHeader('Set-Cookie', setCookieHeader(token));
-    await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date() } });
-    res.json({ ok: true, user: { id: user._id.toString(), email: user.email, name: user.name } });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-app.post('/api/auth/logout', async (req, res) => {
-  try {
-    await ensureDb();
-    await destroySession(req);
-  } catch (_) { /* clearing the cookie matters more than tidying the row */ }
-  res.setHeader('Set-Cookie', clearCookieHeader());
-  res.json({ ok: true });
-});
-
-app.get('/api/auth/session', async (req, res) => {
-  try {
-    await ensureDb();
-    const session = await resolveSession(req);
-    if (!session) return res.json({ authenticated: false });
-    const user = await User.findById(session.userId, { email: 1, name: 1 }).lean();
-    if (!user) return res.json({ authenticated: false });
-    res.json({ authenticated: true, user: { id: user._id.toString(), email: user.email, name: user.name } });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
 
 app.get('/logout', async (req, res) => {
   try {
@@ -368,8 +333,24 @@ app.get('/api/share/session', requireDb, async (req, res) => {
     try {
       const session = await resolveSession(req);
       if (session) {
-        const doc = await User.findById(session.userId, { email: 1, name: 1 }).lean();
-        if (doc) { owner = true; user = { id: doc._id.toString(), email: doc.email, name: doc.name }; }
+        const doc = await User.findById(session.userId, { email: 1, name: 1, isAdmin: 1, status: 1, onboarding: 1 }).lean();
+        // isAdmin and onboarding live INSIDE `user`, which is only ever
+        // populated once resolveSession has succeeded. That keeps them
+        // structurally unreachable on the public share path below, which this
+        // endpoint also answers.
+        //
+        // `=== true` rather than a truthiness test: .lean() skips schema
+        // defaults, so a row written before isAdmin existed reads as undefined.
+        if (doc && doc.status !== 'disabled') {
+          owner = true;
+          user = {
+            id: doc._id.toString(),
+            email: doc.email,
+            name: doc.name,
+            isAdmin: doc.isAdmin === true,
+            onboarded: isOnboarded(doc),
+          };
+        }
       }
     } catch (_) { /* fall through as signed-out */ }
   }
@@ -462,6 +443,14 @@ const { inngest } = require('./inngest');
 const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip } = require('./inngest-fns');
 app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip] }));
 
+// Sign-in is an emailed one-time code; see routes/auth.js and lib/loginCode.js.
+// Mounted ABOVE the /api stack below on purpose: none of these endpoints can
+// require a req.userId, because they are how one is obtained, and attachUser
+// would 401 every one of them. Accounts are still created out of band
+// (scripts/invite-user.js, or the admin dashboard) — whitelisting an address is
+// what makes it possible to sign in at all.
+app.use('/api/auth', requireDb, require('./routes/auth'));
+
 app.use('/api', requireDb, attachUser, auditHttpMutations);
 app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
@@ -478,6 +467,13 @@ app.use('/api/interviews', requireDb, require('./routes/interviews'));
 app.use('/api/postings', requireDb, require('./routes/postings'));
 app.use('/api/campaigns', requireDb, require('./routes/campaigns'));
 app.use('/api/blocklist', requireDb, require('./routes/blocklist'));
+// First-run setup. Below the /api stack above, so it inherits attachUser and
+// the mutation audit log like every other owner-scoped router.
+app.use('/api/onboarding', requireDb, require('./routes/onboarding'));
+// Fleet-wide admin. Mounted BELOW the /api stack so it inherits attachUser and
+// auditHttpMutations like everything else — moving it above those would lose the
+// audit trail on exactly the routes that most need one.
+app.use('/api/admin', requireDb, requireAdmin, require('./routes/admin'));
 
 // ── Configure Gmail credentials ────────────────────────────────────────────
 app.post('/api/config', requireDb, async (req, res) => {
@@ -888,7 +884,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
 });
 
 // ── Send single email (legacy — kept for step3 fallback) ──────────────────
-app.post('/api/send', requireDb, async (req, res) => {
+app.post('/api/send', requireDb, requireOnboarded, async (req, res) => {
   const { to, subject, body, attachResume } = req.body;
   if (!to || !subject || !body) return res.status(400).json({ error: 'to, subject, body are required' });
 

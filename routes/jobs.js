@@ -1,4 +1,5 @@
 const router = require('express').Router();
+const { requireOnboarded } = require('../lib/onboardingGuard');
 const SendJob = require('../models/SendJob');
 const Contact = require('../models/Contact');
 const Campaign = require('../models/Campaign');
@@ -17,7 +18,7 @@ const serialize = (doc) => {
 };
 
 // Create a new send job and trigger Inngest orchestrator
-router.post('/', async (req, res) => {
+router.post('/', requireOnboarded, async (req, res) => {
   try {
     const { items, attachResume, senderEmail, senderName, senderAppPassword, sendMode, chunkSize } = req.body;
     if (!items || !items.length) return res.status(400).json({ error: 'No items provided' });

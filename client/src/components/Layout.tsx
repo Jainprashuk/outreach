@@ -10,15 +10,19 @@ function switchToClassic() {
   window.location.href = '/';
 }
 
-export default function Layout({ title, subtitle, actions, children, wide }: {
+export default function Layout({ title, subtitle, actions, children, wide, minimal }: {
   title: string;
   subtitle?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
   wide?: boolean; // main content manages its own layout (wizard uses this)
+  /** Hides the nav links but keeps the logo, theme toggle, account and Sign out.
+   *  For first-run setup, where every nav link would bounce straight back here —
+   *  showing links that do not work is worse than showing none. */
+  minimal?: boolean;
 }) {
   const { toggleTheme } = useTheme(); // applies data-theme + provides the toggle
-  const { owner, user, logout } = useSession();
+  const { owner, user, isAdmin, logout } = useSession();
   const { reminders } = useInterviews();
   const [menuOpen, setMenuOpen] = useState(false);
   const { pathname } = useLocation();
@@ -45,6 +49,7 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
         <div className="sidebar-logo-icon"><i className="ti ti-send" /></div>
         <span className="sidebar-logo-text">Outreach</span>
       </div>
+      {!minimal && (<>
       <NavLink to="/" end className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-layout-dashboard" /> Dashboard
       </NavLink>
@@ -103,6 +108,14 @@ export default function Layout({ title, subtitle, actions, children, wide }: {
       <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-settings" /> Settings
       </NavLink>
+      {/* Display only. routes/admin.js re-checks isAdmin on every request and is
+          the actual boundary; hiding the link just keeps it out of the way. */}
+      {isAdmin && (
+        <NavLink to="/admin" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+          <i className="ti ti-shield-lock" /> Admin
+        </NavLink>
+      )}
+      </>)}
       <div className="sidebar-bottom">
         <button className="theme-toggle" type="button" onClick={toggleTheme}>
           <span className="tt-icon"><i className="ti ti-sun" /><i className="ti ti-moon" />Appearance</span>

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import Layout from '../components/Layout';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
-import { API_BASE } from '../lib/api';
+import { API_BASE, loadSettingsApi, connectGmailApi, disconnectGmailApi } from '../lib/api';
 import { BUILTIN_VARIABLES } from '../lib/format';
 import SmtpChart from '../components/SmtpChart';
 
@@ -27,6 +27,11 @@ export default function Settings() {
   const [loading, setLoading] = useState(true);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved'>('idle');
   const [sent24h, setSent24h] = useState<{ count: number | null; buckets: any[] }>({ count: null, buckets: [] });
+  // The App Password itself is never sent back to the browser — only whether
+  // one is stored.
+  const [hasPassword, setHasPassword] = useState(false);
+  const [appPassword, setAppPassword] = useState('');
+  const [connecting, setConnecting] = useState(false);
   const [chartLoading, setChartLoading] = useState(false);
   const resumeInputRef = useRef<HTMLInputElement>(null);
 
@@ -52,6 +57,10 @@ export default function Settings() {
         setCompany(sender.company === 'Your Company' ? '' : sender.company);
         setEmail(sender.email);
         setVarRows((sender.customVariables || []).map(v => ({ key: v.key, value: v.value })));
+        try {
+          const raw = await loadSettingsApi();
+          setHasPassword(!!raw.hasGmailAppPassword);
+        } catch { /* the panel just shows as not connected */ }
       } catch (err: any) {
         toast('Could not load settings: ' + err.message, 'error');
       } finally {
@@ -160,12 +169,65 @@ export default function Settings() {
             <label className="form-label">Gmail address</label>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="yourname@gmail.com" {...dis} />
           </div>
+          <div className="form-group" style={{ marginBottom: 14 }}>
+            <label className="form-label">
+              App Password
+              {hasPassword && (
+                <span className="badge badge-sent" style={{ marginLeft: 8 }}>
+                  <i className="ti ti-lock" /> stored
+                </span>
+              )}
+            </label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              <input
+                type="password" value={appPassword} onChange={e => setAppPassword(e.target.value)}
+                placeholder={hasPassword ? 'Enter a new one to replace it' : '16 characters, no spaces'}
+                autoComplete="off" style={{ flex: 1, minWidth: 200 }}
+              />
+              <button
+                className="btn btn-primary" type="button"
+                disabled={connecting || !email.trim() || !appPassword.trim()}
+                onClick={async () => {
+                  setConnecting(true);
+                  try {
+                    const r = await connectGmailApi(email.trim(), appPassword.trim());
+                    setAppPassword('');
+                    setHasPassword(true);
+                    toast(r.message || 'Connected', 'success');
+                  } catch (err: any) {
+                    toast(err.message || 'Could not connect', 'error');
+                  } finally {
+                    setConnecting(false);
+                  }
+                }}
+              >
+                {connecting ? <><i className="ti ti-loader" /> Verifying…</> : hasPassword ? 'Replace' : 'Connect'}
+              </button>
+              {hasPassword && (
+                <button
+                  className="btn btn-danger" type="button" disabled={connecting}
+                  onClick={async () => {
+                    if (!window.confirm('Remove the stored App Password? Nothing will send until you add one again.')) return;
+                    try {
+                      await disconnectGmailApi();
+                      setHasPassword(false);
+                      toast('App Password removed', 'success');
+                    } catch (err: any) {
+                      toast(err.message || 'Could not remove it', 'error');
+                    }
+                  }}
+                >Remove</button>
+              )}
+            </div>
+          </div>
           <div className="info-box" style={{ marginBottom: 0 }}>
             <i className="ti ti-info-circle" style={{ fontSize: 15, flexShrink: 0 }} />
             <div>
-              Sending requires a <strong>16-character App Password</strong>.{' '}
-              Generate one at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" style={{ color: 'var(--blue)' }}>Google Account → Security → App Passwords</a>.{' '}
-              It's entered at send time and never stored.
+              Not your Google password — a <strong>16-character App Password</strong>{' '}
+              from <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" style={{ color: 'var(--blue)' }}>Google Account → Security → App Passwords</a>.
+              {' '}We verify it against Gmail before saving, then store it{' '}
+              <strong>encrypted (AES-256-GCM)</strong>. It is never sent back to this
+              page, and Remove deletes it.
             </div>
           </div>
         </div>

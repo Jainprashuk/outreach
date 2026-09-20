@@ -5,6 +5,11 @@ export interface SessionUser {
   id: string;
   email: string;
   name: string;
+  /** Can see the fleet-wide admin dashboard. A DISPLAY gate only — routes/admin.js
+   *  re-checks this server-side, and that is the real boundary. */
+  isAdmin: boolean;
+  /** Has finished first-run setup. */
+  onboarded: boolean;
 }
 
 interface Session {
@@ -13,6 +18,12 @@ interface Session {
   owner: boolean;
   share: boolean;
   user: SessionUser | null;
+  isAdmin: boolean;
+  /** Whether to send someone to the wizard. Defaults to TRUE when the field is
+   *  missing, so a session payload that predates onboarding (or a partial
+   *  failure) does not trap every user in a wizard they do not need. The server
+   *  send-guard is what actually protects anything. */
+  onboarded: boolean;
   loading: boolean;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
@@ -56,7 +67,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   const value = useMemo<Session>(
-    () => ({ owner, share, user, loading, refresh, logout }),
+    () => ({
+      owner,
+      share,
+      user,
+      isAdmin: user?.isAdmin === true,
+      onboarded: user ? user.onboarded !== false : true,
+      loading,
+      refresh,
+      logout,
+    }),
     [owner, share, user, loading, refresh, logout],
   );
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;

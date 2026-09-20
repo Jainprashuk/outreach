@@ -13,6 +13,8 @@ const { deadline } = require('../lib/http');
 const { inCooldown } = require('../lib/cooldown');
 const mailer = require('../lib/mailer');
 
+const { requireOnboarded } = require('../lib/onboardingGuard');
+
 const router = express.Router();
 
 // .lean() skips schema defaults, so rows written before a field existed come back
@@ -113,7 +115,7 @@ async function restoreReservedContacts(rows, note, userId) {
 // Returns 200 even when individual campaigns fail: the workflow asserts
 // code = 200, and one bad campaign should not turn the whole cron red. The body
 // is the readable log the workflow cats.
-router.post('/run-due', async (req, res) => {
+router.post('/run-due', requireOnboarded, async (req, res) => {
   try {
     const report = await runDueCampaigns({ trigger: req.body && req.body.trigger === 'manual' ? 'manual' : 'cron' });
     res.json(report);
@@ -611,7 +613,7 @@ router.post('/:id/pause', async (req, res) => {
 });
 
 // POST /api/campaigns/:id/resume
-router.post('/:id/resume', async (req, res) => {
+router.post('/:id/resume', requireOnboarded, async (req, res) => {
   try {
     const campaign = await findCampaign(req.params.id, req.userId);
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
@@ -643,7 +645,7 @@ router.post('/:id/resume', async (req, res) => {
 });
 
 // POST /api/campaigns/:id/run-now
-router.post('/:id/run-now', async (req, res) => {
+router.post('/:id/run-now', requireOnboarded, async (req, res) => {
   try {
     const campaign = await findCampaign(req.params.id, req.userId, { _id: 1, status: 1 });
     if (!campaign) return res.status(404).json({ error: 'Campaign not found' });
