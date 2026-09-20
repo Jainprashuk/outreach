@@ -1278,3 +1278,26 @@ export const rejectAccessApi = (id: string, note?: string) =>
 
 export const clearAccessRequestApi = (id: string) =>
   apiFetch<{ ok: true }>(`/api/admin/access-requests/${id}`, { method: 'DELETE' });
+
+// ── Per-account tokens ───────────────────────────────────────────────────────
+// Both are returned exactly once, at issue time: only a SHA-256 of each is
+// stored, so neither can be shown again afterwards. The GET endpoints answer
+// "is one registered", never the value.
+
+export const shareLinkStatusApi = () =>
+  apiFetch<{ registered: boolean }>('/api/share-link');
+
+export const issueShareLinkApi = () =>
+  apiFetch<{ token: string; path: string; note: string }>('/api/share-link', { method: 'POST' });
+
+export const revokeShareLinkApi = () =>
+  apiFetch<{ ok: true }>('/api/share-link', { method: 'DELETE' });
+
+export const workerTokenStatusApi = () =>
+  apiFetch<{ registered: boolean }>('/api/scrapes/worker-token');
+
+export const issueWorkerTokenApi = () =>
+  apiFetch<{ token: string; note: string }>('/api/scrapes/worker-token', { method: 'POST' });
+
+export const revokeWorkerTokenApi = () =>
+  apiFetch<{ ok: true }>('/api/scrapes/worker-token', { method: 'DELETE' });

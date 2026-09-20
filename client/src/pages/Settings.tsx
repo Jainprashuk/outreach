@@ -2,9 +2,14 @@ import { useEffect, useRef, useState } from 'react';
 import Layout from '../components/Layout';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
-import { API_BASE, loadSettingsApi, connectGmailApi, disconnectGmailApi } from '../lib/api';
+import {
+  API_BASE, loadSettingsApi, connectGmailApi, disconnectGmailApi,
+  shareLinkStatusApi, issueShareLinkApi, revokeShareLinkApi,
+  workerTokenStatusApi, issueWorkerTokenApi, revokeWorkerTokenApi,
+} from '../lib/api';
 import { BUILTIN_VARIABLES } from '../lib/format';
 import SmtpChart from '../components/SmtpChart';
+import TokenCard from '../components/TokenCard';
 
 const VARIABLE_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
@@ -301,6 +306,50 @@ export default function Settings() {
             onClick={() => setVarRows(rows => [...rows, { key: '', value: '' }])}>
             <i className="ti ti-plus" /> Add variable
           </button>
+        </div>
+      </div>
+
+      {/* TOKENS & SHARING */}
+      <div className="s-card" style={{ animationDelay: '.18s' }}>
+        <div className="s-head">
+          <div className="s-head-left">
+            <div className="s-icon" style={{ background: 'var(--amber-bg)', color: 'var(--amber)' }}><i className="ti ti-key" /></div>
+            <div>
+              <div className="s-title">Tokens &amp; sharing</div>
+              <div className="s-sub">Credentials that act for this account without signing in</div>
+            </div>
+          </div>
+        </div>
+        <div className="s-body" style={{ paddingTop: 0 }}>
+          <TokenCard
+            title="Share link"
+            icon="ti-share"
+            description="A read-only link to your contact export, for someone with no account. They see the export and nothing else."
+            registeredLabel="active"
+            issueLabel="link"
+            secretLabel="Your share link"
+            secretHint="Anyone who has this link can read your contact export, without signing in. Treat it like a password."
+            loadStatus={shareLinkStatusApi}
+            issue={issueShareLinkApi}
+            revoke={revokeShareLinkApi}
+            revokeWarning="Revoke the share link? Anyone currently using it loses access immediately."
+            // The token alone is not usable — the person needs the whole URL,
+            // and the server already builds the right path.
+            format={(r) => `${window.location.origin}${r.path ?? ''}`}
+          />
+          <TokenCard
+            title="Scrape worker token"
+            icon="ti-robot"
+            description="Lets the LinkedIn scrape worker on your Mac claim runs for this account. Without one it falls back to the shared WORKER_SECRET, which stops working as soon as a second account exists."
+            registeredLabel="registered"
+            issueLabel="token"
+            secretLabel="Your worker token"
+            secretHint="Put this in the worker machine's .env as WORKER_SECRET, then restart the worker."
+            loadStatus={workerTokenStatusApi}
+            issue={issueWorkerTokenApi}
+            revoke={revokeWorkerTokenApi}
+            revokeWarning="Revoke the worker token? The scrape worker stops claiming runs until you generate a new one."
+          />
         </div>
       </div>
 
