@@ -41,6 +41,7 @@ export default function Admin() {
   const [error, setError] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviting, setInviting] = useState(false);
+  const [notifyInvite, setNotifyInvite] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [requests, setRequests] = useState<AccessRequestRow[]>([]);
   const [reqFilter, setReqFilter] = useState<'pending' | 'all'>('pending');
@@ -69,9 +70,14 @@ export default function Admin() {
     if (!email) return;
     setInviting(true);
     try {
-      await adminInviteApi(email);
+      const r = await adminInviteApi(email, { notify: notifyInvite });
       setInviteEmail('');
-      toast(`${email} can now sign in — they'll get a code by email.`, 'success');
+      toast(
+        r.warning ? `${email} was added, but the email did not send — tell them yourself.`
+          : r.emailed ? `${email} was added and emailed.`
+          : `${email} was added. They have not been told.`,
+        r.warning ? 'info' : 'success',
+      );
       await load(days);
     } catch (err: any) {
       toast(err.message || 'Could not whitelist that address', 'error');
@@ -301,6 +307,13 @@ export default function Admin() {
                     {inviting ? <><i className="ti ti-loader" /> Adding…</> : <><i className="ti ti-plus" /> Whitelist</>}
                   </button>
                 </form>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10, fontSize: 12.5, color: 'var(--text2)', cursor: 'pointer' }}>
+                  <input type="checkbox" checked={notifyInvite} onChange={e => setNotifyInvite(e.target.checked)} />
+                  Email them to say their access is ready
+                  <span style={{ color: 'var(--text3)' }}>
+                    — otherwise they have no way of knowing the account exists.
+                  </span>
+                </label>
               </div>
             </div>
 

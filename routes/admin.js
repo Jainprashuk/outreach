@@ -363,13 +363,36 @@ router.post('/users', async (req, res) => {
       onboarding: { startedAt: null, completedAt: null, step: 0, skipped: [], version: 0 },
     });
 
+    // Tell them, unless explicitly asked not to. Whitelisting somebody who
+    // never asked is otherwise silent — they have no way to know the account
+    // exists, and would only find out if you remembered to message them.
+    // Same email as approving a request, because it is the same event to them.
+    const notify = req.body.notify !== false;
+    const mail = notify
+      ? await sendAccessApproved({ to: email, appUrl: process.env.OUTREACH_URL || '' })
+      : { delivered: false, skipped: true };
+
     logEvent({
       userId: req.userId, category: 'admin', action: 'invite',
       message: `Whitelisted ${email}`,
-      meta: { targetUserId: String(user._id), targetEmail: email, isAdmin: req.body.isAdmin === true },
+      meta: {
+        targetUserId: String(user._id), targetEmail: email,
+        isAdmin: req.body.isAdmin === true, emailed: mail.delivered === true,
+      },
     }).catch(() => {});
 
-    res.status(201).json({ ok: true, id: String(user._id), email: user.email, status: user.status });
+    res.status(201).json({
+      ok: true,
+      id: String(user._id),
+      email: user.email,
+      status: user.status,
+      emailed: mail.delivered === true,
+      // The account exists either way — surfaced so the admin knows whether
+      // they still have to tell the person themselves.
+      ...(notify && mail.delivered !== true
+        ? { warning: 'The account was created, but the notification email could not be sent.' }
+        : {}),
+    });
   } catch (err) {
     if (err && err.code === 11000) return res.status(409).json({ error: 'That address already has an account' });
     res.status(500).json({ error: err.message });

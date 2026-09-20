@@ -1229,10 +1229,13 @@ export interface AdminOverview {
 export const adminOverviewApi = (days = 30) =>
   apiFetch<AdminOverview>(`/api/admin/users?days=${days}`);
 
-export const adminInviteApi = (email: string, name?: string, isAdmin?: boolean) =>
-  apiFetch<{ ok: true; id: string; email: string; status: string }>('/api/admin/users', {
-    method: 'POST', body: JSON.stringify({ email, name, isAdmin }),
-  });
+/** Creates the account and, unless `notify` is false, emails them to say so. */
+export const adminInviteApi = (email: string, opts?: { name?: string; isAdmin?: boolean; notify?: boolean }) =>
+  apiFetch<{ ok: true; id: string; email: string; status: string; emailed: boolean; warning?: string }>(
+    '/api/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ email, name: opts?.name, isAdmin: opts?.isAdmin, notify: opts?.notify }),
+    });
 
 export const adminUpdateUserApi = (id: string, patch: { status?: string; isAdmin?: boolean }) =>
   apiFetch<{ ok: true; revoked: number }>(`/api/admin/users/${id}`, {

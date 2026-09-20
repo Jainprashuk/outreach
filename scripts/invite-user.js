@@ -18,6 +18,7 @@
  *   node scripts/invite-user.js --list --env=dev
  *   node scripts/invite-user.js --email=new@example.com --env=dev
  *   node scripts/invite-user.js --email=new@example.com --env=dev --execute
+ *   node scripts/invite-user.js --email=new@example.com --execute --no-notify
  *   node scripts/invite-user.js --email=you@example.com --admin --execute
  *   node scripts/invite-user.js --email=x@y.com --disable --execute
  *   node scripts/invite-user.js --email=x@y.com --enable --execute
@@ -27,6 +28,7 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const Session = require('../models/Session');
 const { ONBOARDING_VERSION } = require('../lib/onboarding');
+const { sendAccessApproved } = require('../lib/emailOtp');
 
 const args = process.argv.slice(2);
 const flag = (name) => args.some(a => a === `--${name}`);
@@ -40,6 +42,8 @@ const LIST = flag('list');
 const MAKE_ADMIN = flag('admin');
 const DISABLE = flag('disable');
 const ENABLE = flag('enable');
+// On by default: an account the person is never told about is not much use.
+const NOTIFY = !flag('no-notify');
 const ENV = value('env') === 'dev' ? 'dev' : 'prod';
 const URI = ENV === 'prod' ? process.env.MONGODB_URI_PROD : process.env.MONGODB_URI_DEV;
 const EMAIL = (value('email') || '').trim().toLowerCase();
@@ -119,6 +123,9 @@ async function main() {
   if (!EXECUTE) {
     console.log(`\nDry run — would whitelist ${EMAIL}${MAKE_ADMIN ? ' as an ADMIN' : ''}.`);
     console.log(`They would then sign in at /login with a code emailed to that address.`);
+    console.log(NOTIFY
+      ? `They would be emailed to say their access is ready.`
+      : `They would NOT be emailed (--no-notify) — you would have to tell them yourself.`);
     console.log(`\nRe-run with --execute to apply.\n`);
     return;
   }
@@ -136,7 +143,17 @@ async function main() {
   });
 
   console.log(`\nWhitelisted ${EMAIL}${MAKE_ADMIN ? ' as an ADMIN' : ''}.`);
-  console.log(`Tell them to go to /login and sign in with that address — a code will be emailed to them.`);
+
+  if (NOTIFY) {
+    // Never throws: the account exists regardless, and failing the whole command
+    // over a mail hiccup would be the wrong end to break.
+    const mail = await sendAccessApproved({ to: EMAIL, appUrl: process.env.OUTREACH_URL || '' });
+    console.log(mail.delivered
+      ? `Emailed them to say they can sign in.`
+      : `NOT emailed${mail.dev ? ' (no RESEND_API_KEY set)' : ''} — tell them yourself that they can sign in at /login.`);
+  } else {
+    console.log(`Not emailed (--no-notify). Tell them to sign in at /login with that address.`);
+  }
   console.log(`\nNote: adding a second account switches off every "sole account" fallback`);
   console.log(`(the GMAIL_EMAIL env credential and the global WORKER_SECRET). Make sure`);
   console.log(`scripts/import-gmail-credential.js has run and the worker has its own token.\n`);
