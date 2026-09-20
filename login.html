@@ -122,6 +122,21 @@
     </div>
   </form>
 
+  <!-- Step 1b: not on the list -->
+  <form id="request-form" style="display:none">
+    <div class="login-title">Request access</div>
+    <div class="login-sub"><span class="login-dest" id="req-dest"></span> isn't registered yet</div>
+    <label class="login-label" for="req-name">Your name</label>
+    <input class="login-input" id="req-name" autocomplete="name" style="margin-bottom:14px">
+    <label class="login-label" for="req-note">Why you need access <span style="color:var(--text3)">(optional)</span></label>
+    <textarea class="login-input" id="req-note" rows="3" maxlength="500"
+              placeholder="Who you are and what you'd use it for." style="resize:vertical"></textarea>
+    <button class="login-btn" id="req-btn" type="submit">Send request</button>
+    <div class="login-linkrow">
+      <button class="login-link" id="req-back" type="button">&larr; Use a different email</button>
+    </div>
+  </form>
+
   <div id="note" class="login-note" style="display:none"></div>
   <div id="err" class="login-error" style="display:none"></div>
 </div>
@@ -180,9 +195,29 @@
       body: JSON.stringify({ email: address }),
     });
     const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(data.error || 'Could not send a code');
+    if (!res.ok) {
+      const err = new Error(data.error || 'Could not send a code');
+      // Carried on the error so the caller can route to the request form
+      // instead of matching on the message.
+      err.canRequestAccess = data.canRequestAccess === true;
+      err.requestPending = data.requestPending === true;
+      throw err;
+    }
     return data;
   }
+
+  const requestForm = document.getElementById('request-form');
+  const reqDest = document.getElementById('req-dest');
+  const reqName = document.getElementById('req-name');
+  const reqNote = document.getElementById('req-note');
+  const reqBtn = document.getElementById('req-btn');
+  const reqBack = document.getElementById('req-back');
+
+  const showPane = (which) => {
+    emailForm.style.display = which === 'email' ? '' : 'none';
+    codeForm.style.display = which === 'code' ? '' : 'none';
+    requestForm.style.display = which === 'request' ? '' : 'none';
+  };
 
   emailForm.addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -191,24 +226,63 @@
     // seconds, and a second click inside the cooldown does nothing at all.
     emailBtn.disabled = true;
     emailBtn.textContent = 'Sending…';
+    const address = emailInput.value.trim();
     try {
-      const address = emailInput.value.trim();
       const data = await requestCode(address);
       dest.textContent = address;
-      emailForm.style.display = 'none';
-      codeForm.style.display = '';
+      showPane('code');
       codeInput.focus();
-      // Phrased conditionally on purpose. The API deliberately cannot tell you
-      // whether an address has an account; saying "a code is on its way" here
-      // would give that away on the one screen where it matters.
-      showNote('If that address has an account, a code is on its way.');
+      showNote('Check your email for a six-digit code.');
       startCooldown(data.cooldownMs || 60000);
     } catch (e2) {
-      showErr(e2.message);
+      // Branch on the flag, not on the message text — the copy will change and
+      // string matching would break silently when it does.
+      if (e2.canRequestAccess) {
+        reqDest.textContent = address;
+        showPane('request');
+        reqName.focus();
+        showNote("You're not on the list yet. Ask below and the administrator will review it.");
+      } else {
+        showErr(e2.message);
+      }
     } finally {
       emailBtn.disabled = false;
       emailBtn.textContent = 'Send code';
     }
+  });
+
+  requestForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearMsgs();
+    reqBtn.disabled = true;
+    reqBtn.textContent = 'Sending…';
+    try {
+      const res = await fetch('/api/auth/request-access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: reqDest.textContent,
+          name: reqName.value.trim(),
+          note: reqNote.value.trim(),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'Could not send that request');
+      showPane('email');
+      showNote(data.message || 'Your request has been sent.');
+      reqName.value = ''; reqNote.value = '';
+    } catch (e2) {
+      showErr(e2.message);
+    } finally {
+      reqBtn.disabled = false;
+      reqBtn.textContent = 'Send request';
+    }
+  });
+
+  reqBack.addEventListener('click', () => {
+    clearMsgs();
+    showPane('email');
+    emailInput.focus();
   });
 
   resendBtn.addEventListener('click', async () => {
@@ -217,7 +291,7 @@
     resendBtn.disabled = true;
     try {
       const data = await requestCode(dest.textContent);
-      showNote('If that address has an account, another code is on its way.');
+      showNote('Another code is on its way.');
       startCooldown(data.cooldownMs || 60000);
     } catch (e2) {
       showErr(e2.message);
@@ -227,8 +301,7 @@
 
   backBtn.addEventListener('click', () => {
     clearMsgs();
-    codeForm.style.display = 'none';
-    emailForm.style.display = '';
+    showPane('email');
     codeInput.value = '';
     emailInput.focus();
   });

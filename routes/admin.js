@@ -30,8 +30,10 @@ const SendJob = require('../models/SendJob');
 const Interview = require('../models/Interview');
 const ActivityLog = require('../models/ActivityLog');
 const LoginCode = require('../models/LoginCode');
+const AccessRequest = require('../models/AccessRequest');
 const { destroyAllForUser } = require('../lib/session');
 const { logEvent } = require('../lib/activityLog');
+const { sendAccessApproved } = require('../lib/emailOtp');
 const { ONBOARDING_VERSION } = require('../lib/onboarding');
 
 const router = express.Router();
@@ -194,6 +196,10 @@ router.get('/users', async (req, res) => {
       ]),
     ]);
 
+    // Folded into this response rather than left to a second request, so the
+    // dashboard cannot render without showing that somebody is waiting.
+    const pendingRequests = await AccessRequest.countDocuments({ status: 'pending' });
+
     const cMap = byUser(contacts), kMap = byUser(campaigns), lMap = byUser(leads);
     const rMap = byUser(scrapes), jMap = byUser(sendJobs), iMap = byUser(interviews);
     const tMap = byUser(templates), sMap = byUser(settings), zMap = byUser(sessions);
@@ -309,6 +315,7 @@ router.get('/users', async (req, res) => {
         activeSessions: sum(r => r.activeSessions),
         scrapeFailures: sum(r => (r.scrapes.by || {}).failed || 0),
         duplicateSettings: rows.filter(r => r.config.settingsDocs > 1).length,
+        pendingRequests,
       },
       series: [...days_.values()].sort((a, b) => a.day.localeCompare(b.day)),
       signups: signups.map(s => ({ month: s._id, n: s.n })),
@@ -466,6 +473,157 @@ router.post('/users/:id/revoke-sessions', async (req, res) => {
     }).catch(() => {});
 
     res.json({ ok: true, revoked });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Access requests ─────────────────────────────────────────────────────────
+// People asking to be let in. Approving one creates their account; rejecting it
+// is final, and re-asking does not reopen it (see lib/loginCode.js).
+
+/** The queue. Defaults to pending, which is the only part needing attention. */
+router.get('/access-requests', async (req, res) => {
+  try {
+    const status = ['pending', 'approved', 'rejected', 'all'].includes(req.query.status)
+      ? req.query.status : 'pending';
+    const filter = status === 'all' ? {} : { status };
+    const [requests, pendingCount] = await Promise.all([
+      AccessRequest.find(filter).sort({ createdAt: -1 }).limit(200).lean(),
+      AccessRequest.countDocuments({ status: 'pending' }),
+    ]);
+    res.json({
+      pendingCount,
+      requests: requests.map(r => ({
+        id: String(r._id),
+        email: r.email,
+        name: r.name || '',
+        note: r.note || '',
+        status: r.status,
+        requestCount: r.requestCount || 1,
+        createdAt: r.createdAt,
+        lastRequestedAt: r.lastRequestedAt || r.createdAt,
+        decidedAt: r.decidedAt || null,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Approve: create the account, then tell them.
+ *
+ * The account is created FIRST and the email sent after. If the mail fails the
+ * approval still stands and they can sign in — the reverse order would promise
+ * access that does not exist yet.
+ */
+router.post('/access-requests/:id/approve', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Not a valid request id' });
+    const reqDoc = await AccessRequest.findById(req.params.id);
+    if (!reqDoc) return res.status(404).json({ error: 'No such request' });
+    if (reqDoc.status === 'approved') return res.status(409).json({ error: 'That request was already approved' });
+
+    const existing = await User.findOne({ email: reqDoc.email }, { _id: 1 }).lean();
+    let userId;
+    if (existing) {
+      // Someone whitelisted them by hand while the request was sitting in the
+      // queue. Close it out rather than failing on the unique index.
+      userId = existing._id;
+    } else {
+      const user = await User.create({
+        email: reqDoc.email,
+        name: reqDoc.name || '',
+        isAdmin: false,
+        status: 'invited',
+        invitedAt: new Date(),
+        invitedBy: req.userId,
+        onboarding: { startedAt: null, completedAt: null, step: 0, skipped: [], version: 0 },
+      });
+      userId = user._id;
+    }
+
+    await AccessRequest.updateOne({ _id: reqDoc._id }, {
+      $set: { status: 'approved', decidedAt: new Date(), decidedBy: req.userId },
+    });
+
+    // Never throws — see lib/emailOtp.js. The approval is done either way.
+    const mail = await sendAccessApproved({
+      to: reqDoc.email,
+      appUrl: process.env.OUTREACH_URL || '',
+    });
+
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'approve-access',
+      message: `Approved access for ${reqDoc.email}`,
+      meta: { targetUserId: String(userId), targetEmail: reqDoc.email, emailed: mail.delivered === true },
+    }).catch(() => {});
+
+    res.json({
+      ok: true,
+      id: String(userId),
+      email: reqDoc.email,
+      emailed: mail.delivered === true,
+      // Surfaced so the admin knows to tell them another way rather than
+      // assuming the person has been notified.
+      ...(mail.delivered === true ? {} : { warning: 'The account was created, but the notification email could not be sent.' }),
+    });
+  } catch (err) {
+    if (err && err.code === 11000) return res.status(409).json({ error: 'That address already has an account' });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Reject. Final, and deliberately not emailed to the requester. */
+router.post('/access-requests/:id/reject', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Not a valid request id' });
+    const reqDoc = await AccessRequest.findById(req.params.id);
+    if (!reqDoc) return res.status(404).json({ error: 'No such request' });
+    if (reqDoc.status === 'approved') {
+      return res.status(409).json({ error: 'That request was already approved — disable the account instead.' });
+    }
+
+    await AccessRequest.updateOne({ _id: reqDoc._id }, {
+      $set: {
+        status: 'rejected',
+        decidedAt: new Date(),
+        decidedBy: req.userId,
+        decisionNote: String((req.body && req.body.note) || '').trim().slice(0, 500),
+      },
+    });
+
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'reject-access',
+      message: `Declined access for ${reqDoc.email}`,
+      meta: { targetEmail: reqDoc.email },
+    }).catch(() => {});
+
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** Clear a decided request out of the list. Pending ones must be decided first. */
+router.delete('/access-requests/:id', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Not a valid request id' });
+    const reqDoc = await AccessRequest.findById(req.params.id, { status: 1, email: 1 }).lean();
+    if (!reqDoc) return res.status(404).json({ error: 'No such request' });
+    if (reqDoc.status === 'pending') {
+      return res.status(400).json({ error: 'Approve or decline it first.' });
+    }
+    // Deleting a REJECTED row lets that address ask again, which is the only way
+    // back from a rejection. Deliberate: rejection is final, but not permanent.
+    await AccessRequest.deleteOne({ _id: reqDoc._id });
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'clear-access-request',
+      message: `Cleared the ${reqDoc.status} request from ${reqDoc.email}`,
+      meta: { targetEmail: reqDoc.email, was: reqDoc.status },
+    }).catch(() => {});
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

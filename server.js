@@ -138,6 +138,8 @@ const isShare = (req) => cookieMatches(req, EXPORT_COOKIE, EXPORT_TOKEN);
 // future /api/auth/users public the day somebody adds it.
 const PUBLIC_AUTH_PATHS = new Set([
   '/api/auth/request-code',
+  // Public by necessity: whoever uses it has no account by definition.
+  '/api/auth/request-access',
   '/api/auth/verify-code',
   '/api/auth/logout',
   '/api/auth/session',

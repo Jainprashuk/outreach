@@ -1220,6 +1220,7 @@ export interface AdminOverview {
     everSent: number; everReplied: number; replyRate: number;
     leads: number; campaigns: number; interviews: number;
     activeSessions: number; scrapeFailures: number; duplicateSettings: number;
+    pendingRequests: number;
   };
   series: Array<{ day: string; sent: number; replied: number }>;
   signups: Array<{ month: string; n: number }>;
@@ -1243,3 +1244,34 @@ export const adminRevokeSessionsApi = (id: string) =>
 
 export const adminOtpHealthApi = () =>
   apiFetch<{ since: string; failures: Array<{ email: string; error: string; at: string }> }>('/api/admin/otp-health');
+
+// ── Access requests ──────────────────────────────────────────────────────────
+
+export interface AccessRequestRow {
+  id: string;
+  email: string;
+  name: string;
+  note: string;
+  status: 'pending' | 'approved' | 'rejected';
+  requestCount: number;
+  createdAt: string;
+  lastRequestedAt: string;
+  decidedAt: string | null;
+}
+
+export const accessRequestsApi = (status: 'pending' | 'approved' | 'rejected' | 'all' = 'pending') =>
+  apiFetch<{ pendingCount: number; requests: AccessRequestRow[] }>(`/api/admin/access-requests?status=${status}`);
+
+/** Creates the account, then emails them. `emailed: false` means they still
+ *  have access but have not been told — pass that on rather than assuming. */
+export const approveAccessApi = (id: string) =>
+  apiFetch<{ ok: true; id: string; email: string; emailed: boolean; warning?: string }>(
+    `/api/admin/access-requests/${id}/approve`, { method: 'POST' });
+
+export const rejectAccessApi = (id: string, note?: string) =>
+  apiFetch<{ ok: true }>(`/api/admin/access-requests/${id}/reject`, {
+    method: 'POST', body: JSON.stringify({ note }),
+  });
+
+export const clearAccessRequestApi = (id: string) =>
+  apiFetch<{ ok: true }>(`/api/admin/access-requests/${id}`, { method: 'DELETE' });

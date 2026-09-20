@@ -8,7 +8,7 @@
  */
 const express = require('express');
 const User = require('../models/User');
-const { requestCode, verifyCode, CODE_TTL_MS, RESEND_COOLDOWN_MS } = require('../lib/loginCode');
+const { requestCode, requestAccess, verifyCode, CODE_TTL_MS, RESEND_COOLDOWN_MS } = require('../lib/loginCode');
 const { createSession, resolveSession, destroySession, setCookieHeader, clearCookieHeader } = require('../lib/session');
 const { logEvent } = require('../lib/activityLog');
 const { isOnboarded } = require('../lib/onboarding');
@@ -26,23 +26,89 @@ const publicUser = (user) => ({
 /**
  * Ask for a code.
  *
- * Answers 200 no matter what happened — unknown address, rate limited, disabled
- * account, code actually sent, Resend refusing it. That is the point: any
- * variation here tells a stranger which addresses have accounts. In particular
- * this never answers 429, because a 429 for one address beside a 200 for another
- * is that disclosure in a different shape. The visible cooldown on the login
- * page is what keeps this honest to a real user.
+ * This tells the caller whether the address is registered. Sign-in is
+ * whitelist-only, so the alternative is somebody who was never added sitting at
+ * a code screen waiting for mail that will never arrive — a dead end with no way
+ * out. They are told, and pointed at the access request instead.
+ *
+ * `canRequestAccess` is what the login page keys its form off, rather than
+ * matching on message text.
  */
 router.post('/request-code', async (req, res) => {
   try {
-    await requestCode(req, req.body && req.body.email);
-    res.json({ ok: true, cooldownMs: RESEND_COOLDOWN_MS, ttlMs: CODE_TTL_MS });
+    const { outcome } = await requestCode(req, req.body && req.body.email);
+
+    switch (outcome) {
+      case 'sent':
+      case 'throttled':
+        // Throttling stays quiet. The cooldown on the page already explains the
+        // wait, and a 429 here would only ever be noise to a real person.
+        return res.json({ ok: true, cooldownMs: RESEND_COOLDOWN_MS, ttlMs: CODE_TTL_MS });
+
+      case 'unknown':
+        return res.status(404).json({
+          error: 'That email address is not registered.',
+          canRequestAccess: true,
+        });
+
+      case 'requested':
+        return res.status(403).json({
+          error: 'Your access request is waiting to be reviewed. You will get an email if it is approved.',
+          requestPending: true,
+        });
+
+      case 'rejected':
+        // Said plainly so they stop trying. The reason is deliberately not
+        // included — that is the admin's note to themselves.
+        return res.status(403).json({ error: 'Your access request was not approved.' });
+
+      case 'disabled':
+        return res.status(403).json({ error: 'This account has been disabled. Contact the administrator.' });
+
+      case 'invalid':
+      default:
+        return res.status(400).json({ error: 'Enter a valid email address.' });
+    }
   } catch (err) {
-    // A genuine server fault, not a rejected sign-in. Logged with no userId
-    // because at this point we do not know, and must not reveal, who this is.
+    // A genuine server fault, not a refused sign-in.
     console.error(`[auth] request-code failed: ${err.message}`);
     logEvent({ userId: null, category: 'auth', action: 'failed', message: `Sign-in code request failed: ${err.message}` }).catch(() => {});
     res.status(500).json({ error: 'Could not send a sign-in code. Try again in a moment.' });
+  }
+});
+
+/**
+ * Ask to be let in.
+ *
+ * Public, because the people using it have no account by definition. Capped per
+ * IP in lib/loginCode.js — an open form on a public URL is a spam target.
+ */
+router.post('/request-access', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const { outcome } = await requestAccess(req, body.email, body.name, body.note);
+
+    switch (outcome) {
+      case 'created':
+      case 'updated':
+      case 'pending':
+        return res.json({
+          ok: true,
+          message: 'Your request has been sent. You will get an email if it is approved.',
+        });
+      case 'exists':
+        return res.status(409).json({ error: 'That address already has an account — go ahead and sign in.' });
+      case 'rejected':
+        return res.status(403).json({ error: 'Your access request was not approved.' });
+      case 'throttled':
+        return res.status(429).json({ error: 'Too many requests from this network today. Try again tomorrow.' });
+      case 'invalid':
+      default:
+        return res.status(400).json({ error: 'Enter a valid email address.' });
+    }
+  } catch (err) {
+    console.error(`[auth] request-access failed: ${err.message}`);
+    res.status(500).json({ error: 'Could not send that request. Try again in a moment.' });
   }
 });
 

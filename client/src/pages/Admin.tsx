@@ -5,7 +5,8 @@ import { useSession } from '../context/SessionContext';
 import { fmtAgo } from '../lib/analytics';
 import {
   adminOverviewApi, adminInviteApi, adminUpdateUserApi, adminRevokeSessionsApi,
-  type AdminOverview, type AdminUserRow,
+  accessRequestsApi, approveAccessApi, rejectAccessApi, clearAccessRequestApi,
+  type AdminOverview, type AdminUserRow, type AccessRequestRow,
 } from '../lib/api';
 
 const RANGES = [7, 30, 90];
@@ -41,6 +42,8 @@ export default function Admin() {
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviting, setInviting] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [requests, setRequests] = useState<AccessRequestRow[]>([]);
+  const [reqFilter, setReqFilter] = useState<'pending' | 'all'>('pending');
 
   const load = useCallback(async (d: number) => {
     try {
@@ -51,7 +54,14 @@ export default function Admin() {
     }
   }, []);
 
+  const loadRequests = useCallback(async (f: 'pending' | 'all') => {
+    try {
+      setRequests((await accessRequestsApi(f)).requests);
+    } catch { /* the overview tile still shows the count */ }
+  }, []);
+
   useEffect(() => { load(days); }, [load, days]);
+  useEffect(() => { loadRequests(reqFilter); }, [loadRequests, reqFilter]);
 
   const invite = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -84,6 +94,22 @@ export default function Admin() {
     }
   };
 
+  const decide = async (row: AccessRequestRow, fn: () => Promise<any>, done: string) => {
+    setBusyId(row.id);
+    try {
+      const r = await fn();
+      // An approval whose email failed still granted access — say so, rather
+      // than letting the admin assume the person was notified.
+      toast(r?.warning ? `${done} — but the email did not send, so tell them yourself.` : done,
+        r?.warning ? 'info' : 'success');
+      await Promise.all([loadRequests(reqFilter), load(days)]);
+    } catch (err: any) {
+      toast(err.message || 'That did not work', 'error');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const tiles = data ? [
     { label: 'Accounts', value: data.totals.users, sub: `${data.totals.active} active · ${data.totals.invited} invited` },
     { label: 'Set up', value: data.totals.onboarded, sub: `${data.totals.withGmail} with Gmail connected`, cls: data.totals.onboarded < data.totals.users ? 'amber' : 'green' },
@@ -91,6 +117,9 @@ export default function Admin() {
     { label: 'Emails sent', value: data.totals.everSent, sub: `${data.totals.campaigns} campaign(s)`, cls: 'green' },
     { label: 'Replies', value: data.totals.everReplied, sub: `${data.totals.replyRate}% reply rate` },
     { label: 'Live sessions', value: data.totals.activeSessions },
+    ...(data.totals.pendingRequests > 0
+      ? [{ label: 'Access requests', value: data.totals.pendingRequests, sub: 'waiting for you', cls: 'amber' }]
+      : []),
   ] : [];
 
   return (
@@ -167,6 +196,92 @@ export default function Admin() {
                     </div>
                   ));
                 })()}
+              </div>
+            </div>
+
+            <div className="an-card" style={{ marginTop: 16 }}>
+              <div className="an-card-head" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+                <div>
+                  <div className="an-card-title">
+                    <i className="ti ti-inbox" /> Access requests
+                    {data.totals.pendingRequests > 0 && (
+                      <span className="tab-badge" style={{ marginLeft: 6 }}>{data.totals.pendingRequests}</span>
+                    )}
+                  </div>
+                  <div className="an-card-sub">
+                    People who tried to sign in and weren't on the list. Approving one creates
+                    their account and emails them; declining is final, and they are not emailed.
+                  </div>
+                </div>
+                <div className="seg-toggle">
+                  {(['pending', 'all'] as const).map(f => (
+                    <button
+                      key={f} type="button" className={`btn btn-xs${reqFilter === f ? ' active' : ''}`}
+                      onClick={() => setReqFilter(f)}
+                    >{f}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="an-card-body">
+                {requests.length === 0 ? (
+                  <div className="an-empty">
+                    {reqFilter === 'pending' ? 'Nothing waiting.' : 'No requests yet.'}
+                  </div>
+                ) : requests.map(r => (
+                  <div
+                    key={r.id}
+                    style={{
+                      display: 'flex', gap: 12, alignItems: 'flex-start', padding: '10px 0',
+                      borderBottom: '1px solid var(--border)',
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 500, fontSize: 13 }}>
+                        {r.email}
+                        {r.name && <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {r.name}</span>}
+                        {r.status !== 'pending' && (
+                          <span className={`badge ${r.status === 'approved' ? 'badge-sent' : 'badge-rejected'}`} style={{ marginLeft: 6 }}>
+                            {r.status}
+                          </span>
+                        )}
+                        {r.requestCount > 1 && (
+                          <span className="badge badge-pending" style={{ marginLeft: 6 }}>asked {r.requestCount}×</span>
+                        )}
+                      </div>
+                      {/* Free text from a stranger. React escapes it; it is never
+                          inserted as HTML anywhere. */}
+                      {r.note && (
+                        <div style={{ fontSize: 12.5, color: 'var(--text2)', marginTop: 3, whiteSpace: 'pre-wrap' }}>{r.note}</div>
+                      )}
+                      <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>{ago(r.createdAt)}</div>
+                    </div>
+                    <div style={{ whiteSpace: 'nowrap' }}>
+                      {r.status === 'pending' ? (
+                        <>
+                          <button
+                            className="btn btn-xs btn-success" type="button" disabled={busyId === r.id}
+                            onClick={() => decide(r, () => approveAccessApi(r.id), `${r.email} approved`)}
+                          >Approve</button>{' '}
+                          <button
+                            className="btn btn-xs btn-danger" type="button" disabled={busyId === r.id}
+                            onClick={() => {
+                              if (!window.confirm(`Decline ${r.email}? They are told plainly, and asking again will not reopen it.`)) return;
+                              decide(r, () => rejectAccessApi(r.id), `${r.email} declined`);
+                            }}
+                          >Decline</button>
+                        </>
+                      ) : (
+                        <button
+                          className="btn btn-xs" type="button" disabled={busyId === r.id}
+                          title={r.status === 'rejected'
+                            ? 'Remove this row. That address can then ask again.'
+                            : 'Remove this row from the list.'}
+                          onClick={() => decide(r, () => clearAccessRequestApi(r.id), 'Cleared')}
+                        >Clear</button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
 

@@ -4,8 +4,9 @@
  *
  * The properties worth protecting here are easy to lose in a refactor and
  * invisible when they break:
- *   - a request for an unknown address must be indistinguishable from one for a
- *     real address, INCLUDING when rate limited (so: never a 429);
+ *   - requesting a code says whether the address is registered, and routes an
+ *     unregistered person to the access request rather than a dead end;
+ *   - VERIFYING a code stays generic — one message for every kind of failure;
  *   - a six-digit code is only safe because of the attempt cap;
  *   - locking out must burn the CODE, not the account, or guessing at someone
  *     else's address becomes a denial of service against them.
@@ -36,7 +37,7 @@ const post = async (path, body) => {
   return { status: res.status, text, data, setCookie: res.headers.get('set-cookie') || '' };
 };
 
-let codes, users, sessions;
+let codes, users, sessions, requests;
 
 /** Rewrites the newest row for an address to a code we know. Standing in for an
  *  inbox — the plaintext is never stored, by design. */
@@ -66,6 +67,7 @@ async function main() {
   codes = db.collection('logincodes');
   users = db.collection('users');
   sessions = db.collection('sessions');
+  requests = db.collection('accessrequests');
 
   const account = await users.findOne({ email: EMAIL });
   if (!account) throw new Error(`No account for ${EMAIL}`);
@@ -153,31 +155,57 @@ async function main() {
       ? ok('a freshly requested code still works — the account was not locked')
       : bad(`the account appears locked (${recovered.status})`);
 
-    // ── Enumeration ───────────────────────────────────────────────────────
-    console.log('\nAn unknown address is indistinguishable from a real one:');
-    await clearCodes(EMAIL);
-    const real = await post('/api/auth/request-code', { email: EMAIL });
+    // ── An unregistered address is told so ────────────────────────────────
+    console.log('\nAn unregistered address is told, and offered a way to ask:');
+    await requests.deleteMany({ email: UNKNOWN });
     const fake = await post('/api/auth/request-code', { email: UNKNOWN });
-    fake.status === real.status ? ok(`same status (${real.status})`) : bad(`${real.status} vs ${fake.status}`);
-    fake.text === real.text ? ok('byte-identical body') : bad(`bodies differ: ${real.text} vs ${fake.text}`);
+    fake.status === 404 ? ok('request-code -> 404') : bad(`request-code -> ${fake.status}`);
+    fake.data && fake.data.canRequestAccess === true
+      ? ok('flagged canRequestAccess, so the page can offer the form')
+      : bad('canRequestAccess missing — the login page cannot route them');
 
-    const decoy = await codes.findOne({ email: UNKNOWN }, { sort: { createdAt: -1 } });
-    decoy ? ok('a decoy row was written for it') : bad('no decoy row — the rate limits would differ');
-    decoy && decoy.codeHash === null && decoy.userId === null
-      ? ok('the decoy has no hash and no user, so it can never verify')
-      : bad('the decoy row is not inert');
+    const noRow = await codes.countDocuments({ email: UNKNOWN });
+    noRow === 0 ? ok('no code row is written for it') : bad(`${noRow} row(s) written for an unregistered address`);
     const vFake = await post('/api/auth/verify-code', { email: UNKNOWN, code: '424242' });
-    vFake.status === 401 ? ok('verifying against it -> 401') : bad(`verifying against it -> ${vFake.status}`);
+    vFake.status === 401 ? ok('verifying anyway -> 401') : bad(`verifying anyway -> ${vFake.status}`);
     !vFake.setCookie.includes('outreach_session') ? ok('and no session is issued') : bad('a session was issued for an unknown address');
 
+    console.log('\nThey can request access, and it is idempotent:');
+    const ra1 = await post('/api/auth/request-access', { email: UNKNOWN, name: 'Test', note: 'please' });
+    ra1.status === 200 ? ok('request-access -> 200') : bad(`request-access -> ${ra1.status}`);
+    const ra2 = await post('/api/auth/request-access', { email: UNKNOWN, name: 'Test', note: 'again' });
+    ra2.status === 200 ? ok('asking twice -> 200') : bad(`asking twice -> ${ra2.status}`);
+    const reqCount = await requests.countDocuments({ email: UNKNOWN });
+    reqCount === 1 ? ok('but only one row exists') : bad(`${reqCount} rows — the queue would fill with duplicates`);
+    const reqRow = await requests.findOne({ email: UNKNOWN });
+    reqRow.requestCount === 2 ? ok('and the ask was counted (2)') : bad(`requestCount is ${reqRow.requestCount}`);
+
+    const pendingReq = await post('/api/auth/request-code', { email: UNKNOWN });
+    pendingReq.status === 403 && pendingReq.data.requestPending === true
+      ? ok('signing in now says the request is pending')
+      : bad(`-> ${pendingReq.status}`);
+
+    console.log('\nA declined request is final:');
+    await requests.updateOne({ email: UNKNOWN }, { $set: { status: 'rejected', decidedAt: new Date() } });
+    const rej = await post('/api/auth/request-code', { email: UNKNOWN });
+    rej.status === 403 ? ok('request-code -> 403') : bad(`-> ${rej.status}`);
+    /not approved/i.test(rej.text) ? ok('and says so plainly') : bad(`message was: ${rej.text}`);
+    const reAsk = await post('/api/auth/request-access', { email: UNKNOWN, note: 'please reconsider' });
+    reAsk.status === 403 ? ok('re-asking does not reopen it') : bad(`re-asking -> ${reAsk.status}`);
+    const stillRejected = await requests.findOne({ email: UNKNOWN });
+    stillRejected.status === 'rejected' ? ok('the row is still rejected') : bad(`row is ${stillRejected.status}`);
+
+    console.log('\nAn existing account is told to just sign in:');
+    const dupe = await post('/api/auth/request-access', { email: EMAIL });
+    dupe.status === 409 ? ok('request-access -> 409') : bad(`-> ${dupe.status}`);
+
     // ── Rate limiting ─────────────────────────────────────────────────────
-    console.log('\nRate limiting never announces itself:');
+    console.log('\nThrottling a REAL address stays quiet:');
     await clearCodes(EMAIL);
     const first = await post('/api/auth/request-code', { email: EMAIL });
     const second = await post('/api/auth/request-code', { email: EMAIL });
     second.status === 200 ? ok('a second request inside the cooldown -> 200') : bad(`-> ${second.status}`);
-    second.status !== 429 ? ok('never a 429 (a 429 would itself identify real addresses)') : bad('returned 429');
-    second.text === first.text ? ok('byte-identical body to the un-throttled one') : bad('the throttled body differs');
+    second.text === first.text ? ok('same body as the un-throttled one') : bad('the throttled body differs');
     const count = await codes.countDocuments({ email: EMAIL });
     count === 1 ? ok('and no second row was written') : bad(`${count} rows written`);
 
@@ -190,9 +218,14 @@ async function main() {
     });
     disabledId = ins.insertedId;
     const dReq = await post('/api/auth/request-code', { email: DISABLED });
-    dReq.status === 200 ? ok('requesting a code -> the same 200') : bad(`-> ${dReq.status}`);
-    const dRow = await codes.findOne({ email: DISABLED }, { sort: { createdAt: -1 } });
-    dRow && dRow.codeHash === null ? ok('but only a decoy row was written') : bad('a usable code was issued to a disabled account');
+    dReq.status === 403 ? ok('requesting a code -> 403') : bad(`-> ${dReq.status}`);
+    // It must NOT say "not registered": they were, and pointing them at the
+    // access request would let a revoked account walk straight back in.
+    !/not registered/i.test(dReq.text) && dReq.data.canRequestAccess !== true
+      ? ok('and is not offered the access request')
+      : bad('a disabled account was offered the access request');
+    const dRow = await codes.countDocuments({ email: DISABLED });
+    dRow === 0 ? ok('no code row was written') : bad('a code was issued to a disabled account');
 
     // ── Machine callers still work ────────────────────────────────────────
     console.log('\nMachine callers are unaffected:');
@@ -204,6 +237,7 @@ async function main() {
     sess.status === 200 ? ok('/api/auth/session is still public') : bad(`-> ${sess.status}`);
   } finally {
     await codes.deleteMany({ email: { $in: [UNKNOWN, DISABLED] } });
+    await requests.deleteMany({ email: { $in: [UNKNOWN, DISABLED] } });
     if (disabledId) await users.deleteOne({ _id: disabledId });
     await clearCodes(EMAIL);
     // The suite signs in several times; tidy up after itself.
