@@ -319,7 +319,7 @@
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || 'That code is not valid');
       try { sessionStorage.removeItem(COOLDOWN_KEY); } catch (e) {}
-      location.href = '/';
+      location.href = '/app/';
     } catch (e2) {
       showErr(e2.message);
       codeInput.value = '';

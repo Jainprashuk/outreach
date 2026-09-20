@@ -5,11 +5,6 @@ import { useSession } from '../context/SessionContext';
 import { useInterviews } from '../context/InterviewContext';
 import SendJobWidget from './SendJobWidget';
 
-function switchToClassic() {
-  document.cookie = 'outreach_ui=classic;path=/;max-age=31536000';
-  window.location.href = '/';
-}
-
 export default function Layout({ title, subtitle, actions, children, wide, minimal }: {
   title: string;
   subtitle?: ReactNode;
@@ -123,13 +118,6 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
         </button>
         {owner && (
           <>
-            <button
-              className="theme-toggle" type="button" onClick={switchToClassic}
-              title="Back to the classic HTML interface" style={{ marginTop: 8 }}
-            >
-              <span className="tt-icon"><i className="ti ti-arrow-back-up" />Classic UI</span>
-              <i className="ti ti-chevron-right" style={{ fontSize: 12 }} />
-            </button>
             {user && (
               <div style={{ fontSize: 11, color: 'var(--text3)', padding: '6px 0 0', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                 {user.email}

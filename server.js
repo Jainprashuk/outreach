@@ -228,12 +228,15 @@ app.get('/logout', async (req, res) => {
   res.redirect('/login');
 });
 
-// ── UI toggle: remembered preference for the React UI (see client/) ─────────
-// Only the exact root path redirects — deep links to either UI always work.
-app.get('/', (req, res, next) => {
-  if ((req.headers.cookie || '').includes('outreach_ui=react')) return res.redirect('/app/');
-  next();
-});
+// ── The app lives at /app ────────────────────────────────────────────────────
+// This used to depend on an `outreach_ui=react` cookie, which meant anyone
+// arriving without one — a fresh browser, incognito, straight after signing in —
+// silently landed on the old interface instead.
+//
+// The classic pages at the repo root are still SERVED, so an existing bookmark
+// to /contacts.html keeps working; they are just no longer what you get by
+// default, and nothing links to them any more.
+app.get('/', (_req, res) => res.redirect('/app/'));
 
 // React SPA (Vite build) — served behind the same requireAuth as everything else.
 app.use('/app', express.static(path.join(__dirname, 'client/dist')));
