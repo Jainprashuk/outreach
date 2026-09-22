@@ -5,6 +5,7 @@ const Contact = require('../models/Contact');
 const Campaign = require('../models/Campaign');
 const { inngest } = require('../inngest');
 const mailer = require('../lib/mailer');
+const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
 
 const serialize = (doc) => {
   const obj = { ...doc };
@@ -23,6 +24,15 @@ router.post('/', requireOnboarded, async (req, res) => {
     const { items, attachResume, senderEmail, senderName, senderAppPassword, sendMode, chunkSize } = req.body;
     if (!items || !items.length) return res.status(400).json({ error: 'No items provided' });
 
+    // Anyone already in the interview pipeline never makes it onto the job. The
+    // Inngest workers re-check this at send time (rows can move mid-run), but
+    // dropping them here keeps the job's counts honest from the start.
+    const interviewSets = await loadInterviewSets(req.userId);
+    const sendable = items.filter(i => !isInInterview({ id: i.contactId, email: i.to }, interviewSets));
+    if (!sendable.length) {
+      return res.status(400).json({ error: 'Every selected contact is in your interview pipeline — nothing to send.' });
+    }
+
     const mode = ['bulk', 'drip'].includes(sendMode) ? sendMode : 'sequential';
 
     // Prefer credentials sent from the browser (guaranteed same-request values).
@@ -31,7 +41,7 @@ router.post('/', requireOnboarded, async (req, res) => {
     const creds = await mailer.getSenderFor(req.userId);
     const job = await SendJob.create({
       userId: req.userId,
-      items,
+      items: sendable,
       attachResume:      !!attachResume,
       senderEmail:       senderEmail       || creds.email       || '',
       senderName:        senderName        || creds.name        || '',
@@ -51,7 +61,7 @@ router.post('/', requireOnboarded, async (req, res) => {
       await SendJob.findOneAndUpdate({ _id: job.id, userId: req.userId }, { status: 'cancelled' });
       return res.status(502).json({ error: `Could not queue the send: ${err.message}` });
     }
-    res.json(job.toJSON());
+    res.json({ ...job.toJSON(), skippedInInterview: items.length - sendable.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

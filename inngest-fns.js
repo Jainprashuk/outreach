@@ -6,11 +6,12 @@ const Contact = require('./models/Contact');
 const mailer = require('./lib/mailer');
 const { COOLDOWN_ERROR, COOLDOWN_LABEL, inCooldown, priorStatus } = require('./lib/cooldown');
 const { BLOCKLIST_ERROR, isBlocked, loadBlocklistSets } = require('./lib/blocklist');
+const { INTERVIEW_ERROR, isInInterview, loadInterviewSets } = require('./lib/interviewGuard');
 const { notifyCampaignJobFinished } = require('./lib/campaignNotifications');
 const { logEvent } = require('./lib/activityLog');
 const db = require('./db');
 
-// A send was skipped (cooldown or blocklist): make sure the contact isn't left
+// A send was skipped (cooldown, blocklist or interview): make sure the contact isn't left
 // parked at `queued` by the "Reset for sending" that preceded the job.
 async function restoreAfterSkip(contactDoc, note, userId) {
   if (!contactDoc || contactDoc.status !== 'queued') return;
@@ -146,6 +147,19 @@ const sendSingleEmail = inngest.createFunction(
         await markBlocked(contactDoc, job.userId);
         return;
       }
+
+      // Interview check — once someone is in the interview pipeline, outreach stops.
+      // Unlike the blocklist this does NOT flag the contact: the interview record is
+      // the source of truth, so the contact just keeps its real status.
+      if (isInInterview({ id: contactId, email: item.to }, await loadInterviewSets(job.userId))) {
+        await _atomicItemUpdate(jobId, contactId, {
+          'items.$.status': 'skipped',
+          'items.$.error': INTERVIEW_ERROR,
+          'items.$.processedAt': new Date(),
+        }, job.userId);
+        await restoreAfterSkip(contactDoc, 'Send skipped — contact is in the interview pipeline; status restored', job.userId);
+        return;
+      }
       const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
 
       // Credentials stored in job at creation time; fall back to mailer (env vars)
@@ -273,6 +287,7 @@ const sendEmailBulk = inngest.createFunction(
 
       const attachments = await mailer.getResumeAttachment(job.attachResume, job.userId);
       const blocklistSets = await loadBlocklistSets(job.userId);
+      const interviewSets = await loadInterviewSets(job.userId);
 
       for (let ci = 0; ci < chunks.length; ci++) {
         const chunk = chunks[ci];
@@ -326,6 +341,23 @@ const sendEmailBulk = inngest.createFunction(
                 }
               );
               await markBlocked(contactDoc);
+              continue;
+            }
+
+            // Interview check — see the single-send path above.
+            if (isInInterview({ id: item.contactId, email: item.to }, interviewSets)) {
+              await SendJob.findOneAndUpdate(
+                { _id: jobId, userId: job.userId, 'items.contactId': item.contactId },
+                {
+                  $set: {
+                    'items.$.status': 'skipped',
+                    'items.$.error': INTERVIEW_ERROR,
+                    'items.$.processedAt': new Date(),
+                  },
+                  $inc: { processedCount: 1 },
+                }
+              );
+              await restoreAfterSkip(contactDoc, 'Send skipped — contact is in the interview pipeline; status restored');
               continue;
             }
 

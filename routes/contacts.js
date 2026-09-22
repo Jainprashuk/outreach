@@ -2,6 +2,7 @@ const express = require('express');
 const Contact = require('../models/Contact');
 const SendJob = require('../models/SendJob');
 const { COOLDOWN_LABEL, inCooldown, cooldownRemaining } = require('../lib/cooldown');
+const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
 const { importContacts } = require('../lib/contactImport');
 const { classifyReply } = require('../lib/replyClassifier');
 const { deadline } = require('../lib/http');
@@ -126,10 +127,13 @@ router.post('/reset-for-send', async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'Expected a non-empty ids array' });
     }
-    // Contacts emailed inside the cooldown window, or blocklisted, are left completely
-    // alone — they keep their real status instead of being parked at `queued`.
+    // Contacts emailed inside the cooldown window, blocklisted, or already in the
+    // interview pipeline are left completely alone — they keep their real status
+    // instead of being parked at `queued`.
     const all = await Contact.find({ _id: { $in: ids }, userId: req.userId, deleted: { $ne: true } }).lean();
-    const skipped = all.filter(c => c.status === 'in-campaign' || c.status === 'blocked' || inCooldown(c));
+    const interviewSets = await loadInterviewSets(req.userId);
+    const inInterview = (c) => isInInterview({ id: c._id, email: c.email }, interviewSets);
+    const skipped = all.filter(c => c.status === 'in-campaign' || c.status === 'blocked' || inCooldown(c) || inInterview(c));
     const skippedIds = new Set(skipped.map(c => String(c._id)));
     const eligibleIds = all.filter(c => !skippedIds.has(String(c._id))).map(c => c._id);
 
@@ -151,7 +155,10 @@ router.post('/reset-for-send', async (req, res) => {
       skipped: skipped.map(c => ({
         id: String(c._id), name: c.name, email: c.email, status: c.status,
         lastSentAt: c.lastSentAt, remainingMs: cooldownRemaining(c),
-        reason: c.status === 'in-campaign' ? 'in_campaign' : c.status === 'blocked' ? 'blocked' : 'cooldown',
+        reason: c.status === 'in-campaign' ? 'in_campaign'
+          : c.status === 'blocked' ? 'blocked'
+          : inInterview(c) ? 'in_interview'
+          : 'cooldown',
       })),
     });
   } catch (err) {

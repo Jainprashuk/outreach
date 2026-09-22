@@ -11,6 +11,7 @@ const {
 } = require('../lib/campaignRunner');
 const { deadline } = require('../lib/http');
 const { inCooldown } = require('../lib/cooldown');
+const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
 const mailer = require('../lib/mailer');
 
 const { requireOnboarded } = require('../lib/onboardingGuard');
@@ -306,7 +307,9 @@ router.post('/from-contacts', async (req, res) => {
     if (!ids.length) return res.status(400).json({ error: 'Select at least one contact.' });
     const candidates = await Contact.find({ _id: { $in: ids }, userId: req.userId, ...BASE_FILTER, status: { $ne: 'in-campaign' } })
       .select('name email company role status lastSentAt').lean();
-    const contacts = candidates.filter(c => !inCooldown(c));
+    // Contacts already in the interview pipeline never enter a campaign at all.
+    const interviewSets = await loadInterviewSets(req.userId);
+    const contacts = candidates.filter(c => !inCooldown(c) && !isInInterview({ id: c._id, email: c.email }, interviewSets));
     if (!contacts.length) return res.status(400).json({ error: 'None of the selected contacts are available.' });
 
     const runHourIst = Number.isInteger(Number(b.runHourIst))

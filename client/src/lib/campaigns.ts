@@ -37,6 +37,7 @@ export const SKIP_REASON_LABEL: Record<CampaignSkipReason, string> = {
   render_empty: 'Template rendered empty',
   cooldown: 'Emailed within the last 24 hours',
   source_contact_missing: 'Contact is no longer available',
+  in_interview: 'Moved to Interviews',
 };
 
 export const SKIP_REASON_BADGE: Record<CampaignSkipReason, string> = {
@@ -48,6 +49,7 @@ export const SKIP_REASON_BADGE: Record<CampaignSkipReason, string> = {
   queue_failed: 'badge-rejected',
   render_empty: 'badge-rejected',
   cooldown: 'badge-pending',
+  in_interview: 'badge-sent',
   source_contact_missing: 'badge-closed',
 };
 

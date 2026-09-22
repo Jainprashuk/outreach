@@ -194,7 +194,7 @@ export const deleteBlocklistEntryApi = (id: string) =>
 
 export interface CooldownSkip {
   id: string; name: string; email: string; status: ContactStatus;
-  lastSentAt: string | null; remainingMs: number; reason?: 'cooldown' | 'in_campaign' | 'blocked';
+  lastSentAt: string | null; remainingMs: number; reason?: 'cooldown' | 'in_campaign' | 'blocked' | 'in_interview';
 }
 
 export interface ResetForSendResult {
@@ -782,7 +782,8 @@ export type CampaignRowStatus = 'pending' | 'queued' | 'released' | 'skipped' | 
 
 export type CampaignSkipReason =
   | 'blank_email' | 'invalid_email' | 'duplicate_in_file' | 'duplicate_contact'
-  | 'removed_by_user' | 'queue_failed' | 'render_empty' | 'cooldown' | 'source_contact_missing';
+  | 'removed_by_user' | 'queue_failed' | 'render_empty' | 'cooldown' | 'source_contact_missing'
+  | 'in_interview';
 
 export interface CampaignStats {
   total: number; pending: number; released: number; skipped: number; removed: number;

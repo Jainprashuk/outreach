@@ -40,7 +40,7 @@ const campaignRowSchema = new mongoose.Schema({
     default: 'pending',
   },
   // 'blank_email'|'invalid_email'|'duplicate_in_file'|'duplicate_contact'
-  // |'removed_by_user'|'queue_failed'|'render_empty'
+  // |'removed_by_user'|'queue_failed'|'render_empty'|'in_interview'
   skipReason: { type: String, default: null },
 
   contactId:  { type: String, default: null },   // String, matching SendJob.items.contactId

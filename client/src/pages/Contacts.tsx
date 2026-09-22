@@ -172,12 +172,14 @@ export default function Contacts() {
       if (skipped.length > 0) {
         const reserved = skipped.filter(c => c.reason === 'in_campaign').length;
         const blocked = skipped.filter(c => c.reason === 'blocked').length;
-        const cooldown = skipped.length - reserved - blocked;
+        const interviewing = skipped.filter(c => c.reason === 'in_interview').length;
+        const cooldown = skipped.length - reserved - blocked - interviewing;
         toast(
           [
             cooldown ? `${cooldown} contact${cooldown !== 1 ? 's were' : ' was'} skipped — already emailed in the last ${cooldownLabel}.` : '',
             reserved ? `${reserved} contact${reserved !== 1 ? 's are' : ' is'} already reserved by a campaign.` : '',
             blocked ? `${blocked} contact${blocked !== 1 ? 's are' : ' is'} blocklisted and won't be sent to.` : '',
+            interviewing ? `${interviewing} contact${interviewing !== 1 ? 's are' : ' is'} in your interview pipeline — outreach is stopped for them.` : '',
           ].filter(Boolean).join(' '),
           contacts.length === 0 ? 'error' : 'info',
         );

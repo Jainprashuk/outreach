@@ -4,6 +4,7 @@ const Interview = require('../models/Interview');
 const { INTERVIEW_STATUSES } = require('../models/Interview');
 const Contact = require('../models/Contact');
 const Lead = require('../models/Lead');
+const { withdrawFromOutreach } = require('../lib/interviewGuard');
 
 const router = express.Router();
 
@@ -133,9 +134,17 @@ router.post('/', async (req, res) => {
       statusHistory: [{ status, changedAt: now, note: normText(body.note) || 'Moved to interviews' }],
     });
 
+    // Outreach stops here. Anything already queued for this person is retired
+    // now; the Inngest workers re-check the pipeline at send time too, so a job
+    // that is mid-flight right this second is still safe.
+    const withdrawn = await withdrawFromOutreach(req.userId, {
+      contactId: sourceType === 'contact' ? sourceId : null,
+      email: doc.email,
+    });
+
     // Re-read without the (empty) binaries so the response shape matches GET.
     const created = await Interview.findOne({ _id: doc._id, userId: req.userId }, NO_BINARIES);
-    res.status(201).json(created);
+    res.status(201).json({ ...created.toJSON(), withdrawnFromOutreach: withdrawn });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
