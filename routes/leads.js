@@ -115,6 +115,9 @@ router.post('/move-to-outreach', async (req, res) => {
       const e = edits.get(String(d._id)) || {};
       return {
         _leadId: String(d._id),
+        // Stamped onto the Contact so the Contacts board can filter by origin.
+        source: 'lead',
+        sourceLeadId: String(d._id),
         // Contact.name is required and author_name can be edited to empty in the
         // modal, so fall back twice — a ValidationError inside insertMany would
         // abort the whole batch.

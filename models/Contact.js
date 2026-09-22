@@ -7,6 +7,12 @@ const contactSchema = new mongoose.Schema({
   company: { type: String, default: '' },
   role: { type: String, default: '' },
   template: { type: String, default: '' },
+  // Where this contact entered outreach from. 'lead' means it was promoted from
+  // the Leads board (sourceLeadId points back at that row); 'outreach' covers
+  // everything you fed in directly — a CSV drop, a manual add, or a campaign
+  // spreadsheet. Default is 'outreach' because that is what a bare insert means.
+  source:       { type: String, enum: ['outreach', 'lead'], default: 'outreach' },
+  sourceLeadId: { type: String, default: null },
   status: { type: String, enum: ['queued', 'in-campaign', 'sent', 'follow-up-sent', 'failed', 'bounced', 'replied', 'follow-up-replied', 'closed', 'no-openings', 'in-review', 'blocked'], default: 'queued' },
   approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   editedSubject: { type: String, default: null },

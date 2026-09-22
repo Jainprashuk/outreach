@@ -50,6 +50,7 @@ export default function Contacts() {
   const [approvalFilter, setApprovalFilter] = useState('');
   const [templateFilter, setTemplateFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState(params.get('source') || '');
   const [dateFilters, setDateFilters] = useState<ContactDateFilters>(DEFAULT_DATE_FILTERS);
   const [showDateFilters, setShowDateFilters] = useState(false);
   const [page, setPage] = useState(1);
@@ -76,6 +77,9 @@ export default function Contacts() {
     if (approvalFilter) list = list.filter(c => c.approvalStatus === approvalFilter);
     if (templateFilter) list = list.filter(c => c.template === templateFilter);
     if (categoryFilter) list = list.filter(c => c.replyCategory === categoryFilter);
+    // Contacts imported before `source` existed are backfilled at boot (db.js), so
+    // a missing value here only ever means an old cached row — treat it as direct.
+    if (sourceFilter) list = list.filter(c => (c.source || 'outreach') === sourceFilter);
     if (dateFilters.createdFrom || dateFilters.createdTo) {
       list = list.filter(c => inDateRange(c.createdAt, dateFilters.createdFrom, dateFilters.createdTo));
     }
@@ -86,7 +90,7 @@ export default function Contacts() {
       list = list.filter(c => inDateRange(c.repliedAt, dateFilters.repliedFrom, dateFilters.repliedTo));
     }
     return list;
-  }, [app.contacts, tab, search, statusFilter, approvalFilter, templateFilter, categoryFilter, dateFilters]);
+  }, [app.contacts, tab, search, statusFilter, approvalFilter, templateFilter, categoryFilter, sourceFilter, dateFilters]);
 
   const dateFilterCount = countActiveDateFilters(dateFilters);
 
@@ -263,6 +267,11 @@ export default function Contacts() {
           <option value="">All reply categories</option>
           {CATEGORY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
+        <select value={sourceFilter} onChange={e => { setSourceFilter(e.target.value); resetPage(); }} style={{ width: 'auto', minWidth: 140 }}>
+          <option value="">All sources</option>
+          <option value="lead">From a lead</option>
+          <option value="outreach">Added directly</option>
+        </select>
         <div style={{ position: 'relative' }}>
           <button className={`btn btn-sm${showDateFilters || dateFilterCount > 0 ? ' btn-primary' : ''}`} type="button"
             data-filter-trigger onClick={() => setShowDateFilters(v => !v)}>
@@ -277,7 +286,7 @@ export default function Contacts() {
           )}
         </div>
         <button className="btn btn-sm" type="button" onClick={() => {
-          setSearch(''); setStatusFilter(''); setApprovalFilter(''); setTemplateFilter(''); setCategoryFilter('');
+          setSearch(''); setStatusFilter(''); setApprovalFilter(''); setTemplateFilter(''); setCategoryFilter(''); setSourceFilter('');
           setDateFilters(DEFAULT_DATE_FILTERS); setTab('all'); resetPage();
         }}>Clear filters</button>
       </div>
@@ -344,7 +353,16 @@ export default function Contacts() {
                 <td>
                   <div className="contact-chip">
                     <Avatar name={c.name} />
-                    <div><div className="name">{c.name}</div><div className="email">{c.email}</div></div>
+                    <div>
+                      <div className="name">
+                        {c.name}
+                        {c.source === 'lead' && (
+                          <i className="ti ti-target-arrow" title="Promoted from a lead"
+                            style={{ marginLeft: 6, fontSize: 13, color: 'var(--text3)' }} />
+                        )}
+                      </div>
+                      <div className="email">{c.email}</div>
+                    </div>
                   </div>
                 </td>
                 <td style={{ color: 'var(--text2)' }}>{c.company}</td>

@@ -2,6 +2,7 @@ const mongoose = require('mongoose');
 const Contact = require('./models/Contact');
 const User = require('./models/User');
 const Settings = require('./models/Settings');
+const Lead = require('./models/Lead');
 const { ONBOARDING_VERSION } = require('./lib/onboarding');
 
 async function backfillStatusHistory() {
@@ -182,6 +183,45 @@ async function backfillOnboarding() {
 }
 
 
+// Every contact promoted from the Leads board before `source` existed looks like
+// a direct import, which would make the new origin filter quietly wrong. Lead
+// already stamps `contactId` on promote, so the link is recoverable exactly —
+// this reads it back rather than guessing.
+//
+// Matched on the field being ABSENT, so it goes inert after one pass: every
+// contact created since gets 'outreach' from schema defaults and can never match.
+async function backfillContactSource() {
+  const unstamped = await Contact.countDocuments({ source: { $exists: false } });
+  if (unstamped === 0) return;
+
+  const promoted = await Lead.find(
+    { contactId: { $nin: [null, ''] } },
+    { contactId: 1 },
+  ).lean();
+
+  let fromLeads = 0;
+  if (promoted.length) {
+    // One op per lead, not a single updateMany: each contact needs ITS OWN
+    // lead's id written back, which a bulk filter cannot express.
+    const res = await Contact.bulkWrite(promoted.map(l => ({
+      updateOne: {
+        filter: { _id: l.contactId, source: { $exists: false } },
+        update: { $set: { source: 'lead', sourceLeadId: String(l._id) } },
+      },
+    })), { ordered: false });
+    fromLeads = res.modifiedCount || 0;
+  }
+
+  // Whatever is left predates the Leads board or came in by CSV — direct outreach.
+  const rest = await Contact.updateMany(
+    { source: { $exists: false } },
+    { $set: { source: 'outreach', sourceLeadId: null } },
+  );
+
+  console.log(`✅  Backfilled contact source: ${fromLeads} from leads, ${rest.modifiedCount || 0} direct`);
+}
+
+
 async function connect() {
   const env = process.env.NODE_ENV === 'prod' ? 'prod' : 'dev';
   const uri = env === 'prod' ? process.env.MONGODB_URI_PROD : process.env.MONGODB_URI_DEV;
@@ -204,6 +244,7 @@ async function connect() {
   await backfillSendTimestamps();
   await backfillFollowUpReplied();
   await backfillOnboarding();
+  await backfillContactSource();
 }
 
 module.exports = { connect };

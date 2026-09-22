@@ -38,6 +38,9 @@ export interface Contact {
   company: string;
   role: string;
   template: string;
+  /** Where the contact entered outreach: promoted from the Leads board, or fed in directly. */
+  source: 'outreach' | 'lead';
+  sourceLeadId: string | null;
   status: ContactStatus;
   approvalStatus: ApprovalStatus;
   editedSubject: string | null;
