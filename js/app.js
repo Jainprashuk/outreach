@@ -11,8 +11,9 @@ const App = (() => {
   };
 
   const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
+  // `sent` only — a contact who replied is a live conversation, not one to chase.
   const isFollowUpDue = (c) =>
-    (c.status === 'sent' || c.status === 'replied') && !c.followUpSentAt &&
+    c.status === 'sent' && !c.followUpSentAt &&
     c.lastSentAt && (Date.now() - new Date(c.lastSentAt).getTime() >= THREE_DAYS_MS);
 
   const getStats = () => ({

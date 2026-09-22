@@ -28,9 +28,12 @@ const buildFilter = (tab) => {
   if (tab === 'remaining')    return { ...BASE_FILTER, status: 'queued' };
   if (tab === 'in-campaign')  return { ...BASE_FILTER, status: 'in-campaign' };
   if (tab === 'pending')      return { ...BASE_FILTER, approvalStatus: 'pending' };
+  // `sent` only — a contact who already replied is a live conversation, and
+  // nudging them again three days later reads as a bot. Chasing them is the
+  // Interviews section's job, not outreach's.
   if (tab === 'followup-due') return {
     ...BASE_FILTER,
-    status: { $in: ['sent', 'replied'] },
+    status: 'sent',
     followUpSentAt: null,
     lastSentAt: { $lt: new Date(Date.now() - THREE_DAYS_MS) },
   };
@@ -87,7 +90,7 @@ router.get('/stats', async (req, res) => {
         pending:      { $sum: { $cond: [{ $eq: ['$approvalStatus', 'pending'] }, 1, 0] } },
         remaining:    { $sum: { $cond: [{ $eq: ['$status', 'queued'] },    1, 0] } },
         followUpDue:  { $sum: { $cond: [{ $and: [
-          { $in: ['$status', ['sent', 'replied']] },
+          { $eq: ['$status', 'sent'] },
           { $eq: [{ $ifNull: ['$followUpSentAt', null] }, null] },
           { $lt: ['$lastSentAt', new Date(Date.now() - THREE_DAYS_MS)] },
         ]}, 1, 0] }},

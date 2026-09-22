@@ -65,8 +65,10 @@ export const STATUS_OPTIONS = [
 
 const THREE_DAYS_MS = 3 * 24 * 60 * 60 * 1000;
 
+// `sent` only — someone who replied is a live conversation, not a cold thread
+// to chase. Mirrors the server filter in routes/contacts.js.
 export const isFollowUpDue = (c: Contact) =>
-  (c.status === 'sent' || c.status === 'replied') && !c.followUpSentAt &&
+  c.status === 'sent' && !c.followUpSentAt &&
   !!c.lastSentAt && (Date.now() - new Date(c.lastSentAt).getTime() >= THREE_DAYS_MS);
 
 // Converts plain-text body to HTML for previews. Supports [text](url) links.
