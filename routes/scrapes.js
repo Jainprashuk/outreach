@@ -223,7 +223,7 @@ router.post('/:id/cancel', async (req, res) => {
 // polls every 20s and each call is a serverless cold-start candidate.
 router.post('/claim', async (req, res) => {
   try {
-    const { host, chromeUp, linkedinLoggedIn, nextWakeAt, defaultQueries } = req.body || {};
+    const { host, chromeUp, linkedinLoggedIn, nextWakeAt, defaultQueries, probeOnly } = req.body || {};
 
     const worker = await ScrapeWorker.getForUser(req.userId);
     worker.lastSeenAt = new Date();
@@ -240,6 +240,12 @@ router.post('/claim', async (req, res) => {
     if (blockedUntilOf(worker)) {
       return res.json({ run: null, blockedUntil: worker.blockedUntil });
     }
+
+    // A heartbeat with no appetite for work. The worker sends this when the
+    // Naukri worker is holding the shared debug Chrome: it must keep the panel
+    // saying "ready" for the length of that run, but must not claim a run it
+    // cannot execute, and must not fire the schedule below on its behalf.
+    if (probeOnly) return res.json({ run: null, busy: true });
 
     await failStaleRuns(req.userId);
 

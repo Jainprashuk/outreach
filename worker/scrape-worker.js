@@ -26,6 +26,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { spawn, spawnSync, execFile } = require('child_process');
+const chromeLock = require('./chrome-lock');
 
 const CFG = {
   outreachUrl:  (process.env.OUTREACH_URL || 'http://localhost:3000').replace(/\/+$/, ''),
@@ -424,23 +425,40 @@ async function main() {
 
     try {
       const [chrome, loggedIn, wake] = await Promise.all([chromeUp(), linkedinLoggedIn(), nextWakeAt()]);
+
+      // The Naukri worker drives the same debug Chrome. Two clients scrolling
+      // one browser steal focus from each other and leave a page that never
+      // paints — indistinguishable from a dark wake, and easy to misread as a
+      // selector bug. Taken BEFORE claiming, not around executeRun: a run
+      // claimed and then skipped would sit in 'running' forever, because
+      // /claim only ever hands out queued rows.
+      const releaseChrome = chromeLock.acquire('linkedin-harvest');
+
       const { run: runDoc, blockedUntil } = await api('/api/scrapes/claim', {
         host: os.hostname(),
         chromeUp: chrome,
         linkedinLoggedIn: loggedIn,
         nextWakeAt: wake,
         defaultQueries: defaultQueries(),
+        // Still heartbeat while the other worker has the browser, so the panel
+        // keeps saying "ready" instead of "your Mac is asleep" for the length
+        // of someone else's run. The server hands back no work for these.
+        probeOnly: !releaseChrome,
       });
 
-      if (blockedUntil) {
-        log(`harvesting is blocked until ${blockedUntil} — idling`);
-      } else if (runDoc) {
-        log(`claimed ${runDoc.trigger} run ${runDoc.id}`);
-        const { checkpoint } = await executeRun(runDoc);
-        if (checkpoint) {
-          log('LinkedIn checkpoint. Stopping the worker — do not restart it for a week.');
-          process.exit(0);
+      try {
+        if (blockedUntil) {
+          log(`harvesting is blocked until ${blockedUntil} — idling`);
+        } else if (runDoc) {
+          log(`claimed ${runDoc.trigger} run ${runDoc.id}`);
+          const { checkpoint } = await executeRun(runDoc);
+          if (checkpoint) {
+            log('LinkedIn checkpoint. Stopping the worker — do not restart it for a week.');
+            process.exit(0);
+          }
         }
+      } finally {
+        if (releaseChrome) releaseChrome();
       }
     } catch (err) {
       log('poll failed:', err.message);

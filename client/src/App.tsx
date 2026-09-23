@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
 import Mailbox from './pages/Mailbox';
 import Leads from './pages/Leads';
+import Naukri from './pages/Naukri';
 import Jobs from './pages/Jobs';
 import CampaignsRouter from './pages/campaigns/CampaignsRouter';
 import Interviews from './pages/Interviews';
@@ -74,6 +75,7 @@ export default function App() {
       <Route path="/" element={owner(<Dashboard />)} />
       <Route path="/leads" element={owner(<Leads />)} />
       <Route path="/jobs" element={owner(<Jobs />)} />
+      <Route path="/naukri" element={owner(<Naukri />)} />
       {/* Splat route: the list, wizard and detail screens live in CampaignsRouter. */}
       <Route path="/campaigns/*" element={owner(<CampaignsRouter />)} />
       <Route path="/interviews" element={owner(<Interviews />)} />

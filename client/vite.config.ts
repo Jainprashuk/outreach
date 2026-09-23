@@ -24,6 +24,15 @@ export default defineConfig({
     proxy: {
       // Same-origin proxy to the Express server so the outreach_auth cookie flows.
       '/api': 'http://localhost:3000',
+      // In DEV ONLY, Vite rewrites the absolute hrefs in index.html to sit under
+      // `base` — /css/style.css becomes /app/css/style.css. Nothing serves that,
+      // so it fell through to the SPA fallback and came back as index.html with
+      // Content-Type text/html; Chrome's strict MIME check then refuses to apply
+      // it and the app renders with only the client's own stylesheets. These two
+      // entries strip the /app prefix back off before forwarding to Express.
+      // The production build is unaffected: dist/index.html keeps /css/style.css.
+      '/app/css': { target: 'http://localhost:3000', rewrite: (p) => p.replace(/^\/app/, '') },
+      '/app/js':  { target: 'http://localhost:3000', rewrite: (p) => p.replace(/^\/app/, '') },
       '/css': 'http://localhost:3000',
       // Serves /js/telemetry.js, which index.html loads by absolute path.
       '/js': 'http://localhost:3000',

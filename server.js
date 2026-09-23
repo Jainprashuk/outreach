@@ -89,6 +89,12 @@ const CRON_PATHS = new Set(['/api/postings/sync', '/api/check-mailbox', '/api/ca
 const WORKER_PATHS = new Set([
   '/api/scrapes/claim', '/api/scrapes/ingest', '/api/scrapes/finish',
   '/api/scrapes/progress',
+  // The Naukri worker runs on the same machine under the same token.
+  // /worker-resume is a separate GET-only route rather than the owner's
+  // /resume: this Set matches on PATH, not method, so listing the owner path
+  // would hand a worker token the power to DELETE the resume too.
+  '/api/naukri/claim', '/api/naukri/ingest', '/api/naukri/finish',
+  '/api/naukri/progress', '/api/naukri/result', '/api/naukri/worker-resume',
 ]);
 
 const isCron = (req) => {
@@ -483,6 +489,7 @@ app.use('/api/settings', requireDb, require('./routes/settings'));
 app.use('/api/jobs', requireDb, require('./routes/jobs'));
 app.use('/api/leads', requireDb, require('./routes/leads'));
 app.use('/api/scrapes', requireDb, require('./routes/scrapes'));
+app.use('/api/naukri', requireDb, require('./routes/naukri'));
 // People who actually got back to you. A separate store from Contact/Lead so the
 // outreach and apply journeys above are never written to — see models/Interview.js.
 app.use('/api/interviews', requireDb, require('./routes/interviews'));

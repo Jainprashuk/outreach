@@ -1305,3 +1305,241 @@ export const issueWorkerTokenApi = () =>
 
 export const revokeWorkerTokenApi = () =>
   apiFetch<{ ok: true }>('/api/scrapes/worker-token', { method: 'DELETE' });
+
+// ── Naukri ───────────────────────────────────────────────────────────────────
+// Self-contained: its own models, routes, worker and tab. Like the LinkedIn
+// scrape it runs on the Mac, because it drives a real logged-in Chrome over CDP
+// and has no headless path — these endpoints are the queue between the two.
+//
+// The one rule worth knowing from the client side: a harvest may only ever
+// create a job as `pending`. Approving is the ONLY thing that authorises an
+// application, which is why decideNaukriJobsApi is also what queues the run.
+
+export type NaukriRunKind = 'refresh' | 'harvest' | 'apply' | 'probe';
+export type NaukriRunStatus = 'queued' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled';
+export type NaukriApproval = 'pending' | 'approved' | 'rejected';
+export type NaukriApplyStatus =
+  | 'none' | 'applied' | 'skipped' | 'failed'
+  | 'in-review' | 'interviewing' | 'offer' | 'rejected';
+
+export interface NaukriRun {
+  id: string;
+  kind: NaukriRunKind;
+  status: NaukriRunStatus;
+  trigger: 'manual' | 'scheduled';
+  /** Snapshotted at claim time, so a config change mid-run can't turn a rehearsal real. */
+  dryRun: boolean;
+  claimedAt: string | null;
+  finishedAt: string | null;
+  workerHost: string;
+  progress: {
+    phase: string; label: string;
+    page: number; pagesTotal: number;
+    found: number; new: number;
+    applied: number; skipped: number; failed: number;
+    updatedAt: string | null;
+  };
+  stats: {
+    found: number; new: number; updated: number;
+    applied: number; skipped: number; failed: number; rehearsed: number; searches: number;
+  };
+  results: Array<{
+    jobId: string; title: string; company: string;
+    outcome: 'applied' | 'skipped' | 'failed' | 'dry-run';
+    reason: string; at: string;
+  }>;
+  error: string | null;
+  /** 2 means Naukri showed a captcha — a hard stop, blocked for 7 days. */
+  exitCode: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NaukriJob {
+  id: string;
+  sourceId: string;
+  title: string;
+  company: string;
+  location: string;
+  experienceMin: number | null;
+  experienceMax: number | null;
+  salaryText: string;
+  tags: string[];
+  url: string;
+  postedText: string;
+  queries: string[];
+  firstSeenAt: string;
+  lastSeenAt: string;
+  seenCount: number;
+  approval: NaukriApproval;
+  approvedAt: string | null;
+  applyStatus: NaukriApplyStatus;
+  appliedAt: string | null;
+  applyNote: string;
+  /** The screening question that caused a skip — offered as a one-click answer rule. */
+  unknownQuestion: string;
+  applyHistory: Array<{ at: string; from: string; to: string; note: string }>;
+}
+
+export interface NaukriSchedule {
+  enabled: boolean;
+  days: number[];          // 0 = Sunday .. 6 = Saturday
+  time: string;            // 'HH:mm', wall clock in `timezone`
+  timezone: string;
+  catchUpHours: number;
+  lastFiredAt: string | null;
+  runRefresh: boolean;
+  runHarvest: boolean;
+  /** Off by default: applying should follow your approvals, not a clock. */
+  runApply: boolean;
+}
+
+export interface NaukriSearch {
+  label: string; keywords: string; location: string;
+  experienceYears: number | null; url: string; enabled: boolean;
+}
+
+export interface NaukriFilters {
+  titleInclude: string[]; titleExclude: string[]; companyExclude: string[];
+  locations: string[]; remoteOnly: boolean;
+  minExperienceYears: number | null; maxExperienceYears: number | null;
+  minSalaryLpa: number | null; maxPostedAgeDays: number | null;
+  skipAlreadyApplied: boolean;
+}
+
+export interface NaukriProfileFields {
+  fullName: string; email: string; phone: string;
+  noticePeriodDays: number | null;
+  currentCtcLpa: number | null; expectedCtcLpa: number | null;
+  totalExperienceMonths: number | null;
+  currentCompany: string; currentDesignation: string; currentLocation: string;
+  preferredLocations: string[]; willingToRelocate: boolean;
+  highestQualification: string; skills: string[];
+}
+
+export interface NaukriAnswer {
+  /** Lowercased substring matched against the question. First match wins, so order matters. */
+  pattern: string;
+  /** May contain {{placeholders}} resolved from the profile at apply time. */
+  answer: string;
+  kind: 'text' | 'choice' | 'number' | 'yesno';
+  enabled: boolean;
+}
+
+export interface NaukriConfig {
+  id: string;
+  schedule: NaukriSchedule;
+  searches: NaukriSearch[];
+  useRecommended: boolean;
+  filters: NaukriFilters;
+  profile: NaukriProfileFields;
+  answers: NaukriAnswer[];
+  onUnknownQuestion: 'skip' | 'apply-anyway';
+  apply: {
+    maxPerRun: number; maxPerDay: number;
+    /** THE gate. While false, nothing is applied to without an approval click. */
+    autoApproveEnabled: boolean; autoApproveMinScore: number;
+    delayMinMs: number; delayMaxMs: number; coverNote: string;
+  };
+  headlineVariants: string[];
+  headlineIndex: number;
+  safety: {
+    /** One kill switch — while true the worker is handed no work at all. */
+    pauseAll: boolean;
+    /** Walk the whole apply flow, fill everything, submit nothing. */
+    dryRun: boolean;
+  };
+  resume?: { filename: string; size: number; uploadedAt: string | null };
+}
+
+export interface NaukriWorkerState {
+  everSeen: boolean;
+  online: boolean;
+  lastSeenAt: string | null;
+  host: string;
+  chromeUp: boolean;
+  naukriLoggedIn: boolean;
+  nextWakeAt: string | null;
+}
+
+export interface NaukriOverview {
+  activeRun: NaukriRun | null;
+  queuedRuns: NaukriRun[];
+  history: NaukriRun[];
+  worker: NaukriWorkerState;
+  schedule: NaukriSchedule;
+  scheduleKinds: NaukriRunKind[];
+  nextOccurrence: string | null;
+  reviewCount: number;
+  appliedCount: number;
+  appliedToday: number;
+  paused: boolean;
+  dryRun: boolean;
+  autoApprove: boolean;
+  /** Set for 7 days after Naukri shows a captcha. Nothing may run until it passes. */
+  blockedUntil: string | null;
+  blockedReason: string;
+}
+
+export const naukriOverviewApi = () => apiFetch<NaukriOverview>('/api/naukri/overview');
+
+export const naukriConfigApi = () =>
+  apiFetch<{ config: NaukriConfig; nextOccurrence: string | null; resume: NaukriConfig['resume'] | null }>(
+    '/api/naukri/config');
+
+/** Partial save — send only the section a card owns, so two open cards can't clobber each other. */
+export const updateNaukriConfigApi = (patch: Record<string, unknown>) =>
+  apiFetch<{ config: NaukriConfig; nextOccurrence: string | null }>(
+    '/api/naukri/config', { method: 'PATCH', body: JSON.stringify(patch) });
+
+/** 409 when a run is already active; 423 while paused or inside a captcha block. */
+export const queueNaukriRunApi = (kind: NaukriRunKind) =>
+  apiFetch<{ run: NaukriRun }>('/api/naukri/runs', { method: 'POST', body: JSON.stringify({ kind }) });
+
+export const cancelNaukriRunApi = (id: string) =>
+  apiFetch<{ run: NaukriRun }>(`/api/naukri/runs/${id}/cancel`, { method: 'POST' });
+
+export const listNaukriRunsApi = (page = 1, limit = 20, kind?: NaukriRunKind) =>
+  apiFetch<{ runs: NaukriRun[]; total: number; page: number; limit: number; pages: number }>(
+    `/api/naukri/runs?page=${page}&limit=${limit}${kind ? `&kind=${kind}` : ''}`);
+
+export const listNaukriJobsApi = (params: {
+  approval?: NaukriApproval; applyStatus?: NaukriApplyStatus | 'any'; q?: string;
+  page?: number; limit?: number;
+} = {}) => {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') qs.set(k, String(v));
+  return apiFetch<{ jobs: NaukriJob[]; total: number; page: number; limit: number; pages: number }>(
+    `/api/naukri/jobs?${qs.toString()}`);
+};
+
+/** The authorisation point: approving is what permits an application, and it queues the run. */
+export const decideNaukriJobsApi = (ids: string[], decision: NaukriApproval, reason?: string) =>
+  apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
+    '/api/naukri/jobs/decide', { method: 'POST', body: JSON.stringify({ ids, decision, reason }) });
+
+export const updateNaukriJobApi = (id: string, patch: { applyStatus?: NaukriApplyStatus; applyNote?: string }) =>
+  apiFetch<{ job: NaukriJob }>(`/api/naukri/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+
+/** Runs the same resolver the worker does, so the tester cannot disagree with reality. */
+export const testNaukriAnswerApi = (question: string) =>
+  apiFetch<{
+    question: string; matched: boolean; answer: string | null; kind: string | null;
+    pattern: string | null; ruleIndex: number | null; reason: string | null;
+    missing: string[]; wouldSkip: boolean;
+  }>('/api/naukri/config/test-answer', { method: 'POST', body: JSON.stringify({ question }) });
+
+/** "Would have kept 18 of 47", replayed against your last harvest before you commit. */
+export const previewNaukriFiltersApi = (filters: Partial<NaukriFilters>) =>
+  apiFetch<{
+    counts: { total: number; kept: number; dropped: number };
+    examples: Array<{ title: string; company: string; reason: string }>;
+  }>('/api/naukri/config/preview-filters', { method: 'POST', body: JSON.stringify({ filters }) });
+
+/** Questions that caused skips — the loop by which the answer bank fills itself. */
+export const naukriUnknownQuestionsApi = () =>
+  apiFetch<{ questions: Array<{ question: string; count: number; lastSeenAt: string }> }>(
+    '/api/naukri/config/unknown-questions');
+
+export const deleteNaukriResumeApi = () =>
+  apiFetch<{ ok: true }>('/api/naukri/resume', { method: 'DELETE' });

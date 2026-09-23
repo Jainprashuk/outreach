@@ -8,7 +8,9 @@
     "start": "node server.js",
     "dev:client": "cd client && npm run dev",
     "build:client": "cd client && npm install && npm run build",
-    "scrape-worker": "caffeinate -is node worker/scrape-worker.js"
+    "scrape-worker": "caffeinate -is node worker/scrape-worker.js",
+    "naukri-worker": "caffeinate -is node worker/naukri-worker.js",
+    "naukri-worker:stub": "NAUKRI_STUB=1 node worker/naukri-worker.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",
@@ -20,6 +22,7 @@
     "mailparser": "^3.9.9",
     "mongoose": "^9.7.0",
     "multer": "^2.1.1",
-    "nodemailer": "^8.0.11"
+    "nodemailer": "^8.0.11",
+    "playwright-core": "^1.63.0"
   }
 }
