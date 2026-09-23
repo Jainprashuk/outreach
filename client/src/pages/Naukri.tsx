@@ -1,18 +1,20 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { NaukriOverview, NaukriRunKind } from '../lib/api';
+import type { NaukriOverview, NaukriRunKind, NaukriConfig } from '../lib/api';
 import { naukriOverviewApi, naukriConfigApi, queueNaukriRunApi, cancelNaukriRunApi } from '../lib/api';
-import type { NaukriConfig } from '../lib/api';
+import Layout from '../components/Layout';
 import StatusHeader, { readiness } from '../components/naukri/StatusHeader';
 import RunTimeline, { ActiveRun } from '../components/naukri/RunTimeline';
-import ScheduleCard from '../components/naukri/config/ScheduleCard';
+import ReviewQueue from '../components/naukri/ReviewQueue';
+import AppliedTable from '../components/naukri/AppliedTable';
 import ConnectionCard from '../components/naukri/config/ConnectionCard';
+import ScheduleCard from '../components/naukri/config/ScheduleCard';
 import SearchesCard from '../components/naukri/config/SearchesCard';
 import FiltersCard from '../components/naukri/config/FiltersCard';
 import ProfileCard from '../components/naukri/config/ProfileCard';
 import AnswerBank from '../components/naukri/config/AnswerBank';
 import ResumeCard from '../components/naukri/config/ResumeCard';
 import ApplyCard from '../components/naukri/config/ApplyCard';
-import ReviewQueue from '../components/naukri/ReviewQueue';
+import { Card, Band, Muted, Notice, Empty } from '../components/naukri/ui';
 import { fmtTime } from '../components/naukri/format';
 
 // The Naukri tab.
@@ -29,6 +31,13 @@ const POLL_MS = 3000;
 
 type View = 'activity' | 'review' | 'applied' | 'config';
 
+const TABS: Array<[View, string, string]> = [
+  ['activity', 'Activity', 'ti-activity'],
+  ['review', 'Review', 'ti-checklist'],
+  ['applied', 'Applied', 'ti-send'],
+  ['config', 'Configuration', 'ti-settings'],
+];
+
 export default function Naukri() {
   const [overview, setOverview] = useState<NaukriOverview | null>(null);
   const [config, setConfig] = useState<NaukriConfig | null>(null);
@@ -37,18 +46,14 @@ export default function Naukri() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async () => {
-    try {
-      setOverview(await naukriOverviewApi());
-      setError('');
-    } catch (e: any) {
-      setError(e?.message || 'Could not load the Naukri panel');
-    }
+    try { setOverview(await naukriOverviewApi()); setError(''); }
+    catch (e: any) { setError(e?.message || 'Could not load the Naukri panel'); }
   }, []);
 
-  // The config is NOT polled. It is a form the user is typing into; refetching
-  // it every three seconds would fight them for the cursor.
+  // The config is NOT polled. It is a form you are typing into; refetching it
+  // every three seconds would fight you for the cursor.
   const loadConfig = useCallback(async () => {
-    try { setConfig((await naukriConfigApi()).config); } catch { /* cards render from cache */ }
+    try { setConfig((await naukriConfigApi()).config); } catch { /* cards keep what they have */ }
   }, []);
 
   useEffect(() => {
@@ -75,136 +80,132 @@ export default function Naukri() {
 
   if (!overview) {
     return (
-      <div className="page">
-        <h1 className="page-title">Naukri</h1>
-        <div className="page-info">{error || 'Loading…'}</div>
-      </div>
+      <Layout title="Naukri" subtitle="Auto-apply worker">
+        <Empty icon="ti-loader">{error || 'Loading…'}</Empty>
+      </Layout>
     );
   }
 
   const r = readiness(overview);
   const canStart = r.canRun && !busy;
+  const counts: Partial<Record<View, number>> = {
+    review: overview.reviewCount,
+    applied: overview.appliedCount,
+  };
 
-  const TABS: Array<[View, string, number | null]> = [
-    ['activity', 'Activity', null],
-    ['review', 'Review', overview.reviewCount || null],
-    ['applied', 'Applied', overview.appliedCount || null],
-    ['config', 'Configuration', null],
-  ];
+  const subtitle = [
+    `${overview.reviewCount} awaiting review`,
+    `${overview.appliedCount} applied`,
+    `${overview.appliedToday} today`,
+    overview.schedule.enabled && overview.nextOccurrence ? `next ${fmtTime(overview.nextOccurrence)}` : 'no schedule',
+  ].join(' · ');
 
   return (
-    <div className="page">
-      <h1 className="page-title">Naukri</h1>
-
-      <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-        {TABS.map(([key, label, count]) => (
-          <button
-            key={key} onClick={() => setView(key)}
-            className={`btn btn-sm${view === key ? ' btn-primary' : ''}`}
-          >
-            {label}{count ? ` · ${count}` : ''}
+    <Layout
+      title="Naukri"
+      subtitle={subtitle}
+      actions={
+        <>
+          <button className="btn btn-sm" type="button" onClick={() => start('refresh')} disabled={!canStart}>
+            <i className="ti ti-refresh" /> Refresh
           </button>
-        ))}
+          <button className="btn btn-sm" type="button" onClick={() => start('harvest')} disabled={!canStart}>
+            <i className="ti ti-download" /> Harvest
+          </button>
+          <button className="btn btn-primary btn-sm" type="button" onClick={() => start('apply')} disabled={!canStart}>
+            <i className="ti ti-send" /> Apply
+          </button>
+        </>
+      }
+    >
+      <div className="section-head">
+        <div className="nav-tabs">
+          {TABS.map(([key, label, icon]) => (
+            <button key={key} type="button" onClick={() => setView(key)}
+              className={`nav-tab${view === key ? ' active' : ''}`}>
+              <i className={`ti ${icon}`} style={{ marginRight: 5 }} />{label}
+              {counts[key] ? <span className="contact-count-badge" style={{ marginLeft: 6 }}>{counts[key]}</span> : null}
+            </button>
+          ))}
+        </div>
       </div>
 
       <StatusHeader overview={overview} />
 
-      {error && (
-        <div className="card" style={{ padding: 10, marginBottom: 14, fontSize: 13, color: 'var(--danger, #dc2626)' }}>
-          {error}
-        </div>
-      )}
+      {error && <Notice tone="danger" icon="ti-alert-triangle">{error}</Notice>}
 
       {view === 'activity' && (
         <>
-          <section className="card" style={{ padding: 14, marginBottom: 14 }}>
-            <div className="page-info" style={{ marginBottom: 8, letterSpacing: '.06em' }}>NOW</div>
+          <Card>
+            <div style={{ marginBottom: 10 }}><Band>Now</Band></div>
             {overview.activeRun
               ? <ActiveRun run={overview.activeRun} />
-              : <div className="page-info">Nothing running.</div>}
-          </section>
+              : <Muted>Nothing running.</Muted>}
+          </Card>
 
-          <section className="card" style={{ padding: 14, marginBottom: 14 }}>
-            <div className="page-info" style={{ marginBottom: 8, letterSpacing: '.06em' }}>NEXT</div>
+          <Card>
+            <div style={{ marginBottom: 10 }}><Band>Next</Band></div>
 
             {overview.schedule.enabled && overview.nextOccurrence ? (
-              <div style={{ fontSize: 13, marginBottom: 8 }}>
+              <div style={{ fontSize: 13, marginBottom: 10 }}>
+                <i className="ti ti-clock" style={{ marginRight: 6, color: 'var(--text2)' }} />
                 {overview.scheduleKinds.join(' + ') || 'nothing'} · {fmtTime(overview.nextOccurrence)}
               </div>
             ) : (
-              <div className="page-info" style={{ marginBottom: 8 }}>
-                No schedule. Set one in Configuration.
+              <div style={{ marginBottom: 10 }}>
+                <Muted>No schedule.</Muted>{' '}
+                <button className="btn btn-xs" type="button" onClick={() => setView('config')}>Set one</button>
               </div>
             )}
 
             {overview.queuedRuns.map(run => (
-              <div key={run.id} style={{ display: 'flex', gap: 10, alignItems: 'baseline', fontSize: 13, padding: '3px 0' }}>
+              <div key={run.id} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '4px 0' }}>
                 <span className="badge badge-queued">queued</span>
-                <span>{run.kind}</span>
-                <button className="btn btn-sm" onClick={() => cancel(run.id)} disabled={busy}>Cancel</button>
+                <span style={{ fontSize: 13 }}>{run.kind}</span>
+                <button className="btn btn-xs" type="button" onClick={() => cancel(run.id)} disabled={busy}>Cancel</button>
               </div>
             ))}
 
             {overview.reviewCount > 0 && (
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '10px 0', fontSize: 13 }}>
-                <i className="ti ti-alert-triangle" style={{ color: 'var(--warn, #d97706)' }} />
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, fontSize: 13 }}>
+                <i className="ti ti-alert-triangle" style={{ color: 'var(--red)' }} />
                 <span>{overview.reviewCount} job{overview.reviewCount === 1 ? '' : 's'} awaiting your review</span>
-                <button className="btn btn-sm btn-primary" onClick={() => setView('review')}>Review</button>
+                <button className="btn btn-xs btn-primary" type="button" onClick={() => setView('review')}>Review</button>
               </div>
             )}
 
-            <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-              <button className="btn btn-sm" onClick={() => start('refresh')} disabled={!canStart}>Refresh now</button>
-              <button className="btn btn-sm" onClick={() => start('harvest')} disabled={!canStart}>Harvest now</button>
-              <button className="btn btn-sm" onClick={() => start('apply')} disabled={!canStart}>Apply now</button>
-            </div>
             {!r.canRun && (
-              <div className="page-info" style={{ fontSize: 12, marginTop: 6 }}>
-                Nothing can start until the problem above is fixed.
+              <div style={{ marginTop: 10 }}>
+                <Muted>Nothing can start until the problem above is fixed.</Muted>
               </div>
             )}
-          </section>
+          </Card>
 
-          <section className="card" style={{ padding: 14 }}>
-            <div className="page-info" style={{ marginBottom: 8, letterSpacing: '.06em' }}>PAST</div>
+          <Card>
+            <div style={{ marginBottom: 6 }}><Band>Past</Band></div>
             <RunTimeline runs={overview.history} />
-          </section>
-        </>
-      )}
-
-      {view === 'config' && (
-        <>
-          <ConnectionCard overview={overview} onChanged={load} />
-          <ScheduleCard
-            schedule={overview.schedule}
-            nextOccurrence={overview.nextOccurrence}
-            onSaved={load}
-          />
-          {config ? (
-            <>
-              <SearchesCard config={config} onSaved={load} />
-              <FiltersCard config={config} onSaved={load} />
-              <ProfileCard config={config} onSaved={load} />
-              <AnswerBank config={config} onSaved={load} />
-              <ResumeCard config={config} onSaved={load} />
-              <ApplyCard config={config} onSaved={load} />
-            </>
-          ) : (
-            <div className="card" style={{ padding: 14 }}><span className="page-info">Loading configuration…</span></div>
-          )}
-
+          </Card>
         </>
       )}
 
       {view === 'review' && <ReviewQueue onChanged={load} />}
 
-      {view === 'applied' && (
-        <div className="card" style={{ padding: 14 }}>
-          <div className="page-info">
-            {overview.appliedCount} application(s) recorded. This board lands with the apply driver.
-          </div>
-        </div>
+      {view === 'applied' && <AppliedTable onChanged={load} />}
+
+      {view === 'config' && (
+        config ? (
+          <>
+            <ConnectionCard overview={overview} onChanged={load} />
+            <ScheduleCard schedule={overview.schedule} nextOccurrence={overview.nextOccurrence} onSaved={load} />
+            <SearchesCard config={config} onSaved={load} />
+            <FiltersCard config={config} onSaved={load} />
+            <ProfileCard config={config} onSaved={load} />
+            <AnswerBank config={config} onSaved={load} />
+            <ResumeCard config={config} onSaved={load} />
+            <ApplyCard config={config} onSaved={load} />
+          </>
+        ) : <Empty icon="ti-loader">Loading configuration…</Empty>
       )}
-    </div>
+    </Layout>
   );
 }

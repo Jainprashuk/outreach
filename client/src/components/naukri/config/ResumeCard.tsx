@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { NaukriConfig } from '../../../lib/api';
+import { Card } from '../ui';
 import { updateNaukriConfigApi, deleteNaukriResumeApi } from '../../../lib/api';
 
 // The file the worker attaches, and the headlines the daily refresh rotates.
@@ -55,23 +56,19 @@ export default function ResumeCard({ config, onSaved }: {
   };
 
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <i className="ti ti-file-cv" />
-        <strong style={{ flex: 1 }}>Resume &amp; headline</strong>
-      </div>
+    <Card title="Resume & headline" icon="ti-file-cv">
 
       <div style={{ marginBottom: 14 }}>
         {resume ? (
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', fontSize: 13 }}>
             <i className="ti ti-file-text" />
             <span>{resume.filename}</span>
-            <span className="page-info">{Math.round(resume.size / 1024)} KB</span>
+            <span style={{ color: 'var(--text2)', fontSize: 12 }}>{Math.round(resume.size / 1024)} KB</span>
             <a className="btn btn-sm" href="/api/naukri/resume">Download</a>
             <button className="btn btn-sm" onClick={remove} disabled={busy}>Remove</button>
           </div>
         ) : (
-          <div className="page-info" style={{ fontSize: 13 }}>
+          <div style={{ color: 'var(--text2)', fontSize: 13 }}>
             No resume uploaded. The apply step needs one where Naukri asks for a fresh file.
           </div>
         )}
@@ -84,26 +81,26 @@ export default function ResumeCard({ config, onSaved }: {
         </button>
       </div>
 
-      <div className="page-info" style={{ marginBottom: 6 }}>Headline variants</div>
+      <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 6 }}>Headline variants</div>
       {variants.map((v, i) => (
         <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
-          <input className="input" style={{ flex: 1 }} value={v}
+          <input type="text" style={{ flex: 1 }} value={v}
             onChange={e => setVariants(r => r.map((x, n) => (n === i ? e.target.value : x)))} />
           <button className="btn btn-sm" onClick={() => setVariants(r => r.filter((_, n) => n !== i))}>
             <i className="ti ti-trash" />
           </button>
         </div>
       ))}
-      <div className="page-info" style={{ fontSize: 11, marginBottom: 8 }}>
+      <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 8 }}>
         The daily refresh cycles through these. With none set it rewrites your current headline, which
         Naukri may ignore as a no-op — two or three variants make the save reliable.
       </div>
 
-      {msg && <div className="page-info" style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
+      {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 8 }}>{msg}</div>}
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="btn btn-sm" onClick={() => setVariants(r => [...r, ''])}>Add variant</button>
         <button className="btn btn-primary btn-sm" onClick={saveVariants} disabled={busy}>Save headlines</button>
       </div>
-    </div>
+    </Card>
   );
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { NaukriSchedule } from '../../../lib/api';
+import { Card, Muted } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 import { fmtTime, DAY_LABELS } from '../format';
 
@@ -46,14 +47,9 @@ export default function ScheduleCard({
   const noKinds = !draft.runRefresh && !draft.runHarvest && !draft.runApply;
 
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <i className="ti ti-calendar-repeat" />
-        <strong style={{ flex: 1 }}>Schedule</strong>
-        {nextOccurrence && !noKinds && draft.enabled && (
-          <span className="page-info">Next: {fmtTime(nextOccurrence)}</span>
-        )}
-      </div>
+    <Card title="Schedule" icon="ti-calendar-repeat"
+      right={nextOccurrence && !noKinds && draft.enabled
+        ? <Muted>Next: {fmtTime(nextOccurrence)}</Muted> : null}>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
         <input type="checkbox" checked={draft.enabled} onChange={e => set('enabled', e.target.checked)} />
@@ -61,7 +57,7 @@ export default function ScheduleCard({
       </label>
 
       <div style={{ marginBottom: 12 }}>
-        <div className="page-info" style={{ marginBottom: 6 }}>Days</div>
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 6 }}>Days</div>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
           {DAY_LABELS.map((label, d) => (
             <button
@@ -75,28 +71,28 @@ export default function ScheduleCard({
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 12 }}>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Time</div>
-          <input type="time" value={draft.time} onChange={e => set('time', e.target.value)} className="input" />
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Time</div>
+          <input type="time" value={draft.time} onChange={e => set('time', e.target.value)} />
         </label>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Timezone</div>
-          <input value={draft.timezone} onChange={e => set('timezone', e.target.value)} className="input" style={{ width: 160 }} />
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Timezone</div>
+          <input type="text" value={draft.timezone} onChange={e => set('timezone', e.target.value)} style={{ width: 160 }} />
         </label>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Catch-up window (hours)</div>
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Catch-up window (hours)</div>
           <input
             type="number" min={0} max={24} value={draft.catchUpHours}
             onChange={e => set('catchUpHours', Number(e.target.value))}
-            className="input" style={{ width: 90 }}
+            style={{ width: 90 }}
           />
         </label>
       </div>
-      <div className="page-info" style={{ fontSize: 12, marginBottom: 14 }}>
+      <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 14 }}>
         A missed slot only runs if you open the Mac within the catch-up window — so a Mac opened on
         Thursday does not fire Monday's runs.
       </div>
 
-      <div className="page-info" style={{ marginBottom: 6 }}>What fires on a scheduled wake</div>
+      <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 6 }}>What fires on a scheduled wake</div>
       {([
         ['runRefresh', 'Refresh', 'Re-save your profile so recruiter search ranks you. Safe to run daily.'],
         ['runHarvest', 'Harvest', 'Collect new listings into the review queue. Read-only.'],
@@ -107,23 +103,23 @@ export default function ScheduleCard({
           <span>
             {label}
             {key === 'runApply' && draft.runApply && (
-              <span style={{ color: 'var(--warn, #d97706)' }}> — unattended</span>
+              <span style={{ color: 'var(--orange, var(--text2))' }}> — unattended</span>
             )}
-            <div className="page-info" style={{ fontSize: 12 }}>{help}</div>
+            <div style={{ color: 'var(--text2)', fontSize: 12 }}>{help}</div>
           </span>
         </label>
       ))}
 
       {noKinds && draft.enabled && (
-        <div style={{ fontSize: 12, color: 'var(--warn, #d97706)', marginTop: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--orange, var(--text2))', marginTop: 8 }}>
           Nothing is turned on, so the schedule will never fire.
         </div>
       )}
-      {err && <div style={{ fontSize: 12, color: 'var(--danger, #dc2626)', marginTop: 8 }}>{err}</div>}
+      {err && <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 8 }}>{err}</div>}
 
       <button className="btn btn-primary btn-sm" onClick={save} disabled={saving} style={{ marginTop: 12 }}>
         {saving ? 'Saving…' : 'Save schedule'}
       </button>
-    </div>
+    </Card>
   );
 }

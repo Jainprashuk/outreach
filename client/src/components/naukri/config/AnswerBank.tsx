@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { NaukriConfig, NaukriAnswer } from '../../../lib/api';
+import { Card } from '../ui';
 import { updateNaukriConfigApi, testNaukriAnswerApi, naukriUnknownQuestionsApi } from '../../../lib/api';
 
 // How the worker answers Naukri's screening questions.
@@ -77,12 +78,10 @@ export default function AnswerBank({ config, onSaved }: {
   };
 
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <i className="ti ti-messages" />
-        <strong style={{ flex: 1 }}>Answers</strong>
-        <button className="btn btn-sm" onClick={() => setRows(r => [...r, blank()])}>Add rule</button>
-      </div>
+    <Card title="Answers" icon="ti-messages"
+      right={<button className="btn btn-xs" type="button" onClick={() => setRows(r => [...r, blank()])}>
+        <i className="ti ti-plus" /> Add rule
+      </button>}>
 
       {/* The feedback loop: every skip becomes a one-click rule. */}
       {unknown.length > 0 && (
@@ -91,7 +90,7 @@ export default function AnswerBank({ config, onSaved }: {
           {unknown.map((u, i) => (
             <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, padding: '3px 0' }}>
               <span style={{ flex: 1 }}>{u.question}</span>
-              <span className="page-info">{u.count}×</span>
+              <span style={{ color: 'var(--text2)', fontSize: 12 }}>{u.count}×</span>
               <button className="btn btn-sm" onClick={() => setRows(r => [
                 // Seeded with the question itself as the pattern. It is a
                 // substring match, so the full question is the safest possible
@@ -106,12 +105,12 @@ export default function AnswerBank({ config, onSaved }: {
 
       {rows.map((row, i) => (
         <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
-          <span className="page-info" style={{ width: 18, textAlign: 'right' }}>{i + 1}</span>
-          <input className="input" placeholder="question contains…" value={row.pattern}
+          <span style={{ color: 'var(--text2)', fontSize: 12, width: 18, textAlign: 'right' }}>{i + 1}</span>
+          <input type="text" placeholder="question contains…" value={row.pattern}
             onChange={e => patch(i, { pattern: e.target.value })} style={{ flex: 1, minWidth: 170 }} />
-          <input className="input" placeholder="answer, may use {{expectedCtcLpa}}" value={row.answer}
+          <input type="text" placeholder="answer, may use {{expectedCtcLpa}}" value={row.answer}
             onChange={e => patch(i, { answer: e.target.value })} style={{ flex: 1.3, minWidth: 190 }} />
-          <select className="input" value={row.kind} style={{ width: 92 }}
+          <select value={row.kind} style={{ width: 92 }}
             onChange={e => patch(i, { kind: e.target.value as NaukriAnswer['kind'] })}>
             <option value="text">text</option>
             <option value="number">number</option>
@@ -127,7 +126,7 @@ export default function AnswerBank({ config, onSaved }: {
         </div>
       ))}
 
-      <div className="page-info" style={{ fontSize: 11, margin: '8px 0' }}>
+      <div style={{ color: 'var(--text2)', fontSize: 11, margin: '8px 0' }}>
         First matching rule wins, so order matters. Placeholders: {PLACEHOLDERS.map(p => `{{${p}}}`).join(' ')}
       </div>
 
@@ -136,24 +135,24 @@ export default function AnswerBank({ config, onSaved }: {
           onChange={e => setOnUnknown(e.target.checked ? 'apply-anyway' : 'skip')} />
         <span>
           Apply even when a question has no rule
-          <div className="page-info" style={{ fontSize: 11 }}>
+          <div style={{ color: 'var(--text2)', fontSize: 11 }}>
             Off is strongly recommended. On means the worker submits forms with unanswered questions.
           </div>
         </span>
       </label>
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
-        <input className="input" placeholder="Test a question…" value={probe}
+        <input type="text" placeholder="Test a question…" value={probe}
           onChange={e => setProbe(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && test()} style={{ flex: 1, minWidth: 200 }} />
         <button className="btn btn-sm" onClick={test}>Test</button>
       </div>
       {probeResult && <div style={{ fontSize: 12, marginBottom: 8 }}>{probeResult}</div>}
 
-      {msg && <div className="page-info" style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
+      {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 8 }}>{msg}</div>}
       <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
         {saving ? 'Saving…' : 'Save answers'}
       </button>
-    </div>
+    </Card>
   );
 }

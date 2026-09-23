@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { NaukriConfig, NaukriFilters } from '../../../lib/api';
+import { Card } from '../ui';
 import { updateNaukriConfigApi, previewNaukriFiltersApi } from '../../../lib/api';
 
 // What never reaches your review queue.
@@ -45,23 +46,19 @@ export default function FiltersCard({ config, onSaved }: {
 
   const Text = ({ label, k, help }: { label: string; k: keyof NaukriFilters; help?: string }) => (
     <label style={{ display: 'block', marginBottom: 10, fontSize: 13 }}>
-      <div className="page-info" style={{ marginBottom: 4 }}>{label}</div>
-      <input
-        className="input" style={{ width: '100%' }}
+      <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>{label}</div>
+      <input type="text"
+        style={{ width: '100%' }}
         value={toText(f[k] as string[])}
         onChange={e => set(k, toList(e.target.value) as NaukriFilters[typeof k])}
         placeholder="comma separated"
       />
-      {help && <div className="page-info" style={{ fontSize: 11, marginTop: 2 }}>{help}</div>}
+      {help && <div style={{ color: 'var(--text2)', fontSize: 11, marginTop: 2 }}>{help}</div>}
     </label>
   );
 
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <i className="ti ti-filter" />
-        <strong style={{ flex: 1 }}>Filters</strong>
-      </div>
+    <Card title="Filters" icon="ti-filter">
 
       <Text label="Title must contain one of" k="titleInclude" help="Empty means any title." />
       <Text label="Title must NOT contain" k="titleExclude" />
@@ -70,27 +67,27 @@ export default function FiltersCard({ config, onSaved }: {
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Min exp (yrs)</div>
-          <input className="input" type="number" min={0} max={50} style={{ width: 90 }}
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Min exp (yrs)</div>
+          <input type="number" min={0} max={50} style={{ width: 90 }}
             value={f.minExperienceYears ?? ''} onChange={e => set('minExperienceYears', num(e.target.value))} />
         </label>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Max exp (yrs)</div>
-          <input className="input" type="number" min={0} max={50} style={{ width: 90 }}
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Max exp (yrs)</div>
+          <input type="number" min={0} max={50} style={{ width: 90 }}
             value={f.maxExperienceYears ?? ''} onChange={e => set('maxExperienceYears', num(e.target.value))} />
         </label>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Min salary (LPA)</div>
-          <input className="input" type="number" min={0} style={{ width: 110 }}
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Min salary (LPA)</div>
+          <input type="number" min={0} style={{ width: 110 }}
             value={f.minSalaryLpa ?? ''} onChange={e => set('minSalaryLpa', num(e.target.value))} />
         </label>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Max age (days)</div>
-          <input className="input" type="number" min={1} max={365} style={{ width: 100 }}
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Max age (days)</div>
+          <input type="number" min={1} max={365} style={{ width: 100 }}
             value={f.maxPostedAgeDays ?? ''} onChange={e => set('maxPostedAgeDays', num(e.target.value))} />
         </label>
       </div>
-      <div className="page-info" style={{ fontSize: 11, marginBottom: 10 }}>
+      <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 10 }}>
         Experience bands are kept when they overlap yours at all. Listings that do not publish pay are
         kept — most of Naukri hides it, and dropping them would empty your queue.
       </div>
@@ -110,20 +107,20 @@ export default function FiltersCard({ config, onSaved }: {
             Would keep <strong>{preview.counts.kept}</strong> of {preview.counts.total} from your last harvest.
           </div>
           {preview.examples.map((x, i) => (
-            <div key={i} className="page-info" style={{ fontSize: 11, marginTop: 3 }}>
+            <div key={i} style={{ color: 'var(--text2)', fontSize: 11, marginTop: 3 }}>
               dropped: {x.title} · {x.company} — {x.reason}
             </div>
           ))}
         </div>
       )}
 
-      {msg && <div className="page-info" style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
+      {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 8 }}>{msg}</div>}
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="btn btn-sm" onClick={runPreview}>Preview</button>
         <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
           {saving ? 'Saving…' : 'Save filters'}
         </button>
       </div>
-    </div>
+    </Card>
   );
 }

@@ -59,31 +59,50 @@ export function readiness(o: NaukriOverview): Readiness {
 }
 
 const TONE_COLOR: Record<Tone, string> = {
-  ok: 'var(--ok, #16a34a)', warn: 'var(--warn, #d97706)',
-  bad: 'var(--danger, #dc2626)', idle: 'var(--text2)',
+  ok: 'var(--green)', warn: 'var(--orange, var(--text2))',
+  bad: 'var(--red)', idle: 'var(--text2)',
 };
+
+const Dot = ({ on, children }: { on: boolean; children: React.ReactNode }) => (
+  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+    <span style={{
+      width: 6, height: 6, borderRadius: '50%', flexShrink: 0,
+      background: on ? 'var(--green)' : 'var(--text3)',
+    }} />
+    {children}
+  </span>
+);
 
 export default function StatusHeader({ overview }: { overview: NaukriOverview }) {
   const r = readiness(overview);
   const w = overview.worker;
 
   return (
-    <div className="card" style={{ padding: '12px 14px', marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
-        <i className={`ti ${r.icon}`} style={{ color: TONE_COLOR[r.tone], fontSize: 18, marginTop: 1 }} />
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 13, color: 'var(--text)' }}>{r.text}</div>
-          {/* The raw facts under the sentence, so a state the sentence doesn't
-              cover is still diagnosable without opening the database. */}
-          <div className="page-info" style={{ marginTop: 4, display: 'flex', gap: 12, flexWrap: 'wrap', fontSize: 12 }}>
-            <span>{w.online ? '● Mac online' : '○ Mac offline'}{w.host ? ` · ${w.host}` : ''}</span>
-            <span>{w.chromeUp ? '● Chrome up' : '○ Chrome down'}</span>
-            <span>{w.naukriLoggedIn ? '● Naukri logged in' : '○ Naukri logged out'}</span>
-            {overview.autoApprove && (
-              <span style={{ color: TONE_COLOR.warn }}>● auto-approve ON</span>
-            )}
-            <span>{overview.appliedToday} applied today</span>
-          </div>
+    <div style={{
+      background: r.tone === 'bad' ? 'var(--red-bg)' : 'var(--bg2)',
+      border: `0.5px solid ${r.tone === 'bad' ? 'color-mix(in srgb, var(--red) 25%, transparent)' : 'var(--border)'}`,
+      borderRadius: 'var(--radius-lg)',
+      padding: '11px 14px',
+      marginBottom: 14,
+      display: 'flex', alignItems: 'flex-start', gap: 10,
+    }}>
+      <i className={`ti ${r.icon}`} style={{ color: TONE_COLOR[r.tone], fontSize: 17, marginTop: 1, flexShrink: 0 }} />
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, color: r.tone === 'bad' ? 'var(--red)' : 'var(--text)', lineHeight: 1.5 }}>
+          {r.text}
+        </div>
+        {/* The raw facts under the sentence, so a state the sentence does not
+            cover is still diagnosable without opening the database. */}
+        <div style={{
+          marginTop: 5, display: 'flex', gap: 14, flexWrap: 'wrap',
+          fontSize: 11, color: 'var(--text2)',
+        }}>
+          <Dot on={w.online}>{w.online ? 'Mac online' : 'Mac offline'}{w.host ? ` · ${w.host}` : ''}</Dot>
+          <Dot on={w.chromeUp}>Chrome</Dot>
+          <Dot on={w.naukriLoggedIn}>Naukri session</Dot>
+          {overview.dryRun && <span style={{ color: 'var(--orange, var(--text2))' }}>dry run</span>}
+          {overview.autoApprove && <span style={{ color: 'var(--red)' }}>auto-approve on</span>}
+          <span>{overview.appliedToday} applied today</span>
         </div>
       </div>
     </div>

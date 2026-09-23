@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { NaukriConfig, NaukriProfileFields } from '../../../lib/api';
+import { Card } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 
 // You, in the form the screening questions ask for.
@@ -34,11 +35,11 @@ export default function ProfileCard({ config, onSaved }: {
     label: string; k: keyof NaukriProfileFields; type?: string; width?: number; hint?: string;
   }) => (
     <label style={{ fontSize: 13, marginBottom: 10, display: 'inline-block', marginRight: 12 }}>
-      <div className="page-info" style={{ marginBottom: 4 }}>
+      <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>
         {label}{hint && <span style={{ opacity: .7 }}> · {hint}</span>}
       </div>
       <input
-        className="input" type={type} style={{ width }}
+        type={type} style={{ width }}
         value={(p[k] as string | number | null) ?? ''}
         onChange={e => set(k, (type === 'number' ? num(e.target.value) : e.target.value) as NaukriProfileFields[typeof k])}
       />
@@ -46,11 +47,7 @@ export default function ProfileCard({ config, onSaved }: {
   );
 
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <i className="ti ti-user" />
-        <strong style={{ flex: 1 }}>Profile</strong>
-      </div>
+    <Card title="Profile" icon="ti-user">
 
       <div>
         <Field label="Full name" k="fullName" />
@@ -73,14 +70,14 @@ export default function ProfileCard({ config, onSaved }: {
       </div>
 
       <label style={{ display: 'block', fontSize: 13, marginBottom: 10 }}>
-        <div className="page-info" style={{ marginBottom: 4 }}>Preferred locations</div>
-        <input className="input" style={{ width: '100%' }} placeholder="comma separated"
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Preferred locations</div>
+        <input type="text" style={{ width: '100%' }} placeholder="comma separated"
           value={(p.preferredLocations || []).join(', ')}
           onChange={e => set('preferredLocations', toList(e.target.value))} />
       </label>
       <label style={{ display: 'block', fontSize: 13, marginBottom: 10 }}>
-        <div className="page-info" style={{ marginBottom: 4 }}>Skills</div>
-        <input className="input" style={{ width: '100%' }} placeholder="comma separated"
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Skills</div>
+        <input type="text" style={{ width: '100%' }} placeholder="comma separated"
           value={(p.skills || []).join(', ')}
           onChange={e => set('skills', toList(e.target.value))} />
       </label>
@@ -91,10 +88,10 @@ export default function ProfileCard({ config, onSaved }: {
         Willing to relocate
       </label>
 
-      {msg && <div className="page-info" style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
+      {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 8 }}>{msg}</div>}
       <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
         {saving ? 'Saving…' : 'Save profile'}
       </button>
-    </div>
+    </Card>
   );
 }

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { NaukriOverview } from '../../../lib/api';
+import { Card, Muted } from '../ui';
 import { queueNaukriRunApi, updateNaukriConfigApi } from '../../../lib/api';
 import { fmtTime } from '../format';
 
@@ -14,10 +15,10 @@ function Line({ ok, label, fix }: { ok: boolean; label: string; fix?: string }) 
   return (
     <div style={{ display: 'flex', gap: 8, alignItems: 'flex-start', padding: '5px 0', fontSize: 13 }}>
       <i className={`ti ti-${ok ? 'circle-check' : 'circle-x'}`}
-         style={{ color: ok ? 'var(--ok, #16a34a)' : 'var(--danger, #dc2626)', fontSize: 15, marginTop: 1 }} />
+         style={{ color: ok ? 'var(--green)' : 'var(--red)', fontSize: 15, marginTop: 1 }} />
       <span>
         {label}
-        {!ok && fix && <div className="page-info" style={{ fontSize: 12 }}>{fix}</div>}
+        {!ok && fix && <div style={{ color: 'var(--text2)', fontSize: 12 }}>{fix}</div>}
       </span>
     </div>
   );
@@ -50,12 +51,8 @@ export default function ConnectionCard({ overview, onChanged }: {
   };
 
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <i className="ti ti-plug-connected" />
-        <strong style={{ flex: 1 }}>Connection</strong>
-        {w.lastSeenAt && <span className="page-info">last seen {fmtTime(w.lastSeenAt)}</span>}
-      </div>
+    <Card title="Connection" icon="ti-plug-connected"
+      right={w.lastSeenAt ? <Muted>last seen {fmtTime(w.lastSeenAt)}</Muted> : null}>
 
       <Line ok={w.everSeen && w.online} label={w.host ? `Worker running on ${w.host}` : 'Worker running'}
             fix={w.everSeen
@@ -67,7 +64,7 @@ export default function ConnectionCard({ overview, onChanged }: {
             fix="Open naukri.com inside the debug Chrome window and log in. The cookie persists across reboots; no password is ever stored here." />
 
       {overview.blockedUntil && (
-        <div style={{ fontSize: 12, color: 'var(--danger, #dc2626)', marginTop: 8 }}>
+        <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 8 }}>
           Blocked until {fmtTime(overview.blockedUntil)} — {overview.blockedReason}
         </div>
       )}
@@ -80,7 +77,7 @@ export default function ConnectionCard({ overview, onChanged }: {
           {overview.paused ? 'Resume' : 'Pause all'}
         </button>
       </div>
-      {msg && <div className="page-info" style={{ fontSize: 12, marginTop: 8 }}>{msg}</div>}
-    </div>
+      {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginTop: 8 }}>{msg}</div>}
+    </Card>
   );
 }

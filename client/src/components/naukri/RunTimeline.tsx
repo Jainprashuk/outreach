@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { NaukriRun } from '../../lib/api';
 import { fmtRunTime, elapsed } from './format';
+import { Muted, Empty } from './ui';
 
 // The PAST band: what already happened, newest first, each row expandable.
 //
@@ -55,26 +56,26 @@ function Row({ run }: { run: NaukriRun }) {
         <span className={`badge ${BADGE[run.status]}`}>{run.status}</span>
         <i className={`ti ${KIND_ICON[run.kind] || 'ti-point'}`} style={{ fontSize: 14, color: 'var(--text2)' }} />
         <span style={{ minWidth: 70, fontSize: 13 }}>{run.kind}</span>
-        <span className="page-info" style={{ minWidth: 120 }}>{fmtRunTime(run.createdAt)}</span>
-        <span className="page-info" style={{ flex: 1, minWidth: 160 }}>{summary(run)}</span>
-        {run.trigger === 'scheduled' && <span className="page-info">scheduled</span>}
+        <Muted style={{ minWidth: 118 }}>{fmtRunTime(run.createdAt)}</Muted>
+        <Muted style={{ flex: 1, minWidth: 150 }}>{summary(run)}</Muted>
+        {run.trigger === 'scheduled' && <Muted>scheduled</Muted>}
         {hasDetail && <i className={`ti ti-chevron-${open ? 'up' : 'down'}`} style={{ fontSize: 14, color: 'var(--text2)' }} />}
       </div>
 
       {open && (
         <div style={{ padding: '2px 0 12px 12px', borderLeft: '2px solid var(--border)', marginLeft: 4 }}>
           {run.error && (
-            <div style={{ fontSize: 12, color: 'var(--danger, #dc2626)', whiteSpace: 'pre-wrap', marginBottom: 8 }}>
+            <div style={{ fontSize: 12, color: 'var(--red)', whiteSpace: 'pre-wrap', marginBottom: 8, lineHeight: 1.6 }}>
               {run.error}
             </div>
           )}
           {run.results.map((r, i) => (
             <div key={i} style={{ display: 'flex', gap: 8, fontSize: 12, padding: '3px 0', flexWrap: 'wrap' }}>
-              <span style={{ minWidth: 60, color: r.outcome === 'applied' ? 'var(--ok, #16a34a)' : 'var(--text2)' }}>
+              <span style={{ minWidth: 62, color: r.outcome === 'applied' ? 'var(--green)' : 'var(--text2)' }}>
                 {r.outcome}
               </span>
               <span style={{ minWidth: 200 }}>{r.title}{r.company ? ` · ${r.company}` : ''}</span>
-              <span className="page-info" style={{ flex: 1 }}>{r.reason}</span>
+              <Muted style={{ flex: 1 }}>{r.reason}</Muted>
             </div>
           ))}
         </div>
@@ -85,7 +86,7 @@ function Row({ run }: { run: NaukriRun }) {
 
 export default function RunTimeline({ runs }: { runs: NaukriRun[] }) {
   if (!runs.length) {
-    return <div className="page-info" style={{ padding: '10px 0' }}>Nothing has run yet.</div>;
+    return <Empty icon="ti-history">Nothing has run yet.</Empty>;
   }
   return <div>{runs.map(r => <Row key={r.id} run={r} />)}</div>;
 }
@@ -102,27 +103,27 @@ export function ActiveRun({ run, onCancel }: { run: NaukriRun; onCancel?: () => 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
         <span className="badge badge-pending">{run.status}</span>
         <strong style={{ fontSize: 13 }}>{run.kind}</strong>
-        <span className="page-info">running {elapsed(run.claimedAt)}</span>
+        <Muted>running {elapsed(run.claimedAt)}</Muted>
         {run.dryRun && <span className="badge badge-queued">dry run</span>}
         {onCancel && run.status === 'queued' && (
-          <button className="btn btn-sm" onClick={onCancel} style={{ marginLeft: 'auto' }}>Cancel</button>
+          <button className="btn btn-xs" type="button" onClick={onCancel} style={{ marginLeft: 'auto' }}>Cancel</button>
         )}
       </div>
 
-      {pct !== null && (
-        <div style={{ height: 6, background: 'var(--bg2)', borderRadius: 3, margin: '10px 0 6px', overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, height: '100%', background: 'var(--accent)', transition: 'width .3s' }} />
-        </div>
-      )}
-
-      <div className="page-info" style={{ fontSize: 12 }}>
-        {p.label && <span>{p.phase ? `${p.phase}: ` : ''}{p.label}</span>}
-        {p.pagesTotal > 0 && <span> · {p.page} / {p.pagesTotal}</span>}
+      <div className="progress-bar" style={{ margin: '10px 0 7px' }}>
+        {pct === null
+          ? <div className="progress-fill progress-indeterminate" />
+          : <div className="progress-fill" style={{ width: `${pct}%` }} />}
       </div>
 
-      <div className="page-info" style={{ fontSize: 12, marginTop: 2 }}>
-        {run.kind === 'harvest' && <span>{p.found} found · {p.new} new</span>}
-        {run.kind === 'apply' && <span>{p.applied} applied · {p.skipped} skipped · {p.failed} failed</span>}
+      <Muted>
+        {p.label && <>{p.phase ? `${p.phase}: ` : ''}{p.label}</>}
+        {p.pagesTotal > 0 && <> · {p.page} / {p.pagesTotal}</>}
+      </Muted>
+
+      <div style={{ marginTop: 3 }}>
+        {run.kind === 'harvest' && <Muted>{p.found} found · {p.new} new</Muted>}
+        {run.kind === 'apply' && <Muted>{p.applied} applied · {p.skipped} skipped · {p.failed} failed</Muted>}
       </div>
     </div>
   );

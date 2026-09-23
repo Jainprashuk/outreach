@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { NaukriConfig, NaukriSearch } from '../../../lib/api';
+import { Card } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 
 // What the harvest walks.
@@ -39,30 +40,28 @@ export default function SearchesCard({ config, onSaved }: {
   };
 
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
-        <i className="ti ti-search" />
-        <strong style={{ flex: 1 }}>Searches</strong>
-        <button className="btn btn-sm" onClick={() => setRows(r => [...r, blank()])}>Add</button>
-      </div>
+    <Card title="Searches" icon="ti-search"
+      right={<button className="btn btn-xs" type="button" onClick={() => setRows(r => [...r, blank()])}>
+        <i className="ti ti-plus" /> Add
+      </button>}>
 
       {rows.map((row, i) => (
         <div key={i} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-            <input
-              className="input" placeholder="Label (optional)" value={row.label}
+            <input type="text"
+              placeholder="Label (optional)" value={row.label}
               onChange={e => patch(i, { label: e.target.value })} style={{ width: 140 }}
             />
-            <input
-              className="input" placeholder="Keywords, e.g. backend developer" value={row.keywords}
+            <input type="text"
+              placeholder="Keywords, e.g. backend developer" value={row.keywords}
               onChange={e => patch(i, { keywords: e.target.value })} style={{ flex: 1, minWidth: 180 }}
             />
-            <input
-              className="input" placeholder="Location" value={row.location}
+            <input type="text"
+              placeholder="Location" value={row.location}
               onChange={e => patch(i, { location: e.target.value })} style={{ width: 130 }}
             />
             <input
-              className="input" type="number" min={0} max={50} placeholder="Exp"
+              type="number" min={0} max={50} placeholder="Exp"
               value={row.experienceYears ?? ''}
               onChange={e => patch(i, { experienceYears: e.target.value === '' ? null : Number(e.target.value) })}
               style={{ width: 70 }}
@@ -75,8 +74,8 @@ export default function SearchesCard({ config, onSaved }: {
               <i className="ti ti-trash" />
             </button>
           </div>
-          <input
-            className="input" placeholder="…or paste a Naukri search URL (overrides the fields above)"
+          <input type="text"
+            placeholder="…or paste a Naukri search URL (overrides the fields above)"
             value={row.url} onChange={e => patch(i, { url: e.target.value })}
             style={{ width: '100%', marginTop: 6, fontSize: 12 }}
           />
@@ -88,10 +87,10 @@ export default function SearchesCard({ config, onSaved }: {
         Also walk Naukri&apos;s recommended jobs
       </label>
 
-      {msg && <div className="page-info" style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
+      {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 8 }}>{msg}</div>}
       <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>
         {saving ? 'Saving…' : 'Save searches'}
       </button>
-    </div>
+    </Card>
   );
 }

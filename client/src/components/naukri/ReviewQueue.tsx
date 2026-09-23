@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { NaukriJob } from '../../lib/api';
 import { listNaukriJobsApi, decideNaukriJobsApi } from '../../lib/api';
+import { Card, Muted, Hint, Empty } from './ui';
 
 // The approval queue — the only place in this system that authorises an
 // application.
@@ -11,7 +12,7 @@ import { listNaukriJobsApi, decideNaukriJobsApi } from '../../lib/api';
 // Approving is deliberately the heavier-weight action of the two.
 
 const ageTone = (s: string) =>
-  /hour|today|just now/i.test(s) ? 'var(--ok, #16a34a)' : 'var(--text2)';
+  /hour|today|just now/i.test(s) ? 'var(--green)' : 'var(--text2)';
 
 function Row({ job, selected, onToggle }: {
   job: NaukriJob; selected: boolean; onToggle: () => void;
@@ -32,16 +33,16 @@ function Row({ job, selected, onToggle }: {
              style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>
             {job.title}
           </a>
-          <span className="page-info">{job.company}</span>
+          <span style={{ color: 'var(--text2)', fontSize: 12 }}>{job.company}</span>
         </div>
-        <div className="page-info" style={{ fontSize: 12, marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {exp && <span>{exp}</span>}
           {job.location && <span style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.location}</span>}
           {job.salaryText && <span>{job.salaryText}</span>}
           <span style={{ color: ageTone(job.postedText) }}>{job.postedText}</span>
         </div>
         {job.tags.length > 0 && (
-          <div className="page-info" style={{ fontSize: 11, marginTop: 3 }}>
+          <div style={{ color: 'var(--text2)', fontSize: 11, marginTop: 3 }}>
             {job.tags.slice(0, 6).join(' · ')}
           </div>
         )}
@@ -95,20 +96,18 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
     finally { setBusy(false); }
   };
 
-  if (loading) return <div className="card" style={{ padding: 14 }}><span className="page-info">Loading…</span></div>;
+  if (loading) return <Empty icon="ti-loader">Loading…</Empty>;
 
   if (!jobs.length) {
     return (
-      <div className="card" style={{ padding: 14 }}>
-        <span className="page-info">Nothing waiting. Run a harvest to collect new listings.</span>
-      </div>
+      <Empty icon="ti-checklist">Nothing waiting. Run a harvest to collect new listings.</Empty>
     );
   }
 
   const allSelected = sel.size === jobs.length;
 
   return (
-    <div className="card" style={{ padding: 14 }}>
+    <Card>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
           <input
@@ -117,10 +116,10 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
           />
           Select all
         </label>
-        <span className="page-info">
+        <Muted>
           {sel.size ? `${sel.size} selected` : `${total} awaiting review`}
           {total > jobs.length && ` (showing ${jobs.length})`}
-        </span>
+        </Muted>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
           <button className="btn btn-sm" onClick={() => decide('rejected')} disabled={!sel.size || busy}>
             Reject
@@ -131,15 +130,15 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
         </div>
       </div>
 
-      <div className="page-info" style={{ fontSize: 12, marginBottom: 8 }}>
+      <Hint style={{ marginBottom: 10 }}>
         Approving is the only thing that authorises an application. Nothing is sent until you click it.
-      </div>
+      </Hint>
 
       {msg && <div style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
 
       {jobs.map(j => (
         <Row key={j.id} job={j} selected={sel.has(j.id)} onToggle={() => toggle(j.id)} />
       ))}
-    </div>
+    </Card>
   );
 }

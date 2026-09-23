@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { NaukriConfig } from '../../../lib/api';
+import { Card } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 
 // The caps, and the two switches that decide whether this thing is safe.
@@ -59,42 +60,38 @@ export default function ApplyCard({ config, onSaved }: {
   };
 
   return (
-    <div className="card" style={{ padding: 14, marginBottom: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
-        <i className="ti ti-send" />
-        <strong style={{ flex: 1 }}>Apply behaviour &amp; safety</strong>
-      </div>
+    <Card title="Apply behaviour & safety" icon="ti-send">
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Max per run</div>
-          <input className="input" type="number" min={1} max={20} style={{ width: 100 }}
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Max per run</div>
+          <input type="number" min={1} max={20} style={{ width: 100 }}
             value={a.maxPerRun} onChange={e => set('maxPerRun', Number(e.target.value))} />
         </label>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Max per day</div>
-          <input className="input" type="number" min={1} max={200} style={{ width: 100 }}
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Max per day</div>
+          <input type="number" min={1} max={200} style={{ width: 100 }}
             value={a.maxPerDay} onChange={e => set('maxPerDay', Number(e.target.value))} />
         </label>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Gap min (ms)</div>
-          <input className="input" type="number" min={500} style={{ width: 110 }}
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Gap min (ms)</div>
+          <input type="number" min={500} style={{ width: 110 }}
             value={a.delayMinMs} onChange={e => set('delayMinMs', Number(e.target.value))} />
         </label>
         <label style={{ fontSize: 13 }}>
-          <div className="page-info" style={{ marginBottom: 4 }}>Gap max (ms)</div>
-          <input className="input" type="number" min={500} style={{ width: 110 }}
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Gap max (ms)</div>
+          <input type="number" min={500} style={{ width: 110 }}
             value={a.delayMaxMs} onChange={e => set('delayMaxMs', Number(e.target.value))} />
         </label>
       </div>
-      <div className="page-info" style={{ fontSize: 11, marginBottom: 12 }}>
+      <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 12 }}>
         Max per run is capped at 20 server-side whatever you type here. The gap is randomised between
         every job — a fixed interval is a signature.
       </div>
 
       <label style={{ display: 'block', fontSize: 13, marginBottom: 12 }}>
-        <div className="page-info" style={{ marginBottom: 4 }}>Cover note, where Naukri offers one</div>
-        <textarea className="input" rows={3} style={{ width: '100%' }}
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Cover note, where Naukri offers one</div>
+        <textarea rows={3} style={{ width: '100%' }}
           value={a.coverNote} onChange={e => set('coverNote', e.target.value)} />
       </label>
 
@@ -108,7 +105,7 @@ export default function ApplyCard({ config, onSaved }: {
             onChange={e => setSafetyFlag('dryRun', e.target.checked)} style={{ marginTop: 3 }} />
           <span>
             Dry run
-            <div className="page-info" style={{ fontSize: 11 }}>
+            <div style={{ color: 'var(--text2)', fontSize: 11 }}>
               Walk the whole flow, fill every field, submit nothing, and log what it would have sent.
             </div>
           </span>
@@ -119,7 +116,7 @@ export default function ApplyCard({ config, onSaved }: {
             onChange={e => setSafetyFlag('pauseAll', e.target.checked)} style={{ marginTop: 3 }} />
           <span>
             Pause all
-            <div className="page-info" style={{ fontSize: 11 }}>
+            <div style={{ color: 'var(--text2)', fontSize: 11 }}>
               The kill switch. The worker is handed no work at all while this is on.
             </div>
           </span>
@@ -127,11 +124,11 @@ export default function ApplyCard({ config, onSaved }: {
 
         <div style={{ padding: 10, borderRadius: 6, background: 'var(--bg2)' }}>
           <div style={{ fontSize: 13, marginBottom: 4 }}>
-            Auto-approve: <strong style={{ color: a.autoApproveEnabled ? 'var(--warn, #d97706)' : 'inherit' }}>
+            Auto-approve: <strong style={{ color: a.autoApproveEnabled ? 'var(--orange, var(--text2))' : 'inherit' }}>
               {a.autoApproveEnabled ? 'ON' : 'off'}
             </strong>
           </div>
-          <div className="page-info" style={{ fontSize: 11, marginBottom: 8 }}>
+          <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 8 }}>
             While off, nothing is applied to unless you approve that specific job. Turning it on lets the
             worker send applications on its own, including on a schedule while you are asleep.
           </div>
@@ -146,7 +143,7 @@ export default function ApplyCard({ config, onSaved }: {
             </button>
           ) : (
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <input className="input" placeholder='type: APPLY WITHOUT ME' value={confirm}
+              <input type="text" placeholder='type: APPLY WITHOUT ME' value={confirm}
                 onChange={e => setConfirm(e.target.value)} style={{ flex: 1, minWidth: 170 }} />
               <button className="btn btn-sm" disabled={busy || confirm.trim().toUpperCase() !== 'APPLY WITHOUT ME'}
                 onClick={enableAuto}>Enable</button>
@@ -155,7 +152,7 @@ export default function ApplyCard({ config, onSaved }: {
         </div>
       </div>
 
-      {msg && <div className="page-info" style={{ fontSize: 12, marginTop: 10 }}>{msg}</div>}
-    </div>
+      {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginTop: 10 }}>{msg}</div>}
+    </Card>
   );
 }
