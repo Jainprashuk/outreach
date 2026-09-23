@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { NaukriJob } from '../../lib/api';
 import { listNaukriJobsApi, decideNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty } from './ui';
+import JobFilters, { EMPTY, toQuery, activeCount, type Draft } from './JobFilters';
 
 // The approval queue — the only place in this system that authorises an
 // application.
@@ -54,21 +55,33 @@ function Row({ job, selected, onToggle }: {
 export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [total, setTotal] = useState(0);
+  const [truncated, setTruncated] = useState(false);
+  const [draft, setDraft] = useState<Draft>(EMPTY);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (d: Draft) => {
     setLoading(true);
     try {
-      const r = await listNaukriJobsApi({ approval: 'pending', limit: 100 });
-      setJobs(r.jobs); setTotal(r.total); setSel(new Set());
+      const r = await listNaukriJobsApi({ approval: 'pending', limit: 100, ...toQuery(d) });
+      setJobs(r.jobs); setTotal(r.total); setTruncated(!!r.truncated);
+      // Selection is cleared whenever the visible set changes. Keeping it would
+      // mean approving rows you can no longer see, which is the one mistake this
+      // screen must not make possible.
+      setSel(new Set());
     } catch (e: any) { setMsg(e?.message || 'Could not load the queue'); }
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  // Debounced, because the search box refetches on every keystroke otherwise.
+  // The other controls are in the same effect so one change never fires two
+  // requests.
+  useEffect(() => {
+    const t = setTimeout(() => load(draft), draft.q ? 300 : 0);
+    return () => clearTimeout(t);
+  }, [draft, load]);
 
   const toggle = (id: string) => setSel(s => {
     const next = new Set(s);
@@ -90,41 +103,47 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
           ? `Approved ${r.updated}. Could not start the apply run: ${runErr}`
           : `Approved ${r.updated} — an apply run is queued.`
         : `Rejected ${r.updated}.`);
-      await load();
+      await load(draft);
       onChanged();
     } catch (e: any) { setMsg(e?.message || 'Could not save your decision'); }
     finally { setBusy(false); }
   };
 
-  if (loading) return <Empty icon="ti-loader">Loading…</Empty>;
-
-  if (!jobs.length) {
-    return (
-      <Empty icon="ti-checklist">Nothing waiting. Run a harvest to collect new listings.</Empty>
-    );
-  }
-
-  const allSelected = sel.size === jobs.length;
+  const allSelected = jobs.length > 0 && sel.size === jobs.length;
+  const filtered = activeCount(draft) > 0;
 
   return (
     <Card>
+      <JobFilters
+        draft={draft} onChange={setDraft}
+        total={total} showing={jobs.length} truncated={truncated}
+      />
+
+      {loading && <Muted style={{ display: 'block', marginBottom: 8 }}>Loading…</Muted>}
+
+      {!loading && !jobs.length && (
+        filtered
+          ? <Empty icon="ti-search-off">No jobs match these filters. Clear them to see the rest of the queue.</Empty>
+          : <Empty icon="ti-checklist">Nothing waiting. Run a harvest to collect new listings.</Empty>
+      )}
+
+      {jobs.length > 0 && (<>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
           <input
             type="checkbox" checked={allSelected}
             onChange={() => setSel(allSelected ? new Set() : new Set(jobs.map(j => j.id)))}
           />
-          Select all
+          Select all{filtered ? ' shown' : ''}
         </label>
-        <Muted>
-          {sel.size ? `${sel.size} selected` : `${total} awaiting review`}
-          {total > jobs.length && ` (showing ${jobs.length})`}
-        </Muted>
+        {/* Counts live in the filter bar; this says only what is SELECTED, so
+            the two never disagree about what "all" means under a filter. */}
+        {sel.size > 0 && <Muted>{sel.size} selected</Muted>}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className="btn btn-sm" onClick={() => decide('rejected')} disabled={!sel.size || busy}>
+          <button className="btn btn-sm" type="button" onClick={() => decide('rejected')} disabled={!sel.size || busy}>
             Reject
           </button>
-          <button className="btn btn-sm btn-primary" onClick={() => decide('approved')} disabled={!sel.size || busy}>
+          <button className="btn btn-sm btn-primary" type="button" onClick={() => decide('approved')} disabled={!sel.size || busy}>
             Approve &amp; apply
           </button>
         </div>
@@ -139,6 +158,7 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
       {jobs.map(j => (
         <Row key={j.id} job={j} selected={sel.has(j.id)} onToggle={() => toggle(j.id)} />
       ))}
+      </>)}
     </Card>
   );
 }

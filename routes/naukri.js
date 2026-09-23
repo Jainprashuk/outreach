@@ -6,7 +6,7 @@ const NaukriConfig = require('../models/NaukriConfig');
 const NaukriWorker = require('../models/NaukriWorker');
 const { dueOccurrence, nextOccurrence, kindsFor, parseTime } = require('../lib/naukriSchedule');
 const { resolveAnswer } = require('../lib/naukriAnswers');
-const { applyFilters } = require('../lib/naukriFilters');
+const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = require('../lib/naukriFilters');
 
 const router = express.Router();
 
@@ -500,6 +500,17 @@ router.post('/runs/:id/cancel', async (req, res) => {
 
 // ── Jobs: the review queue and the applied board ───────────────────────────
 
+// Regex-escaped, because the search box is free text and a stray "(" or "+"
+// in a job title would otherwise throw rather than find nothing.
+const rx = (v, max = 100) => new RegExp(str(v, max).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+
+// How many rows the salary/age refinement may consider. Those two live in free
+// text ("8-12 Lacs PA", "3+ weeks ago") and cannot be queried in Mongo, so they
+// are applied in JS after the indexed filters have already cut the set down.
+// The review queue is a daily skim, not an archive, so this ceiling is never
+// reached in practice — and if it were, the count would be honest about it.
+const REFINE_CAP = 1000;
+
 router.get('/jobs', async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -508,16 +519,75 @@ router.get('/jobs', async (req, res) => {
     if (['pending', 'approved', 'rejected'].includes(req.query.approval)) filter.approval = req.query.approval;
     if (req.query.applyStatus === 'any') filter.applyStatus = { $ne: 'none' };
     else if (req.query.applyStatus) filter.applyStatus = req.query.applyStatus;
-    if (req.query.q) filter.$or = [
-      { title: new RegExp(str(req.query.q, 100), 'i') },
-      { company: new RegExp(str(req.query.q, 100), 'i') },
-    ];
 
-    const [jobs, total] = await Promise.all([
-      NaukriJob.find(filter).sort({ lastSeenAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
-      NaukriJob.countDocuments(filter),
-    ]);
-    res.json({ jobs: jobs.map(serialize), total, page, limit, pages: Math.ceil(total / limit) });
+    if (req.query.q) {
+      const r = rx(req.query.q);
+      filter.$or = [{ title: r }, { company: r }, { tags: r }];
+    }
+    if (req.query.location) {
+      // Naukri writes "Bengaluru"; people type "Bangalore". Matching literally
+      // returned one row out of a hundred, which reads as a broken filter.
+      const names = cityVariants(req.query.location);
+      filter.location = names.length > 1
+        ? new RegExp(names.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|'), 'i')
+        : rx(req.query.location);
+    }
+
+    // Experience is a band on both sides, so this keeps a job when the two bands
+    // OVERLAP rather than when the job's band sits inside yours — a "3-8 Yrs"
+    // listing is a real match at 4 years, and requiring containment would hide
+    // most of the board. Same rule as lib/naukriFilters.js, deliberately.
+    const minExp = num(req.query.minExp, { min: 0, max: 50 });
+    const maxExp = num(req.query.maxExp, { min: 0, max: 50 });
+    const bands = [];
+    if (maxExp != null) bands.push({ $or: [{ experienceMin: null }, { experienceMin: { $lte: maxExp } }] });
+    if (minExp != null) bands.push({ $or: [{ experienceMax: null }, { experienceMax: { $gte: minExp } }] });
+    if (bands.length) filter.$and = [...(filter.$and || []), ...bands];
+
+    const SORTS = {
+      newest: { lastSeenAt: -1 },
+      oldest: { lastSeenAt: 1 },
+      experience: { experienceMin: 1, lastSeenAt: -1 },
+      company: { company: 1, lastSeenAt: -1 },
+    };
+    const sort = SORTS[req.query.sort] || SORTS.newest;
+
+    const minSalaryLpa = num(req.query.minSalary, { min: 0, max: 1000 });
+    const maxPostedAgeDays = num(req.query.maxAge, { min: 1, max: 365, integer: true });
+    const needsRefine = minSalaryLpa != null || maxPostedAgeDays != null;
+
+    if (!needsRefine) {
+      const [jobs, total] = await Promise.all([
+        NaukriJob.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).lean(),
+        NaukriJob.countDocuments(filter),
+      ]);
+      return res.json({ jobs: jobs.map(serialize), total, page, limit, pages: Math.ceil(total / limit) });
+    }
+
+    // Salary and posted-age are parsed from Naukri's own words by the same lib
+    // the worker and the Filters preview use, so all three agree on what
+    // "8-12 Lacs PA" and "3+ weeks ago" mean.
+    const rows = await NaukriJob.find(filter).sort(sort).limit(REFINE_CAP).lean();
+    const kept = rows.filter((j) => {
+      if (minSalaryLpa != null) {
+        const lpa = parseSalaryLpa(j.salaryText);
+        // Undisclosed pay is KEPT. Most of Naukri hides it, and dropping those
+        // would empty the queue rather than narrow it.
+        if (lpa != null && lpa < minSalaryLpa) return false;
+      }
+      if (maxPostedAgeDays != null) {
+        const age = parsePostedAgeDays(j.postedText);
+        if (age != null && age > maxPostedAgeDays) return false;
+      }
+      return true;
+    });
+
+    const total = kept.length;
+    const slice = kept.slice((page - 1) * limit, page * limit);
+    res.json({
+      jobs: slice.map(serialize), total, page, limit, pages: Math.ceil(total / limit),
+      truncated: rows.length >= REFINE_CAP,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

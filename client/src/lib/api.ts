@@ -1503,14 +1503,33 @@ export const listNaukriRunsApi = (page = 1, limit = 20, kind?: NaukriRunKind) =>
   apiFetch<{ runs: NaukriRun[]; total: number; page: number; limit: number; pages: number }>(
     `/api/naukri/runs?page=${page}&limit=${limit}${kind ? `&kind=${kind}` : ''}`);
 
-export const listNaukriJobsApi = (params: {
-  approval?: NaukriApproval; applyStatus?: NaukriApplyStatus | 'any'; q?: string;
-  page?: number; limit?: number;
-} = {}) => {
+export interface NaukriJobQuery {
+  approval?: NaukriApproval;
+  applyStatus?: NaukriApplyStatus | 'any';
+  /** Free text over title, company and tags. */
+  q?: string;
+  location?: string;
+  /** Experience bands are kept when they OVERLAP this range, not when contained. */
+  minExp?: number | null;
+  maxExp?: number | null;
+  /** Listings that do not publish pay are kept — most of Naukri hides it. */
+  minSalary?: number | null;
+  maxAge?: number | null;
+  sort?: 'newest' | 'oldest' | 'experience' | 'company';
+  page?: number;
+  limit?: number;
+}
+
+export const listNaukriJobsApi = (params: NaukriJobQuery = {}) => {
   const qs = new URLSearchParams();
-  for (const [k, v] of Object.entries(params)) if (v !== undefined && v !== '') qs.set(k, String(v));
-  return apiFetch<{ jobs: NaukriJob[]; total: number; page: number; limit: number; pages: number }>(
-    `/api/naukri/jobs?${qs.toString()}`);
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+  }
+  return apiFetch<{
+    jobs: NaukriJob[]; total: number; page: number; limit: number; pages: number;
+    /** Set when salary/age refinement hit its scan ceiling, so the count is a floor. */
+    truncated?: boolean;
+  }>(`/api/naukri/jobs?${qs.toString()}`);
 };
 
 /** The authorisation point: approving is what permits an application, and it queues the run. */
