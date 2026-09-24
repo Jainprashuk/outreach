@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { NaukriConfig } from '../../../lib/api';
 import { Card } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
+import { useToast } from '../../../context/ToastContext';
 
 // The caps, and the two switches that decide whether this thing is safe.
 //
@@ -19,6 +20,7 @@ export default function ApplyCard({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
 }) {
   const [a, setA] = useState(config.apply);
+  const toast = useToast();
   const [safety, setSafety] = useState(config.safety);
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
@@ -33,9 +35,9 @@ export default function ApplyCard({ config, onSaved }: {
       // send; echo back what it actually stored rather than what was typed.
       const r = await updateNaukriConfigApi({ apply: a });
       setA(r.config.apply);
-      setMsg(`Saved. Max ${r.config.apply.maxPerRun} per run, ${r.config.apply.maxPerDay} per day.`);
+      { toast(`Saved. Max ${r.config.apply.maxPerRun} per run, ${r.config.apply.maxPerDay} per day.`, 'success'); setMsg(`Saved. Max ${r.config.apply.maxPerRun} per run, ${r.config.apply.maxPerDay} per day.`); };
       onSaved();
-    } catch (e: any) { setMsg(e?.message || 'Could not save'); }
+    } catch (e: any) { toast(e?.message || 'Could not save', 'error'); setMsg(e?.message || 'Could not save'); }
     finally { setBusy(false); }
   };
 
@@ -45,7 +47,7 @@ export default function ApplyCard({ config, onSaved }: {
       setSafety(s => ({ ...s, [k]: v }));
       await updateNaukriConfigApi({ safety: { [k]: v } });
       onSaved();
-    } catch (e: any) { setMsg(e?.message || 'Could not save'); }
+    } catch (e: any) { toast(e?.message || 'Could not save', 'error'); setMsg(e?.message || 'Could not save'); }
     finally { setBusy(false); }
   };
 
@@ -55,7 +57,7 @@ export default function ApplyCard({ config, onSaved }: {
     try {
       await updateNaukriConfigApi({ apply: { ...a, autoApproveEnabled: true } });
       set('autoApproveEnabled', true); setConfirm(''); onSaved();
-    } catch (e: any) { setMsg(e?.message || 'Could not enable'); }
+    } catch (e: any) { toast(e?.message || 'Could not enable', 'error'); setMsg(e?.message || 'Could not enable'); }
     finally { setBusy(false); }
   };
 

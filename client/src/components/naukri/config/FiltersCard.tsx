@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { NaukriConfig, NaukriFilters } from '../../../lib/api';
 import { Card } from '../ui';
 import { updateNaukriConfigApi, previewNaukriFiltersApi } from '../../../lib/api';
+import { useToast } from '../../../context/ToastContext';
 
 // What never reaches your review queue.
 //
@@ -17,6 +18,7 @@ export default function FiltersCard({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
 }) {
   const [f, setF] = useState<NaukriFilters>(config.filters);
+  const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [preview, setPreview] = useState<{
@@ -34,13 +36,13 @@ export default function FiltersCard({ config, onSaved }: {
   const runPreview = async () => {
     setMsg('');
     try { setPreview(await previewNaukriFiltersApi(f)); }
-    catch (e: any) { setMsg(e?.message || 'Could not preview'); }
+    catch (e: any) { toast(e?.message || 'Could not preview', 'error'); setMsg(e?.message || 'Could not preview'); }
   };
 
   const save = async () => {
     setSaving(true); setMsg('');
-    try { await updateNaukriConfigApi({ filters: f }); setMsg('Saved.'); onSaved(); }
-    catch (e: any) { setMsg(e?.message || 'Could not save'); }
+    try { await updateNaukriConfigApi({ filters: f }); { toast('Saved.', 'success'); setMsg('Saved.'); }; onSaved(); }
+    catch (e: any) { toast(e?.message || 'Could not save', 'error'); setMsg(e?.message || 'Could not save'); }
     finally { setSaving(false); }
   };
 

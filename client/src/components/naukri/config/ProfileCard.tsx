@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { NaukriConfig, NaukriProfileFields } from '../../../lib/api';
 import { Card } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
+import { useToast } from '../../../context/ToastContext';
 
 // You, in the form the screening questions ask for.
 //
@@ -16,6 +17,7 @@ export default function ProfileCard({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
 }) {
   const [p, setP] = useState<NaukriProfileFields>(config.profile);
+  const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -26,8 +28,8 @@ export default function ProfileCard({ config, onSaved }: {
 
   const save = async () => {
     setSaving(true); setMsg('');
-    try { await updateNaukriConfigApi({ profile: p }); setMsg('Saved.'); onSaved(); }
-    catch (e: any) { setMsg(e?.message || 'Could not save'); }
+    try { await updateNaukriConfigApi({ profile: p }); { toast('Saved.', 'success'); setMsg('Saved.'); }; onSaved(); }
+    catch (e: any) { toast(e?.message || 'Could not save', 'error'); setMsg(e?.message || 'Could not save'); }
     finally { setSaving(false); }
   };
 

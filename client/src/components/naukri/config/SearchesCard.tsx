@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { NaukriConfig, NaukriSearch } from '../../../lib/api';
 import { Card } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
+import { useToast } from '../../../context/ToastContext';
 
 // What the harvest walks.
 //
@@ -18,6 +19,7 @@ export default function SearchesCard({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
 }) {
   const [rows, setRows] = useState<NaukriSearch[]>(config.searches.length ? config.searches : [blank()]);
+  const toast = useToast();
   const [useRecommended, setUseRecommended] = useState(config.useRecommended);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -33,9 +35,9 @@ export default function SearchesCard({ config, onSaved }: {
       const usable = rows.filter(r => r.keywords.trim() || r.url.trim());
       await updateNaukriConfigApi({ searches: usable, useRecommended });
       setRows(usable.length ? usable : [blank()]);
-      setMsg(`Saved ${usable.length} search${usable.length === 1 ? '' : 'es'}.`);
+      { toast(`Saved ${usable.length} search${usable.length === 1 ? '' : 'es'}.`, 'success'); setMsg(`Saved ${usable.length} search${usable.length === 1 ? '' : 'es'}.`); };
       onSaved();
-    } catch (e: any) { setMsg(e?.message || 'Could not save'); }
+    } catch (e: any) { toast(e?.message || 'Could not save', 'error'); setMsg(e?.message || 'Could not save'); }
     finally { setSaving(false); }
   };
 

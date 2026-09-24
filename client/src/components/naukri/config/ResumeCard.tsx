@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { NaukriConfig } from '../../../lib/api';
 import { Card } from '../ui';
 import { updateNaukriConfigApi, deleteNaukriResumeApi } from '../../../lib/api';
+import { useToast } from '../../../context/ToastContext';
 
 // The file the worker attaches, and the headlines the daily refresh rotates.
 //
@@ -18,6 +19,7 @@ export default function ResumeCard({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
 }) {
   const [variants, setVariants] = useState<string[]>(config.headlineVariants.length ? config.headlineVariants : ['']);
+  const toast = useToast();
   const [resume, setResume] = useState(config.resume || null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -33,16 +35,16 @@ export default function ResumeCard({ config, onSaved }: {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Upload failed');
       setResume(data.resume);
-      setMsg(`Uploaded ${data.resume.filename}.`);
+      { toast(`Uploaded ${data.resume.filename}.`, 'success'); setMsg(`Uploaded ${data.resume.filename}.`); };
       onSaved();
-    } catch (e: any) { setMsg(e?.message || 'Could not upload'); }
+    } catch (e: any) { toast(e?.message || 'Could not upload', 'error'); setMsg(e?.message || 'Could not upload'); }
     finally { setBusy(false); }
   };
 
   const remove = async () => {
     setBusy(true); setMsg('');
-    try { await deleteNaukriResumeApi(); setResume(null); setMsg('Removed.'); onSaved(); }
-    catch (e: any) { setMsg(e?.message || 'Could not remove'); }
+    try { await deleteNaukriResumeApi(); setResume(null); { toast('Removed.', 'info'); setMsg('Removed.'); }; onSaved(); }
+    catch (e: any) { toast(e?.message || 'Could not remove', 'error'); setMsg(e?.message || 'Could not remove'); }
     finally { setBusy(false); }
   };
 
@@ -50,8 +52,8 @@ export default function ResumeCard({ config, onSaved }: {
     setBusy(true); setMsg('');
     try {
       await updateNaukriConfigApi({ headlineVariants: variants.filter(v => v.trim()) });
-      setMsg('Saved.'); onSaved();
-    } catch (e: any) { setMsg(e?.message || 'Could not save'); }
+      { toast('Saved.', 'success'); setMsg('Saved.'); }; onSaved();
+    } catch (e: any) { toast(e?.message || 'Could not save', 'error'); setMsg(e?.message || 'Could not save'); }
     finally { setBusy(false); }
   };
 

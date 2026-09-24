@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { NaukriOverview, NaukriRunKind, NaukriConfig } from '../lib/api';
 import { naukriOverviewApi, naukriConfigApi, queueNaukriRunApi, cancelNaukriRunApi } from '../lib/api';
 import Layout from '../components/Layout';
+import { useToast } from '../context/ToastContext';
 import StatusHeader, { readiness } from '../components/naukri/StatusHeader';
 import RunTimeline, { ActiveRun } from '../components/naukri/RunTimeline';
 import ReviewQueue from '../components/naukri/ReviewQueue';
@@ -46,6 +47,7 @@ export default function Naukri() {
   const [view, setView] = useState<View>('activity');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
 
   const load = useCallback(async () => {
     try { setOverview(await naukriOverviewApi()); setError(''); }
@@ -66,18 +68,34 @@ export default function Naukri() {
 
   useEffect(() => { if (view === 'config' && !config) loadConfig(); }, [view, config, loadConfig]);
 
+  const KIND_TOAST: Record<string, string> = {
+    refresh: 'Refresh queued — your profile will be re-saved on the next worker poll.',
+    harvest: 'Harvest queued — new listings will land in Review.',
+    apply: 'Apply run queued — approved jobs go out on the next worker poll.',
+    probe: 'Probe queued.',
+  };
+
   const start = async (kind: NaukriRunKind) => {
     setBusy(true);
-    try { await queueNaukriRunApi(kind); await load(); }
-    catch (e: any) { setError(e?.message || `Could not start the ${kind} run`); }
-    finally { setBusy(false); }
+    try {
+      await queueNaukriRunApi(kind);
+      // Queueing changes nothing visible until the worker polls, up to twenty
+      // seconds later. Without a toast the button reads as broken.
+      toast(KIND_TOAST[kind] || 'Run queued.', 'success');
+      await load();
+    } catch (e: any) {
+      const m = e?.message || `Could not start the ${kind} run`;
+      toast(m, 'error'); setError(m);
+    } finally { setBusy(false); }
   };
 
   const cancel = async (id: string) => {
     setBusy(true);
-    try { await cancelNaukriRunApi(id); await load(); }
-    catch (e: any) { setError(e?.message || 'Could not cancel'); }
-    finally { setBusy(false); }
+    try { await cancelNaukriRunApi(id); toast('Run cancelled.', 'info'); await load(); }
+    catch (e: any) {
+      const m = e?.message || 'Could not cancel';
+      toast(m, 'error'); setError(m);
+    } finally { setBusy(false); }
   };
 
   if (!overview) {

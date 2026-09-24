@@ -3,6 +3,7 @@ import type { NaukriOverview } from '../../../lib/api';
 import { Card, Muted } from '../ui';
 import { queueNaukriRunApi, updateNaukriConfigApi } from '../../../lib/api';
 import { fmtTime } from '../format';
+import { useToast } from '../../../context/ToastContext';
 
 // Read-only health, plus the two controls that belong next to it: a probe that
 // proves the whole chain end to end, and the kill switch.
@@ -29,15 +30,17 @@ export default function ConnectionCard({ overview, onChanged }: {
 }) {
   const w = overview.worker;
   const [busy, setBusy] = useState(false);
+  const toast = useToast();
   const [msg, setMsg] = useState('');
 
   const probe = async () => {
     setBusy(true); setMsg('');
     try {
       await queueNaukriRunApi('refresh');
-      setMsg('Queued a refresh. Watch it in Activity — it proves the attach, the login and a real save.');
+      const m = 'Test queued — a refresh run proves the attach, the login and a real profile save. Watch it in Activity.';
+      toast(m, 'success'); setMsg(m);
       onChanged();
-    } catch (e: any) { setMsg(e?.message || 'Could not queue the test run'); }
+    } catch (e: any) { const m = e?.message || 'Could not queue the test run'; toast(m, 'error'); setMsg(m); }
     finally { setBusy(false); }
   };
 
@@ -45,8 +48,12 @@ export default function ConnectionCard({ overview, onChanged }: {
     setBusy(true); setMsg('');
     try {
       await updateNaukriConfigApi({ safety: { pauseAll: !overview.paused } });
+      // The kill switch deserves confirmation: its only other visible effect is
+      // buttons quietly going grey.
+      toast(overview.paused ? 'Resumed — runs can start again.' : 'Paused — the worker will be handed no work.',
+        overview.paused ? 'success' : 'info');
       onChanged();
-    } catch (e: any) { setMsg(e?.message || 'Could not change the pause switch'); }
+    } catch (e: any) { const m = e?.message || 'Could not change the pause switch'; toast(m, 'error'); setMsg(m); }
     finally { setBusy(false); }
   };
 

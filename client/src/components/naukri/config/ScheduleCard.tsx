@@ -3,6 +3,7 @@ import type { NaukriSchedule } from '../../../lib/api';
 import { Card, Muted } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 import { fmtTime, DAY_LABELS } from '../format';
+import { useToast } from '../../../context/ToastContext';
 
 // When the worker does things on its own.
 //
@@ -20,6 +21,7 @@ export default function ScheduleCard({
   onSaved: (next: string | null) => void;
 }) {
   const [draft, setDraft] = useState<NaukriSchedule>(schedule);
+  const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
@@ -36,9 +38,13 @@ export default function ScheduleCard({
     setSaving(true); setErr('');
     try {
       const res = await updateNaukriConfigApi({ schedule: draft });
+      toast(draft.enabled && res.nextOccurrence
+        ? `Schedule saved — next run ${new Date(res.nextOccurrence).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}.`
+        : 'Schedule saved — automatic runs are off.', 'success');
       onSaved(res.nextOccurrence);
     } catch (e: any) {
-      setErr(e?.message || 'Could not save the schedule');
+      const m = e?.message || 'Could not save the schedule';
+      toast(m, 'error'); setErr(m);
     } finally {
       setSaving(false);
     }

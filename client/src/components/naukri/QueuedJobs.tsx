@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { NaukriJob, NaukriOverview } from '../../lib/api';
 import { listNaukriJobsApi, decideNaukriJobsApi, queueNaukriRunApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty, Notice } from './ui';
+import { useToast } from '../../context/ToastContext';
 import { fmtTime, fmtRunTime } from './format';
 
 // Approved, and still waiting to be applied to.
@@ -51,6 +52,7 @@ export default function QueuedJobs({ overview, onChanged }: {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const toast = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -68,16 +70,32 @@ export default function QueuedJobs({ overview, onChanged }: {
 
   const applyNow = async () => {
     setBusy(true); setMsg('');
-    try { await queueNaukriRunApi('apply'); setMsg('Apply run queued.'); onChanged(); }
-    catch (e: any) { setMsg(e?.message || 'Could not start the run'); }
-    finally { setBusy(false); }
+    try {
+      await queueNaukriRunApi('apply');
+      // A toast, not just inline text: the button is at the top of a long list,
+      // and queueing a run produces no other visible change until the worker
+      // picks it up — which can be twenty seconds away. Without this the click
+      // looks like it did nothing.
+      const n = Math.min(jobs.length, 20);
+      toast(`Apply run queued — ${n} job${n === 1 ? '' : 's'} will go out on the next worker poll.`, 'success');
+      onChanged();
+    } catch (e: any) {
+      const m = e?.message || 'Could not start the run';
+      toast(m, 'error');
+      setMsg(m);
+    } finally { setBusy(false); }
   };
 
   const unapprove = async (id: string) => {
     setBusy(true);
-    try { await decideNaukriJobsApi([id], 'pending'); await load(); onChanged(); }
-    catch (e: any) { setMsg(e?.message || 'Could not un-approve'); }
-    finally { setBusy(false); }
+    try {
+      await decideNaukriJobsApi([id], 'pending');
+      toast('Moved back to Review.', 'info');
+      await load(); onChanged();
+    } catch (e: any) {
+      const m = e?.message || 'Could not un-approve';
+      toast(m, 'error'); setMsg(m);
+    } finally { setBusy(false); }
   };
 
   if (loading) return <Empty icon="ti-loader">Loading…</Empty>;

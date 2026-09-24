@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { NaukriConfig, NaukriAnswer } from '../../../lib/api';
 import { Card } from '../ui';
 import { updateNaukriConfigApi, testNaukriAnswerApi, naukriUnknownQuestionsApi } from '../../../lib/api';
+import { useToast } from '../../../context/ToastContext';
 
 // How the worker answers Naukri's screening questions.
 //
@@ -28,6 +29,7 @@ export default function AnswerBank({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
 }) {
   const [rows, setRows] = useState<NaukriAnswer[]>(config.answers.length ? config.answers : [blank()]);
+  const toast = useToast();
   const [onUnknown, setOnUnknown] = useState(config.onUnknownQuestion);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -57,9 +59,9 @@ export default function AnswerBank({ config, onSaved }: {
       const usable = rows.filter(r => r.pattern.trim());
       await updateNaukriConfigApi({ answers: usable, onUnknownQuestion: onUnknown });
       setRows(usable.length ? usable : [blank()]);
-      setMsg(`Saved ${usable.length} rule${usable.length === 1 ? '' : 's'}.`);
+      { toast(`Saved ${usable.length} rule${usable.length === 1 ? '' : 's'}.`, 'success'); setMsg(`Saved ${usable.length} rule${usable.length === 1 ? '' : 's'}.`); };
       onSaved();
-    } catch (e: any) { setMsg(e?.message || 'Could not save'); }
+    } catch (e: any) { toast(e?.message || 'Could not save', 'error'); setMsg(e?.message || 'Could not save'); }
     finally { setSaving(false); }
   };
 

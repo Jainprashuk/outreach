@@ -3,6 +3,7 @@ import type { NaukriJob } from '../../lib/api';
 import { listNaukriJobsApi, decideNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty } from './ui';
 import JobFilters, { EMPTY, toQuery, activeCount, type Draft } from './JobFilters';
+import { useToast } from '../../context/ToastContext';
 
 // The approval queue — the only place in this system that authorises an
 // application.
@@ -57,6 +58,7 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
   const [draft, setDraft] = useState<Draft>(EMPTY);
+  const toast = useToast();
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
@@ -98,15 +100,23 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
       // (paused, blocked, one already active). Say so — the approvals are saved
       // either way, and silently doing nothing would look like a bug.
       const runErr = r.run && 'error' in r.run ? r.run.error : null;
-      setMsg(decision === 'approved'
+      // Approving is the single most consequential click on this screen, and the
+      // rows simply vanish from the list afterwards — so say what happened, and
+      // say it loudly when the run could NOT be queued, since the approvals are
+      // saved either way and silence would read as "nothing sent".
+      const text = decision === 'approved'
         ? runErr
-          ? `Approved ${r.updated}. Could not start the apply run: ${runErr}`
-          : `Approved ${r.updated} — an apply run is queued.`
-        : `Rejected ${r.updated}.`);
+          ? `Approved ${r.updated}, but the apply run did not start: ${runErr}`
+          : `Approved ${r.updated} — apply run queued.`
+        : `Rejected ${r.updated}.`;
+      toast(text, decision === 'approved' && runErr ? 'error' : 'success');
+      setMsg(text);
       await load(draft);
       onChanged();
-    } catch (e: any) { setMsg(e?.message || 'Could not save your decision'); }
-    finally { setBusy(false); }
+    } catch (e: any) {
+      const m = e?.message || 'Could not save your decision';
+      toast(m, 'error'); setMsg(m);
+    } finally { setBusy(false); }
   };
 
   const allSelected = jobs.length > 0 && sel.size === jobs.length;

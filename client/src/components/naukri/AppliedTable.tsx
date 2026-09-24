@@ -3,6 +3,7 @@ import type { NaukriJob, NaukriApplyStatus } from '../../lib/api';
 import { listNaukriJobsApi, updateNaukriJobApi } from '../../lib/api';
 import { Card, Muted, Empty } from './ui';
 import { fmtRunTime } from './format';
+import { useToast } from '../../context/ToastContext';
 
 // Everything that left, and where it got to.
 //
@@ -25,6 +26,7 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState('');
+  const toast = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -39,8 +41,9 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
     try {
       await updateNaukriJobApi(id, { applyStatus });
       setJobs(j => j.map(x => (x.id === id ? { ...x, applyStatus } : x)));
+      toast(`Moved to ${applyStatus}.`, 'success');
       onChanged();
-    } catch (e: any) { setMsg(e?.message || 'Could not update'); }
+    } catch (e: any) { const m = e?.message || 'Could not update'; toast(m, 'error'); setMsg(m); }
   };
 
   if (loading) return <Empty icon="ti-loader">Loading…</Empty>;
