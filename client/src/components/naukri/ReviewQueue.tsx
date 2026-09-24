@@ -63,6 +63,7 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [total, setTotal] = useState(0);
   const [truncated, setTruncated] = useState(false);
+  const [typeCounts, setTypeCounts] = useState<{ all: number; external: number; native: number } | undefined>();
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const toast = useToast();
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -74,7 +75,7 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
     setLoading(true);
     try {
       const r = await listNaukriJobsApi({ approval: 'pending', limit: 100, ...toQuery(d) });
-      setJobs(r.jobs); setTotal(r.total); setTruncated(!!r.truncated);
+      setJobs(r.jobs); setTotal(r.total); setTruncated(!!r.truncated); setTypeCounts(r.typeCounts);
       // Selection is cleared whenever the visible set changes. Keeping it would
       // mean approving rows you can no longer see, which is the one mistake this
       // screen must not make possible.
@@ -132,7 +133,7 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
     <Card>
       <JobFilters
         draft={draft} onChange={setDraft}
-        total={total} showing={jobs.length} truncated={truncated}
+        total={total} showing={jobs.length} truncated={truncated} typeCounts={typeCounts}
       />
 
       {loading && <Muted style={{ display: 'block', marginBottom: 8 }}>Loading…</Muted>}

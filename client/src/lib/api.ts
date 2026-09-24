@@ -1527,8 +1527,9 @@ export interface NaukriJobQuery {
   minSalary?: number | null;
   maxAge?: number | null;
   sort?: 'newest' | 'oldest' | 'experience' | 'company';
-  /** '1' hides employers already known to apply on their own site. */
-  hideExternal?: '1';
+  /** Filter by how the job is applied to: 'native' (not a known company-site
+      employer) or 'external' (one that is). A prediction, not a guarantee. */
+  applyType?: 'native' | 'external';
   page?: number;
   limit?: number;
 }
@@ -1542,6 +1543,8 @@ export const listNaukriJobsApi = (params: NaukriJobQuery = {}) => {
     jobs: NaukriJob[]; total: number; page: number; limit: number; pages: number;
     /** Set when salary/age refinement hit its scan ceiling, so the count is a floor. */
     truncated?: boolean;
+    /** Sizes for the apply-type chips, ignoring the type facet itself. */
+    typeCounts?: { all: number; external: number; native: number };
   }>(`/api/naukri/jobs?${qs.toString()}`);
 };
 

@@ -54,12 +54,15 @@ export default function QueuedJobs({ overview, onChanged }: {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [type, setType] = useState<'' | 'native' | 'external'>('');
+  const [counts, setCounts] = useState<{ all: number; external: number; native: number } | undefined>();
   const toast = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await listNaukriJobsApi({ approval: 'approved', limit: 200 });
+      const r = await listNaukriJobsApi({ approval: 'approved', limit: 200, applyType: type || undefined });
+      setCounts(r.typeCounts);
       // Split by whether a run can still act on them. Showing the two together
       // is what made "80 approved" look like 80 that would be applied to.
       // Skips are excluded here — they have their own tab, and mixing them made
@@ -71,7 +74,7 @@ export default function QueuedJobs({ overview, onChanged }: {
       setSel(new Set());
     } catch (e: any) { setMsg(e?.message || 'Could not load'); }
     finally { setLoading(false); }
-  }, []);
+  }, [type]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -163,6 +166,26 @@ export default function QueuedJobs({ overview, onChanged }: {
           </Hint>
 
           {msg && <Muted style={{ display: 'block', marginBottom: 8 }}>{msg}</Muted>}
+
+          {/* The same chips as Review, because this is where they pay off: most
+              of a queue can be employers that hand off to their own site, and
+              the useful move is to select those and set them aside in one go. */}
+          {counts && (
+            <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+              {([
+                ['', 'All', counts.all, 'ti-list'],
+                ['native', 'Naukri apply', counts.native, 'ti-bolt'],
+                ['external', 'Company site', counts.external, 'ti-external-link'],
+              ] as const).map(([value, label, n, icon]) => (
+                <button key={value || 'all'} type="button"
+                  onClick={() => { setType(value as typeof type); setSel(new Set()); }}
+                  className={`btn btn-sm${type === value ? ' btn-primary' : ''}`}>
+                  <i className={`ti ${icon}`} style={{ marginRight: 5 }} />{label}
+                  <span className="contact-count-badge" style={{ marginLeft: 6 }}>{n}</span>
+                </button>
+              ))}
+            </div>
+          )}
 
           <SelectionBar
             ids={jobs.map(j => j.id)} selected={sel} onChange={setSel}

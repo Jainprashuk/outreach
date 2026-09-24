@@ -578,9 +578,14 @@ router.get('/jobs', async (req, res) => {
       const r = rx(req.query.q);
       filter.$or = [{ title: r }, { company: r }, { tags: r }];
     }
-    // Lets the review queue hide employers already known to apply on their own
-    // site, so you stop spending approvals on jobs that will only be skipped.
-    if (req.query.hideExternal === '1') filter.likelyExternal = { $ne: true };
+    // Which kind of apply. `external` means the employer has been seen handing
+    // off to their own site before; `native` means they have not — a prediction,
+    // not a guarantee, which is why the UI never calls it "will apply".
+    // hideExternal is the older spelling of applyType=native, still accepted.
+    if (req.query.applyType === 'external') filter.likelyExternal = true;
+    else if (req.query.applyType === 'native' || req.query.hideExternal === '1') {
+      filter.likelyExternal = { $ne: true };
+    }
     if (req.query.location) {
       // Naukri writes "Bengaluru"; people type "Bangalore". Matching literally
       // returned one row out of a hundred, which reads as a broken filter.
@@ -613,12 +618,27 @@ router.get('/jobs', async (req, res) => {
     const maxPostedAgeDays = num(req.query.maxAge, { min: 1, max: 365, integer: true });
     const needsRefine = minSalaryLpa != null || maxPostedAgeDays != null;
 
+    // Counts for the apply-type chips, computed WITHOUT the type facet so each
+    // chip shows how many it would give you rather than how many match the one
+    // already selected — a chip reading 0 because it is not the active one is
+    // worse than no chip.
+    const typeFilter = { ...filter };
+    delete typeFilter.likelyExternal;
+    const typeCounts = async () => {
+      const [external, all] = await Promise.all([
+        NaukriJob.countDocuments({ ...typeFilter, likelyExternal: true }),
+        NaukriJob.countDocuments(typeFilter),
+      ]);
+      return { all, external, native: all - external };
+    };
+
     if (!needsRefine) {
-      const [jobs, total] = await Promise.all([
+      const [jobs, total, counts] = await Promise.all([
         NaukriJob.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).lean(),
         NaukriJob.countDocuments(filter),
+        typeCounts(),
       ]);
-      return res.json({ jobs: jobs.map(serialize), total, page, limit, pages: Math.ceil(total / limit) });
+      return res.json({ jobs: jobs.map(serialize), total, page, limit, pages: Math.ceil(total / limit), typeCounts: counts });
     }
 
     // Salary and posted-age are parsed from Naukri's own words by the same lib
@@ -644,6 +664,7 @@ router.get('/jobs', async (req, res) => {
     res.json({
       jobs: slice.map(serialize), total, page, limit, pages: Math.ceil(total / limit),
       truncated: rows.length >= REFINE_CAP,
+      typeCounts: await typeCounts(),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

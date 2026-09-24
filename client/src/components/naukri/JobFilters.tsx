@@ -16,13 +16,13 @@ export interface Draft {
   q: string; location: string;
   minExp: string; maxExp: string; minSalary: string; maxAge: string;
   sort: NonNullable<NaukriJobQuery['sort']>;
-  /** Hide employers already seen applying on their own site — the ones a run will only skip. */
-  hideExternal: boolean;
+  /** '' = all. Otherwise only jobs of that apply type. */
+  applyType: '' | 'native' | 'external';
 }
 
 export const EMPTY: Draft = {
   q: '', location: '', minExp: '', maxExp: '', minSalary: '', maxAge: '', sort: 'newest',
-  hideExternal: false,
+  applyType: '',
 };
 
 // Draft -> query, dropping anything blank so the server sees only real filters.
@@ -34,21 +34,22 @@ export function toQuery(d: Draft): NaukriJobQuery {
     minExp: n(d.minExp), maxExp: n(d.maxExp),
     minSalary: n(d.minSalary), maxAge: n(d.maxAge),
     sort: d.sort === 'newest' ? undefined : d.sort,
-    hideExternal: d.hideExternal ? '1' : undefined,
+    applyType: d.applyType || undefined,
   };
 }
 
 export const activeCount = (d: Draft) =>
   (['q', 'location', 'minExp', 'maxExp', 'minSalary', 'maxAge'] as const)
     .filter(k => d[k].trim() !== '').length
-  + (d.sort !== 'newest' ? 1 : 0) + (d.hideExternal ? 1 : 0);
+  + (d.sort !== 'newest' ? 1 : 0) + (d.applyType ? 1 : 0);
 
-export default function JobFilters({ draft, onChange, total, showing, truncated }: {
+export default function JobFilters({ draft, onChange, total, showing, truncated, typeCounts }: {
   draft: Draft;
   onChange: (next: Draft) => void;
   total: number;
   showing: number;
   truncated?: boolean;
+  typeCounts?: { all: number; external: number; native: number };
 }) {
   const [open, setOpen] = useState(false);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => onChange({ ...draft, [k]: v });
@@ -64,6 +65,34 @@ export default function JobFilters({ draft, onChange, total, showing, truncated 
 
   return (
     <div style={{ marginBottom: 12 }}>
+      {/* Apply type, as chips rather than a checkbox buried in the panel below.
+          It is the first thing worth filtering on — roughly half the board hands
+          off to the employer's own site and the worker cannot apply to those —
+          so hiding it behind a disclosure meant nobody found it. */}
+      {typeCounts && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 9, flexWrap: 'wrap', alignItems: 'center' }}>
+          {([
+            ['', 'All', typeCounts.all, 'ti-list'],
+            ['native', 'Naukri apply', typeCounts.native, 'ti-bolt'],
+            ['external', 'Company site', typeCounts.external, 'ti-external-link'],
+          ] as const).map(([value, label, n, icon]) => (
+            <button
+              key={value || 'all'} type="button"
+              onClick={() => set('applyType', value as Draft['applyType'])}
+              className={`btn btn-sm${draft.applyType === value ? ' btn-primary' : ''}`}
+            >
+              <i className={`ti ${icon}`} style={{ marginRight: 5 }} />{label}
+              <span className="contact-count-badge" style={{ marginLeft: 6 }}>{n}</span>
+            </button>
+          ))}
+          <Hint style={{ marginTop: 0, flexBasis: '100%' }}>
+            “Company site” is an employer already seen handing off to their own careers page — the worker
+            cannot apply to those. “Naukri apply” is everything else, which is a prediction rather than a
+            promise: an employer we have not seen do it yet still might.
+          </Hint>
+        </div>
+      )}
+
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         <input
           type="text" placeholder="Search title, company or skill…"
@@ -118,19 +147,6 @@ export default function JobFilters({ draft, onChange, total, showing, truncated 
               type="text" placeholder="e.g. Gurugram" value={draft.location}
               onChange={e => set('location', e.target.value)} style={{ width: '100%' }}
             />
-          </label>
-
-          <label style={{ flexBasis: '100%', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
-            <input type="checkbox" checked={draft.hideExternal}
-              onChange={e => set('hideExternal', e.target.checked as Draft['hideExternal'])}
-              style={{ width: 15, height: 15, marginTop: 2 }} />
-            <span style={{ fontSize: 13 }}>
-              Hide jobs that apply on the company site
-              <Hint>
-                Employers already seen doing this. The worker cannot apply to those, so approving them
-                only spends a run. It is a prediction from past skips, not a guarantee.
-              </Hint>
-            </span>
           </label>
 
           <Hint style={{ flexBasis: '100%', marginTop: 0 }}>
