@@ -30,7 +30,9 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setJobs((await listNaukriJobsApi({ applyStatus: 'any', limit: 200 })).jobs); }
+    // 'sent', not 'any': a board called Applied must not list jobs the worker
+    // skipped or failed on. Those have their own tab.
+    try { setJobs((await listNaukriJobsApi({ applyStatus: 'sent', limit: 200 })).jobs); }
     catch (e: any) { setMsg(e?.message || 'Could not load'); }
     finally { setLoading(false); }
   }, []);

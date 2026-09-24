@@ -8,6 +8,7 @@ import RunTimeline, { ActiveRun } from '../components/naukri/RunTimeline';
 import ReviewQueue from '../components/naukri/ReviewQueue';
 import AppliedTable from '../components/naukri/AppliedTable';
 import QueuedJobs from '../components/naukri/QueuedJobs';
+import SkippedJobs from '../components/naukri/SkippedJobs';
 import ConnectionCard from '../components/naukri/config/ConnectionCard';
 import ScheduleCard from '../components/naukri/config/ScheduleCard';
 import SearchesCard from '../components/naukri/config/SearchesCard';
@@ -31,12 +32,13 @@ import { fmtTime } from '../components/naukri/format';
 
 const POLL_MS = 3000;
 
-type View = 'activity' | 'review' | 'queued' | 'applied' | 'config';
+type View = 'activity' | 'review' | 'queued' | 'skipped' | 'applied' | 'config';
 
 const TABS: Array<[View, string, string]> = [
   ['activity', 'Activity', 'ti-activity'],
   ['review', 'Review', 'ti-checklist'],
   ['queued', 'Waiting', 'ti-hourglass'],
+  ['skipped', 'Skipped', 'ti-player-skip-forward'],
   ['applied', 'Applied', 'ti-send'],
   ['config', 'Configuration', 'ti-settings'],
 ];
@@ -111,6 +113,7 @@ export default function Naukri() {
   const counts: Partial<Record<View, number>> = {
     review: overview.reviewCount,
     queued: overview.waitingCount,
+    skipped: overview.skippedCount,
     applied: overview.appliedCount,
   };
 
@@ -229,6 +232,8 @@ export default function Naukri() {
       {view === 'review' && <ReviewQueue onChanged={load} />}
 
       {view === 'queued' && <QueuedJobs overview={overview} onChanged={load} />}
+
+      {view === 'skipped' && <SkippedJobs onChanged={load} />}
 
       {view === 'applied' && <AppliedTable onChanged={load} />}
 

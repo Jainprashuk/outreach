@@ -30,6 +30,15 @@ const BLOCK_MS = 7 * 24 * 3600 * 1000;
 // can act on them.
 const SENT_STATUSES = ['applied', 'in-review', 'interviewing', 'offer', 'rejected'];
 
+// Skips that no future run can turn into an application.
+//
+// The worker also sends `terminal: true` for these, but the SERVER decides,
+// because the worker is a separate process on a machine you update by hand. A
+// worker running last week's code kept reporting company-site skips as ordinary
+// ones, and they went straight back into the queue to be attempted again. The
+// rule belongs where it cannot drift.
+const TERMINAL_SKIP = /applies on the company site|already applied/i;
+
 const RESUME_TYPES = new Set([
   'application/pdf',
   'application/msword',
@@ -114,7 +123,7 @@ const appliedToday = (userId) => {
 router.get('/overview', async (req, res) => {
   try {
     await failStaleRuns(req.userId);
-    const [worker, config, activeRun, queued, history, reviewCount, appliedCount, todayCount, waitingCount] = await Promise.all([
+    const [worker, config, activeRun, queued, history, reviewCount, appliedCount, todayCount, waitingCount, skippedCount] = await Promise.all([
       NaukriWorker.getForUser(req.userId),
       NaukriConfig.getForUser(req.userId),
       NaukriRun.findOne({ userId: req.userId, status: 'running', ...BASE_FILTER }).sort({ createdAt: 1 }).lean(),
@@ -123,18 +132,20 @@ router.get('/overview', async (req, res) => {
       NaukriJob.countDocuments({ userId: req.userId, approval: 'pending', ...BASE_FILTER }),
       NaukriJob.countDocuments({ userId: req.userId, applyStatus: { $in: SENT_STATUSES }, ...BASE_FILTER }),
       appliedToday(req.userId),
-      // Approved and still waiting — the set a future apply run will draw from.
-      // Its own count because "approved" alone is misleading: it also covers
-      // jobs already applied to, and ones parked as never-retryable.
+      // Approved and genuinely queued to be sent. Deliberately excludes skips:
+      // those have been looked at and backed out of, which is a different state
+      // with a different next action, and mixing them made "138 waiting" mean
+      // two unrelated things at once. They have their own tab.
       //
-      // Appended LAST, matching the destructuring above. Adding it in the middle
-      // silently shifted every position after it, so the panel reported the
-      // waiting count as "applied today".
+      // Appended LAST, matching the destructuring above. Adding a query in the
+      // middle silently shifts every position after it — that is how the panel
+      // once reported the waiting count as "applied today".
       NaukriJob.countDocuments({
         userId: req.userId, approval: 'approved',
-        applyStatus: { $in: ['none', 'failed', 'skipped'] },
+        applyStatus: { $in: ['none', 'failed'] },
         retryable: { $ne: false }, ...BASE_FILTER,
       }),
+      NaukriJob.countDocuments({ userId: req.userId, applyStatus: 'skipped', ...BASE_FILTER }),
     ]);
 
     const lastSeenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt) : null;
@@ -158,6 +169,7 @@ router.get('/overview', async (req, res) => {
       appliedCount,
       appliedToday: todayCount,
       waitingCount,
+      skippedCount,
       // Surfaced separately from the config blob so the header can warn about
       // them without the client having to know which fields mean "unsafe".
       paused: !!config.safety.pauseAll,
@@ -547,6 +559,9 @@ router.get('/jobs', async (req, res) => {
       const r = rx(req.query.q);
       filter.$or = [{ title: r }, { company: r }, { tags: r }];
     }
+    // Lets the review queue hide employers already known to apply on their own
+    // site, so you stop spending approvals on jobs that will only be skipped.
+    if (req.query.hideExternal === '1') filter.likelyExternal = { $ne: true };
     if (req.query.location) {
       // Naukri writes "Bengaluru"; people type "Bangalore". Matching literally
       // returned one row out of a hundred, which reads as a broken filter.
@@ -765,6 +780,9 @@ router.post('/claim', async (req, res) => {
         // screening question succeeds once you add the rule, and that loop is
         // the point of surfacing the question in Configuration. 'applied' is
         // absent for the opposite reason — that one has left.
+        // Skips ARE still claimed: one whose question you have since answered
+        // succeeds on the next run. They are excluded from the waiting COUNT
+        // above (different state, different next action), not from the work.
         applyStatus: { $in: ['none', 'failed', 'skipped'] },
         // …but only the ones that CAN succeed. Skips marked terminal (applies on
         // the company site, already applied) would otherwise be re-attempted
@@ -807,6 +825,17 @@ router.post('/ingest', async (req, res) => {
     let created = 0, updated = 0, skipped = 0;
     const now = new Date();
 
+    // Employers already known to hand off to their own site. Apply type is a
+    // property of the employer far more than the role, so this predicts most of
+    // them for free — no extra page loads, no extra traffic to Naukri. Computed
+    // once per ingest call rather than per row.
+    const externalCompanies = new Set(
+      (await NaukriJob.distinct('company', {
+        userId: req.userId, retryable: false,
+        applyNote: TERMINAL_SKIP, ...BASE_FILTER,
+      })).filter(Boolean).map(c => c.toLowerCase())
+    );
+
     for (const raw of jobs.slice(0, 500)) {
       const sourceId = str(raw && raw.sourceId, 100);
       const title = str(raw && raw.title, 300);
@@ -829,6 +858,9 @@ router.post('/ingest', async (req, res) => {
             description: str(raw.description, 5000),
             postedText: str(raw.postedText, 100),
             lastSeenAt: now,
+            // Re-evaluated on every harvest, so a company that turns out to be
+            // external gets its other listings flagged next time round.
+            likelyExternal: externalCompanies.has(str(raw.company, 200).toLowerCase()),
           },
           $setOnInsert: {
             userId: req.userId, sourceId, sourceKey,
@@ -921,7 +953,9 @@ router.post('/result', async (req, res) => {
       // A terminal skip can never succeed — an external ATS, or one Naukri says
       // is already applied to. Marking it keeps the next run from spending its
       // budget re-attempting it instead of reaching the jobs behind it.
-      if (terminal) job.retryable = false;
+      // Inferred from the reason as well as the worker's flag, so an out-of-date
+      // worker cannot quietly reintroduce the loop this prevents.
+      if (terminal || TERMINAL_SKIP.test(str(reason, 500))) job.retryable = false;
       if (outcome === 'applied') job.appliedAt = new Date();
       await job.save();
     }

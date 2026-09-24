@@ -43,6 +43,12 @@ function Row({ job, selected, onToggle }: {
           {job.salaryText && <span>{job.salaryText}</span>}
           <span style={{ color: ageTone(job.postedText) }}>{job.postedText}</span>
         </div>
+        {job.likelyExternal && (
+          <div style={{ fontSize: 11, color: 'var(--red)', marginTop: 2 }}>
+            <i className="ti ti-external-link" style={{ marginRight: 4 }} />
+            likely applies on the company site — the worker will skip this
+          </div>
+        )}
         {job.tags.length > 0 && (
           <div style={{ color: 'var(--text2)', fontSize: 11, marginTop: 3 }}>
             {job.tags.slice(0, 6).join(' · ')}

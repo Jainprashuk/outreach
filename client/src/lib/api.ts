@@ -1378,6 +1378,8 @@ export interface NaukriJob {
   applyNote: string;
   /** False when no future run can succeed on this — an external ATS, or already applied. */
   retryable: boolean;
+  /** Predicted at harvest to apply on the company's own site, from employers already seen doing it. */
+  likelyExternal: boolean;
   /** The screening question that caused a skip — offered as a one-click answer rule. */
   unknownQuestion: string;
   applyHistory: Array<{ at: string; from: string; to: string; note: string }>;
@@ -1477,6 +1479,8 @@ export interface NaukriOverview {
   appliedToday: number;
   /** Approved and still actionable — what a future apply run will draw from. */
   waitingCount: number;
+  /** Reached and backed out of — needs an answer rule, or can never succeed. */
+  skippedCount: number;
   paused: boolean;
   dryRun: boolean;
   autoApprove: boolean;
@@ -1521,6 +1525,8 @@ export interface NaukriJobQuery {
   minSalary?: number | null;
   maxAge?: number | null;
   sort?: 'newest' | 'oldest' | 'experience' | 'company';
+  /** '1' hides employers already known to apply on their own site. */
+  hideExternal?: '1';
   page?: number;
   limit?: number;
 }

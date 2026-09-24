@@ -60,8 +60,10 @@ export default function QueuedJobs({ overview, onChanged }: {
       const r = await listNaukriJobsApi({ approval: 'approved', limit: 200 });
       // Split by whether a run can still act on them. Showing the two together
       // is what made "80 approved" look like 80 that would be applied to.
-      setJobs(r.jobs.filter(j => j.applyStatus !== 'applied' && j.retryable !== false));
-      setParked(r.jobs.filter(j => j.retryable === false));
+      // Skips are excluded here — they have their own tab, and mixing them made
+      // this number mean two unrelated things at once.
+      setJobs(r.jobs.filter(j => (j.applyStatus === 'none' || j.applyStatus === 'failed') && j.retryable !== false));
+      setParked([]);
     } catch (e: any) { setMsg(e?.message || 'Could not load'); }
     finally { setLoading(false); }
   }, []);
@@ -149,9 +151,9 @@ export default function QueuedJobs({ overview, onChanged }: {
                     {i >= perRun ? ` · run ${Math.floor(i / perRun) + 1}` : ' · next run'}
                   </Muted>
                 </div>
-                {job.applyStatus === 'skipped' && job.unknownQuestion && (
-                  <Muted style={{ display: 'block' }}>
-                    will retry — needs an answer rule for “{job.unknownQuestion}”
+                {job.likelyExternal && (
+                  <Muted style={{ display: 'block', color: 'var(--red)' }}>
+                    likely applies on the company site — this employer has before, so it will probably be skipped
                   </Muted>
                 )}
               </div>
@@ -163,21 +165,6 @@ export default function QueuedJobs({ overview, onChanged }: {
         </Card>
       )}
 
-      {parked.length > 0 && (
-        <Card title={`${parked.length} approved but never retried`} icon="ti-circle-off">
-          <Hint style={{ marginTop: 0, marginBottom: 10 }}>
-            These were approved, tried once, and can't succeed — almost always because they apply on
-            the company site. Open them yourself if you still want them.
-          </Hint>
-          {parked.slice(0, 50).map(job => (
-            <div key={job.id} style={{ padding: '6px 0', borderBottom: '0.5px solid var(--border)' }}>
-              <a href={job.url} target="_blank" rel="noreferrer"
-                 style={{ fontSize: 13, color: 'var(--text)' }}>{job.title}</a>
-              <div><Muted>{job.company} · {job.applyNote}</Muted></div>
-            </div>
-          ))}
-        </Card>
-      )}
     </>
   );
 }

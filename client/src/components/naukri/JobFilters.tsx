@@ -16,10 +16,13 @@ export interface Draft {
   q: string; location: string;
   minExp: string; maxExp: string; minSalary: string; maxAge: string;
   sort: NonNullable<NaukriJobQuery['sort']>;
+  /** Hide employers already seen applying on their own site — the ones a run will only skip. */
+  hideExternal: boolean;
 }
 
 export const EMPTY: Draft = {
   q: '', location: '', minExp: '', maxExp: '', minSalary: '', maxAge: '', sort: 'newest',
+  hideExternal: false,
 };
 
 // Draft -> query, dropping anything blank so the server sees only real filters.
@@ -31,12 +34,14 @@ export function toQuery(d: Draft): NaukriJobQuery {
     minExp: n(d.minExp), maxExp: n(d.maxExp),
     minSalary: n(d.minSalary), maxAge: n(d.maxAge),
     sort: d.sort === 'newest' ? undefined : d.sort,
+    hideExternal: d.hideExternal ? '1' : undefined,
   };
 }
 
 export const activeCount = (d: Draft) =>
   (['q', 'location', 'minExp', 'maxExp', 'minSalary', 'maxAge'] as const)
-    .filter(k => d[k].trim() !== '').length + (d.sort !== 'newest' ? 1 : 0);
+    .filter(k => d[k].trim() !== '').length
+  + (d.sort !== 'newest' ? 1 : 0) + (d.hideExternal ? 1 : 0);
 
 export default function JobFilters({ draft, onChange, total, showing, truncated }: {
   draft: Draft;
@@ -113,6 +118,19 @@ export default function JobFilters({ draft, onChange, total, showing, truncated 
               type="text" placeholder="e.g. Gurugram" value={draft.location}
               onChange={e => set('location', e.target.value)} style={{ width: '100%' }}
             />
+          </label>
+
+          <label style={{ flexBasis: '100%', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <input type="checkbox" checked={draft.hideExternal}
+              onChange={e => set('hideExternal', e.target.checked as Draft['hideExternal'])}
+              style={{ width: 15, height: 15, marginTop: 2 }} />
+            <span style={{ fontSize: 13 }}>
+              Hide jobs that apply on the company site
+              <Hint>
+                Employers already seen doing this. The worker cannot apply to those, so approving them
+                only spends a run. It is a prediction from past skips, not a guarantee.
+              </Hint>
+            </span>
           </label>
 
           <Hint style={{ flexBasis: '100%', marginTop: 0 }}>

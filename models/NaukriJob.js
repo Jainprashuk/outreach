@@ -80,6 +80,17 @@ const naukriJobSchema = new mongoose.Schema({
   // silently eating the per-run budget so the jobs actually waiting behind them
   // are never reached. That is not a slow failure; it is a stuck queue.
   retryable:    { type: Boolean, default: true },
+  // Predicted, at harvest time, to apply on the company site rather than on
+  // Naukri — i.e. one this worker will skip.
+  //
+  // It is a prediction, not a fact: the search card says nothing about where
+  // Apply goes, and Naukri offers no facet for it, so the only way to KNOW is
+  // to open the listing. What we can do for free is learn from the ones already
+  // tried: apply type is a property of the employer far more than the role
+  // (17 of the first 38 externals were one company), so a job from an employer
+  // known to do this is flagged on arrival. Labelled, never auto-rejected —
+  // a guess must not silently throw away a job you might want.
+  likelyExternal: { type: Boolean, default: false },
   // The unanswered question text, when applyStatus === 'skipped'. Its own field
   // rather than parsed back out of applyNote, because the config UI queries it.
   unknownQuestion: { type: String, default: '' },
