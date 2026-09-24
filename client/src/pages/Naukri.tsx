@@ -6,6 +6,7 @@ import StatusHeader, { readiness } from '../components/naukri/StatusHeader';
 import RunTimeline, { ActiveRun } from '../components/naukri/RunTimeline';
 import ReviewQueue from '../components/naukri/ReviewQueue';
 import AppliedTable from '../components/naukri/AppliedTable';
+import QueuedJobs from '../components/naukri/QueuedJobs';
 import ConnectionCard from '../components/naukri/config/ConnectionCard';
 import ScheduleCard from '../components/naukri/config/ScheduleCard';
 import SearchesCard from '../components/naukri/config/SearchesCard';
@@ -29,11 +30,12 @@ import { fmtTime } from '../components/naukri/format';
 
 const POLL_MS = 3000;
 
-type View = 'activity' | 'review' | 'applied' | 'config';
+type View = 'activity' | 'review' | 'queued' | 'applied' | 'config';
 
 const TABS: Array<[View, string, string]> = [
   ['activity', 'Activity', 'ti-activity'],
   ['review', 'Review', 'ti-checklist'],
+  ['queued', 'Waiting', 'ti-hourglass'],
   ['applied', 'Applied', 'ti-send'],
   ['config', 'Configuration', 'ti-settings'],
 ];
@@ -90,11 +92,13 @@ export default function Naukri() {
   const canStart = r.canRun && !busy;
   const counts: Partial<Record<View, number>> = {
     review: overview.reviewCount,
+    queued: overview.waitingCount,
     applied: overview.appliedCount,
   };
 
   const subtitle = [
     `${overview.reviewCount} awaiting review`,
+    `${overview.waitingCount} approved & waiting`,
     `${overview.appliedCount} applied`,
     `${overview.appliedToday} today`,
     overview.schedule.enabled && overview.nextOccurrence ? `next ${fmtTime(overview.nextOccurrence)}` : 'no schedule',
@@ -174,6 +178,22 @@ export default function Naukri() {
               </div>
             )}
 
+            {/* Approved jobs sit between Review and Applied, and nothing used to
+                show them. Worse, when the schedule has Apply switched off they
+                wait forever — so this says which of those it is. */}
+            {overview.waitingCount > 0 && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, fontSize: 13, flexWrap: 'wrap' }}>
+                <i className="ti ti-hourglass" style={{ color: 'var(--text2)' }} />
+                <span>
+                  {overview.waitingCount} approved, waiting to be applied to
+                  {overview.schedule.enabled && overview.schedule.runApply
+                    ? ` — runs ${fmtTime(overview.nextOccurrence)}`
+                    : ' — nothing will send these automatically'}
+                </span>
+                <button className="btn btn-xs" type="button" onClick={() => setView('queued')}>See them</button>
+              </div>
+            )}
+
             {!r.canRun && (
               <div style={{ marginTop: 10 }}>
                 <Muted>Nothing can start until the problem above is fixed.</Muted>
@@ -189,6 +209,8 @@ export default function Naukri() {
       )}
 
       {view === 'review' && <ReviewQueue onChanged={load} />}
+
+      {view === 'queued' && <QueuedJobs overview={overview} onChanged={load} />}
 
       {view === 'applied' && <AppliedTable onChanged={load} />}
 

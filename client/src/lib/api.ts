@@ -1475,6 +1475,8 @@ export interface NaukriOverview {
   reviewCount: number;
   appliedCount: number;
   appliedToday: number;
+  /** Approved and still actionable — what a future apply run will draw from. */
+  waitingCount: number;
   paused: boolean;
   dryRun: boolean;
   autoApprove: boolean;

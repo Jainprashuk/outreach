@@ -107,7 +107,7 @@ const appliedToday = (userId) => {
 router.get('/overview', async (req, res) => {
   try {
     await failStaleRuns(req.userId);
-    const [worker, config, activeRun, queued, history, reviewCount, appliedCount, todayCount] = await Promise.all([
+    const [worker, config, activeRun, queued, history, reviewCount, appliedCount, todayCount, waitingCount] = await Promise.all([
       NaukriWorker.getForUser(req.userId),
       NaukriConfig.getForUser(req.userId),
       NaukriRun.findOne({ userId: req.userId, status: 'running', ...BASE_FILTER }).sort({ createdAt: 1 }).lean(),
@@ -116,6 +116,18 @@ router.get('/overview', async (req, res) => {
       NaukriJob.countDocuments({ userId: req.userId, approval: 'pending', ...BASE_FILTER }),
       NaukriJob.countDocuments({ userId: req.userId, applyStatus: { $ne: 'none' }, ...BASE_FILTER }),
       appliedToday(req.userId),
+      // Approved and still waiting — the set a future apply run will draw from.
+      // Its own count because "approved" alone is misleading: it also covers
+      // jobs already applied to, and ones parked as never-retryable.
+      //
+      // Appended LAST, matching the destructuring above. Adding it in the middle
+      // silently shifted every position after it, so the panel reported the
+      // waiting count as "applied today".
+      NaukriJob.countDocuments({
+        userId: req.userId, approval: 'approved',
+        applyStatus: { $in: ['none', 'failed', 'skipped'] },
+        retryable: { $ne: false }, ...BASE_FILTER,
+      }),
     ]);
 
     const lastSeenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt) : null;
@@ -138,6 +150,7 @@ router.get('/overview', async (req, res) => {
       reviewCount,
       appliedCount,
       appliedToday: todayCount,
+      waitingCount,
       // Surfaced separately from the config blob so the header can warn about
       // them without the client having to know which fields mean "unsafe".
       paused: !!config.safety.pauseAll,
