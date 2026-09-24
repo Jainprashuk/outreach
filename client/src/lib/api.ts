@@ -1509,7 +1509,8 @@ export const listNaukriRunsApi = (page = 1, limit = 20, kind?: NaukriRunKind) =>
 
 export interface NaukriJobQuery {
   approval?: NaukriApproval;
-  applyStatus?: NaukriApplyStatus | 'any';
+  /** 'sent' = actually went out (applied and beyond); 'any' = every outcome, skips included. */
+  applyStatus?: NaukriApplyStatus | 'any' | 'sent';
   /** Free text over title, company and tags. */
   q?: string;
   location?: string;

@@ -23,6 +23,13 @@ const STALE_RUN_MS = 90 * 60_000;
 // week, and do not let a worker restart shrug it off.
 const BLOCK_MS = 7 * 24 * 3600 * 1000;
 
+// The statuses that mean an application actually left, plus where it got to
+// afterwards. Deliberately excludes 'skipped' and 'failed': those are jobs the
+// worker looked at and backed out of, so listing them under "Applied" claims
+// work that never happened. They remain visible in Waiting, which is where you
+// can act on them.
+const SENT_STATUSES = ['applied', 'in-review', 'interviewing', 'offer', 'rejected'];
+
 const RESUME_TYPES = new Set([
   'application/pdf',
   'application/msword',
@@ -114,7 +121,7 @@ router.get('/overview', async (req, res) => {
       NaukriRun.find({ userId: req.userId, status: 'queued', ...BASE_FILTER }).sort({ createdAt: 1 }).limit(10).lean(),
       NaukriRun.find({ userId: req.userId, status: { $nin: ACTIVE }, ...BASE_FILTER }).sort({ createdAt: -1 }).limit(20).lean(),
       NaukriJob.countDocuments({ userId: req.userId, approval: 'pending', ...BASE_FILTER }),
-      NaukriJob.countDocuments({ userId: req.userId, applyStatus: { $ne: 'none' }, ...BASE_FILTER }),
+      NaukriJob.countDocuments({ userId: req.userId, applyStatus: { $in: SENT_STATUSES }, ...BASE_FILTER }),
       appliedToday(req.userId),
       // Approved and still waiting — the set a future apply run will draw from.
       // Its own count because "approved" alone is misleading: it also covers
@@ -530,7 +537,10 @@ router.get('/jobs', async (req, res) => {
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const filter = { userId: req.userId, ...BASE_FILTER };
     if (['pending', 'approved', 'rejected'].includes(req.query.approval)) filter.approval = req.query.approval;
-    if (req.query.applyStatus === 'any') filter.applyStatus = { $ne: 'none' };
+    // 'sent' is what the Applied board asks for: things that actually went out.
+    // 'any' is kept for anything that wants every outcome including skips.
+    if (req.query.applyStatus === 'sent') filter.applyStatus = { $in: SENT_STATUSES };
+    else if (req.query.applyStatus === 'any') filter.applyStatus = { $ne: 'none' };
     else if (req.query.applyStatus) filter.applyStatus = req.query.applyStatus;
 
     if (req.query.q) {

@@ -11,11 +11,14 @@ import { fmtRunTime } from './format';
 // dropdown here rather than a badge — this table is the one place the automation
 // hands control back.
 
-const STAGES: NaukriApplyStatus[] = ['applied', 'in-review', 'interviewing', 'offer', 'rejected', 'skipped', 'failed'];
+// Only the funnel. 'skipped' and 'failed' are not stages you move a real
+// application into — a job that was never sent cannot be "in review" — and
+// offering them here would let you fabricate an outcome.
+const STAGES: NaukriApplyStatus[] = ['applied', 'in-review', 'interviewing', 'offer', 'rejected'];
 
 const BADGE: Partial<Record<NaukriApplyStatus, string>> = {
   applied: 'badge-sent', 'in-review': 'badge-pending', interviewing: 'badge-pending',
-  offer: 'badge-sent', rejected: 'badge-rejected', skipped: 'badge-closed', failed: 'badge-rejected',
+  offer: 'badge-sent', rejected: 'badge-rejected',
 };
 
 export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
@@ -41,7 +44,13 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
   };
 
   if (loading) return <Empty icon="ti-loader">Loading…</Empty>;
-  if (!jobs.length) return <Empty icon="ti-send">Nothing applied yet.</Empty>;
+  if (!jobs.length) {
+    return (
+      <Empty icon="ti-send">
+        Nothing applied yet. Jobs the worker skipped or failed on are in Waiting, not here.
+      </Empty>
+    );
+  }
 
   return (
     <Card title={`${jobs.length} application${jobs.length === 1 ? '' : 's'}`} icon="ti-send">
@@ -56,20 +65,11 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
             <a href={job.url} target="_blank" rel="noreferrer"
                style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{job.title}</a>
             <div><Muted>{job.company}{job.appliedAt ? ` · ${fmtRunTime(job.appliedAt)}` : ''}</Muted></div>
-            {/* WHY it ended up here. Without this, a screen full of "skipped"
-                explains nothing and you have to read the database to find out
-                that they were all company-site redirects. */}
-            {job.applyNote && (
-              <Muted style={{ display: 'block' }}>
-                {job.applyNote}
-                {job.retryable === false && ' — will not be retried'}
-              </Muted>
-            )}
-            {/* The question that stopped it, where one did — this is the row
-                that tells you which answer rule is missing. */}
-            {job.unknownQuestion && (
-              <Muted style={{ display: 'block' }}>asked: “{job.unknownQuestion}”</Muted>
-            )}
+            {/* How it went out — "Applied after 2 question(s)" is worth knowing
+                when you are wondering whether a screening form was involved.
+                The skip/retry notes that used to live here belong to Waiting;
+                nothing on this board was skipped. */}
+            {job.applyNote && <Muted style={{ display: 'block' }}>{job.applyNote}</Muted>}
           </div>
           <select value={job.applyStatus} onChange={e => move(job.id, e.target.value as NaukriApplyStatus)}
                   style={{ width: 132 }}>
