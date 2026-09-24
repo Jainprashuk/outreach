@@ -53,7 +53,7 @@ export default function ScheduleCard({
   const noKinds = !draft.runRefresh && !draft.runHarvest && !draft.runApply;
 
   return (
-    <Card title="Schedule" icon="ti-calendar-repeat"
+    <Card title="Schedule" icon="ti-calendar-repeat" collapsible id="schedule"
       right={nextOccurrence && !noKinds && draft.enabled
         ? <Muted>Next: {fmtTime(nextOccurrence)}</Muted> : null}>
 

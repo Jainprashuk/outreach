@@ -49,7 +49,7 @@ export default function ProfileCard({ config, onSaved }: {
   );
 
   return (
-    <Card title="Profile" icon="ti-user">
+    <Card title="Profile" icon="ti-user" collapsible id="profile" defaultOpen={false}>
 
       <div>
         <Field label="Full name" k="fullName" />

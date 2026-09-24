@@ -58,7 +58,7 @@ export default function ConnectionCard({ overview, onChanged }: {
   };
 
   return (
-    <Card title="Connection" icon="ti-plug-connected"
+    <Card title="Connection" icon="ti-plug-connected" collapsible id="connection"
       right={w.lastSeenAt ? <Muted>last seen {fmtTime(w.lastSeenAt)}</Muted> : null}>
 
       <Line ok={w.everSeen && w.online} label={w.host ? `Worker running on ${w.host}` : 'Worker running'}

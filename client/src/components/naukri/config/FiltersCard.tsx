@@ -60,7 +60,7 @@ export default function FiltersCard({ config, onSaved }: {
   );
 
   return (
-    <Card title="Filters" icon="ti-filter">
+    <Card title="Filters" icon="ti-filter" collapsible id="filters" defaultOpen={false}>
 
       <Text label="Title must contain one of" k="titleInclude" help="Empty means any title." />
       <Text label="Title must NOT contain" k="titleExclude" />

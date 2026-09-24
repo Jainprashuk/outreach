@@ -42,7 +42,7 @@ export default function SearchesCard({ config, onSaved }: {
   };
 
   return (
-    <Card title="Searches" icon="ti-search"
+    <Card title="Searches" icon="ti-search" collapsible id="searches" defaultOpen={false}
       right={<button className="btn btn-xs" type="button" onClick={() => setRows(r => [...r, blank()])}>
         <i className="ti ti-plus" /> Add
       </button>}>

@@ -1568,8 +1568,12 @@ export const previewNaukriFiltersApi = (filters: Partial<NaukriFilters>) =>
 
 /** Questions that caused skips — the loop by which the answer bank fills itself. */
 export const naukriUnknownQuestionsApi = () =>
-  apiFetch<{ questions: Array<{ question: string; count: number; lastSeenAt: string }> }>(
-    '/api/naukri/config/unknown-questions');
+  apiFetch<{
+    /** Only ones that still have no matching rule. */
+    questions: Array<{ question: string; count: number; lastSeenAt: string }>;
+    /** How many caused a skip but are now covered — lets the UI say "all answered". */
+    answeredCount: number;
+  }>('/api/naukri/config/unknown-questions');
 
 export const deleteNaukriResumeApi = () =>
   apiFetch<{ ok: true }>('/api/naukri/resume', { method: 'DELETE' });

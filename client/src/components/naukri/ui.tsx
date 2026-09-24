@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 
 // Small shared primitives for the Naukri tab.
 //
@@ -15,10 +15,37 @@ import type { ReactNode } from 'react';
 // bare <input>/<select>/<textarea>, which the stylesheet already styles globally
 // — they need no className at all.
 
-export function Card({ title, icon, right, children, style }: {
+export function Card({ title, icon, right, badge, children, style, collapsible, id, defaultOpen = true }: {
   title?: string; icon?: string; right?: ReactNode; children: ReactNode;
+  /** Shown beside the title even when collapsed — for a count that means
+      "there is something for you in here", which a hidden card must still say. */
+  badge?: ReactNode;
   style?: React.CSSProperties;
+  /** Give the header a disclosure control. Needs `id` to remember its state. */
+  collapsible?: boolean;
+  /** Stable key for remembering open/closed. Without it the card stays open. */
+  id?: string;
+  defaultOpen?: boolean;
 }) {
+  // Remembered per card, because the Configuration tab is eight of these and
+  // scrolling past the seven you are not editing is most of the work. Kept in
+  // localStorage rather than server state: it is a per-browser convenience, not
+  // a setting, and it must not fail if storage is blocked.
+  const key = id ? `naukri-card-${id}` : null;
+  const [open, setOpen] = useState(() => {
+    if (!collapsible || !key) return true;
+    try {
+      const saved = localStorage.getItem(key);
+      return saved === null ? defaultOpen : saved === '1';
+    } catch { return defaultOpen; }
+  });
+
+  const toggle = () => {
+    const next = !open;
+    setOpen(next);
+    if (key) { try { localStorage.setItem(key, next ? '1' : '0'); } catch { /* private window */ } }
+  };
+
   return (
     <div style={{
       background: 'var(--bg)',
@@ -30,15 +57,30 @@ export function Card({ title, icon, right, children, style }: {
       ...style,
     }}>
       {(title || right) && (
-        <div className="section-head" style={{ marginBottom: 12 }}>
-          <span className="section-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <div className="section-head" style={{ marginBottom: open ? 12 : 0 }}>
+          <span
+            className="section-title"
+            onClick={collapsible ? toggle : undefined}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 7,
+              cursor: collapsible ? 'pointer' : 'default', userSelect: 'none',
+              flex: 1,
+            }}
+          >
+            {collapsible && (
+              <i className={`ti ti-chevron-${open ? 'down' : 'right'}`} style={{ fontSize: 13 }} />
+            )}
             {icon && <i className={`ti ${icon}`} style={{ fontSize: 14 }} />}
             {title}
+            {badge}
           </span>
-          {right}
+          {/* Header actions stay reachable while collapsed only if they make
+              sense there; a card's own Save does not, so callers pass `right`
+              for status, not for controls. */}
+          {open && right}
         </div>
       )}
-      {children}
+      {open && children}
     </div>
   );
 }

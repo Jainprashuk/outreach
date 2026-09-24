@@ -62,7 +62,7 @@ export default function ApplyCard({ config, onSaved }: {
   };
 
   return (
-    <Card title="Apply behaviour & safety" icon="ti-send">
+    <Card title="Apply behaviour & safety" icon="ti-send" collapsible id="apply" defaultOpen={false}>
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
         <label style={{ fontSize: 13 }}>

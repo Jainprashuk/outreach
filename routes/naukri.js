@@ -383,13 +383,32 @@ router.post('/config/preview-filters', async (req, res) => {
 // every skip becomes a one-click suggestion in the config UI.
 router.get('/config/unknown-questions', async (req, res) => {
   try {
-    const rows = await NaukriJob.aggregate([
-      { $match: { userId: req.userId, applyStatus: 'skipped', unknownQuestion: { $nin: [null, ''] }, deleted: { $ne: true } } },
-      { $group: { _id: '$unknownQuestion', count: { $sum: 1 }, lastSeenAt: { $max: '$updatedAt' } } },
-      { $sort: { count: -1, lastSeenAt: -1 } },
-      { $limit: 25 },
+    const [rows, config] = await Promise.all([
+      NaukriJob.aggregate([
+        { $match: { userId: req.userId, applyStatus: 'skipped', unknownQuestion: { $nin: [null, ''] }, deleted: { $ne: true } } },
+        { $group: { _id: '$unknownQuestion', count: { $sum: 1 }, lastSeenAt: { $max: '$updatedAt' } } },
+        { $sort: { count: -1, lastSeenAt: -1 } },
+        { $limit: 50 },
+      ]),
+      NaukriConfig.getForUser(req.userId),
     ]);
-    res.json({ questions: rows.map(r => ({ question: r._id, count: r.count, lastSeenAt: r.lastSeenAt })) });
+
+    // Only questions that STILL have no rule. The list is a to-do, so a question
+    // you have already answered must leave it — otherwise it reads as "this is
+    // still broken" and you add the rule twice. Resolved with the same matcher
+    // the worker uses, so "covered" here means genuinely covered at apply time,
+    // including a rule whose placeholders resolve from your profile.
+    const answered = (q) => resolveAnswer(q, { answers: config.answers, profile: config.profile }).matched;
+
+    res.json({
+      questions: rows
+        .filter(r => !answered(r._id))
+        .slice(0, 25)
+        .map(r => ({ question: r._id, count: r.count, lastSeenAt: r.lastSeenAt })),
+      // What the list would hold without that filter, so "nothing here" is
+      // distinguishable from "you have answered them all".
+      answeredCount: rows.filter(r => answered(r._id)).length,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -58,7 +58,7 @@ export default function ResumeCard({ config, onSaved }: {
   };
 
   return (
-    <Card title="Resume & headline" icon="ti-file-cv">
+    <Card title="Resume & headline" icon="ti-file-cv" collapsible id="resume" defaultOpen={false}>
 
       <div style={{ marginBottom: 14 }}>
         {resume ? (

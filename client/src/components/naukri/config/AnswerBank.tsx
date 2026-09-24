@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { NaukriConfig, NaukriAnswer } from '../../../lib/api';
-import { Card } from '../ui';
+import { Card, Hint } from '../ui';
 import { updateNaukriConfigApi, testNaukriAnswerApi, naukriUnknownQuestionsApi } from '../../../lib/api';
 import { useToast } from '../../../context/ToastContext';
 
@@ -34,11 +34,15 @@ export default function AnswerBank({ config, onSaved }: {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [unknown, setUnknown] = useState<Array<{ question: string; count: number }>>([]);
+  const [answeredCount, setAnsweredCount] = useState(0);
   const [probe, setProbe] = useState('');
   const [probeResult, setProbeResult] = useState<string | null>(null);
 
   const loadUnknown = useCallback(async () => {
-    try { setUnknown((await naukriUnknownQuestionsApi()).questions); } catch { /* not fatal */ }
+    try {
+      const r = await naukriUnknownQuestionsApi();
+      setUnknown(r.questions); setAnsweredCount(r.answeredCount || 0);
+    } catch { /* not fatal */ }
   }, []);
   useEffect(() => { loadUnknown(); }, [loadUnknown]);
 
@@ -79,17 +83,38 @@ export default function AnswerBank({ config, onSaved }: {
     } catch (e: any) { setProbeResult(e?.message || 'Could not test'); }
   };
 
+  // A draft rule covers a question when its pattern appears in it — the same
+  // substring test the worker applies. Case-insensitive because patterns are
+  // stored lowercased.
+  const covered = (q: string) => rows.some(r =>
+    r.enabled !== false && r.pattern.trim() && q.toLowerCase().includes(r.pattern.trim().toLowerCase()));
+  const pending = unknown.filter(u => !covered(u.question));
+
   return (
-    <Card title="Answers" icon="ti-messages"
+    <Card title="Answers" icon="ti-messages" collapsible id="answers" defaultOpen={false}
+      badge={pending.length > 0
+        ? <span className="contact-count-badge" style={{ marginLeft: 6 }}>{pending.length} unanswered</span>
+        : null}
       right={<button className="btn btn-xs" type="button" onClick={() => setRows(r => [...r, blank()])}>
         <i className="ti ti-plus" /> Add rule
       </button>}>
 
-      {/* The feedback loop: every skip becomes a one-click rule. */}
-      {unknown.length > 0 && (
+      {/* The feedback loop: every skip becomes a one-click rule.
+          Filtered against the DRAFT rows as well as the saved ones, so a
+          question disappears the moment you add its rule rather than lingering
+          until you save — the list is a to-do, and a done item that stays on it
+          gets answered twice. */}
+      {pending.length === 0 && answeredCount > 0 && (
+        <Hint style={{ marginTop: 0, marginBottom: 12 }}>
+          All {answeredCount} question{answeredCount === 1 ? '' : 's'} that caused a skip now have a rule.
+          Those jobs retry on the next apply run.
+        </Hint>
+      )}
+
+      {pending.length > 0 && (
         <div style={{ padding: 10, background: 'var(--bg2)', borderRadius: 6, marginBottom: 12 }}>
           <div style={{ fontSize: 13, marginBottom: 6 }}>Questions that caused a skip</div>
-          {unknown.map((u, i) => (
+          {pending.map((u, i) => (
             <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, padding: '3px 0' }}>
               <span style={{ flex: 1 }}>{u.question}</span>
               <span style={{ color: 'var(--text2)', fontSize: 12 }}>{u.count}×</span>
