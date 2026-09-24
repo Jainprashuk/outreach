@@ -738,12 +738,18 @@ router.post('/claim', async (req, res) => {
       ));
       payload.jobs = budget === 0 ? [] : await NaukriJob.find({
         userId: req.userId, approval: 'approved',
-        // 'skipped' is retryable on purpose: a job is skipped when a screening
-        // question matched no rule, and the whole point of surfacing that
-        // question in Configuration is that adding the rule makes the next run
-        // succeed on it. Excluding it here would make that loop a dead end.
-        // 'applied' is absent for the opposite reason — that one has left.
-        applyStatus: { $in: ['none', 'failed', 'skipped'] }, ...BASE_FILTER,
+        // 'skipped' is retryable on purpose: a job skipped for an unanswered
+        // screening question succeeds once you add the rule, and that loop is
+        // the point of surfacing the question in Configuration. 'applied' is
+        // absent for the opposite reason — that one has left.
+        applyStatus: { $in: ['none', 'failed', 'skipped'] },
+        // …but only the ones that CAN succeed. Skips marked terminal (applies on
+        // the company site, already applied) would otherwise be re-attempted
+        // every run, consuming the whole per-run budget and starving the queue
+        // behind them. `$ne: false` rather than `true` so rows written before
+        // this field existed still qualify.
+        retryable: { $ne: false },
+        ...BASE_FILTER,
       }).sort({ approvedAt: 1 }).limit(budget).lean().then(rows => rows.map(serialize));
       payload.budget = { perRun: config.apply.maxPerRun, perDay: config.apply.maxPerDay, doneToday, granted: budget };
     }
@@ -872,7 +878,7 @@ router.post('/progress', async (req, res) => {
 // truthful record of what it already sent.
 router.post('/result', async (req, res) => {
   try {
-    const { runId, jobId, outcome, reason, question } = req.body || {};
+    const { runId, jobId, outcome, reason, question, terminal } = req.body || {};
     if (!runId || !jobId) return res.status(400).json({ error: 'runId and jobId are required' });
     if (!['applied', 'skipped', 'failed', 'dry-run'].includes(outcome)) {
       return res.status(400).json({ error: 'outcome must be applied, skipped, failed or dry-run' });
@@ -889,6 +895,10 @@ router.post('/result', async (req, res) => {
       job.applyStatus = to;
       job.applyNote = str(reason, 500);
       job.unknownQuestion = outcome === 'skipped' ? str(question, 500) : '';
+      // A terminal skip can never succeed — an external ATS, or one Naukri says
+      // is already applied to. Marking it keeps the next run from spending its
+      // budget re-attempting it instead of reaching the jobs behind it.
+      if (terminal) job.retryable = false;
       if (outcome === 'applied') job.appliedAt = new Date();
       await job.save();
     }

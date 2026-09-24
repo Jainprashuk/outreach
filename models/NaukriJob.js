@@ -68,6 +68,18 @@ const naukriJobSchema = new mongoose.Schema({
   },
   appliedAt:    { type: Date, default: null },
   applyNote:    { type: String, default: '' },
+  // Whether a future run should try this job again.
+  //
+  // Not every skip is the same. A skip caused by an unanswered screening
+  // question SHOULD be retried — adding the rule is exactly what makes it
+  // succeed next time, and that loop is the point of surfacing the question.
+  // A skip caused by "Apply on company site", or by Naukri saying you already
+  // applied, can never succeed no matter how many times it is attempted.
+  //
+  // Without this distinction the permanent ones are re-attempted on every run,
+  // silently eating the per-run budget so the jobs actually waiting behind them
+  // are never reached. That is not a slow failure; it is a stuck queue.
+  retryable:    { type: Boolean, default: true },
   // The unanswered question text, when applyStatus === 'skipped'. Its own field
   // rather than parsed back out of applyNote, because the config UI queries it.
   unknownQuestion: { type: String, default: '' },

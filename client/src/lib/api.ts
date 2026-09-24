@@ -1376,6 +1376,8 @@ export interface NaukriJob {
   applyStatus: NaukriApplyStatus;
   appliedAt: string | null;
   applyNote: string;
+  /** False when no future run can succeed on this — an external ATS, or already applied. */
+  retryable: boolean;
   /** The screening question that caused a skip — offered as a one-click answer rule. */
   unknownQuestion: string;
   applyHistory: Array<{ at: string; from: string; to: string; note: string }>;

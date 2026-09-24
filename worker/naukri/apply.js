@@ -198,7 +198,8 @@ async function applyToOne(page, job, { config, dryRun, onStep }) {
 
   const body = await bodyText(page);
   if (ALREADY_MARKERS.some(m => body.includes(m))) {
-    return { outcome: 'skipped', reason: 'Naukri says you have already applied to this job' };
+    // Terminal: no future run can change this.
+    return { outcome: 'skipped', terminal: true, reason: 'Naukri says you have already applied to this job' };
   }
 
   // Wait for EITHER button before classifying. The listing page hydrates its
@@ -214,7 +215,10 @@ async function applyToOne(page, job, { config, dryRun, onStep }) {
   // External ATS. We have no idea what form is on the other side, so we do not
   // follow it — that would be applying somewhere you never showed us.
   if (appeared === 'external') {
-    return { outcome: 'skipped', reason: 'Applies on the company site — open it yourself, this worker only does native Naukri applies' };
+    // Terminal: the listing has no native Apply and never will. Retrying it
+    // every run would eat the per-run budget and starve the queue behind it.
+    return { outcome: 'skipped', terminal: true,
+      reason: 'Applies on the company site — open it yourself, this worker only does native Naukri applies' };
   }
   if (appeared !== 'native') {
     return { outcome: 'failed', reason: 'No Apply button appeared on the page. Naukri may have changed their DOM — fix APPLY_BUTTON in worker/naukri/apply.js.' };
@@ -223,7 +227,8 @@ async function applyToOne(page, job, { config, dryRun, onStep }) {
   // Re-read after the race: a page carrying both must still be treated as
   // external, whichever selector happened to resolve first.
   if (await page.locator(COMPANY_SITE_BUTTON).count().catch(() => 0)) {
-    return { outcome: 'skipped', reason: 'Applies on the company site — open it yourself, this worker only does native Naukri applies' };
+    return { outcome: 'skipped', terminal: true,
+      reason: 'Applies on the company site — open it yourself, this worker only does native Naukri applies' };
   }
 
   const applyBtn = await firstVisible(page, [APPLY_BUTTON], 4000);

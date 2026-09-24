@@ -40,9 +40,28 @@ function summary(run: NaukriRun): string {
   }
 }
 
+// The one-line "why" for a run whose outcomes were all the same thing.
+// "19 skipped" sends you to the database; "19 skipped — all apply on the
+// company site" ends the question on the row itself.
+function dominantReason(run: NaukriRun): string | null {
+  const skips = run.results.filter(r => r.outcome === 'skipped');
+  if (skips.length < 2) return null;
+  const counts = new Map<string, number>();
+  for (const r of skips) {
+    const key = /company site/i.test(r.reason) ? 'apply on the company site'
+      : /already applied/i.test(r.reason) ? 'already applied'
+      : /question/i.test(r.reason) ? 'an unanswered screening question'
+      : r.reason;
+    counts.set(key, (counts.get(key) || 0) + 1);
+  }
+  const [reason, n] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return n === skips.length ? `all ${reason}` : `${n} ${reason}`;
+}
+
 function Row({ run }: { run: NaukriRun }) {
   const [open, setOpen] = useState(false);
   const hasDetail = !!run.error || run.results.length > 0;
+  const why = dominantReason(run);
 
   return (
     <div style={{ borderBottom: '1px solid var(--border)' }}>
@@ -57,7 +76,9 @@ function Row({ run }: { run: NaukriRun }) {
         <i className={`ti ${KIND_ICON[run.kind] || 'ti-point'}`} style={{ fontSize: 14, color: 'var(--text2)' }} />
         <span style={{ minWidth: 70, fontSize: 13 }}>{run.kind}</span>
         <Muted style={{ minWidth: 118 }}>{fmtRunTime(run.createdAt)}</Muted>
-        <Muted style={{ flex: 1, minWidth: 150 }}>{summary(run)}</Muted>
+        <Muted style={{ flex: 1, minWidth: 150 }}>
+          {summary(run)}{why ? ` · ${why}` : ''}
+        </Muted>
         {run.trigger === 'scheduled' && <Muted>scheduled</Muted>}
         {hasDetail && <i className={`ti ti-chevron-${open ? 'up' : 'down'}`} style={{ fontSize: 14, color: 'var(--text2)' }} />}
       </div>

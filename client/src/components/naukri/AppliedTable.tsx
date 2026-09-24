@@ -56,9 +56,20 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
             <a href={job.url} target="_blank" rel="noreferrer"
                style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{job.title}</a>
             <div><Muted>{job.company}{job.appliedAt ? ` · ${fmtRunTime(job.appliedAt)}` : ''}</Muted></div>
+            {/* WHY it ended up here. Without this, a screen full of "skipped"
+                explains nothing and you have to read the database to find out
+                that they were all company-site redirects. */}
+            {job.applyNote && (
+              <Muted style={{ display: 'block' }}>
+                {job.applyNote}
+                {job.retryable === false && ' — will not be retried'}
+              </Muted>
+            )}
             {/* The question that stopped it, where one did — this is the row
                 that tells you which answer rule is missing. */}
-            {job.unknownQuestion && <Muted style={{ display: 'block' }}>asked: “{job.unknownQuestion}”</Muted>}
+            {job.unknownQuestion && (
+              <Muted style={{ display: 'block' }}>asked: “{job.unknownQuestion}”</Muted>
+            )}
           </div>
           <select value={job.applyStatus} onChange={e => move(job.id, e.target.value as NaukriApplyStatus)}
                   style={{ width: 132 }}>
