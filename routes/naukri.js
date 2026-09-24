@@ -686,6 +686,74 @@ router.post('/jobs/decide', async (req, res) => {
   }
 });
 
+// POST /api/naukri/jobs/bulk — act on a selection.
+//
+// The actions differ by where you are, because the useful next step does:
+// from Waiting you either send these now or set them aside; from Skipped you
+// either put them back in the queue or drop them. One endpoint, named actions,
+// so the client never has to assemble a state change field by field.
+router.post('/jobs/bulk', async (req, res) => {
+  try {
+    const { ids, action, reason } = req.body || {};
+    if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ error: 'ids must be a non-empty array' });
+
+    const scope = { _id: { $in: ids.slice(0, 500) }, userId: req.userId, ...BASE_FILTER };
+    const now = new Date();
+    let result, run = null;
+
+    if (action === 'apply-next') {
+      // Only jobs a run could actually take. Silently including an applied one
+      // would report a number that never becomes an application.
+      result = await NaukriJob.updateMany(
+        { ...scope, approval: 'approved', applyStatus: { $in: ['none', 'failed', 'skipped'] }, retryable: { $ne: false } },
+        { $set: { priority: 1 } }
+      );
+      const out = await queueRun(req.userId, 'apply', 'manual');
+      run = out.error ? { error: out.error } : out.run;
+
+    } else if (action === 'skip') {
+      // Set aside by hand. Marked not-retryable for the same reason a
+      // company-site skip is: you have decided, and a run must not undo that by
+      // picking it up again tomorrow.
+      result = await NaukriJob.updateMany(
+        { ...scope, applyStatus: { $in: ['none', 'failed'] } },
+        { $set: {
+            applyStatus: 'skipped', retryable: false, priority: 0,
+            applyNote: str(reason, 300) || 'Set aside by you',
+          },
+          $push: { applyHistory: { at: now, from: 'none', to: 'skipped', note: 'set aside by you' } },
+        }
+      );
+
+    } else if (action === 'requeue') {
+      // Back into the queue. Clears the outcome AND the note, so a row that
+      // said "applies on the company site" does not keep claiming that after
+      // you have decided to try it again.
+      result = await NaukriJob.updateMany(
+        { ...scope, applyStatus: { $in: ['skipped', 'failed'] } },
+        { $set: {
+            applyStatus: 'none', retryable: true, approval: 'approved',
+            approvedAt: now, applyNote: '', unknownQuestion: '',
+          },
+          $push: { applyHistory: { at: now, from: 'skipped', to: 'none', note: 'requeued by you' } },
+        }
+      );
+
+    } else if (action === 'dismiss') {
+      result = await NaukriJob.updateMany(scope, {
+        $set: { approval: 'rejected', rejectedReason: str(reason, 300) || 'dismissed' },
+      });
+
+    } else {
+      return res.status(400).json({ error: 'action must be apply-next, skip, requeue or dismiss' });
+    }
+
+    res.json({ updated: result.modifiedCount, run });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/naukri/jobs/:id — manual applyStatus moves as recruiters reply.
 router.patch('/jobs/:id', async (req, res) => {
   try {
@@ -810,7 +878,9 @@ router.post('/claim', async (req, res) => {
         // this field existed still qualify.
         retryable: { $ne: false },
         ...BASE_FILTER,
-      }).sort({ approvedAt: 1 }).limit(budget).lean().then(rows => rows.map(serialize));
+      // Priority first, then oldest approval. Picking jobs in the UI sets
+      // priority, so "apply to these" means these — not "these, eventually".
+      }).sort({ priority: -1, approvedAt: 1 }).limit(budget).lean().then(rows => rows.map(serialize));
       payload.budget = { perRun: config.apply.maxPerRun, perDay: config.apply.maxPerDay, doneToday, granted: budget };
     }
 
@@ -975,6 +1045,9 @@ router.post('/result', async (req, res) => {
       // Inferred from the reason as well as the worker's flag, so an out-of-date
       // worker cannot quietly reintroduce the loop this prevents.
       if (terminal || TERMINAL_SKIP.test(str(reason, 500))) job.retryable = false;
+      // Spent. Priority is "send this next", not "send this first forever" — a
+      // job that kept it would outrank everything on every future run.
+      job.priority = 0;
       if (outcome === 'applied') job.appliedAt = new Date();
       await job.save();
     }

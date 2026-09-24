@@ -91,6 +91,11 @@ const naukriJobSchema = new mongoose.Schema({
   // known to do this is flagged on arrival. Labelled, never auto-rejected —
   // a guess must not silently throw away a job you might want.
   likelyExternal: { type: Boolean, default: false },
+  // Jump the queue. A run claims by `priority` descending then `approvedAt`
+  // ascending, so picking specific jobs and pressing Apply sends THOSE rather
+  // than whatever happens to be oldest — which is the whole point of choosing.
+  // Zero for everything else, so the default order is unchanged.
+  priority:     { type: Number, default: 0 },
   // The unanswered question text, when applyStatus === 'skipped'. Its own field
   // rather than parsed back out of applyNote, because the config UI queries it.
   unknownQuestion: { type: String, default: '' },

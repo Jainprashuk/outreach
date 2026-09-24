@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { NaukriJob } from '../../lib/api';
-import { listNaukriJobsApi, decideNaukriJobsApi } from '../../lib/api';
+import { listNaukriJobsApi, bulkNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty } from './ui';
 import { useToast } from '../../context/ToastContext';
+import SelectionBar, { RowCheck } from './SelectionBar';
 
 // Jobs the worker reached and backed out of.
 //
@@ -32,11 +33,15 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
   const [tab, setTab] = useState<Tab>('answer');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [sel, setSel] = useState<Set<string>>(new Set());
   const toast = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
-    try { setJobs((await listNaukriJobsApi({ applyStatus: 'skipped', limit: 200 })).jobs); }
+    try {
+      setJobs((await listNaukriJobsApi({ applyStatus: 'skipped', limit: 200 })).jobs);
+      setSel(new Set());
+    }
     catch (e: any) { toast(e?.message || 'Could not load', 'error'); }
     finally { setLoading(false); }
   }, [toast]);
@@ -53,16 +58,27 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
     other: jobs.filter(j => !isExternal(j) && !isQuestion(j)),
   }), [jobs]);
 
-  const dismiss = async (ids: string[]) => {
+  const bulk = async (action: 'requeue' | 'dismiss', ids: string[]) => {
     if (!ids.length) return;
     setBusy(true);
     try {
-      await decideNaukriJobsApi(ids, 'rejected', 'dismissed from skipped');
-      toast(`Dismissed ${ids.length}.`, 'info');
+      const r = await bulkNaukriJobsApi(ids, action, action === 'dismiss' ? 'dismissed from skipped' : undefined);
+      toast(action === 'requeue'
+        // Honest about what requeuing a company-site job will do: the worker
+        // will try, find the same button, and skip it again.
+        ? `${r.updated} moved back to Waiting. Any that apply on the company site will be skipped again.`
+        : `Dismissed ${r.updated}.`,
+        action === 'requeue' ? 'success' : 'info');
       await load(); onChanged();
-    } catch (e: any) { toast(e?.message || 'Could not dismiss', 'error'); }
+    } catch (e: any) { toast(e?.message || 'Could not update', 'error'); }
     finally { setBusy(false); }
   };
+
+  const toggle = (id: string) => setSel(s => {
+    const next = new Set(s);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   if (loading) return <Empty icon="ti-loader">Loading…</Empty>;
   if (!jobs.length) return <Empty icon="ti-player-skip-forward">Nothing has been skipped.</Empty>;
@@ -78,6 +94,7 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
   const Row = ({ job }: { job: NaukriJob }) => (
     <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
       padding: '8px 0', borderBottom: '0.5px solid var(--border)' }}>
+      <RowCheck checked={sel.has(job.id)} onToggle={() => toggle(job.id)} />
       <div style={{ flex: 1, minWidth: 190 }}>
         <a href={job.url} target="_blank" rel="noreferrer"
            style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{job.title}</a>
@@ -94,9 +111,6 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
         )}
         {tab === 'other' && job.applyNote && <Muted style={{ display: 'block' }}>{job.applyNote}</Muted>}
       </div>
-      <button className="btn btn-xs" type="button" disabled={busy} onClick={() => dismiss([job.id])}>
-        Dismiss
-      </button>
     </div>
   );
 
@@ -115,8 +129,12 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
     <>
       <div className="section-head">
         <div className="nav-tabs">
+          {/* Clearing the selection on a tab change is not tidiness: the action
+              buttons act on `sel`, and a selection made under one tab would
+              otherwise still be acted on from another, where those rows are not
+              even visible. */}
           {TABS.map(([key, label, icon, n]) => (
-            <button key={key} type="button" onClick={() => setTab(key)}
+            <button key={key} type="button" onClick={() => { setTab(key); setSel(new Set()); }}
               className={`nav-tab${tab === key ? ' active' : ''}`}>
               <i className={`ti ${icon}`} style={{ marginRight: 5 }} />{label}
               {n > 0 && <span className="contact-count-badge" style={{ marginLeft: 6 }}>{n}</span>}
@@ -128,15 +146,26 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
       <Card
         title={`${rows.length} ${tab === 'answer' ? 'waiting on an answer' : tab === 'external' ? "the worker can't apply to" : 'other'}`}
         icon={tab === 'answer' ? 'ti-help-circle' : tab === 'external' ? 'ti-external-link' : 'ti-dots'}
-        right={rows.length > 0 && tab !== 'answer'
-          ? <button className="btn btn-xs" type="button" disabled={busy}
-                    onClick={() => dismiss(rows.map(j => j.id))}>Dismiss all</button>
-          : null}
       >
         <Hint style={{ marginTop: 0, marginBottom: 10 }}>{BLURB[tab]}</Hint>
-        {rows.length === 0
-          ? <Muted>Nothing here.</Muted>
-          : rows.map(j => <Row key={j.id} job={j} />)}
+        {rows.length === 0 ? <Muted>Nothing here.</Muted> : (
+          <>
+            <SelectionBar
+              ids={rows.map(j => j.id)} selected={sel} onChange={setSel}
+              note="tick rows to put them back in the queue, or drop them"
+            >
+              <button className="btn btn-xs btn-primary" type="button" disabled={busy}
+                      onClick={() => bulk('requeue', [...sel])}>
+                <i className="ti ti-rotate" /> Move to waiting
+              </button>
+              <button className="btn btn-xs" type="button" disabled={busy}
+                      onClick={() => bulk('dismiss', [...sel])}>
+                <i className="ti ti-trash" /> Dismiss
+              </button>
+            </SelectionBar>
+            {rows.map(j => <Row key={j.id} job={j} />)}
+          </>
+        )}
       </Card>
     </>
   );

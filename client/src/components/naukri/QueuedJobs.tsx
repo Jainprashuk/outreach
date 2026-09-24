@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { NaukriJob, NaukriOverview } from '../../lib/api';
-import { listNaukriJobsApi, decideNaukriJobsApi, queueNaukriRunApi } from '../../lib/api';
+import { listNaukriJobsApi, decideNaukriJobsApi, queueNaukriRunApi, bulkNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty, Notice } from './ui';
 import { useToast } from '../../context/ToastContext';
+import SelectionBar, { RowCheck } from './SelectionBar';
 import { fmtTime, fmtRunTime } from './format';
 
 // Approved, and still waiting to be applied to.
@@ -52,6 +53,7 @@ export default function QueuedJobs({ overview, onChanged }: {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [sel, setSel] = useState<Set<string>>(new Set());
   const toast = useToast();
 
   const load = useCallback(async () => {
@@ -64,6 +66,9 @@ export default function QueuedJobs({ overview, onChanged }: {
       // this number mean two unrelated things at once.
       setJobs(r.jobs.filter(j => (j.applyStatus === 'none' || j.applyStatus === 'failed') && j.retryable !== false));
       setParked([]);
+      // Cleared whenever the list reloads: acting on rows you can no longer see
+      // is the one mistake this screen must not allow.
+      setSel(new Set());
     } catch (e: any) { setMsg(e?.message || 'Could not load'); }
     finally { setLoading(false); }
   }, []);
@@ -87,6 +92,31 @@ export default function QueuedJobs({ overview, onChanged }: {
       setMsg(m);
     } finally { setBusy(false); }
   };
+
+  const bulk = async (action: 'apply-next' | 'skip', ids: string[]) => {
+    if (!ids.length) return;
+    setBusy(true);
+    try {
+      const r = await bulkNaukriJobsApi(ids, action);
+      if (action === 'apply-next') {
+        const runErr = r.run && 'error' in r.run ? r.run.error : null;
+        toast(runErr
+          ? `Queued ${r.updated} to go first, but the run did not start: ${runErr}`
+          : `${r.updated} will be applied to on the next run, ahead of the rest.`,
+          runErr ? 'error' : 'success');
+      } else {
+        toast(`${r.updated} moved to Skipped — they will not be applied to.`, 'info');
+      }
+      await load(); onChanged();
+    } catch (e: any) { toast(e?.message || 'Could not update', 'error'); }
+    finally { setBusy(false); }
+  };
+
+  const toggle = (id: string) => setSel(s => {
+    const next = new Set(s);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
 
   const unapprove = async (id: string) => {
     setBusy(true);
@@ -134,13 +164,28 @@ export default function QueuedJobs({ overview, onChanged }: {
 
           {msg && <Muted style={{ display: 'block', marginBottom: 8 }}>{msg}</Muted>}
 
+          <SelectionBar
+            ids={jobs.map(j => j.id)} selected={sel} onChange={setSel}
+            note="tick rows to apply to just those, or set them aside"
+          >
+            <button className="btn btn-xs btn-primary" type="button" disabled={busy}
+                    onClick={() => bulk('apply-next', [...sel])}>
+              <i className="ti ti-send" /> Apply to these
+            </button>
+            <button className="btn btn-xs" type="button" disabled={busy}
+                    onClick={() => bulk('skip', [...sel])}>
+              <i className="ti ti-player-skip-forward" /> Move to skipped
+            </button>
+          </SelectionBar>
+
           {jobs.map((job, i) => (
             <div key={job.id} style={{
               display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
               padding: '8px 0', borderBottom: '0.5px solid var(--border)',
             }}>
+              <RowCheck checked={sel.has(job.id)} onToggle={() => toggle(job.id)} />
               {/* Position matters here: it tells you which run yours lands in. */}
-              <Muted style={{ width: 30, textAlign: 'right' }}>{i + 1}</Muted>
+              <Muted style={{ width: 26, textAlign: 'right' }}>{i + 1}</Muted>
               <div style={{ flex: 1, minWidth: 190 }}>
                 <a href={job.url} target="_blank" rel="noreferrer"
                    style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{job.title}</a>

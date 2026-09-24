@@ -1380,6 +1380,8 @@ export interface NaukriJob {
   retryable: boolean;
   /** Predicted at harvest to apply on the company's own site, from employers already seen doing it. */
   likelyExternal: boolean;
+  /** Non-zero means it jumps the queue on the next apply run. */
+  priority: number;
   /** The screening question that caused a skip — offered as a one-click answer rule. */
   unknownQuestion: string;
   applyHistory: Array<{ at: string; from: string; to: string; note: string }>;
@@ -1547,6 +1549,18 @@ export const listNaukriJobsApi = (params: NaukriJobQuery = {}) => {
 export const decideNaukriJobsApi = (ids: string[], decision: NaukriApproval, reason?: string) =>
   apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
     '/api/naukri/jobs/decide', { method: 'POST', body: JSON.stringify({ ids, decision, reason }) });
+
+/**
+ * Act on a selection. The action names differ by where you are:
+ * 'apply-next' sends these on the next run (ahead of the rest), 'skip' sets
+ * them aside, 'requeue' puts skipped ones back, 'dismiss' rejects them.
+ */
+export const bulkNaukriJobsApi = (
+  ids: string[],
+  action: 'apply-next' | 'skip' | 'requeue' | 'dismiss',
+  reason?: string,
+) => apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
+  '/api/naukri/jobs/bulk', { method: 'POST', body: JSON.stringify({ ids, action, reason }) });
 
 export const updateNaukriJobApi = (id: string, patch: { applyStatus?: NaukriApplyStatus; applyNote?: string }) =>
   apiFetch<{ job: NaukriJob }>(`/api/naukri/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
