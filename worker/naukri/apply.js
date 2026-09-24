@@ -34,6 +34,30 @@ const { resolveAnswer, shouldSkipOnUnknown } = require('../../lib/naukriAnswers'
 // both matter: this one is the last line if a config ever arrives malformed.
 const MAX_PER_RUN = 20;
 
+// One job's whole visit: navigate, classify, click, answer, confirm. Generous —
+// a slow listing with a five-question form is well inside it — but finite.
+//
+// It exists because a Playwright call CAN hang indefinitely. Its per-action
+// timeouts cover waiting for an element; they do not cover a CDP connection
+// that has stopped answering, and a page whose tab has become unresponsive will
+// block a protocol call with no deadline at all. That happened on a live run:
+// the worker sat at 0% CPU on job 18 of 20 for eight minutes, and because only
+// one run may be active, the whole feature was wedged behind it.
+const JOB_TIMEOUT_MS = 90 * 1000;
+
+// Reject after `ms` rather than waiting forever. The work carries on in the
+// background — we cannot cancel a hung protocol call — but the RUN moves on,
+// which is the part that matters.
+function withTimeout(promise, ms, label) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error(`${label} did not finish within ${Math.round(ms / 1000)}s`)), ms);
+    }),
+  ]);
+}
+
 const APPLY_BUTTON = '#apply-button';
 const COMPANY_SITE_BUTTON = '#company-site-button';
 
@@ -285,7 +309,7 @@ async function apply(session, { config = {}, jobs = [], dryRun = false, onProgre
   const delayMin = Number(config.apply && config.apply.delayMinMs) || 1500;
   const delayMax = Math.max(delayMin, Number(config.apply && config.apply.delayMaxMs) || 4000);
 
-  const page = await newPage(session);
+  let page = await newPage(session);
 
   for (let i = 0; i < list.length; i++) {
     const job = list[i];
@@ -297,11 +321,24 @@ async function apply(session, { config = {}, jobs = [], dryRun = false, onProgre
 
     let result;
     try {
-      result = await applyToOne(page, job, { config, dryRun, onProgress });
+      result = await withTimeout(
+        applyToOne(page, job, { config, dryRun, onProgress }),
+        JOB_TIMEOUT_MS,
+        `"${job.title}"`,
+      );
     } catch (err) {
       // A Checkpoint must escape: it stops the whole run and blocks the account.
       if (err && err.name === 'Checkpoint') throw err;
       result = { outcome: 'failed', reason: String(err.message || err).slice(0, 300) };
+
+      // A timed-out job usually means the TAB stopped answering, not that this
+      // one listing is special — so every job after it on the same page would
+      // hang too, one timeout at a time, and the run would crawl to its end
+      // achieving nothing. Throw the page away and continue on a fresh one.
+      if (/did not finish within/.test(result.reason)) {
+        await page.close().catch(() => {});
+        page = await newPage(session);
+      }
     }
 
     if (result.outcome === 'applied') stats.applied++;

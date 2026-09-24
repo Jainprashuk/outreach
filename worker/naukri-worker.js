@@ -165,6 +165,7 @@ function loadDriver() {
 const isCheckpoint = (err) => err && err.name === 'Checkpoint';
 
 async function executeRun(runDoc, config, openSession = null) {
+  let deadlineTimer = null;
   const finish = (status, extra) => api('/api/naukri/finish', { runId: runDoc.id, status, ...extra });
   let resumePath = null;
 
@@ -179,9 +180,29 @@ async function executeRun(runDoc, config, openSession = null) {
   // apply to the same job again.
   const onResult = (result) => api('/api/naukri/result', { runId: runDoc.id, ...result });
 
-  const deadline = setTimeout(() => {
-    log('run exceeded the timeout — the driver will be abandoned');
-  }, RUN_TIMEOUT_MS);
+  // A deadline that actually ends the run.
+  //
+  // The previous version only LOGGED, which meant a hung driver call blocked
+  // the worker forever — and since one run at a time is allowed, the whole
+  // feature with it, until the server's 90-minute reaper noticed. A run that
+  // overruns is now failed and the loop moves on. The hung call cannot be
+  // cancelled, but it stops being everyone else's problem.
+  // Rendered once, so the log line and the error the UI shows agree — and so a
+  // short limit set for a test does not print "0.1333 minutes".
+  const humanLimit = RUN_TIMEOUT_MS >= 60000
+    ? `${Math.round(RUN_TIMEOUT_MS / 60000)}-minute`
+    : `${Math.round(RUN_TIMEOUT_MS / 1000)}-second`;
+  let timedOut = false;
+  const expired = new Promise((_, reject) => {
+    deadlineTimer = setTimeout(() => {
+      timedOut = true;
+      log(`run exceeded ${humanLimit} — abandoning it`);
+      reject(new Error(`The ${runDoc.kind} run passed its ${humanLimit} limit and was abandoned. `
+        + 'Anything it had already reported is recorded.'));
+    }, RUN_TIMEOUT_MS);
+  });
+  // Never rejects on its own; only the race below observes it.
+  expired.catch(() => {});
 
   try {
     if (!CFG.stub && !await chromeUp()) {
@@ -207,7 +228,7 @@ async function executeRun(runDoc, config, openSession = null) {
       }
 
       if (runDoc.kind === 'refresh') {
-        const out = await driver.refresh(session, { config, onProgress });
+        const out = await Promise.race([driver.refresh(session, { config, onProgress }), expired]);
         // The profile's own "last updated" stamp is the only honest proof the
         // save landed. Unchanged means the page never really painted — a dark
         // wake, or a changed DOM — and must not be recorded as success.
@@ -223,7 +244,7 @@ async function executeRun(runDoc, config, openSession = null) {
       }
 
       if (runDoc.kind === 'harvest') {
-        const { jobs, searches } = await driver.harvest(session, { config, onProgress });
+        const { jobs, searches } = await Promise.race([driver.harvest(session, { config, onProgress }), expired]);
         // Same doctrine as the LinkedIn harvest's zero-rendered check: a page
         // that painted nothing is a failure, never "no new jobs today".
         if (jobs.length === 0) {
@@ -253,9 +274,12 @@ async function executeRun(runDoc, config, openSession = null) {
           return {};
         }
         resumePath = await fetchResume(runDoc.id);
-        const out = await driver.apply(session, {
-          config, jobs, resumePath, dryRun: !!runDoc.dryRun, onProgress, onResult,
-        });
+        const out = await Promise.race([
+          driver.apply(session, {
+            config, jobs, resumePath, dryRun: !!runDoc.dryRun, onProgress, onResult,
+          }),
+          expired,
+        ]);
         await finish('done', { exitCode: 0, stats: out });
         log(runDoc.dryRun
           ? `apply rehearsed — ${out.rehearsed || 0} job(s) walked, nothing submitted`
@@ -275,10 +299,14 @@ async function executeRun(runDoc, config, openSession = null) {
       return { checkpoint: true };
     }
     log('run failed:', err.message);
-    try { await finish('failed', { error: String(err.stack || err.message).slice(0, 1500) }); } catch (_) {}
+    // A timeout is reported as itself, without a stack: the stack is this
+    // file's race, not the thing that hung, and printing it would send you
+    // looking in the wrong place.
+    const detail = timedOut ? err.message : String(err.stack || err.message);
+    try { await finish('failed', { error: detail.slice(0, 1500) }); } catch (_) {}
     return {};
   } finally {
-    clearTimeout(deadline);
+    clearTimeout(deadlineTimer);
     if (resumePath) { try { fs.unlinkSync(resumePath); } catch (_) {} }
   }
 }

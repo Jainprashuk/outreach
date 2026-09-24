@@ -115,14 +115,24 @@ export default function RunTimeline({ runs }: { runs: NaukriRun[] }) {
 // The NOW band. Separate from the history rows because a live run needs
 // different furniture — a bar, the current label, a cancel — and sharing one
 // component would make both worse.
+// A run whose progress has not moved for this long is not working. The bar
+// keeps its last position and the counters keep their last values, so without
+// saying so a stalled run looks exactly like a busy one — which is how eight
+// minutes of nothing reads as "still going".
+const STALL_MS = 3 * 60 * 1000;
+
 export function ActiveRun({ run, onCancel }: { run: NaukriRun; onCancel?: () => void }) {
   const p = run.progress;
   const pct = p.pagesTotal > 0 ? Math.min(100, Math.round((p.page / p.pagesTotal) * 100)) : null;
+  const stalledFor = p.updatedAt ? Date.now() - new Date(p.updatedAt).getTime() : 0;
+  const stalled = stalledFor > STALL_MS;
 
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' }}>
-        <span className="badge badge-pending">{run.status}</span>
+        <span className={`badge ${stalled ? 'badge-rejected' : 'badge-pending'}`}>
+          {stalled ? 'stalled' : run.status}
+        </span>
         <strong style={{ fontSize: 13 }}>{run.kind}</strong>
         <Muted>running {elapsed(run.claimedAt)}</Muted>
         {run.dryRun && <span className="badge badge-queued">dry run</span>}
@@ -130,6 +140,15 @@ export function ActiveRun({ run, onCancel }: { run: NaukriRun; onCancel?: () => 
           <button className="btn btn-xs" type="button" onClick={onCancel} style={{ marginLeft: 'auto' }}>Cancel</button>
         )}
       </div>
+
+      {stalled && (
+        <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 6, lineHeight: 1.5 }}>
+          <i className="ti ti-alert-triangle" style={{ marginRight: 5 }} />
+          No progress for {Math.round(stalledFor / 60000)} minutes. The worker is probably stuck on a page
+          that stopped responding — restart it on your Mac (Ctrl-C, then <code>npm run naukri-worker</code>).
+          Anything it already reported is recorded.
+        </div>
+      )}
 
       <div className="progress-bar" style={{ margin: '10px 0 7px' }}>
         {pct === null
