@@ -39,6 +39,19 @@ const SENT_STATUSES = ['applied', 'in-review', 'interviewing', 'offer', 'rejecte
 // rule belongs where it cannot drift.
 const TERMINAL_SKIP = /applies on the company site|already applied/i;
 
+// "Approved and still queued to be sent", in ONE place.
+//
+// It was written out twice — once for the tab's count, once implied by the
+// list's query — and the two drifted: the badge said 55 while the list's own
+// chips totalled 259, because the list asked only for `approval: 'approved'`
+// and counted everything ever approved, applied and skipped included. A number
+// that disagrees with the list under it is worse than no number.
+const WAITING_FILTER = {
+  approval: 'approved',
+  applyStatus: { $in: ['none', 'failed'] },
+  retryable: { $ne: false },
+};
+
 const RESUME_TYPES = new Set([
   'application/pdf',
   'application/msword',
@@ -140,11 +153,7 @@ router.get('/overview', async (req, res) => {
       // Appended LAST, matching the destructuring above. Adding a query in the
       // middle silently shifts every position after it — that is how the panel
       // once reported the waiting count as "applied today".
-      NaukriJob.countDocuments({
-        userId: req.userId, approval: 'approved',
-        applyStatus: { $in: ['none', 'failed'] },
-        retryable: { $ne: false }, ...BASE_FILTER,
-      }),
+      NaukriJob.countDocuments({ userId: req.userId, ...WAITING_FILTER, ...BASE_FILTER }),
       NaukriJob.countDocuments({ userId: req.userId, applyStatus: 'skipped', ...BASE_FILTER }),
     ]);
 
@@ -567,7 +576,10 @@ router.get('/jobs', async (req, res) => {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
     const filter = { userId: req.userId, ...BASE_FILTER };
-    if (['pending', 'approved', 'rejected'].includes(req.query.approval)) filter.approval = req.query.approval;
+    // `bucket=waiting` is the Waiting tab asking for exactly what its badge
+    // counts, rather than reproducing the rule and hoping the two agree.
+    if (req.query.bucket === 'waiting') Object.assign(filter, WAITING_FILTER);
+    else if (['pending', 'approved', 'rejected'].includes(req.query.approval)) filter.approval = req.query.approval;
     // 'sent' is what the Applied board asks for: things that actually went out.
     // 'any' is kept for anything that wants every outcome including skips.
     if (req.query.applyStatus === 'sent') filter.applyStatus = { $in: SENT_STATUSES };

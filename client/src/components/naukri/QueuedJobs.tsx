@@ -56,18 +56,22 @@ export default function QueuedJobs({ overview, onChanged }: {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [type, setType] = useState<'' | 'native' | 'external'>('');
   const [counts, setCounts] = useState<{ all: number; external: number; native: number } | undefined>();
+  const [total, setTotal] = useState(0);
   const toast = useToast();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await listNaukriJobsApi({ approval: 'approved', limit: 200, applyType: type || undefined });
-      setCounts(r.typeCounts);
+      // `bucket: 'waiting'` rather than approval + a client-side filter: the
+      // server owns what "waiting" means, so the chips and the tab badge count
+      // the same rows. Filtering here instead is what let them disagree.
+      const r = await listNaukriJobsApi({ bucket: 'waiting', limit: 200, applyType: type || undefined });
+      setCounts(r.typeCounts); setTotal(r.total);
       // Split by whether a run can still act on them. Showing the two together
       // is what made "80 approved" look like 80 that would be applied to.
-      // Skips are excluded here — they have their own tab, and mixing them made
-      // this number mean two unrelated things at once.
-      setJobs(r.jobs.filter(j => (j.applyStatus === 'none' || j.applyStatus === 'failed') && j.retryable !== false));
+      // No client-side narrowing: the server already returned exactly the
+      // waiting set, and re-filtering here would put the disagreement back.
+      setJobs(r.jobs);
       setParked([]);
       // Cleared whenever the list reloads: acting on rows you can no longer see
       // is the one mistake this screen must not allow.
@@ -137,7 +141,9 @@ export default function QueuedJobs({ overview, onChanged }: {
 
   const t = trigger(overview);
   const perRun = overview.appliedToday >= 0 ? 20 : 20;
-  const batches = Math.ceil(jobs.length / perRun);
+  // From the server's total, not the loaded page: the list stops at 200 rows
+  // and "takes 3 runs to clear" must describe the queue, not the screen.
+  const batches = Math.ceil(total / perRun);
 
   return (
     <>
@@ -151,7 +157,7 @@ export default function QueuedJobs({ overview, onChanged }: {
         </Empty>
       ) : (
         <Card
-          title={`${jobs.length} waiting`}
+          title={`${total} waiting`}
           icon="ti-hourglass"
           right={
             <button className="btn btn-xs btn-primary" type="button" onClick={applyNow} disabled={busy}>
@@ -161,6 +167,7 @@ export default function QueuedJobs({ overview, onChanged }: {
         >
           <Hint style={{ marginTop: 0, marginBottom: 10 }}>
             A run applies to at most {perRun}, so this takes {batches} run{batches === 1 ? '' : 's'} to clear.
+            {total > jobs.length && ` Showing the first ${jobs.length}.`}
             Roughly 6 in 14 Naukri listings apply on the company site and will be skipped — those are
             dropped from this list once seen, not retried.
           </Hint>

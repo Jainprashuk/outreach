@@ -1514,6 +1514,9 @@ export const listNaukriRunsApi = (page = 1, limit = 20, kind?: NaukriRunKind) =>
     `/api/naukri/runs?page=${page}&limit=${limit}${kind ? `&kind=${kind}` : ''}`);
 
 export interface NaukriJobQuery {
+  /** Ask for a named set the server defines — 'waiting' is exactly what the
+      Waiting badge counts, so the list and the number cannot disagree. */
+  bucket?: 'waiting';
   approval?: NaukriApproval;
   /** 'sent' = actually went out (applied and beyond); 'any' = every outcome, skips included. */
   applyStatus?: NaukriApplyStatus | 'any' | 'sent';
