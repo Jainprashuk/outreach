@@ -31,35 +31,40 @@ const HARD_REJECT = -999;
 // promoted. Keyed on EMAIL, not contactId: contactId is only stamped when a new
 // contact is created, so leads whose address already existed as a contact carry
 // null and an id-based join would miss most of them.
+async function leadOutcomes(userId) {
+  const emails = await Lead.distinct('email', { userId, email: { $ne: null }, ...BASE_FILTER });
+  if (emails.length === 0) return {};
+
+  const contacts = await Contact.find(
+    { userId, email: { $in: emails }, deleted: { $ne: true } },
+    {
+      email: 1, status: 1, approvalStatus: 1, template: 1, lastSentAt: 1,
+      followUpSentAt: 1, repliedAt: 1, replySnippet: 1, bounceReason: 1, failReason: 1,
+    }
+  ).collation({ locale: 'en', strength: 2 }).lean();
+
+  const outcomes = {};
+  for (const c of contacts) {
+    outcomes[c.email.trim().toLowerCase()] = {
+      contactId: String(c._id),
+      status: c.status,
+      approvalStatus: c.approvalStatus,
+      template: c.template || '',
+      lastSentAt: c.lastSentAt || null,
+      followUpSentAt: c.followUpSentAt || null,
+      repliedAt: c.repliedAt || null,
+      replySnippet: c.replySnippet || null,
+      bounceReason: c.bounceReason || null,
+      failReason: c.failReason || null,
+    };
+  }
+  return outcomes;
+}
+
 router.get('/outcomes', async (req, res) => {
   try {
-    const emails = await Lead.distinct('email', { userId: req.userId, email: { $ne: null }, ...BASE_FILTER });
-    if (emails.length === 0) return res.json({ outcomes: {}, count: 0 });
-
-    const contacts = await Contact.find(
-      { userId: req.userId, email: { $in: emails }, deleted: { $ne: true } },
-      {
-        email: 1, status: 1, approvalStatus: 1, template: 1, lastSentAt: 1,
-        followUpSentAt: 1, repliedAt: 1, replySnippet: 1, bounceReason: 1, failReason: 1,
-      }
-    ).collation({ locale: 'en', strength: 2 }).lean();
-
-    const outcomes = {};
-    for (const c of contacts) {
-      outcomes[c.email.trim().toLowerCase()] = {
-        contactId: String(c._id),
-        status: c.status,
-        approvalStatus: c.approvalStatus,
-        template: c.template || '',
-        lastSentAt: c.lastSentAt || null,
-        followUpSentAt: c.followUpSentAt || null,
-        repliedAt: c.repliedAt || null,
-        replySnippet: c.replySnippet || null,
-        bounceReason: c.bounceReason || null,
-        failReason: c.failReason || null,
-      };
-    }
-    res.json({ outcomes, count: contacts.length });
+    const outcomes = await leadOutcomes(req.userId);
+    res.json({ outcomes, count: Object.keys(outcomes).length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -300,3 +305,5 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.serialize = serialize;
+module.exports.leadOutcomes = leadOutcomes;

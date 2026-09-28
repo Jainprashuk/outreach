@@ -26,6 +26,8 @@ const { usersByStaleness, runForUsers } = require('./lib/fanout');
 const { deadline } = require('./lib/http');
 const { classifyReply } = require('./lib/replyClassifier');
 const { runBackfillBatch } = require('./routes/contacts');
+const Lead = require('./models/Lead');
+const { serialize: serializeLead, leadOutcomes } = require('./routes/leads');
 
 const app = express();
 app.use(cors());
@@ -402,27 +404,87 @@ app.post('/api/share/login', (req, res) => {
   res.status(401).json({ error: 'Invalid password' });
 });
 
+// Whether the caller is the signed-in owner of the export being read, as
+// opposed to someone holding a share link or the share password. Only the
+// owner is sent timestamps: a share link reveals WHO you contacted, and dates
+// would add WHEN, which nobody sharing a list meant to hand over.
+const viewsOwnExport = async (req) => {
+  if (AUTH_OPEN || isLegacyOwner(req)) return true;
+  try {
+    const session = req.session || await resolveSession(req);
+    return !!session && String(session.userId) === String(req.userId);
+  } catch (_) { return false; }
+};
+
 // Mounted ahead of the `/api` attachUser middleware, so requireShareAuth resolves
 // the account itself — from a link token, a session, or (single-account only) the
 // legacy share cookie. attachUser is the last resort and refuses once there are
 // several accounts, since a global password cannot say whose export it wants.
 app.get('/api/share/contacts', requireDb, requireShareAuth, attachUser, async (req, res) => {
   try {
+    const withDates = await viewsOwnExport(req);
     const docs = await Contact.find({ userId: req.userId, deleted: { $ne: true } })
-      .select('name email company role status repliedAt lastSentAt')
+      .select('name email company role status approvalStatus template source replyCategory repliedAt lastSentAt followUpSentAt createdAt')
       .sort({ createdAt: -1 })
       .lean();
-    // Return only non-sensitive fields; derive booleans so dates never ship.
+    const date = d => (withDates && d ? d : null);
+    // Return only non-sensitive fields — never reply text or bounce reasons.
     const contacts = docs.map(c => ({
       name: c.name,
       email: c.email,
       company: c.company || '',
       role: c.role || '',
       status: c.status,
+      approvalStatus: c.approvalStatus || 'pending',
+      template: c.template || '',
+      source: c.source || 'outreach',
+      replyCategory: c.replyCategory || null,
       replied: !!c.repliedAt || c.status === 'replied' || c.status === 'follow-up-replied',
       delivered: !!c.lastSentAt && c.status !== 'bounced' && c.status !== 'failed',
+      followedUp: !!c.followUpSentAt || c.status === 'follow-up-sent' || c.status === 'follow-up-replied',
+      createdAt: date(c.createdAt),
+      lastSentAt: date(c.lastSentAt),
+      repliedAt: date(c.repliedAt),
     }));
-    res.json({ contacts });
+    res.json({ contacts, withDates });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// LinkedIn-harvested leads, in the same shape GET /api/leads returns so the
+// export page can reuse the Leads page's filters unchanged.
+app.get('/api/share/leads', requireDb, requireShareAuth, attachUser, async (req, res) => {
+  try {
+    const withDates = await viewsOwnExport(req);
+    const [docs, rawOutcomes] = await Promise.all([
+      Lead.find({ userId: req.userId, deleted: { $ne: true } }).sort({ fitScore: -1, createdAt: -1 }).lean(),
+      leadOutcomes(req.userId),
+    ]);
+    const leads = docs.map(d => {
+      const l = serializeLead(d);
+      // Your own notes and the internal dedupe key are not part of an export.
+      delete l.applyNote; delete l.applyHistory; delete l.dedupeKey; delete l.userId;
+      delete l.deleted; delete l.deletedAt;
+      if (!withDates) {
+        l.createdAt = null; l.updatedAt = null; l.appliedAt = null;
+        l.promotedAt = null; l.batchUpdatedAt = null;
+      }
+      return l;
+    });
+    // Outcomes drive the "outreach outcome" filter, which only asks whether a
+    // send or reply HAPPENED. For a share viewer the real time is replaced by
+    // the epoch: still truthy to that test, but it says nothing about when.
+    const mark = d => (d ? (withDates ? d : new Date(0)) : null);
+    const outcomes = {};
+    for (const [email, o] of Object.entries(rawOutcomes)) {
+      outcomes[email] = {
+        contactId: o.contactId, status: o.status, approvalStatus: o.approvalStatus, template: o.template,
+        lastSentAt: mark(o.lastSentAt), followUpSentAt: mark(o.followUpSentAt), repliedAt: mark(o.repliedAt),
+        replySnippet: null, bounceReason: null, failReason: null,
+      };
+    }
+    res.json({ leads, outcomes, withDates });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
