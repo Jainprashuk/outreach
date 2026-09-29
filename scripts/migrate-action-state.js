@@ -105,7 +105,7 @@ function place(c, now, inInterview) {
   }
 
   console.log('\n  would land in:');
-  for (const b of [...actionQueue.STATES]) console.log(`    ${b.padEnd(10)} ${buckets[b] || 0}`);
+  for (const b of actionQueue.QUEUE_BUCKETS) console.log(`    ${b.padEnd(10)} ${buckets[b] || 0}`);
   console.log('\n  because:');
   for (const [k, n] of Object.entries(reasons).sort((a, b) => b[1] - a[1])) console.log(`    ${String(n).padStart(5)}  ${k}`);
 

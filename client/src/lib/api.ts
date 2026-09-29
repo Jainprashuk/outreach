@@ -16,10 +16,11 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 export type ReplyCategory = 'reviewing' | 'stay-in-touch' | 'no' | 'resume-requested' | 'needs-attention' | 'other';
 
 /** Where a replied conversation stands — see lib/actionQueue.js on the server. */
-export type ActionBucket = 'needs-you' | 'waiting' | 'snoozed' | 'done';
+export type ActionBucket = 'needs-you' | 'follow-up' | 'waiting' | 'snoozed' | 'done';
 
 export interface ContactAction {
-  state: ActionBucket | null;
+  /** Stored state. 'follow-up' is never stored — the server derives it from a due wait. */
+  state: Exclude<ActionBucket, 'follow-up'> | null;
   reason: string | null;
   since: string | null;
   /** When a waiting/snoozed item comes back to Needs you. */

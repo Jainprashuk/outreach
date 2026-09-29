@@ -21,7 +21,7 @@ router.get('/', async (req, res) => {
       { action: 1 },
     ).lean();
 
-    const counts = Object.fromEntries(actionQueue.STATES.map(s => [s, 0]));
+    const counts = Object.fromEntries(actionQueue.QUEUE_BUCKETS.map(s => [s, 0]));
     const items = rows.map(c => {
       const bucket = actionQueue.bucketOf(c.action, now);
       counts[bucket]++;
@@ -36,15 +36,16 @@ router.get('/', async (req, res) => {
       };
     });
 
-    // Needs you: most actionable first, then longest waiting. Everything else: newest first.
-    const needsYou = actionQueue.sortNeedsYou(items.filter(i => i.bucket === 'needs-you'), now);
-    const rest = items.filter(i => i.bucket !== 'needs-you')
+    // Needs you and Follow up: most actionable first, then longest waiting. The rest: newest first.
+    const urgent = ['needs-you', 'follow-up'];
+    const ranked = urgent.flatMap(b => actionQueue.sortNeedsYou(items.filter(i => i.bucket === b), now));
+    const rest = items.filter(i => !urgent.includes(i.bucket))
       .sort((a, b) => new Date(b.since || 0) - new Date(a.since || 0));
 
     res.json({
       now,
       counts,
-      items: [...needsYou, ...rest].map(({ action, ...item }) => item),
+      items: [...ranked, ...rest].map(({ action, ...item }) => item),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

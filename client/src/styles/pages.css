@@ -182,6 +182,7 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
 .mailbox-tabs { margin-bottom: 12px; }
 .mailbox-row-reason { font-size: 11.5px; color: var(--text2); margin-top: 3px; display: flex; gap: 5px; align-items: center; }
 .mailbox-row-reason.needs-you { color: var(--amber); font-weight: 550; }
+.mailbox-row-reason.follow-up { color: var(--accent); font-weight: 550; }
 .mailbox-row-unread { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 5px; }
 .mailbox-queue-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin-bottom: 16px; border-radius: var(--radius-lg); background: var(--bg2); }
 .mailbox-queue-reason { flex: 1 1 220px; font-size: 13px; color: var(--text2); display: flex; gap: 6px; align-items: center; min-width: 0; }

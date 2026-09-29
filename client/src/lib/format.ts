@@ -46,7 +46,7 @@ const REASON_LABELS: Record<string, string> = {
   'resume-requested': 'Asked for your resume',
   'needs-attention': 'Needs your answer',
   unclassified: 'Not classified yet',
-  'no-response': 'No reply in 7 days — follow up?',
+  'no-response': 'No reply in 7 days',
   reconnect: 'Time to reconnect',
   reviewing: 'Reviewing your profile',
   'you-replied': 'You replied',
@@ -56,7 +56,7 @@ const REASON_LABELS: Record<string, string> = {
   stale: 'Old reply, closed automatically',
 };
 const MANUAL_LABELS: Record<string, string> = {
-  'needs-you': 'Reopened by you', waiting: 'Waiting', snoozed: 'Snoozed by you', done: 'Marked done by you',
+  'needs-you': 'Reopened by you', 'follow-up': 'Follow up', waiting: 'Waiting', snoozed: 'Snoozed by you', done: 'Marked done by you',
 };
 
 export const actionReasonLabel = (bucket: string, reason: string | null) =>

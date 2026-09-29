@@ -26,6 +26,7 @@ type Tab = ActionBucket | 'all';
 
 const TABS: [Tab, string, string][] = [
   ['needs-you', 'Needs you', 'ti-bell-ringing'],
+  ['follow-up', 'Follow up', 'ti-arrow-forward-up'],
   ['waiting', 'Waiting on them', 'ti-hourglass'],
   ['snoozed', 'Snoozed', 'ti-clock-pause'],
   ['done', 'Done', 'ti-circle-check'],
@@ -34,6 +35,7 @@ const TABS: [Tab, string, string][] = [
 
 const EMPTY: Record<Tab, string> = {
   'needs-you': 'Nothing needs you right now. Replies that need an answer land here.',
+  'follow-up': 'No one to chase. People who go quiet for 7 days after your reply land here.',
   waiting: 'No one owes you a reply at the moment.',
   snoozed: 'Nothing is snoozed.',
   done: 'Nothing is marked done yet.',
@@ -64,7 +66,7 @@ const morningIn = (days: number) => {
 
 // When the item got to where it is: an item that came back is waiting on you since the
 // moment it came back, not since it was parked.
-const cameBack = (i: ActionItem, now: Date) => i.bucket === 'needs-you' && !!i.dueAt && new Date(i.dueAt) <= now;
+const cameBack = (i: ActionItem, now: Date) => (i.bucket === 'needs-you' || i.bucket === 'follow-up') && !!i.dueAt && new Date(i.dueAt) <= now;
 
 function whenLabel(i: ActionItem, now: Date) {
   if ((i.bucket === 'waiting' || i.bucket === 'snoozed') && i.dueAt) return `back ${fmtDay(i.dueAt)}`;
@@ -278,7 +280,7 @@ export default function Mailbox() {
           <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
             className={`nav-tab${tab === key ? ' active' : ''}`}>
             <i className={`ti ${icon}`} style={{ marginRight: 5 }} />{label}
-            {key !== 'all' && queue.counts[key] ? (
+            {key !== 'all' && queue.counts[key as ActionBucket] ? (
               <span className={key === 'needs-you' ? 'tab-badge' : 'contact-count-badge'} style={{ marginLeft: 6 }}>{queue.counts[key]}</span>
             ) : null}
           </button>
@@ -333,7 +335,7 @@ export default function Mailbox() {
                 <button className="btn btn-sm" type="button" disabled={busyAction} onClick={() => snoozeTo([...checked], morningIn(7))}>
                   <i className="ti ti-clock-pause" /> Snooze a week
                 </button>
-                {tab !== 'needs-you' && (
+                {tab !== 'needs-you' && tab !== 'follow-up' && (
                   <button className="btn btn-sm" type="button" disabled={busyAction} onClick={() => act([...checked], 'reopen')}>
                     <i className="ti ti-arrow-back-up" /> Reopen
                   </button>
@@ -377,7 +379,7 @@ export default function Mailbox() {
                       <div style={{ fontSize: 11.5, color: 'var(--text3)' }}>{contact.company}</div>
                       <div className="mailbox-row-preview">{last?.text || contact.replySnippet || '(no content)'}</div>
                       {item && (
-                        <div className={`mailbox-row-reason${item.bucket === 'needs-you' ? ' needs-you' : ''}`}>
+                        <div className={`mailbox-row-reason${item.bucket === 'needs-you' ? ' needs-you' : item.bucket === 'follow-up' ? ' follow-up' : ''}`}>
                           {tab === 'all' && <span className="contact-count-badge">{TABS.find(([k]) => k === item.bucket)?.[1]}</span>}
                           {reasonLine(item, now)}
                         </div>
@@ -445,7 +447,7 @@ export default function Mailbox() {
                         </div>
                       )}
                     </div>
-                    {selectedItem.bucket !== 'needs-you' && (
+                    {selectedItem.bucket !== 'needs-you' && selectedItem.bucket !== 'follow-up' && (
                       <button className="btn btn-sm" type="button" disabled={busyAction} onClick={() => act([selected.id], 'reopen')}>
                         <i className="ti ti-arrow-back-up" /> Reopen
                       </button>

@@ -15,7 +15,7 @@ import { useApp } from './AppContext';
 import { useSession } from './SessionContext';
 
 const REFRESH_MS = 3 * 60 * 1000;
-const EMPTY_COUNTS: Record<ActionBucket, number> = { 'needs-you': 0, waiting: 0, snoozed: 0, done: 0 };
+const EMPTY_COUNTS: Record<ActionBucket, number> = { 'needs-you': 0, 'follow-up': 0, waiting: 0, snoozed: 0, done: 0 };
 
 interface ActionQueueStore {
   loaded: boolean;

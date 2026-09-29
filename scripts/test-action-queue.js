@@ -80,11 +80,17 @@ console.log('\npart 1 — time and reasons');
 {
   const reviewing = q.onInbound(null, verdict('reviewing'), t0).action;
   ok('reviewing is waiting before 7 days', q.bucketOf(reviewing, at(6.9)) === 'waiting');
-  ok('reviewing is needs-you after 7 days', q.bucketOf(reviewing, at(7.1)) === 'needs-you');
+  ok('reviewing goes to follow-up after 7 days, not needs-you', q.bucketOf(reviewing, at(7.1)) === 'follow-up');
   ok('  with the reason "no-response"', q.effectiveReason(reviewing, at(7.1)) === 'no-response');
 
   const reconnect = q.onInbound(null, verdict('stay-in-touch'), t0).action;
-  ok('stay-in-touch comes back after 60 days as "reconnect"', q.bucketOf(reconnect, at(61)) === 'needs-you' && q.effectiveReason(reconnect, at(61)) === 'reconnect');
+  ok('stay-in-touch comes back to follow-up after 60 days as "reconnect"', q.bucketOf(reconnect, at(61)) === 'follow-up' && q.effectiveReason(reconnect, at(61)) === 'reconnect');
+
+  const mine = q.manual('snooze', t0, at(3));
+  ok('a snooze you set comes back to needs-you, not follow-up', q.bucketOf(mine, at(3.1)) === 'needs-you');
+
+  const answered = q.onOutbound(q.onInbound(null, verdict('resume-requested'), t0).action, at(1), t0, at(1));
+  ok('no answer 7 days after your reply → follow-up with reason no-response', q.bucketOf(answered, at(8.5)) === 'follow-up' && q.effectiveReason(answered, at(8.5)) === 'no-response');
 
   const list = [
     { id: 'reconnect', action: reconnect },
