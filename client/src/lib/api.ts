@@ -15,6 +15,18 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected';
 
 export type ReplyCategory = 'reviewing' | 'stay-in-touch' | 'no' | 'resume-requested' | 'needs-attention' | 'other';
 
+/** Where a replied conversation stands — see lib/actionQueue.js on the server. */
+export type ActionBucket = 'needs-you' | 'waiting' | 'snoozed' | 'done';
+
+export interface ContactAction {
+  state: ActionBucket | null;
+  reason: string | null;
+  since: string | null;
+  /** When a waiting/snoozed item comes back to Needs you. */
+  dueAt: string | null;
+  resolvedBy: 'you-replied' | 'manual' | 'auto' | null;
+}
+
 export interface StatusHistoryEntry {
   status: string;
   changedAt: string;
@@ -61,6 +73,9 @@ export interface Contact {
   replyClassifierOk: boolean;
   lastSentAt: string | null;
   followUpSentAt: string | null;
+  lastInboundAt?: string | null;
+  lastOutboundAt?: string | null;
+  action?: ContactAction;
   statusHistory?: StatusHistoryEntry[];
   thread?: ThreadEntry[];
   createdAt: string;
@@ -167,6 +182,25 @@ export const backfillRepliesApi = (limit = 20) =>
 export const triggerReplyClassificationApi = (id: string) =>
   apiFetch<Contact>(`/api/contacts/${id}/classify-reply`, { method: 'POST' });
 
+// The Needs you queue. The server decides every conversation's bucket (and the counts, from
+// the same rows), so the Mailbox never works one out itself and the badge can't disagree
+// with the list.
+export interface ActionItem {
+  id: string;
+  bucket: ActionBucket;
+  reason: string | null;
+  since: string | null;
+  dueAt: string | null;
+  resolvedBy: ContactAction['resolvedBy'];
+}
+export interface ActionQueue { now: string; counts: Record<ActionBucket, number>; items: ActionItem[]; }
+export const loadActionQueueApi = () => apiFetch<ActionQueue>('/api/actions');
+export type ActionOp = 'done' | 'snooze' | 'reopen';
+export const bulkActionApi = (ids: string[], op: ActionOp, until?: string) =>
+  apiFetch<{ ok: boolean; updated: number }>('/api/actions/bulk', {
+    method: 'POST', body: JSON.stringify({ ids, op, until }),
+  });
+
 export const saveSettingsApi = (patch: any) =>
   apiFetch<any>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) });
 
@@ -197,7 +231,7 @@ export const deleteBlocklistEntryApi = (id: string) =>
 
 export interface CooldownSkip {
   id: string; name: string; email: string; status: ContactStatus;
-  lastSentAt: string | null; remainingMs: number; reason?: 'cooldown' | 'in_campaign' | 'blocked' | 'in_interview';
+  lastSentAt: string | null; remainingMs: number; reason?: 'cooldown' | 'in_campaign' | 'blocked' | 'in_interview' | 'replied';
 }
 
 export interface ResetForSendResult {

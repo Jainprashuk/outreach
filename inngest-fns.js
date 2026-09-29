@@ -7,6 +7,7 @@ const mailer = require('./lib/mailer');
 const { COOLDOWN_ERROR, COOLDOWN_LABEL, inCooldown, priorStatus } = require('./lib/cooldown');
 const { BLOCKLIST_ERROR, isBlocked, loadBlocklistSets } = require('./lib/blocklist');
 const { INTERVIEW_ERROR, isInInterview, loadInterviewSets } = require('./lib/interviewGuard');
+const { REPLIED_ERROR, hasUnansweredReply } = require('./lib/actionQueue');
 const { notifyCampaignJobFinished } = require('./lib/campaignNotifications');
 const { logEvent } = require('./lib/activityLog');
 const db = require('./db');
@@ -160,6 +161,19 @@ const sendSingleEmail = inngest.createFunction(
         await restoreAfterSkip(contactDoc, 'Send skipped — contact is in the interview pipeline; status restored', job.userId);
         return;
       }
+
+      // Reply check — a reply that arrived after this job was queued means a live
+      // conversation. Sending the template anyway talks past them, and the status write
+      // below would erase the `replied` status.
+      if (hasUnansweredReply(contactDoc)) {
+        await _atomicItemUpdate(jobId, contactId, {
+          'items.$.status': 'skipped',
+          'items.$.error': REPLIED_ERROR,
+          'items.$.processedAt': new Date(),
+        }, job.userId);
+        await restoreAfterSkip(contactDoc, 'Send skipped — they replied and are waiting on you; status restored', job.userId);
+        return;
+      }
       const isFollowUp = !!(contactDoc?.lastSentAt && !contactDoc?.followUpSentAt);
 
       // Credentials stored in job at creation time; fall back to mailer (env vars)
@@ -213,6 +227,7 @@ const sendSingleEmail = inngest.createFunction(
             messageId: info.messageId || null,
             sentSubject: followUpSubject,
             lastSentAt: sentAt,
+            lastOutboundAt: sentAt,
             ...(isFollowUp ? { followUpSentAt: sentAt } : {}),
           },
           $push: {
@@ -324,7 +339,7 @@ const sendEmailBulk = inngest.createFunction(
                   $inc: { processedCount: 1 },
                 }
               );
-              await restoreAfterSkip(contactDoc, `Send skipped — already emailed within the last ${COOLDOWN_LABEL}; status restored`);
+              await restoreAfterSkip(contactDoc, `Send skipped — already emailed within the last ${COOLDOWN_LABEL}; status restored`, job.userId);
               continue;
             }
 
@@ -340,7 +355,7 @@ const sendEmailBulk = inngest.createFunction(
                   $inc: { processedCount: 1 },
                 }
               );
-              await markBlocked(contactDoc);
+              await markBlocked(contactDoc, job.userId);
               continue;
             }
 
@@ -357,7 +372,24 @@ const sendEmailBulk = inngest.createFunction(
                   $inc: { processedCount: 1 },
                 }
               );
-              await restoreAfterSkip(contactDoc, 'Send skipped — contact is in the interview pipeline; status restored');
+              await restoreAfterSkip(contactDoc, 'Send skipped — contact is in the interview pipeline; status restored', job.userId);
+              continue;
+            }
+
+            // Reply check — see the single-send path above.
+            if (hasUnansweredReply(contactDoc)) {
+              await SendJob.findOneAndUpdate(
+                { _id: jobId, userId: job.userId, 'items.contactId': item.contactId },
+                {
+                  $set: {
+                    'items.$.status': 'skipped',
+                    'items.$.error': REPLIED_ERROR,
+                    'items.$.processedAt': new Date(),
+                  },
+                  $inc: { processedCount: 1 },
+                }
+              );
+              await restoreAfterSkip(contactDoc, 'Send skipped — they replied and are waiting on you; status restored', job.userId);
               continue;
             }
 
@@ -396,6 +428,7 @@ const sendEmailBulk = inngest.createFunction(
                   messageId: info.messageId || null,
                   sentSubject: followUpSubject,
                   lastSentAt: sentAt,
+                  lastOutboundAt: sentAt,
                   ...(isFollowUp ? { followUpSentAt: sentAt } : {}),
                 },
                 $push: {

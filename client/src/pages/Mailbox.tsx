@@ -1,29 +1,103 @@
-// Gmail-style conversation view: every contact with any captured thread
-// activity (outbound sends + inbound replies, including manual replies pulled
-// from the Sent folder), sorted by most recent message, with a full
-// chronological thread on the right. Renders each message's plain-text body
-// only (never `html`) — no sanitizer needed since nothing is ever injected
-// into the DOM as markup.
+// Gmail-style conversation view with a to-do list built in. Every contact who replied sits
+// in one tab — Needs you, Waiting on them, Snoozed or Done — and the server decides which
+// (lib/actionQueue.js, via ActionQueueContext). This page never works a bucket out itself:
+// it takes the server's ids in the server's order and joins them onto the contacts already
+// loaded. "All" is the plain conversation list, newest message first.
+//
+// Renders each message's plain-text body only (never `html`) — no sanitizer needed since
+// nothing is ever injected into the DOM as markup.
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import ClassifierStatus from '../components/ClassifierStatus';
+import SelectionBar, { RowCheck } from '../components/naukri/SelectionBar';
 import { useApp } from '../context/AppContext';
-import { backfillReplyCountApi, backfillRepliesApi, type Contact, type ThreadEntry } from '../lib/api';
-import { CATEGORY_OPTIONS } from '../lib/format';
+import { useActionQueue } from '../context/ActionQueueContext';
+import { useToast } from '../context/ToastContext';
+import {
+  backfillReplyCountApi, backfillRepliesApi,
+  type ActionBucket, type ActionItem, type ActionOp, type Contact, type ReplyCategory, type ThreadEntry,
+} from '../lib/api';
+import { CATEGORY_OPTIONS, actionReasonLabel, relativeDay } from '../lib/format';
+
+type Tab = ActionBucket | 'all';
+
+const TABS: [Tab, string, string][] = [
+  ['needs-you', 'Needs you', 'ti-bell-ringing'],
+  ['waiting', 'Waiting on them', 'ti-hourglass'],
+  ['snoozed', 'Snoozed', 'ti-clock-pause'],
+  ['done', 'Done', 'ti-circle-check'],
+  ['all', 'All', 'ti-inbox'],
+];
+
+const EMPTY: Record<Tab, string> = {
+  'needs-you': 'Nothing needs you right now. Replies that need an answer land here.',
+  waiting: 'No one owes you a reply at the moment.',
+  snoozed: 'Nothing is snoozed.',
+  done: 'Nothing is marked done yet.',
+  all: 'No conversations yet — thread capture starts with your next reply or mailbox check.',
+};
+
+const OP_DONE_LABEL: Record<ActionOp, string> = { done: 'Marked done', snooze: 'Snoozed', reopen: 'Moved to Needs you' };
+
+const isTab = (v: string | null): v is Tab => !!v && TABS.some(([k]) => k === v);
 
 const fmtDateTime = (d: string) => new Date(d).toLocaleString('en-US', {
   month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
 });
+const fmtDay = (d: string) => new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 
-const lastEntry = (c: Contact): ThreadEntry | undefined =>
-  (c.thread && c.thread.length > 0) ? [...c.thread].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())[0] : undefined;
+const byNewest = (a: ThreadEntry, b: ThreadEntry) => new Date(b.at).getTime() - new Date(a.at).getTime();
+const lastEntry = (c: Contact): ThreadEntry | undefined => [...(c.thread || [])].sort(byNewest)[0];
+const lastActivityAt = (c: Contact) => lastEntry(c)?.at || c.repliedAt || c.updatedAt;
+
+// A snooze ends at 9am local, so the item is there when the day starts rather than at
+// whatever minute you happened to press the button.
+const morningIn = (days: number) => {
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  d.setHours(9, 0, 0, 0);
+  return d;
+};
+
+// When the item got to where it is: an item that came back is waiting on you since the
+// moment it came back, not since it was parked.
+const cameBack = (i: ActionItem, now: Date) => i.bucket === 'needs-you' && !!i.dueAt && new Date(i.dueAt) <= now;
+
+function whenLabel(i: ActionItem, now: Date) {
+  if ((i.bucket === 'waiting' || i.bucket === 'snoozed') && i.dueAt) return `back ${fmtDay(i.dueAt)}`;
+  const at = cameBack(i, now) ? i.dueAt : i.since;
+  return at ? relativeDay(at, now) : '';
+}
+
+function reasonLine(i: ActionItem, now: Date) {
+  return [actionReasonLabel(i.bucket, i.reason), whenLabel(i, now)].filter(Boolean).join(' · ');
+}
+
+// Opens the conversation in Gmail: the exact message when we have its id, otherwise
+// everything from them. authuser picks the right account when several are signed in.
+function gmailUrl(c: Contact, account: string) {
+  const inbound = (c.thread || []).filter(t => t.direction === 'inbound' && t.messageId).sort(byNewest)[0];
+  const q = inbound?.messageId ? `rfc822msgid:${inbound.messageId}` : `from:${c.email}`;
+  const base = account ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}` : 'https://mail.google.com/mail/u/0/';
+  return `${base}#search/${encodeURIComponent(q)}`;
+}
 
 export default function Mailbox() {
   const app = useApp();
+  const queue = useActionQueue();
+  const toast = useToast();
+  const [params, setParams] = useSearchParams();
+  const tab: Tab = isTab(params.get('tab')) ? (params.get('tab') as Tab) : 'needs-you';
+
   const [loading, setLoading] = useState(!app.loaded);
   const [error, setError] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+  const [busyAction, setBusyAction] = useState(false);
+  const [snoozeOpen, setSnoozeOpen] = useState(false);
+  const [snoozeDate, setSnoozeDate] = useState('');
   const [backfillCount, setBackfillCount] = useState(0);
   const [backfilling, setBackfilling] = useState(false);
   const [backfillProgress, setBackfillProgress] = useState(0);
@@ -37,6 +111,12 @@ export default function Mailbox() {
     app.init().catch(err => setError(err.message)).finally(() => setLoading(false));
     refreshBackfillCount();
   }, []);
+
+  const setTab = (next: Tab) => {
+    setParams(p => { const n = new URLSearchParams(p); n.set('tab', next); return n; }, { replace: true });
+    setChecked(new Set());
+    setSnoozeOpen(false);
+  };
 
   // Older replies (detected before the thread/classification pipeline existed) only have
   // status + replySnippet — no thread entry, no category. Backfills them in bounded
@@ -63,22 +143,32 @@ export default function Mailbox() {
     }
   };
 
-  // Mailbox is a conversation view — only contacts who actually replied belong here.
-  // A contact with only outbound sends and no reply (the vast majority of outreach) has
-  // nothing to show in a "mailbox" sense and would otherwise flood this list.
-  const allConversations = useMemo(
-    () => app.contacts.filter(c => (c.thread || []).some(t => t.direction === 'inbound')),
-    [app.contacts],
-  );
+  const now = useMemo(() => new Date(), [queue.items]);
+  const contactsById = useMemo(() => new Map(app.contacts.map(c => [c.id, c])), [app.contacts]);
+
+  // The conversations in this tab, in the server's order for a queue tab. "All" is every
+  // conversation with a reply, newest message first — contacts who were only ever emailed
+  // have nothing to show in a mailbox and would flood the list.
+  const inTab = useMemo<Contact[]>(() => {
+    if (tab !== 'all') {
+      return queue.items
+        .filter(i => i.bucket === tab)
+        .map(i => contactsById.get(i.id))
+        .filter((c): c is Contact => !!c);
+    }
+    return app.contacts
+      .filter(c => queue.byId.has(c.id) || (c.thread || []).some(t => t.direction === 'inbound'))
+      .sort((a, b) => new Date(lastActivityAt(b)).getTime() - new Date(lastActivityAt(a)).getTime());
+  }, [tab, queue.items, queue.byId, contactsById, app.contacts]);
 
   // Category counts reflect search (so switching category doesn't re-count against an
   // unrelated set) but not the category filter itself, so every option's count stays visible
   // while one is selected.
   const searched = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return allConversations;
-    return allConversations.filter(c => (c.name + c.email + c.company).toLowerCase().includes(q));
-  }, [allConversations, search]);
+    if (!q) return inTab;
+    return inTab.filter(c => (c.name + c.email + c.company).toLowerCase().includes(q));
+  }, [inTab, search]);
 
   const categoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -89,7 +179,7 @@ export default function Mailbox() {
     return counts;
   }, [searched]);
 
-  const threaded = useMemo(() => {
+  const shown = useMemo(() => {
     let list = searched;
     if (categoryFilter === 'needs-classification') {
       list = list.filter(c => !c.replyClassifierOk);
@@ -97,28 +187,77 @@ export default function Mailbox() {
       list = list.filter(c => c.replyClassifierOk && c.replyCategory === categoryFilter);
     }
     if (unreadOnly) list = list.filter(c => !c.replyRead);
-    return list
-      .map(c => ({ contact: c, last: lastEntry(c)! }))
-      .sort((a, b) => new Date(b.last.at).getTime() - new Date(a.last.at).getTime());
+    return list;
   }, [searched, categoryFilter, unreadOnly]);
 
-  // Keeps a selection valid as the (possibly search-filtered) list changes — falls back to
-  // the top conversation rather than showing a blank pane for a hidden/missing selection.
-  useEffect(() => {
-    if (threaded.length === 0) return;
-    if (!threaded.some(t => t.contact.id === selectedId)) setSelectedId(threaded[0].contact.id);
-  }, [threaded, selectedId]);
+  const shownIds = useMemo(() => shown.map(c => c.id), [shown]);
 
-  const selected = threaded.find(t => t.contact.id === selectedId)?.contact || null;
+  // Keeps a selection valid as the list changes — falls back to the top conversation rather
+  // than showing a blank pane for a hidden/missing selection. Done → the next one.
+  useEffect(() => {
+    if (shown.length === 0) return;
+    if (!shown.some(c => c.id === selectedId)) setSelectedId(shown[0].id);
+  }, [shown, selectedId]);
+
+  // Never act on rows you can't see: a filter change drops them from the selection.
+  useEffect(() => {
+    setChecked(prev => {
+      const visible = new Set(shownIds);
+      const next = new Set([...prev].filter(id => visible.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [shownIds]);
+
+  const selected = shown.find(c => c.id === selectedId) || null;
+  const selectedItem = selected ? queue.byId.get(selected.id) || null : null;
   const orderedThread = useMemo(
     () => selected ? [...(selected.thread || [])].sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime()) : [],
     [selected],
   );
 
-  const busy = loading && app.contacts.length === 0;
+  // Opening a conversation is reading it. Only a click counts — the auto-selected top row
+  // on page load hasn't been read by anyone.
+  const open = (c: Contact) => {
+    setSelectedId(c.id);
+    setSnoozeOpen(false);
+    if (!c.replyRead && c.repliedAt) app.updateContact(c.id, { replyRead: true }).catch(() => {});
+  };
+
+  const act = async (ids: string[], op: ActionOp, until?: Date) => {
+    if (!ids.length) return;
+    setBusyAction(true);
+    try {
+      const n = await queue.act(ids, op, until);
+      const what = OP_DONE_LABEL[op] + (op === 'snooze' && until ? ` until ${fmtDay(until.toISOString())}` : '');
+      toast(ids.length === 1 ? what : `${what}: ${n} conversation${n !== 1 ? 's' : ''}`, 'success');
+      setChecked(new Set());
+      setSnoozeOpen(false);
+    } catch (err: any) {
+      toast(err.message, 'error');
+    } finally {
+      setBusyAction(false);
+    }
+  };
+
+  const snoozeTo = (ids: string[], until: Date) => act(ids, 'snooze', until);
+
+  const setCategory = async (c: Contact, category: ReplyCategory) => {
+    try {
+      await app.updateContact(c.id, { replyCategory: category });
+      toast('Category changed', 'success');
+    } catch (err: any) {
+      toast('Could not change the category: ' + err.message, 'error');
+    }
+  };
+
+  const busy = (loading && app.contacts.length === 0) || !queue.loaded;
+  const needsYou = queue.counts['needs-you'];
+  const subtitle = needsYou
+    ? `${needsYou} need${needsYou === 1 ? 's' : ''} you · ${inTab.length} in this tab`
+    : `${inTab.length} conversation${inTab.length !== 1 ? 's' : ''}`;
 
   return (
-    <Layout title="Mailbox" subtitle={`${threaded.length} conversation${threaded.length !== 1 ? 's' : ''}`}>
+    <Layout title="Mailbox" subtitle={subtitle}>
       {backfillCount > 0 && (
         <div className="info-box" style={{ marginBottom: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
           <i className="ti ti-history" />
@@ -132,12 +271,25 @@ export default function Mailbox() {
           </button>
         </div>
       )}
+
+      <div className="nav-tabs mailbox-tabs" role="tablist">
+        {TABS.map(([key, label, icon]) => (
+          <button key={key} type="button" role="tab" aria-selected={tab === key} onClick={() => setTab(key)}
+            className={`nav-tab${tab === key ? ' active' : ''}`}>
+            <i className={`ti ${icon}`} style={{ marginRight: 5 }} />{label}
+            {key !== 'all' && queue.counts[key] ? (
+              <span className={key === 'needs-you' ? 'tab-badge' : 'contact-count-badge'} style={{ marginLeft: 6 }}>{queue.counts[key]}</span>
+            ) : null}
+          </button>
+        ))}
+      </div>
+
       {busy ? (
         <div className="empty-state"><i className="ti ti-loader" />Loading…</div>
       ) : error ? (
         <div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div>
-      ) : allConversations.length === 0 ? (
-        <div className="empty-state"><i className="ti ti-inbox" />No conversations yet — thread capture starts with your next reply or mailbox check.</div>
+      ) : inTab.length === 0 ? (
+        <div className="empty-state"><i className={`ti ${tab === 'needs-you' ? 'ti-mood-check' : 'ti-inbox'}`} />{EMPTY[tab]}</div>
       ) : (
         <div className="mailbox-layout">
           <div className="mailbox-list-panel" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -169,27 +321,71 @@ export default function Mailbox() {
                 Clear filters
               </button>
             )}
+
+            {tab !== 'all' && shown.length > 0 && (
+              <SelectionBar ids={shownIds} selected={checked} onChange={setChecked}>
+                {tab !== 'done' && (
+                  <button className="btn btn-sm" type="button" disabled={busyAction} onClick={() => act([...checked], 'done')}>
+                    <i className="ti ti-check" /> Done
+                  </button>
+                )}
+                <button className="btn btn-sm" type="button" disabled={busyAction} onClick={() => snoozeTo([...checked], morningIn(7))}>
+                  <i className="ti ti-clock-pause" /> Snooze a week
+                </button>
+                {tab !== 'needs-you' && (
+                  <button className="btn btn-sm" type="button" disabled={busyAction} onClick={() => act([...checked], 'reopen')}>
+                    <i className="ti ti-arrow-back-up" /> Reopen
+                  </button>
+                )}
+              </SelectionBar>
+            )}
+
             <div className="mailbox-list" style={{ flex: 1 }}>
-              {threaded.length === 0 ? (
+              {shown.length === 0 ? (
                 <div className="empty-state"><i className="ti ti-search" />No conversations match these filters</div>
-              ) : threaded.map(({ contact, last }) => (
-                <div
-                  key={contact.id}
-                  className={`mailbox-row${contact.id === selectedId ? ' active' : ''}`}
-                  onClick={() => setSelectedId(contact.id)}
-                >
-                  <Avatar name={contact.name} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-                      <span style={{ fontWeight: 600, fontSize: 13 }}>{contact.name}</span>
-                      <span className="mailbox-row-time">{fmtDateTime(last.at)}</span>
+              ) : shown.map(contact => {
+                const item = queue.byId.get(contact.id);
+                const last = lastEntry(contact);
+                return (
+                  <div
+                    key={contact.id}
+                    className={`mailbox-row${contact.id === selectedId ? ' active' : ''}`}
+                    onClick={() => open(contact)}
+                  >
+                    {tab !== 'all' && (
+                      <span onClick={e => e.stopPropagation()} style={{ paddingTop: 8 }}>
+                        <RowCheck
+                          checked={checked.has(contact.id)}
+                          onToggle={() => setChecked(prev => {
+                            const next = new Set(prev);
+                            if (next.has(contact.id)) next.delete(contact.id); else next.add(contact.id);
+                            return next;
+                          })}
+                        />
+                      </span>
+                    )}
+                    <Avatar name={contact.name} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                        <span style={{ fontWeight: contact.replyRead ? 500 : 650, fontSize: 13, display: 'flex', gap: 6, minWidth: 0 }}>
+                          {!contact.replyRead && contact.repliedAt && <span className="mailbox-row-unread" aria-label="Unread" />}
+                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{contact.name}</span>
+                        </span>
+                        <span className="mailbox-row-time">{fmtDateTime(last?.at || lastActivityAt(contact))}</span>
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text3)' }}>{contact.company}</div>
+                      <div className="mailbox-row-preview">{last?.text || contact.replySnippet || '(no content)'}</div>
+                      {item && (
+                        <div className={`mailbox-row-reason${item.bucket === 'needs-you' ? ' needs-you' : ''}`}>
+                          {tab === 'all' && <span className="contact-count-badge">{TABS.find(([k]) => k === item.bucket)?.[1]}</span>}
+                          {reasonLine(item, now)}
+                        </div>
+                      )}
+                      <ClassifierStatus contact={contact} />
                     </div>
-                    <div style={{ fontSize: 11.5, color: 'var(--text3)' }}>{contact.company}</div>
-                    <div className="mailbox-row-preview">{last.text || '(no content)'}</div>
-                    <ClassifierStatus contact={contact} />
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -198,15 +394,73 @@ export default function Mailbox() {
               <div className="empty-state"><i className="ti ti-mail" />Select a conversation</div>
             ) : (
               <>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                  <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
+                  <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 650, fontSize: 15 }}>{selected.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text2)' }}>
+                    <div style={{ fontSize: 12, color: 'var(--text2)', overflowWrap: 'anywhere' }}>
                       {selected.email}{selected.company ? ` · ${selected.company}` : ''}
                     </div>
                   </div>
                   <ClassifierStatus contact={selected} />
                 </div>
+
+                {selectedItem && (
+                  <div className="mailbox-queue-bar">
+                    <div className="mailbox-queue-reason">
+                      <b>{TABS.find(([k]) => k === selectedItem.bucket)?.[1]}</b>
+                      <span>· {reasonLine(selectedItem, now)}</span>
+                    </div>
+                    {selectedItem.bucket !== 'done' && (
+                      <button className="btn btn-sm btn-primary" type="button" disabled={busyAction} onClick={() => act([selected.id], 'done')}>
+                        <i className="ti ti-check" /> Done
+                      </button>
+                    )}
+                    <div className="mailbox-snooze">
+                      <button className="btn btn-sm" type="button" disabled={busyAction} aria-expanded={snoozeOpen}
+                        onClick={() => setSnoozeOpen(o => !o)}>
+                        <i className="ti ti-clock-pause" /> Snooze <i className="ti ti-chevron-down" />
+                      </button>
+                      {snoozeOpen && (
+                        <div className="mailbox-snooze-menu" role="menu">
+                          <button className="btn btn-sm" type="button" onClick={() => snoozeTo([selected.id], morningIn(1))}>Tomorrow</button>
+                          <button className="btn btn-sm" type="button" onClick={() => snoozeTo([selected.id], morningIn(3))}>In 3 days</button>
+                          <button className="btn btn-sm" type="button" onClick={() => snoozeTo([selected.id], morningIn(7))}>In a week</button>
+                          <label htmlFor="mailbox-snooze-date">
+                            Until a date
+                            <input id="mailbox-snooze-date" type="date" value={snoozeDate}
+                              min={morningIn(1).toISOString().slice(0, 10)}
+                              onChange={e => setSnoozeDate(e.target.value)} />
+                          </label>
+                          <button className="btn btn-sm" type="button" disabled={!snoozeDate}
+                            onClick={() => { const d = new Date(snoozeDate + 'T09:00:00'); snoozeTo([selected.id], d); }}>
+                            Snooze until {snoozeDate ? fmtDay(snoozeDate + 'T09:00:00') : '…'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {selectedItem.bucket !== 'needs-you' && (
+                      <button className="btn btn-sm" type="button" disabled={busyAction} onClick={() => act([selected.id], 'reopen')}>
+                        <i className="ti ti-arrow-back-up" /> Reopen
+                      </button>
+                    )}
+                    <select aria-label="Change category" value={selected.replyClassifierOk ? selected.replyCategory || '' : ''}
+                      onChange={e => e.target.value && setCategory(selected, e.target.value as ReplyCategory)}
+                      style={{ fontSize: 12.5, width: 'auto' }}>
+                      <option value="" disabled>Set category…</option>
+                      {CATEGORY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                    </select>
+                    <a className="btn btn-sm" href={gmailUrl(selected, app.sender.email)} target="_blank" rel="noreferrer">
+                      <i className="ti ti-brand-gmail" /> Reply in Gmail
+                    </a>
+                  </div>
+                )}
+
+                {orderedThread.length === 0 && selected.replySnippet && (
+                  <div className="mailbox-bubble inbound">
+                    <div className="mailbox-bubble-meta">{selected.name}{selected.repliedAt ? ` · ${fmtDateTime(selected.repliedAt)}` : ''}</div>
+                    {selected.replySnippet}
+                  </div>
+                )}
                 {orderedThread.map((m, i) => (
                   <div key={i} className={`mailbox-bubble ${m.direction}`}>
                     <div className="mailbox-bubble-meta">

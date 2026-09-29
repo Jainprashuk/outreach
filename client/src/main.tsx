@@ -6,6 +6,7 @@ import { AppProvider } from './context/AppContext';
 import { ToastProvider } from './context/ToastContext';
 import { SessionProvider } from './context/SessionContext';
 import { InterviewProvider } from './context/InterviewContext';
+import { ActionQueueProvider } from './context/ActionQueueContext';
 import InterviewReminders from './components/InterviewReminders';
 import './styles/pages.css';
 import './styles/theme.css';
@@ -19,10 +20,12 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <ToastProvider>
           <AppProvider>
             <InterviewProvider>
-              <App />
-              {/* Sibling of <App /> so it survives client-side navigation and
-                  fires once per fresh load, not once per route change. */}
-              <InterviewReminders />
+              <ActionQueueProvider>
+                <App />
+                {/* Sibling of <App /> so it survives client-side navigation and
+                    fires once per fresh load, not once per route change. */}
+                <InterviewReminders />
+              </ActionQueueProvider>
             </InterviewProvider>
           </AppProvider>
         </ToastProvider>
