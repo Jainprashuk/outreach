@@ -178,6 +178,25 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
 .mailbox-bubble.inbound { margin-right: auto; background: color-mix(in srgb, var(--bg2) 65%, var(--bg)); }
 .mailbox-bubble-meta { font-size: 11px; color: var(--text3); margin-bottom: 4px; }
 
+/* Needs you queue — the reason line says why a conversation is where it is. */
+.mailbox-tabs { margin-bottom: 12px; }
+.mailbox-row-reason { font-size: 11.5px; color: var(--text2); margin-top: 3px; display: flex; gap: 5px; align-items: center; }
+.mailbox-row-reason.needs-you { color: var(--amber); font-weight: 550; }
+.mailbox-row-unread { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 5px; }
+.mailbox-queue-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; margin-bottom: 16px; border-radius: var(--radius-lg); background: var(--bg2); }
+.mailbox-queue-reason { flex: 1 1 220px; font-size: 13px; color: var(--text2); display: flex; gap: 6px; align-items: center; min-width: 0; }
+.mailbox-queue-reason b { color: var(--text); font-weight: 600; }
+.mailbox-snooze { position: relative; }
+.mailbox-snooze-menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: flex; flex-direction: column; gap: 2px; padding: 6px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg); box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.mailbox-snooze-menu button { text-align: left; justify-content: flex-start; }
+.mailbox-snooze-menu label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text2); padding: 6px 8px 2px; }
+
+/* Six cards on the Dashboard. The shared .stat-grid is five-wide and serves other pages. */
+.stat-grid.stat-grid-6 { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+@media (max-width: 1280px) { .stat-grid.stat-grid-6 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 700px)  { .stat-grid.stat-grid-6 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 460px)  { .stat-grid.stat-grid-6 { grid-template-columns: 1fr; } }
+
 /* ── InfoTip (ⓘ with a hover/focus explanation) ── */
 .info-tip { position: relative; display: inline-flex; align-items: center; color: var(--text3); cursor: help; outline: none; vertical-align: middle; }
 .info-tip:hover, .info-tip:focus-visible { color: var(--accent); }

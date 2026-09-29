@@ -6,8 +6,11 @@ const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
 const { importContacts } = require('../lib/contactImport');
 const { classifyReply } = require('../lib/replyClassifier');
 const { deadline } = require('../lib/http');
+const actionQueue = require('../lib/actionQueue');
 
 const router = express.Router();
+
+const REPLY_CATEGORIES = Contact.schema.path('replyCategory').enumValues;
 
 const serialize = (doc) => {
   const obj = { ...doc };
@@ -130,13 +133,13 @@ router.post('/reset-for-send', async (req, res) => {
     if (!Array.isArray(ids) || ids.length === 0) {
       return res.status(400).json({ error: 'Expected a non-empty ids array' });
     }
-    // Contacts emailed inside the cooldown window, blocklisted, or already in the
-    // interview pipeline are left completely alone — they keep their real status
-    // instead of being parked at `queued`.
+    // Contacts emailed inside the cooldown window, blocklisted, already in the
+    // interview pipeline, or with a reply you haven't answered are left completely
+    // alone — they keep their real status instead of being parked at `queued`.
     const all = await Contact.find({ _id: { $in: ids }, userId: req.userId, deleted: { $ne: true } }).lean();
     const interviewSets = await loadInterviewSets(req.userId);
     const inInterview = (c) => isInInterview({ id: c._id, email: c.email }, interviewSets);
-    const skipped = all.filter(c => c.status === 'in-campaign' || c.status === 'blocked' || inCooldown(c) || inInterview(c));
+    const skipped = all.filter(c => c.status === 'in-campaign' || c.status === 'blocked' || inCooldown(c) || inInterview(c) || actionQueue.hasUnansweredReply(c));
     const skippedIds = new Set(skipped.map(c => String(c._id)));
     const eligibleIds = all.filter(c => !skippedIds.has(String(c._id))).map(c => c._id);
 
@@ -161,7 +164,8 @@ router.post('/reset-for-send', async (req, res) => {
         reason: c.status === 'in-campaign' ? 'in_campaign'
           : c.status === 'blocked' ? 'blocked'
           : inInterview(c) ? 'in_interview'
-          : 'cooldown',
+          : inCooldown(c) ? 'cooldown'
+          : 'replied',
       })),
     });
   } catch (err) {
@@ -223,6 +227,33 @@ const latestClassifiableContent = (contact) => {
     subject: inbound?.subject || (contact.sentSubject ? `Re: ${contact.sentSubject}` : ''),
     body: inbound?.text || contact.replySnippet || '',
   };
+};
+
+// When the latest inbound message was received — the thread's newest inbound entry, or
+// repliedAt for rows whose thread was never captured.
+const latestInboundAt = (contact) => {
+  const times = (contact.thread || []).filter(t => t.direction === 'inbound').map(t => new Date(t.at).getTime());
+  return times.length ? new Date(Math.max(...times)) : contact.repliedAt;
+};
+
+// Stores a classification made after the reply arrived (backfill, or the Classify button),
+// and places the contact in the queue if the reply was still waiting on this verdict. An
+// item you've already dealt with by hand stays where you put it.
+const applyVerdict = (contact, verdict) => {
+  const { category, reasoning, success, provider } = verdict;
+  if (success) {
+    contact.replyCategory = category;
+    contact.replyCategoryReasoning = reasoning;
+    contact.replyCategorizedAt = new Date();
+    contact.classifiedBy = provider;
+  }
+  contact.replyClassifierOk = success;
+
+  const at = latestInboundAt(contact);
+  if (!contact.lastInboundAt && at) contact.lastInboundAt = at;
+  const a = contact.action || {};
+  const pending = !a.state || (a.state === 'needs-you' && a.reason === 'unclassified');
+  if (pending && at) contact.action = actionQueue.onInbound(null, verdict, at).action;
 };
 
 // Backfill target: contacts who ACTUALLY REPLIED before the thread/classification pipeline
@@ -302,16 +333,10 @@ const runBackfillBatch = async (limit, userId) => {
     }
     if (!contact.replyClassifierOk) {
       const { subject, body } = latestClassifiableContent(contact);
-      const { category, reasoning, success, provider } = await classifyReply({
+      const verdict = await classifyReply({
         subject, body, contactEmail: contact.email, contactName: contact.name, userId,
       }, { signal: budget.signal });
-      if (success) {
-        contact.replyCategory = category;
-        contact.replyCategoryReasoning = reasoning;
-        contact.replyCategorizedAt = new Date();
-        contact.classifiedBy = provider;
-      }
-      contact.replyClassifierOk = success;
+      applyVerdict(contact, verdict);
     }
     await contact.save();
     processed++;
@@ -344,20 +369,13 @@ router.post('/:id/classify-reply', async (req, res) => {
     if (!contact.repliedAt) return res.status(400).json({ error: 'This contact has no reply to classify yet' });
 
     const { subject, body } = latestClassifiableContent(contact);
-    const { category, reasoning, success, provider } = await classifyReply({
+    const verdict = await classifyReply({
       subject, body, contactEmail: contact.email, contactName: contact.name, userId: req.userId,
     });
-
-    if (success) {
-      contact.replyCategory = category;
-      contact.replyCategoryReasoning = reasoning;
-      contact.replyCategorizedAt = new Date();
-      contact.classifiedBy = provider;
-    }
-    contact.replyClassifierOk = success;
+    applyVerdict(contact, verdict);
     await contact.save();
 
-    if (!success) return res.status(502).json({ error: 'Every classifier provider failed — they may all still be rate-limited. Try again shortly.' });
+    if (!verdict.success) return res.status(502).json({ error: 'Every classifier provider failed — they may all still be rate-limited. Try again shortly.' });
     res.json(serialize(contact.toObject()));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -422,6 +440,21 @@ router.patch('/:id', async (req, res) => {
     const update = {};
     for (const key of allowed) {
       if (key in req.body) update[key] = req.body[key];
+    }
+    // A category you pick by hand is final for this reply: it's marked classified (so the
+    // backfill leaves it alone) and moves the conversation to where that category belongs.
+    // The next reply from them is classified afresh.
+    if ('replyCategory' in req.body) {
+      const category = req.body.replyCategory;
+      if (!REPLY_CATEGORIES.includes(category)) return res.status(400).json({ error: 'Unknown reply category' });
+      Object.assign(update, {
+        replyCategory: category,
+        replyCategoryReasoning: 'Set by you',
+        replyCategorizedAt: new Date(),
+        classifiedBy: 'manual',
+        replyClassifierOk: true,
+        action: actionQueue.forCategory(category, new Date()),
+      });
     }
     const op = { $set: update };
     if (update.status) {

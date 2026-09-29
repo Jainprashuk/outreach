@@ -11,7 +11,8 @@
  *
  * It prints two answers:
  *   1. with the switches exactly as they are in that database right now
- *   2. if you switched everything on with test mode OFF at this moment
+ *   2. if you turned the MASTER switch on at this moment, with every other
+ *      switch (types, per-user, test mode) exactly as configured
  *
  * Cannot write and cannot send, three ways over:
  *   - every write method on the MongoDB driver's Collection throws
@@ -91,8 +92,27 @@ async function main() {
   const env = ['LIFECYCLE_FROM_EMAIL', 'RESEND_API_KEY', 'OUTREACH_URL', 'CREDENTIAL_KEY'];
   console.log(`  (this laptop's env: ${env.map(k => `${k} ${process.env[k] ? 'set' : 'MISSING'}`).join(', ')} — what matters is Vercel's)\n`);
 
-  // "Switch everything on now, test mode off": the clock would start now.
-  const hypothetical = { ...config, enabled: true, testMode: false, firstEnabledAt: config.firstEnabledAt || now, types: Object.fromEntries(TYPE_KEYS.map(t => [t, true])) };
+  // "Turn the master switch on now", everything else exactly as configured:
+  // the type switches, per-user switches, opt-outs and test mode. The
+  // inactivity clock would start at this moment.
+  //   --types=all | welcome,weekly-report   also assume these types switched on app-wide
+  //   --test=off                            also assume test mode switched off
+  const typesArg = arg('types', '');
+  const assumeTypes = typesArg === 'all' ? TYPE_KEYS : typesArg.split(',').filter(t => TYPE_KEYS.includes(t));
+  const hypothetical = {
+    ...config,
+    enabled: true,
+    firstEnabledAt: config.firstEnabledAt || now,
+    testMode: arg('test', '') === 'off' ? false : config.testMode,
+    types: { ...config.types, ...Object.fromEntries(assumeTypes.map(t => [t, true])) },
+  };
+  const assumed = ['master on', ...(assumeTypes.length ? [`types on: ${assumeTypes.join(', ')}`] : []), ...(arg('test', '') === 'off' ? ['test mode off'] : [])];
+  console.log(`Simulating: ${assumed.join(' + ')} (everything else as saved)\n`);
+  // The preview cannot write, so remember what an earlier sweep in the window
+  // would already have sent. Otherwise a setup reminder due today would be
+  // counted again every day.
+  const planned = new Set();
+  const perUser = new Map();
 
   const runs = [];
   // Every sweep that fires in the window. Later ones assume nothing changes in
@@ -110,7 +130,9 @@ async function main() {
   for (const run of runs.sort((a, b) => a.at - b.at)) {
     console.log(`── ${run.label} — fires ${ist(run.at)} IST ──`);
     const [listNow, listIfOn] = await Promise.all([run.find(config), run.find(hypothetical)]);
-    const byKey = new Map([...listIfOn, ...listNow].map(c => [`${c.userId}|${c.type}|${c.key}`, c]));
+    const byKey = new Map([...listIfOn, ...listNow]
+      .filter(c => !planned.has(`${c.userId}|${c.type}|${c.key}`))
+      .map(c => [`${c.userId}|${c.type}|${c.key}`, c]));
     if (!byKey.size) { console.log('  nobody is due\n'); continue; }
     for (const c of byKey.values()) {
       const inNow = listNow.some(x => String(x.userId) === String(c.userId) && x.type === c.type && x.key === c.key);
@@ -118,13 +140,21 @@ async function main() {
       const dOn = decide(c.type, c.user, hypothetical);
       if (dNow.send) totalNow++;
       if (dOn.send) totalIfOn++;
+      // A slot is used up by a real send, or by a recorded skip (anything but a
+      // pause or a test-mode skip, which do not consume it).
+      if (dOn.send || !['master-off', 'test-mode', 'test-mode-no-recipient', 'sender-not-configured', 'links-not-configured'].includes(dOn.reason)) {
+        planned.add(`${c.userId}|${c.type}|${c.key}`);
+      }
+      const who = perUser.get(c.user.email) || [];
+      who.push(`${ist(run.at)}  ${TYPES[c.type].label}: ${dOn.send ? `SENT to ${dOn.to}` : `not sent (${REASONS[dOn.reason] || dOn.reason})`}`);
+      perUser.set(c.user.email, who);
       let subject = '';
       try { subject = (await buildMessage(c.type, c.user, { now: run.at, since: c.context && c.context.since, period: c.context && c.context.period })).subject; } catch (err) { subject = `(could not build: ${err.message})`; }
       console.log(`  • ${c.user.email}${c.user.name ? ` (${c.user.name})` : ''} — ${TYPES[c.type].label}`);
       console.log(`      subject: ${subject}`);
       console.log(`      ${await describe(c, run.at)}`);
       console.log(`      as switches are now: ${dNow.send ? `WILL SEND to ${dNow.to}` : `not sent (${REASONS[dNow.reason] || dNow.reason})`}`);
-      console.log(`      if you turn it all on:  ${dOn.send ? `would send to ${dOn.to}` : `not sent (${REASONS[dOn.reason] || dOn.reason})`}`);
+      console.log(`      simulated: ${dOn.send ? `would send to ${dOn.to}` : `not sent (${REASONS[dOn.reason] || dOn.reason})`}`);
     }
     console.log('');
   }
@@ -138,7 +168,14 @@ async function main() {
     : '  nobody is mid-setup');
   console.log('  Accounts that already finished setup never get a welcome.\n');
 
-  console.log(`TOTAL in the next ${HOURS}h: ${totalNow} email(s) with the switches as they are; ${totalIfOn} if you turned everything on (test mode off) right now.`);
+  console.log(`── Per account, simulated (${assumed.join(' + ')}) ──`);
+  if (!perUser.size) console.log('  nobody');
+  for (const [email, lines] of perUser) {
+    console.log(`  ${email}`);
+    for (const l of lines) console.log(`      ${l}`);
+  }
+  console.log('');
+  console.log(`TOTAL in the next ${HOURS}h: ${totalNow} email(s) with the switches as they are; ${totalIfOn} simulated (${assumed.join(' + ')}).`);
   if (!config.enabled) console.log('The master switch is OFF in this database, so deploying sends nothing until an admin turns it on.');
   await mongoose.disconnect();
 }

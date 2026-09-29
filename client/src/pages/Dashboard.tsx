@@ -6,6 +6,7 @@ import StatusBadge from '../components/StatusBadge';
 import ReplyModal from '../components/ReplyModal';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
+import { useActionQueue } from '../context/ActionQueueContext';
 import { retryFailedApi, type Contact } from '../lib/api';
 import { Skeleton, SkeletonRows } from '../components/Skeleton';
 
@@ -24,6 +25,7 @@ export default function Dashboard() {
   const app = useApp();
   const toast = useToast();
   const navigate = useNavigate();
+  const actionQueue = useActionQueue();
 
   const [tab, setTab] = useState('all');
   const [search, setSearch] = useState('');
@@ -199,6 +201,8 @@ export default function Dashboard() {
   const fuAllChecked = isFuTab && paged.length > 0 && paged.every(c => selectedFu.has(c.id));
 
   const kpis = [
+    // First on purpose: the one number here that is a to-do list rather than a tally.
+    { label: 'Replies need you', value: actionQueue.counts['needs-you'], cls: 'amber', to: '/mailbox?tab=needs-you', icon: 'ti-inbox', ico: 'amber' },
     { label: 'Total contacts', value: stats.total, cls: '', icon: 'ti-users', ico: '' },
     { label: 'Sent', value: stats.sent, cls: 'green', icon: 'ti-send', ico: 'green' },
     { label: 'Bounced', value: stats.bounced, cls: 'red', icon: 'ti-alert-triangle', ico: 'red' },
@@ -227,8 +231,14 @@ export default function Dashboard() {
         <Link to="/send/step1" className="btn btn-primary"><i className="ti ti-plus" /> New entry</Link>
       </>
     } wide>
-      <div className="stat-grid">
-        {kpis.map(k => k.link ? (
+      <div className="stat-grid stat-grid-6">
+        {kpis.map(k => k.to ? (
+          <Link key={k.label} to={k.to} className="stat-card" style={{ textDecoration: 'none' }}>
+            <div className={`kpi-ico ${k.ico}`}><i className={`ti ${k.icon}`} /></div>
+            <div className="stat-label">{k.label}</div>
+            {busy || !actionQueue.loaded ? <Skeleton w="42%" h={28} style={{ marginTop: 2 }} /> : <div className={`stat-value ${k.cls}`}>{k.value}</div>}
+          </Link>
+        ) : k.link ? (
           <a key={k.label} href="#" className="stat-card" style={{ textDecoration: 'none' }}
             onClick={e => { e.preventDefault(); setTab('followup-due'); setPage(1); }}>
             <div className={`kpi-ico ${k.ico}`}><i className={`ti ${k.icon}`} /></div>

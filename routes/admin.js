@@ -735,6 +735,11 @@ router.post('/emails/sample', async (req, res) => {
     const type = String((req.body && req.body.type) || '');
     if (!isType(type)) return res.status(400).json({ error: 'Unknown email type' });
     if (!systemMail.isConfigured()) return res.status(400).json({ error: 'Set LIFECYCLE_FROM_EMAIL and RESEND_API_KEY first.' });
+    // A sample ignores the switches, but not this: without a public URL every
+    // link in it, the opt-out included, would be dead.
+    if (!unsubscribe.appUrl() || !unsubscribe.isConfigured()) {
+      return res.status(400).json({ error: 'Set OUTREACH_URL (the app\'s public URL) and CREDENTIAL_KEY first, or the links in the email will not work.' });
+    }
     const me = await User.findById(req.userId, USER_FIELDS).lean();
     const msg = await buildMessage(type, me, { manual: type === 'manual-report' });
     await systemMail.sendSystemEmail({ ...msg, subject: `[Sample] ${msg.subject}`, to: me.email });

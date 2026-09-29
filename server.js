@@ -26,6 +26,7 @@ const { usersByStaleness, runForUsers } = require('./lib/fanout');
 const { deadline } = require('./lib/http');
 const { touchActivity } = require('./lib/lifecycle/activity');
 const { classifyReply } = require('./lib/replyClassifier');
+const actionQueue = require('./lib/actionQueue');
 const { runBackfillBatch } = require('./routes/contacts');
 const Lead = require('./models/Lead');
 const { serialize: serializeLead, leadOutcomes } = require('./routes/leads');
@@ -560,6 +561,7 @@ app.use('/api', requireDb, attachUser, auditHttpMutations);
 app.use('/api/reports', requireDb, require('./routes/reports'));
 app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
+app.use('/api/actions', requireDb, require('./routes/actions'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));
 app.use('/api/jobs', requireDb, require('./routes/jobs'));
@@ -709,10 +711,11 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
   const replySnippet = buildSnippet(parsed.text || parsed.html || '');
   const fullBody = parsed.text || parsed.html || '';
 
-  const { category, reasoning, success, provider } = await classifyReply({
+  const verdict = await classifyReply({
     subject: parsed.subject, body: fullBody,
     contactEmail: contact.email, contactName: contact.name, userId,
   });
+  const { category, reasoning, success, provider } = verdict;
 
   const threadEntry = {
     direction: 'inbound',
@@ -724,17 +727,31 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
     at: repliedAt,
   };
 
+  // Mark in-memory to prevent double-processing (and re-matching by message-id) in the same batch
+  contact.thread = [...(contact.thread || []), { messageId: inboundMessageId }];
+  if (inboundMessageId) byMessageId.set(inboundMessageId, contact);
+
+  const { action, keepCategory } = actionQueue.onInbound(contact.action, verdict, repliedAt, contact.replyCategory);
+
+  // An out-of-office on top of a live conversation: keep it in the thread, change nothing
+  // else — not the category, not the queue, not the "latest reply" the lists show.
+  if (keepCategory) {
+    await Contact.findOneAndUpdate({ _id: contact._id, userId }, { $push: { thread: threadEntry } });
+    return;
+  }
+
   // A reply that comes in after we already sent a follow-up is tracked separately from a
   // reply to the initial email. Once a contact is already `replied`/`follow-up-replied`,
-  // later replies keep that status as-is rather than re-deriving it.
-  const newStatus = ['replied', 'follow-up-replied'].includes(contact.status)
+  // later replies keep that status as-is rather than re-deriving it — and so does a status
+  // you set by hand after reading them. The new message still reopens the queue item.
+  const newStatus = [...KEEP_ON_REPLY, 'replied', 'follow-up-replied'].includes(contact.status)
     ? contact.status
     : (contact.status === 'follow-up-sent' ? 'follow-up-replied' : 'replied');
 
-  // Mark in-memory to prevent double-processing (and re-matching by message-id) in the same batch
   contact.status = newStatus;
-  contact.thread = [...(contact.thread || []), { messageId: inboundMessageId }];
-  if (inboundMessageId) byMessageId.set(inboundMessageId, contact);
+  contact.action = action;
+  contact.replyCategory = success ? category : null;
+  contact.lastInboundAt = repliedAt;
 
   // A new reply always resets replyClassifierOk to false first (this is the "new reply"
   // moment) — it only becomes true if THIS classification attempt actually succeeded. On
@@ -743,6 +760,9 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
   await Contact.findOneAndUpdate({ _id: contact._id, userId }, {
     $set: {
       status: newStatus, repliedAt, replySnippet,
+      replyRead: false,
+      lastInboundAt: repliedAt,
+      action,
       replyCategory: success ? category : null,
       replyCategoryReasoning: success ? reasoning : null,
       replyCategorizedAt: success ? new Date() : null,
@@ -757,10 +777,15 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
   replied.push({ email: contact.email, name: contact.name, repliedAt, snippet: replySnippet, category: success ? category : null });
 };
 
+// Statuses you set by hand after reading a reply. A later message from the same person must
+// not quietly undo your triage; it shows up in Needs you instead.
+const KEEP_ON_REPLY = ['closed', 'no-openings', 'in-review', 'blocked'];
+
 // trySentReply — matches a message found in the Sent folder (i.e. a reply YOU typed
 // directly in Gmail, outside this app) back to a contact via thread message-ids or a
 // Re:-subject + recipient-email fallback, and appends it as an outbound thread entry.
-// No status change, no classification — sent messages are just captured for the thread view.
+// No status change and no classification, but it does answer them: if their latest message
+// was waiting on you, the queue item moves to "waiting on them" (lib/actionQueue.js).
 // De-duped on message-id, which also naturally skips messages the app already recorded at
 // send time (inngest-fns.js), since those already carry the same Message-ID header.
 const trySentReply = async (raw, byMessageId, byEmail, userId) => {
@@ -799,17 +824,30 @@ const trySentReply = async (raw, byMessageId, byEmail, userId) => {
   contact.thread = [...(contact.thread || []), { messageId }];
   if (messageId) byMessageId.set(messageId, contact);
 
-  await Contact.findOneAndUpdate({ _id: contact._id, userId }, { $push: { thread: threadEntry } });
+  const at = threadEntry.at;
+  const set = {};
+  if (!contact.lastOutboundAt || at > new Date(contact.lastOutboundAt)) set.lastOutboundAt = at;
+  const moved = actionQueue.onOutbound(contact.action, at, contact.lastInboundAt);
+  if (moved) set.action = moved;
+  Object.assign(contact, set);
+
+  await Contact.findOneAndUpdate({ _id: contact._id, userId }, {
+    ...(Object.keys(set).length ? { $set: set } : {}),
+    $push: { thread: threadEntry },
+  });
 };
 
 // ── Check mailbox ──────────────────────────────────────────────────────────
 const BOUNCE_LOOKBACK_DAYS = 7;
 const REPLY_LOOKBACK_DAYS = 30;
 const BUFFER_MS = 5 * 60 * 1000;
+const SLOW_SCAN_MS = 30_000;
 
 // One user's mailbox scan. Extracted from the route so the cron can run it for
 // every account: there is no longer a single mailbox to check.
-async function checkMailboxForUser(userId) {
+// `sentLookbackDays` widens only the Sent-folder pass — for the one-time catch-up of replies
+// you typed in Gmail before the Sent folder was read at all (scripts/backfill-sent-replies.js).
+async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
   const sender = await mailer.getSenderFor(userId);
   if (!sender.email || !sender.appPassword) {
     return { ok: false, skipped: 'no_credentials' };
@@ -827,6 +865,10 @@ async function checkMailboxForUser(userId) {
     ? new Date(Math.max(lastChecked.getTime() - BUFFER_MS, fallbackReply.getTime()))
     : fallbackReply;
 
+  const sentSince = sentLookbackDays
+    ? new Date(Date.now() - sentLookbackDays * 24 * 60 * 60 * 1000)
+    : replySince;
+
   const client = new ImapFlow({
     host: 'imap.gmail.com', port: 993, secure: true,
     auth: { user: sender.email, pass: sender.appPassword },
@@ -841,7 +883,7 @@ async function checkMailboxForUser(userId) {
   // `thread.messageId` only (not full text/html) keeps this payload small even as threads grow.
   const allContacts = await Contact.find(
     { userId: userId, deleted: { $ne: true } },
-    'email name status bounceReason messageId updatedAt thread.messageId lastSentAt repliedAt'
+    'email name status bounceReason messageId updatedAt thread.messageId lastSentAt repliedAt action replyCategory lastInboundAt lastOutboundAt'
   ).lean();
 
   // byEmailAll: for bounce matching (any status)
@@ -867,6 +909,30 @@ async function checkMailboxForUser(userId) {
     }
   }
 
+  // IMAP SINCE is a date, not a time, so every 5-minute tick matches all of today's mail —
+  // and downloading every one of those in full is what pushed a scan towards Vercel's 60s
+  // cap. So first read only the envelope and the References header (a few hundred bytes),
+  // and download a message in full only if it could matter: a bounce, a message not yet
+  // captured that threads onto one of ours, or mail from/to someone we've emailed.
+  const knownRef = (ids) => ids.some(id => byMessageId.has(id));
+  const refsOf = (msg) => {
+    const header = msg.headers ? msg.headers.toString('utf8') : '';
+    const ids = (header.match(/<[^>]+>/g) || []).map(cleanMsgId);
+    if (msg.envelope?.inReplyTo) ids.push(cleanMsgId(msg.envelope.inReplyTo));
+    return ids.filter(Boolean);
+  };
+  const candidates = async (uids, keep) => {
+    if (!uids.length) return [];
+    const out = [];
+    // Collect first, fetch after: imapflow can't run another command inside a fetch loop.
+    for await (const msg of client.fetch(uids, { uid: true, envelope: true, headers: ['references'] }, { uid: true })) {
+      if (keep(msg)) out.push(msg.uid);
+    }
+    return out;
+  };
+  const alreadyCaptured = (msg) => byMessageId.has(cleanMsgId(msg.envelope?.messageId));
+  const addr = (list) => (list?.[0]?.address || '').toLowerCase();
+
   const scanMailbox = async (mailbox) => {
     let lock;
     try { lock = await client.getMailboxLock(mailbox); } catch (_) { return; }
@@ -877,10 +943,15 @@ async function checkMailboxForUser(userId) {
         client.search({ since: bounceSince, from: 'postmaster' }, { uid: true }),
         client.search({ since: replySince }, { uid: true }),
       ]);
-      const uids = [...new Set([...reportUids, ...daemonUids, ...postmasterUids, ...replyUids])];
+      const bounceUids = new Set([...reportUids, ...daemonUids, ...postmasterUids]);
+      const uids = [...new Set([...bounceUids, ...replyUids])];
       scanned += uids.length;
 
-      for (const uid of uids) {
+      const wanted = await candidates(uids, (msg) => bounceUids.has(msg.uid) || (
+        !alreadyCaptured(msg) && (knownRef(refsOf(msg)) || byEmail.has(addr(msg.envelope?.from)))
+      ));
+
+      for (const uid of wanted) {
         const msg = await client.fetchOne(uid, { source: true }, { uid: true });
         if (!msg?.source) continue;
         const raw = msg.source.toString('utf8');
@@ -914,16 +985,22 @@ async function checkMailboxForUser(userId) {
     }
   };
 
-  // Scans the Sent folder for replies you typed directly in Gmail (not through this app),
-  // so the thread view has your side of the conversation too. No bounce/reply-status logic
-  // here — just thread capture via trySentReply.
+  // Scans the Sent folder for replies you typed directly in Gmail (not through this app), so
+  // the thread view has your side of the conversation too — and so answering someone in
+  // Gmail moves them out of Needs you. Messages the app sent are skipped by message-id.
   const scanSentMailbox = async (mailbox) => {
     let lock;
     try { lock = await client.getMailboxLock(mailbox); } catch (_) { return; }
     try {
-      const uids = await client.search({ since: replySince }, { uid: true });
+      const uids = await client.search({ since: sentSince }, { uid: true });
       scanned += uids.length;
-      for (const uid of uids) {
+      // Matching by address alone needs a "Re:" subject in trySentReply, so only those are
+      // worth downloading — the rest of the mail you sent a contact is your own cold sends.
+      const wanted = await candidates(uids, (msg) =>
+        !alreadyCaptured(msg) && (knownRef(refsOf(msg))
+          || (byEmail.has(addr(msg.envelope?.to)) && /^re\s*:/i.test((msg.envelope?.subject || '').trim())))
+      );
+      for (const uid of wanted) {
         const msg = await client.fetchOne(uid, { source: true }, { uid: true });
         if (!msg?.source) continue;
         await trySentReply(msg.source.toString('utf8'), byMessageId, byEmail, userId);
@@ -933,12 +1010,25 @@ async function checkMailboxForUser(userId) {
     }
   };
 
+  // Gmail's folder names depend on the account's language ("[Gmail]/Sent Mail",
+  // "[Gmail]/Gesendet", ...). The special-use flag is the same everywhere. This used to be
+  // the literal '[Gmail]/Sent', which doesn't exist, and the lock failure was swallowed — so
+  // replies typed in Gmail were never captured.
+  const specialFolder = (boxes, flag, fallback) => {
+    const hit = boxes.find(b => b.specialUse === flag);
+    if (hit) return hit.path;
+    console.warn(`[mailbox] no ${flag} folder found for user ${userId}; trying ${fallback}`);
+    return fallback;
+  };
+
+  const scanStartedAt = Date.now();
   try {
     await client.connect();
-    for (const mailbox of ['INBOX', '[Gmail]/Spam']) {
+    const boxes = await client.list();
+    for (const mailbox of ['INBOX', specialFolder(boxes, '\\Junk', '[Gmail]/Spam')]) {
       await scanMailbox(mailbox);
     }
-    await scanSentMailbox('[Gmail]/Sent');
+    await scanSentMailbox(specialFolder(boxes, '\\Sent', '[Gmail]/Sent Mail'));
   } catch (err) {
     throw new Error(`IMAP check failed: ${err.message}`);
   } finally {
@@ -951,11 +1041,17 @@ async function checkMailboxForUser(userId) {
   // cron so the "Backfill now" button on Mailbox is a manual override, not the only way it
   // ever runs. One bounded batch per 5-minute tick keeps this well under the function timeout;
   // best-effort — a failure here (e.g. a classifier rate limit) must not fail the mailbox check.
+  // Skipped when the scan itself was slow: the backfill has a 20s budget of its own, and the
+  // two together must stay under the function's 60s cap. The next tick picks it up.
   let backfill = null;
-  try {
-    backfill = await runBackfillBatch(20, userId);
-  } catch (err) {
-    backfill = { error: err.message };
+  if (Date.now() - scanStartedAt > SLOW_SCAN_MS) {
+    backfill = { skipped: 'slow_scan' };
+  } else {
+    try {
+      backfill = await runBackfillBatch(20, userId);
+    } catch (err) {
+      backfill = { error: err.message };
+    }
   }
 
   return { ok: true, scanned, bounced, replied, lastCheckedAt: new Date(), backfill };
@@ -1030,6 +1126,7 @@ app.use((err, req, res, next) => {
 // Export for Vercel (serverless). On Vercel, ensureDb() is called lazily per-request via the
 // middleware above; the listen block below only runs in local dev.
 module.exports = app;
+module.exports.checkMailboxForUser = checkMailboxForUser;
 
 if (require.main === module) {
   const PORT = process.env.PORT || 3000;

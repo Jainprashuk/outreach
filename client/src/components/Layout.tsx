@@ -3,6 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom';
 import { useTheme } from '../hooks/useTheme';
 import { useSession } from '../context/SessionContext';
 import { useInterviews } from '../context/InterviewContext';
+import { useActionQueue } from '../context/ActionQueueContext';
 import SendJobWidget from './SendJobWidget';
 
 export default function Layout({ title, subtitle, actions, children, wide, minimal }: {
@@ -19,6 +20,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
   const { theme, toggleTheme } = useTheme(); // applies data-theme + provides the toggle
   const { owner, user, isAdmin, logout } = useSession();
   const { reminders } = useInterviews();
+  const actionQueue = useActionQueue();
   const [menuOpen, setMenuOpen] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const { pathname } = useLocation();
@@ -49,6 +51,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
   // Everything the reminder popup would nag about, surfaced permanently in the rail
   // so a dismissed popup doesn't mean a forgotten interview.
   const needsAttention = reminders.soon.length + reminders.stale.length;
+  const needsYou = actionQueue.counts['needs-you'];
 
   const nav = (
     <>
@@ -76,6 +79,9 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
       </NavLink>
       <NavLink to="/mailbox" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-mail-opened" /> Mailbox
+        {needsYou > 0 && (
+          <span className="tab-badge" title="Replies waiting on you">{needsYou}</span>
+        )}
       </NavLink>
       <NavLink to="/leads" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-target-arrow" /> Leads

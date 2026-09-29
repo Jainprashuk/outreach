@@ -40,6 +40,37 @@ export const CATEGORY_BADGE_CLASS: Record<string, string> = {
   'resume-requested': 'badge-approved', 'needs-attention': 'badge-noopenings', other: 'badge-queued',
 };
 
+// Why a conversation is in the tab it's in. `manual` depends on the tab: the same reason
+// covers "you reopened it", "you snoozed it" and "you marked it done".
+const REASON_LABELS: Record<string, string> = {
+  'resume-requested': 'Asked for your resume',
+  'needs-attention': 'Needs your answer',
+  unclassified: 'Not classified yet',
+  'no-response': 'No reply in 7 days — follow up?',
+  reconnect: 'Time to reconnect',
+  reviewing: 'Reviewing your profile',
+  'you-replied': 'You replied',
+  declined: 'Declined',
+  'no-action': 'Nothing to answer',
+  'in-interview': 'In Interviews',
+  stale: 'Old reply, closed automatically',
+};
+const MANUAL_LABELS: Record<string, string> = {
+  'needs-you': 'Reopened by you', waiting: 'Waiting', snoozed: 'Snoozed by you', done: 'Marked done by you',
+};
+
+export const actionReasonLabel = (bucket: string, reason: string | null) =>
+  reason === 'manual' ? (MANUAL_LABELS[bucket] || 'Moved by you') : (reason && REASON_LABELS[reason]) || '';
+
+/** "2 days ago" / "in 5 days" — coarse on purpose; the thread has the exact times. */
+export const relativeDay = (d: string | Date, now = new Date()) => {
+  const days = Math.round((new Date(d).getTime() - now.getTime()) / 86_400_000);
+  if (days === 0) return 'today';
+  if (days === -1) return 'yesterday';
+  if (days === 1) return 'tomorrow';
+  return days < 0 ? `${-days} days ago` : `in ${days} days`;
+};
+
 export const CATEGORY_OPTIONS = [
   { value: 'reviewing', label: 'Reviewing' },
   { value: 'stay-in-touch', label: 'Stay in touch' },
