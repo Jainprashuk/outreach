@@ -4,20 +4,15 @@ import { useToast } from '../context/ToastContext';
 import { useSession } from '../context/SessionContext';
 import { fmtAgo } from '../lib/analytics';
 import AdminEmailsCard from '../components/AdminEmailsCard';
+import UserEmailsModal from '../components/UserEmailsModal';
+import InfoTip from '../components/InfoTip';
+import { EMAIL_TYPES, effectiveState, TONE_COLOR } from '../lib/lifecycleTypes';
 import {
   adminOverviewApi, adminInviteApi, adminUpdateUserApi, adminRevokeSessionsApi,
-  accessRequestsApi, approveAccessApi, rejectAccessApi, clearAccessRequestApi, adminSetUserEmailApi,
-  type AdminOverview, type AdminUserRow, type AccessRequestRow, type LifecycleType,
+  accessRequestsApi, approveAccessApi, rejectAccessApi, clearAccessRequestApi, adminEmailsApi,
+  type AdminOverview, type AdminUserRow, type AccessRequestRow, type AdminEmailsView,
 } from '../lib/api';
 
-// Same order and names as lib/lifecycle/types.js.
-const EMAIL_TYPES: Array<{ key: LifecycleType; label: string; pref: string | null }> = [
-  { key: 'welcome', label: 'Welcome', pref: null },
-  { key: 'setup-reminder', label: 'Setup reminder', pref: 'reminders' },
-  { key: 'inactive', label: "We haven't seen you", pref: 'reminders' },
-  { key: 'weekly-report', label: 'Weekly report', pref: 'weekly-report' },
-  { key: 'manual-report', label: '"Email it to me"', pref: null },
-];
 
 const RANGES = [7, 30, 90];
 
@@ -56,6 +51,13 @@ export default function Admin() {
   const [requests, setRequests] = useState<AccessRequestRow[]>([]);
   const [reqFilter, setReqFilter] = useState<'pending' | 'all'>('pending');
   const [emailsOpen, setEmailsOpen] = useState<string | null>(null);
+  // Shared by the Lifecycle emails card and the accounts table, so a switch
+  // flipped in one is reflected in the other's "will it actually send" view.
+  const [emails, setEmails] = useState<AdminEmailsView | null>(null);
+  const loadEmails = useCallback(async () => {
+    try { setEmails(await adminEmailsApi()); } catch (e: any) { toast(e.message || 'Could not load email settings', 'error'); }
+  }, [toast]);
+  useEffect(() => { loadEmails(); }, [loadEmails]);
 
   const load = useCallback(async (d: number) => {
     try {
@@ -302,7 +304,7 @@ export default function Admin() {
               </div>
             </div>
 
-            <AdminEmailsCard />
+            <AdminEmailsCard data={emails} reload={loadEmails} />
 
             <div className="an-card" style={{ marginTop: 16 }}>
               <div className="an-card-head">
@@ -339,16 +341,27 @@ export default function Admin() {
                     <th style={{ textAlign: 'right' }}>Leads</th>
                     <th style={{ textAlign: 'right' }}>Campaigns</th>
                     <th style={{ textAlign: 'right' }}>Scrapes</th>
-                    <th>Last seen</th><th>Emails</th><th />
+                    <th>Last seen</th>
+                    <th>
+                      <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
+                        Emails
+                        <InfoTip label="What do the email icons mean?">
+                          <strong>One icon per email</strong>
+                          {EMAIL_TYPES.map(t => t.label).join(' · ')}.<br /><br />
+                          <strong>Colour = what will actually happen</strong>
+                          Green: will send · Blue: test mode, recorded only · Red: you turned it off for this user ·
+                          Amber: they opted out · Grey: off app-wide, master off, or account disabled.
+                          Click to change.
+                        </InfoTip>
+                      </span>
+                    </th>
+                    <th />
                   </tr>
                 </thead>
                 <tbody>
                   {data.users.map(u => {
                     const isSelf = u.id === user?.id;
                     const busy = busyId === u.id;
-                    const blocked = u.emails?.blockedByAdmin || [];
-                    const optOut = u.emails?.optOut || [];
-                    const offCount = EMAIL_TYPES.filter(t => blocked.includes(t.key) || (t.pref && optOut.includes(t.pref))).length;
                     return (
                       <Fragment key={u.id}>
                       <tr>
@@ -384,10 +397,19 @@ export default function Admin() {
                           <div style={{ fontSize: 11, color: 'var(--text3)' }}>{u.activeSessions} session(s)</div>
                         </td>
                         <td>
-                          <button className="btn btn-xs" type="button" onClick={() => setEmailsOpen(emailsOpen === u.id ? null : u.id)}
-                            title="Turn lifecycle emails on or off for this account">
-                            <i className="ti ti-mail" /> {offCount ? <span style={{ color: 'var(--amber)' }}>{offCount} off</span> : 'all on'}
-                          </button>
+                          {u.id && (
+                            <button className="em-strip" type="button" onClick={() => setEmailsOpen(u.id)}
+                              aria-label={`Lifecycle emails for ${u.email}`} title="How many emails will actually be sent to this account. Click to change.">
+                              {EMAIL_TYPES.map(t => {
+                                const eff = effectiveState(t, u, emails?.config || null);
+                                return <i key={t.key} className={`ti ${t.icon}`} style={{ color: TONE_COLOR[eff.tone] }} title={`${t.label}: ${eff.label}`} />;
+                              })}
+                              <span style={{ fontSize: 11, color: 'var(--text2)', fontVariantNumeric: 'tabular-nums', marginLeft: 2 }}>
+                                {EMAIL_TYPES.filter(t => effectiveState(t, u, emails?.config || null).tone === 'on').length}/{EMAIL_TYPES.length}
+                              </span>
+                              <i className="ti ti-chevron-right" style={{ fontSize: 12, color: 'var(--text3)' }} />
+                            </button>
+                          )}
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }}>
                           <button aria-label="Sign this account out on every device"
@@ -415,34 +437,26 @@ export default function Admin() {
                           )}
                         </td>
                       </tr>
-                      {emailsOpen === u.id && (
-                        <tr>
-                          <td colSpan={10} style={{ background: 'var(--bg2)' }}>
-                            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5 }}>
-                              <span style={{ fontWeight: 500 }}>Emails for {u.email}:</span>
-                              {EMAIL_TYPES.map(t => {
-                                const userOff = !!(t.pref && optOut.includes(t.pref));
-                                return (
-                                  <label key={t.key} style={{ display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}
-                                    title={userOff ? 'They opted out themselves. You cannot turn this on for them.' : undefined}>
-                                    <input type="checkbox" checked={!blocked.includes(t.key)} disabled={busy}
-                                      onChange={e => act(u, () => adminSetUserEmailApi(u.id!, t.key, !e.target.checked),
-                                        `${t.label} ${e.target.checked ? 'on' : 'off'} for ${u.email}`)} />
-                                    {t.label}
-                                    {userOff && <span className="badge badge-pending">they opted out</span>}
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          </td>
-                        </tr>
-                      )}
                       </Fragment>
                     );
                   })}
                 </tbody>
               </table>
             </div>
+
+            {(() => {
+              const row = emailsOpen ? data.users.find(x => x.id === emailsOpen) : null;
+              return row ? (
+                <UserEmailsModal
+                  row={row} config={emails?.config || null}
+                  onClose={() => setEmailsOpen(null)}
+                  onChanged={(blockedByAdmin) => setData(d => d && ({
+                    ...d,
+                    users: d.users.map(x => x.id === row.id ? { ...x, emails: { blockedByAdmin, optOut: x.emails?.optOut || [] } } : x),
+                  }))}
+                />
+              ) : null;
+            })()}
 
             <p style={{ fontSize: 11.5, color: 'var(--text3)', marginTop: 12 }}>
               Deleting an account is deliberately not possible here — it would have to

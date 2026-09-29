@@ -1628,9 +1628,10 @@ export const adminSetEmailSwitchApi = (field: string, value: boolean) =>
   apiFetch<{ config: LifecycleConfig }>('/api/admin/emails', { method: 'PUT', body: JSON.stringify({ field, value }) });
 export const adminSendSampleApi = (type: LifecycleType) =>
   apiFetch<{ ok: true; to: string }>('/api/admin/emails/sample', { method: 'POST', body: JSON.stringify({ type }) });
-export const adminSetUserEmailApi = (id: string, type: LifecycleType, blocked: boolean) =>
+/** `type: null` = every email type at once (Enable all / Disable all). */
+export const adminSetUserEmailApi = (id: string, type: LifecycleType | null, blocked: boolean) =>
   apiFetch<{ ok: true; blockedByAdmin: LifecycleType[] }>(`/api/admin/users/${id}/emails`, {
-    method: 'PATCH', body: JSON.stringify({ type, blocked }),
+    method: 'PATCH', body: JSON.stringify(type ? { type, blocked } : { all: true, blocked }),
   });
 
 export interface EmailPref { key: 'reminders' | 'weekly-report'; label: string; on: boolean; blockedByAdmin: boolean }

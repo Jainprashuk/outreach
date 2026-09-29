@@ -748,15 +748,21 @@ router.post('/emails/sample', async (req, res) => {
 router.patch('/users/:id/emails', async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Not a valid account id' });
-    const { type, blocked } = req.body || {};
-    if (!isType(type) || typeof blocked !== 'boolean') return res.status(400).json({ error: 'Send { type, blocked: true|false }' });
+    // Either one type ({ type, blocked }) or every type at once ({ all: true, blocked }).
+    const { type, blocked, all } = req.body || {};
+    if (typeof blocked !== 'boolean' || (all !== true && !isType(type))) {
+      return res.status(400).json({ error: 'Send { type, blocked } or { all: true, blocked }' });
+    }
     const target = await User.findById(req.params.id, { email: 1 }).lean();
     if (!target) return res.status(404).json({ error: 'No such account' });
-    await User.updateOne({ _id: target._id }, blocked ? { $addToSet: { emailBlockedByAdmin: type } } : { $pull: { emailBlockedByAdmin: type } });
+    const update = all === true
+      ? { $set: { emailBlockedByAdmin: blocked ? [...TYPE_KEYS] : [] } }
+      : blocked ? { $addToSet: { emailBlockedByAdmin: type } } : { $pull: { emailBlockedByAdmin: type } };
+    await User.updateOne({ _id: target._id }, update);
     logEvent({
       userId: req.userId, category: 'admin', action: 'lifecycle-user-switch',
-      message: `${target.email}: ${TYPES[type].label} -> ${blocked ? 'off' : 'on'}`,
-      meta: { targetUserId: id(target._id), type, blocked },
+      message: `${target.email}: ${all === true ? 'all emails' : TYPES[type].label} -> ${blocked ? 'off' : 'on'}`,
+      meta: { targetUserId: id(target._id), type: all === true ? 'all' : type, blocked },
     }).catch(() => {});
     const u = await User.findById(target._id, { emailBlockedByAdmin: 1 }).lean();
     res.json({ ok: true, blockedByAdmin: u.emailBlockedByAdmin || [] });
