@@ -177,3 +177,39 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
 .mailbox-bubble.outbound { margin-left: auto; background: var(--accent-bg); }
 .mailbox-bubble.inbound { margin-right: auto; background: color-mix(in srgb, var(--bg2) 65%, var(--bg)); }
 .mailbox-bubble-meta { font-size: 11px; color: var(--text3); margin-bottom: 4px; }
+
+/* ── InfoTip (ⓘ with a hover/focus explanation) ── */
+.info-tip { position: relative; display: inline-flex; align-items: center; color: var(--text3); cursor: help; outline: none; vertical-align: middle; }
+.info-tip:hover, .info-tip:focus-visible { color: var(--accent); }
+.info-tip .ti { font-size: 14px; }
+.info-tip-body {
+  position: absolute; left: 50%; bottom: calc(100% + 8px); transform: translateX(-50%);
+  width: 260px; max-width: 70vw; padding: 9px 11px; border-radius: 8px;
+  background: var(--text); color: var(--bg); font-size: 11.5px; line-height: 1.45; font-weight: 400;
+  text-align: left; white-space: normal; box-shadow: 0 6px 20px rgba(0,0,0,.18);
+  opacity: 0; visibility: hidden; transition: opacity .12s; z-index: 50; pointer-events: none;
+}
+.info-tip:hover .info-tip-body, .info-tip:focus .info-tip-body { opacity: 1; visibility: visible; }
+.info-tip-body strong { display: block; margin-bottom: 2px; }
+
+/* ── Lifecycle email switches (admin) ── */
+.em-strip { display: inline-flex; gap: 6px; align-items: center; padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); cursor: pointer; }
+.em-strip:hover { border-color: var(--accent); }
+.em-strip .ti { font-size: 15px; }
+.em-row { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center; padding: 11px 0; border-top: 1px solid var(--border); }
+.em-row:first-child { border-top: 0; }
+.em-ico { width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; background: var(--bg3); font-size: 17px; }
+.em-state { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; margin-top: 2px; }
+.em-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.em-legend { display: flex; gap: 12px; flex-wrap: wrap; font-size: 11.5px; color: var(--text2); }
+.em-legend span { display: inline-flex; align-items: center; gap: 5px; }
+
+/* A real on/off switch, built on a checkbox so it stays accessible. */
+.switch { position: relative; display: inline-block; width: 36px; height: 20px; flex-shrink: 0; }
+.switch input { opacity: 0; width: 0; height: 0; position: absolute; }
+.switch .slider { position: absolute; inset: 0; border-radius: 20px; background: var(--border-md); transition: background .15s; cursor: pointer; }
+.switch .slider::before { content: ''; position: absolute; width: 16px; height: 16px; left: 2px; top: 2px; border-radius: 50%; background: #fff; transition: transform .15s; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+.switch input:checked + .slider { background: var(--green); }
+.switch input:checked + .slider::before { transform: translateX(16px); }
+.switch input:disabled + .slider { opacity: .45; cursor: not-allowed; }
+.switch input:focus-visible + .slider { outline: 2px solid var(--accent); outline-offset: 2px; }

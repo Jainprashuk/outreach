@@ -87,6 +87,13 @@ async function main() {
     ok(cfg.enabled === false, 'no config row = master switch OFF');
     ok(cfg.testMode === true, 'no config row = test mode ON');
     ok(Object.values(cfg.types).every(v => v === false), 'no config row = every email type OFF');
+    const a0 = await mkUser({ isAdmin: true });
+    await setLifecycleSwitch({ field: 'types:all', value: true, admin: admin(a0) });
+    ok(Object.values((await getLifecycleConfig()).types).every(v => v === true), 'Enable all turns every type on');
+    await setLifecycleSwitch({ field: 'types:all', value: false, admin: admin(a0) });
+    const c0 = await getLifecycleConfig();
+    ok(Object.values(c0.types).every(v => v === false) && c0.enabled === false, 'Disable all turns every type off, master untouched');
+    await reset();
     const u = await mkUser({ onboarded: true });
     const r = await deliver({ type: 'welcome', userId: u._id, key: 'welcome' });
     ok(r.status === 'paused' && sent.length === 0, 'master off: welcome is not sent');
