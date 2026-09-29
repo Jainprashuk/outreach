@@ -27,6 +27,8 @@ interface AppStore {
   createContacts: (rows: Partial<Contact>[]) => Promise<{ created: Contact[]; skipped: number }>;
   updateContact: (id: string, patch: Partial<Contact>) => Promise<Contact>;
   classifyReply: (id: string) => Promise<Contact>;
+  /** Swap in a contact the server just returned (e.g. after sending a reply). */
+  replaceContact: (c: Contact) => void;
   bulkUpdateContacts: (updates: Array<{ id: string } & Partial<Contact>>) => Promise<any>;
   deleteContact: (id: string) => Promise<void>;
   checkMailbox: () => Promise<any>;
@@ -130,6 +132,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const updated = await updateContactApi(id, patch);
       setContacts(prev => prev.map(c => (c.id === id ? updated : c)));
       return updated;
+    },
+    replaceContact(c) {
+      setContacts(prev => prev.map(x => (x.id === c.id ? c : x)));
     },
     async classifyReply(id) {
       const updated = await triggerReplyClassificationApi(id);

@@ -201,6 +201,13 @@ export const bulkActionApi = (ids: string[], op: ActionOp, until?: string) =>
     method: 'POST', body: JSON.stringify({ ids, op, until }),
   });
 
+// AI reply drafts, sent from your Gmail as a threaded reply (routes/replies.js).
+export interface ReplyDraft { body: string; provider: string; attachResume: boolean; hasResume: boolean; }
+export const draftReplyApi = (id: string, opts: { note?: string; attachResume?: boolean }) =>
+  apiFetch<ReplyDraft>(`/api/replies/${id}/draft`, { method: 'POST', body: JSON.stringify(opts) });
+export const sendReplyApi = (id: string, opts: { body: string; attachResume: boolean; allowPlaceholders?: boolean }) =>
+  apiFetch<Contact>(`/api/replies/${id}/send`, { method: 'POST', body: JSON.stringify(opts) });
+
 export const saveSettingsApi = (patch: any) =>
   apiFetch<any>('/api/settings', { method: 'PUT', body: JSON.stringify(patch) });
 

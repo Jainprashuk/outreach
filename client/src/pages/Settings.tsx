@@ -11,6 +11,7 @@ import { BUILTIN_VARIABLES } from '../lib/format';
 import SmtpChart from '../components/SmtpChart';
 import TokenCard from '../components/TokenCard';
 import EmailPrefsCard from '../components/EmailPrefsCard';
+import ReplyProfileCard from '../components/ReplyProfileCard';
 
 const VARIABLE_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
@@ -379,7 +380,8 @@ export default function Settings() {
         </div>
       </div>
 
-      {/* Saves on each click, independently of the Save button below. */}
+      {/* Both save on their own, independently of the Save button below. */}
+      <ReplyProfileCard />
       <EmailPrefsCard />
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 32 }}>
