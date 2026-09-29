@@ -11,6 +11,7 @@
  * the same thing would be a second place for that check to be forgotten.
  */
 const express = require('express');
+const { inngest } = require('../inngest');
 const User = require('../models/User');
 const Settings = require('../models/Settings');
 const Template = require('../models/Template');
@@ -145,6 +146,12 @@ router.post('/complete', async (req, res) => {
       },
       $min: { 'onboarding.startedAt': new Date() },
     });
+    // The welcome email. Queued rather than sent inline: a mail hiccup must
+    // never fail the click that finishes setup, and Vercel may freeze work left
+    // running after the response. The worker applies every switch; with the
+    // master switch off it does nothing, and no welcome is ever sent late.
+    await inngest.send({ name: 'lifecycle/deliver', data: { type: 'welcome', userId: String(req.userId), key: 'welcome' } })
+      .catch(err => console.error('[lifecycle] could not queue welcome email:', err.message));
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

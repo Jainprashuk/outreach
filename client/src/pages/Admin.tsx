@@ -1,13 +1,23 @@
-import { useCallback, useEffect, useState } from 'react';
+import { Fragment, useCallback, useEffect, useState } from 'react';
 import Layout from '../components/Layout';
 import { useToast } from '../context/ToastContext';
 import { useSession } from '../context/SessionContext';
 import { fmtAgo } from '../lib/analytics';
+import AdminEmailsCard from '../components/AdminEmailsCard';
 import {
   adminOverviewApi, adminInviteApi, adminUpdateUserApi, adminRevokeSessionsApi,
-  accessRequestsApi, approveAccessApi, rejectAccessApi, clearAccessRequestApi,
-  type AdminOverview, type AdminUserRow, type AccessRequestRow,
+  accessRequestsApi, approveAccessApi, rejectAccessApi, clearAccessRequestApi, adminSetUserEmailApi,
+  type AdminOverview, type AdminUserRow, type AccessRequestRow, type LifecycleType,
 } from '../lib/api';
+
+// Same order and names as lib/lifecycle/types.js.
+const EMAIL_TYPES: Array<{ key: LifecycleType; label: string; pref: string | null }> = [
+  { key: 'welcome', label: 'Welcome', pref: null },
+  { key: 'setup-reminder', label: 'Setup reminder', pref: 'reminders' },
+  { key: 'inactive', label: "We haven't seen you", pref: 'reminders' },
+  { key: 'weekly-report', label: 'Weekly report', pref: 'weekly-report' },
+  { key: 'manual-report', label: '"Email it to me"', pref: null },
+];
 
 const RANGES = [7, 30, 90];
 
@@ -45,6 +55,7 @@ export default function Admin() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [requests, setRequests] = useState<AccessRequestRow[]>([]);
   const [reqFilter, setReqFilter] = useState<'pending' | 'all'>('pending');
+  const [emailsOpen, setEmailsOpen] = useState<string | null>(null);
 
   const load = useCallback(async (d: number) => {
     try {
@@ -291,6 +302,8 @@ export default function Admin() {
               </div>
             </div>
 
+            <AdminEmailsCard />
+
             <div className="an-card" style={{ marginTop: 16 }}>
               <div className="an-card-head">
                 <div className="an-card-title"><i className="ti ti-user-plus" /> Whitelist an address</div>
@@ -326,15 +339,19 @@ export default function Admin() {
                     <th style={{ textAlign: 'right' }}>Leads</th>
                     <th style={{ textAlign: 'right' }}>Campaigns</th>
                     <th style={{ textAlign: 'right' }}>Scrapes</th>
-                    <th>Last seen</th><th />
+                    <th>Last seen</th><th>Emails</th><th />
                   </tr>
                 </thead>
                 <tbody>
                   {data.users.map(u => {
                     const isSelf = u.id === user?.id;
                     const busy = busyId === u.id;
+                    const blocked = u.emails?.blockedByAdmin || [];
+                    const optOut = u.emails?.optOut || [];
+                    const offCount = EMAIL_TYPES.filter(t => blocked.includes(t.key) || (t.pref && optOut.includes(t.pref))).length;
                     return (
-                      <tr key={u.id}>
+                      <Fragment key={u.id}>
+                      <tr>
                         <td>
                           <div style={{ fontWeight: 500 }}>{u.email}</div>
                           <div style={{ display: 'flex', gap: 5, marginTop: 3 }}>
@@ -363,8 +380,14 @@ export default function Admin() {
                           )}
                         </td>
                         <td style={{ fontSize: 12, color: 'var(--text2)' }}>
-                          {ago(u.lastLoginAt)}
+                          {ago(u.lastActiveAt || u.lastLoginAt)}
                           <div style={{ fontSize: 11, color: 'var(--text3)' }}>{u.activeSessions} session(s)</div>
+                        </td>
+                        <td>
+                          <button className="btn btn-xs" type="button" onClick={() => setEmailsOpen(emailsOpen === u.id ? null : u.id)}
+                            title="Turn lifecycle emails on or off for this account">
+                            <i className="ti ti-mail" /> {offCount ? <span style={{ color: 'var(--amber)' }}>{offCount} off</span> : 'all on'}
+                          </button>
                         </td>
                         <td style={{ whiteSpace: 'nowrap' }}>
                           <button aria-label="Sign this account out on every device"
@@ -392,6 +415,29 @@ export default function Admin() {
                           )}
                         </td>
                       </tr>
+                      {emailsOpen === u.id && (
+                        <tr>
+                          <td colSpan={10} style={{ background: 'var(--bg2)' }}>
+                            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5 }}>
+                              <span style={{ fontWeight: 500 }}>Emails for {u.email}:</span>
+                              {EMAIL_TYPES.map(t => {
+                                const userOff = !!(t.pref && optOut.includes(t.pref));
+                                return (
+                                  <label key={t.key} style={{ display: 'inline-flex', gap: 5, alignItems: 'center', cursor: 'pointer' }}
+                                    title={userOff ? 'They opted out themselves. You cannot turn this on for them.' : undefined}>
+                                    <input type="checkbox" checked={!blocked.includes(t.key)} disabled={busy}
+                                      onChange={e => act(u, () => adminSetUserEmailApi(u.id!, t.key, !e.target.checked),
+                                        `${t.label} ${e.target.checked ? 'on' : 'off'} for ${u.email}`)} />
+                                    {t.label}
+                                    {userOff && <span className="badge badge-pending">they opted out</span>}
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                      </Fragment>
                     );
                   })}
                 </tbody>

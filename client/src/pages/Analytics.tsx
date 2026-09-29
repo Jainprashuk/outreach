@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { Card, HBar } from '../components/AnalyticsCards';
 import LeadsAnalytics from '../components/LeadsAnalytics';
+import ReportsPanel from '../components/ReportsPanel';
 import InterviewFunnelCard from '../components/InterviewFunnelCard';
 import { useInterviews } from '../context/InterviewContext';
 import {
@@ -420,7 +422,12 @@ export default function Analytics() {
   const app = useApp();
   const toast = useToast();
   const { interviews, loaded: interviewsLoaded } = useInterviews();
-  const [view, setView] = useState<'outreach' | 'leads'>('outreach');
+  // ?view=reports is where the Monday email's "View in the app" button lands.
+  const [search] = useSearchParams();
+  const [view, setView] = useState<'outreach' | 'leads' | 'reports'>(() => {
+    const v = search.get('view');
+    return v === 'leads' || v === 'reports' ? v : 'outreach';
+  });
   const [leadsRefresh, setLeadsRefresh] = useState(0);
   const [range, setRange] = useState(30);
   const [statusMode, setStatusMode] = useState<'current' | 'ever'>('current');
@@ -532,9 +539,21 @@ export default function Analytics() {
         <button type="button" className={`nav-tab${view === 'leads' ? ' active' : ''}`} onClick={() => setView('leads')}>
           <i className="ti ti-target-arrow" /> Leads
         </button>
+        <button type="button" className={`nav-tab${view === 'reports' ? ' active' : ''}`} onClick={() => setView('reports')}>
+          <i className="ti ti-file-analytics" /> Reports
+        </button>
       </div>
     </div>
   );
+
+  if (view === 'reports') {
+    return (
+      <Layout title="Analytics" subtitle="Reports for any period — on screen, as a PDF, or emailed to you">
+        {switcher}
+        <ReportsPanel />
+      </Layout>
+    );
+  }
 
   if (view === 'leads') {
     return (

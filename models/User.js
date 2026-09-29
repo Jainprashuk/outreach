@@ -9,6 +9,21 @@ const userSchema = new mongoose.Schema({
   passwordHash: { type: String, default: null },
   name: { type: String, default: '' },
   lastLoginAt: { type: Date, default: null },
+  // The first completed sign-in, written once with $min. The setup reminder
+  // counts its five days from here. Accounts that signed in before this field
+  // existed fall back to onboarding.startedAt, then lastLoginAt.
+  firstLoginAt: { type: Date, default: null },
+  // Last time a person (a session, never cron/worker/share) hit the API. Written
+  // at most once an hour — see touchActivity in lib/lifecycle/activity.js.
+  lastActiveAt: { type: Date, default: null },
+
+  // Lifecycle email controls. Both are lists of what is OFF, so that a missing
+  // field — every account that existed before this — reads as "all on" under
+  // .lean(), which never applies schema defaults.
+  //   emailOptOut          the user's own choices: 'reminders', 'weekly-report'
+  //   emailBlockedByAdmin  email TYPES an admin switched off for this user only
+  emailOptOut: { type: [String], default: [] },
+  emailBlockedByAdmin: { type: [String], default: [] },
 
   // Two tiers, not a role system: everyone, and the person who can see the
   // per-account totals. An enum here would invite a third tier nobody has

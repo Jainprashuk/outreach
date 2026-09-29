@@ -1196,6 +1196,10 @@ export interface AdminUserRow {
   status: 'active' | 'invited' | 'disabled' | 'n/a';
   createdAt: string | null;
   lastLoginAt: string | null;
+  /** Last time a person used the app (hour granularity). Null before lifecycle emails shipped. */
+  lastActiveAt?: string | null;
+  /** Email types off for this account: by an admin, and by the user's own choice. */
+  emails?: { blockedByAdmin: LifecycleType[]; optOut: string[] };
   activeSessions: number;
   onboarding: { completedAt: string | null; step: number; skipped: string[]; current: boolean };
   config: {
@@ -1597,3 +1601,69 @@ export const naukriUnknownQuestionsApi = () =>
 
 export const deleteNaukriResumeApi = () =>
   apiFetch<{ ok: true }>('/api/naukri/resume', { method: 'DELETE' });
+
+// ── Lifecycle emails & reports ───────────────────────────────────────────────
+
+export type LifecycleType = 'welcome' | 'setup-reminder' | 'inactive' | 'weekly-report' | 'manual-report';
+
+export interface LifecycleConfig {
+  enabled: boolean;
+  firstEnabledAt: string | null;
+  testMode: boolean;
+  testRecipient: string;
+  types: Record<LifecycleType, boolean>;
+}
+
+export interface AdminEmailsView {
+  config: LifecycleConfig;
+  types: Array<{ key: LifecycleType; label: string }>;
+  counts: Record<LifecycleType, { sent: number; failed: number; skipped: number; testOnly: number; skippedBy: Record<string, number> }>;
+  recentFailures: Array<{ email: string; type: LifecycleType; attempts: number; at: string }>;
+  changes: Array<{ field: string; value: boolean; byEmail: string; at: string }>;
+  readiness: { sender: boolean; links: boolean };
+}
+
+export const adminEmailsApi = () => apiFetch<AdminEmailsView>('/api/admin/emails');
+export const adminSetEmailSwitchApi = (field: string, value: boolean) =>
+  apiFetch<{ config: LifecycleConfig }>('/api/admin/emails', { method: 'PUT', body: JSON.stringify({ field, value }) });
+export const adminSendSampleApi = (type: LifecycleType) =>
+  apiFetch<{ ok: true; to: string }>('/api/admin/emails/sample', { method: 'POST', body: JSON.stringify({ type }) });
+export const adminSetUserEmailApi = (id: string, type: LifecycleType, blocked: boolean) =>
+  apiFetch<{ ok: true; blockedByAdmin: LifecycleType[] }>(`/api/admin/users/${id}/emails`, {
+    method: 'PATCH', body: JSON.stringify({ type, blocked }),
+  });
+
+export interface EmailPref { key: 'reminders' | 'weekly-report'; label: string; on: boolean; blockedByAdmin: boolean }
+export const emailPrefsApi = () => apiFetch<{ prefs: EmailPref[] }>('/api/settings/email-prefs');
+export const setEmailPrefApi = (key: EmailPref['key'], on: boolean) =>
+  apiFetch<{ prefs: EmailPref[] }>('/api/settings/email-prefs', { method: 'PUT', body: JSON.stringify({ key, on }) });
+
+export type ReportPeriodQuery =
+  | { period: 'last-week' | 'this-week' | 'last-30' }
+  | { period: 'week'; week: string }
+  | { period: 'custom'; from: string; to: string };
+
+export interface ReportHeadline { value: number; previous: number; delta: number }
+export interface ReportStats {
+  label: string;
+  period: { from: string; to: string; kind: string; days: number };
+  previous: { from: string; to: string };
+  generatedAt: string;
+  quiet: boolean;
+  headline: { sent: ReportHeadline; replies: ReportHeadline; replyRate: ReportHeadline; interviews: ReportHeadline };
+  outreach: { firstSends: number; followUps: number; bounced: number; failed: number };
+  series: { unit: 'day' | 'week'; points: Array<{ day: string; sent: number; replies: number }> };
+  replyCategories: Array<{ key: string; label: string; n: number }>;
+  campaigns: Array<{ name: string; status: string; sent: number; remaining: number; finishedInPeriod: boolean }>;
+  pipeline: { leadsAdded: number; leadsApplied: number; naukriApplied: number; interviewsNew: number; interviewMoves: Array<{ status: string; n: number }> };
+  topReplies: Array<{ name: string; company: string; category: string; categoryLabel: string; repliedAt: string }>;
+  waiting: { count: number; items: Array<{ name: string; company: string; categoryLabel: string; repliedAt: string }> };
+  upcomingInterviews: Array<{ name: string; company: string; role: string; round: string; interviewAt: string }>;
+}
+
+export const reportQueryString = (q: ReportPeriodQuery) => new URLSearchParams(q as Record<string, string>).toString();
+export const reportApi = (q: ReportPeriodQuery) => apiFetch<ReportStats>(`/api/reports?${reportQueryString(q)}`);
+export const reportPdfUrl = (q: ReportPeriodQuery) => `${API_BASE}/api/reports/pdf?${reportQueryString(q)}`;
+export const reportWeeksApi = () => apiFetch<{ weeks: Array<{ week: string; label: string }> }>('/api/reports/weeks');
+export const emailReportApi = (q: ReportPeriodQuery) =>
+  apiFetch<{ ok: true; to: string }>(`/api/reports/email?${reportQueryString(q)}`, { method: 'POST' });
