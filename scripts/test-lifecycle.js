@@ -261,6 +261,27 @@ async function main() {
     ok(msgs.welcome.html.includes('/app/settings'), 'welcome opt-out goes to email settings');
   }
 
+  console.log('\nLinks are always absolute');
+  {
+    const { appUrl } = require('../lib/lifecycle/unsubscribe');
+    const { buildMessage } = require('../lib/lifecycle/deliver');
+    const saved = process.env.OUTREACH_URL;
+    delete process.env.OUTREACH_URL;
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    ok(appUrl() === '', 'no OUTREACH_URL and no Vercel domain = no app URL');
+    const u = { _id: new mongoose.Types.ObjectId(), email: 'x@example.com', name: 'X' };
+    let threw = false;
+    try { await buildMessage('setup-reminder', u); } catch (_) { threw = true; }
+    ok(threw, 'building an email without an app URL is refused (no dead links)');
+    process.env.VERCEL_PROJECT_PRODUCTION_URL = 'outreach.example.com';
+    ok(appUrl() === 'https://outreach.example.com', "falls back to Vercel's production domain");
+    delete process.env.VERCEL_PROJECT_PRODUCTION_URL;
+    process.env.OUTREACH_URL = saved;
+    const m = await buildMessage('setup-reminder', u);
+    const hrefs = [...m.html.matchAll(/href="([^"]+)"/g)].map(x => x[1]);
+    ok(hrefs.length > 0 && hrefs.every(h => /^https?:\/\//.test(h)), 'every href in the email is absolute');
+  }
+
   console.log('\nUnsubscribe links');
   {
     const id = new mongoose.Types.ObjectId();
