@@ -58,7 +58,9 @@ router.get('/', async (req, res) => {
       const idList = ids.split(',').filter(Boolean);
       filter._id = { $in: idList };
     }
-    const q = Contact.find(filter).sort({ createdAt: -1 }).lean();
+    // Every page loads this list, so it leaves out each message's html body: the Mailbox
+    // renders plain text only, and html is by far the heaviest part of a long thread.
+    const q = Contact.find(filter, { 'thread.html': 0 }).sort({ createdAt: -1 }).lean();
 
     if (page && limit) {
       const p = Math.max(1, parseInt(page, 10));

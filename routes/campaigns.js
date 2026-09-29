@@ -631,10 +631,12 @@ router.post('/:id/resume', requireOnboarded, async (req, res) => {
       return res.json({ campaign: serialize(done), released: null });
     }
 
-    // Clearing lastError alongside the status is what lets a campaign that tripped
-    // the circuit breaker actually run again.
+    // Clearing lastJobId is what lets a campaign that tripped the circuit breaker
+    // actually run again: circuitTripped() judges that job, not lastError, so
+    // leaving it set re-trips on every resume. Resuming is the owner saying the
+    // cause is fixed; the next batch becomes lastJobId and is judged afresh.
     const updated = await Campaign.findOneAndUpdate({ _id: campaign._id, userId: req.userId },
-      { $set: { status: 'running', pausedAt: null, lastError: null } }, { new: true }).lean();
+      { $set: { status: 'running', pausedAt: null, lastError: null, lastJobId: null } }, { new: true }).lean();
 
     // Resuming at 11pm should not dump a day's batch, so this is opt-in.
     let released = null;

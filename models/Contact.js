@@ -77,6 +77,9 @@ const contactSchema = new mongoose.Schema({
 
 // Indexes for common query patterns
 contactSchema.index({ createdAt: -1 });
+// The contacts list: one account's rows, newest first. Without it the query walks every
+// account's contacts on the createdAt index and throws away the ones that aren't yours.
+contactSchema.index({ userId: 1, createdAt: -1 });
 contactSchema.index({ status: 1, createdAt: -1 });
 contactSchema.index({ approvalStatus: 1 });
 contactSchema.index({ email: 1 });
