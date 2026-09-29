@@ -1,6 +1,8 @@
 const express = require('express');
 const multer = require('multer');
 const Settings = require('../models/Settings');
+const User = require('../models/User');
+const { PREFS, PREF_KEYS, isPref } = require('../lib/lifecycle/types');
 
 const router = express.Router();
 
@@ -127,6 +129,44 @@ router.delete('/gmail', async (req, res) => {
   try {
     await Settings.findOneAndUpdate({ userId: req.userId }, { $set: { gmailAppPasswordEnc: '' } });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Email preferences ────────────────────────────────────────────────────────
+// Lives on User, not Settings (see models/User.js). `blockedByAdmin` is returned
+// so the page can show "Turned off by admin" — the user can see it but not
+// change it, and the admin cannot change the user's own choice either.
+const emailPrefsView = async (userId) => {
+  const u = await User.findById(userId, { emailOptOut: 1, emailBlockedByAdmin: 1 }).lean();
+  const optOut = new Set((u && u.emailOptOut) || []);
+  const blocked = new Set((u && u.emailBlockedByAdmin) || []);
+  return {
+    prefs: PREF_KEYS.map(k => ({
+      key: k,
+      label: PREFS[k].label,
+      on: !optOut.has(k),
+      // Off for this user by an admin if EVERY type the preference covers is.
+      blockedByAdmin: PREFS[k].covers.every(t => blocked.has(t)),
+    })),
+  };
+};
+
+router.get('/email-prefs', async (req, res) => {
+  try {
+    res.json(await emailPrefsView(req.userId));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/email-prefs', async (req, res) => {
+  try {
+    const { key, on } = req.body || {};
+    if (!isPref(key) || typeof on !== 'boolean') return res.status(400).json({ error: 'Unknown preference' });
+    await User.updateOne({ _id: req.userId }, on ? { $pull: { emailOptOut: key } } : { $addToSet: { emailOptOut: key } });
+    res.json(await emailPrefsView(req.userId));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

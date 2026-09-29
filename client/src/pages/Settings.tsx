@@ -10,6 +10,7 @@ import {
 import { BUILTIN_VARIABLES } from '../lib/format';
 import SmtpChart from '../components/SmtpChart';
 import TokenCard from '../components/TokenCard';
+import EmailPrefsCard from '../components/EmailPrefsCard';
 
 const VARIABLE_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
@@ -377,6 +378,9 @@ export default function Settings() {
           <SmtpChart buckets={sent24h.buckets} />
         </div>
       </div>
+
+      {/* Saves on each click, independently of the Save button below. */}
+      <EmailPrefsCard />
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 32 }}>
         <button className="btn btn-primary" onClick={save} disabled={saveState === 'saving' || loading} style={{ padding: '9px 22px' }} type="button">

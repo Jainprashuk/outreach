@@ -130,7 +130,11 @@ router.post('/verify-code', async (req, res) => {
     res.setHeader('Set-Cookie', setCookieHeader(token));
 
     // First successful sign-in is what activates an invited account.
-    await User.updateOne({ _id: user._id }, { $set: { lastLoginAt: new Date(), status: 'active' } });
+    await User.updateOne({ _id: user._id }, {
+      $set: { lastLoginAt: new Date(), status: 'active' },
+      // Written once: the setup reminder counts its days from the FIRST sign-in.
+      $min: { firstLoginAt: new Date() },
+    });
 
     res.json({ ok: true, user: publicUser(user) });
   } catch (err) {

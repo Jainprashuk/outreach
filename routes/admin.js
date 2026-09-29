@@ -35,6 +35,13 @@ const { destroyAllForUser } = require('../lib/session');
 const { logEvent } = require('../lib/activityLog');
 const { sendAccessApproved } = require('../lib/emailOtp');
 const { ONBOARDING_VERSION } = require('../lib/onboarding');
+const LifecycleEmail = require('../models/LifecycleEmail');
+const { getLifecycleConfigWithHistory, setLifecycleSwitch } = require('../lib/lifecycle/config');
+const { TYPES, TYPE_KEYS, isType } = require('../lib/lifecycle/types');
+const { buildMessage } = require('../lib/lifecycle/deliver');
+const { USER_FIELDS } = require('../lib/lifecycle/candidates');
+const systemMail = require('../lib/systemMail');
+const unsubscribe = require('../lib/lifecycle/unsubscribe');
 
 const router = express.Router();
 
@@ -103,6 +110,7 @@ router.get('/users', async (req, res) => {
       User.find({}, {
         email: 1, name: 1, createdAt: 1, lastLoginAt: 1, isAdmin: 1, status: 1,
         onboarding: 1, workerTokenHash: 1, shareTokenHash: 1,
+        lastActiveAt: 1, emailOptOut: 1, emailBlockedByAdmin: 1,
       }).sort({ createdAt: 1 }).lean(),
 
       countByUserAnd(Contact, 'status',
@@ -238,6 +246,12 @@ router.get('/users', async (req, res) => {
         status: u.status || 'active',
         createdAt: u.createdAt || null,
         lastLoginAt: u.lastLoginAt || null,
+        lastActiveAt: u.lastActiveAt || null,
+        // Enum keys only: which email types are off for this account, and why.
+        emails: {
+          blockedByAdmin: (u.emailBlockedByAdmin || []).filter(isType),
+          optOut: u.emailOptOut || [],
+        },
         activeSessions: (zMap.get(key) || {}).active || 0,
         onboarding: {
           completedAt: (u.onboarding && u.onboarding.completedAt) || null,
@@ -647,6 +661,105 @@ router.delete('/access-requests/:id', async (req, res) => {
       meta: { targetEmail: reqDoc.email, was: reqDoc.status },
     }).catch(() => {});
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Lifecycle emails ─────────────────────────────────────────────────────────
+// Switches, counts and samples. Counts are grouped by enum keys (type, status,
+// reason) only — no subject, no body, no error text, per the file header.
+
+router.get('/emails', async (_req, res) => {
+  try {
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const [{ config, changes }, grouped, recentFailures] = await Promise.all([
+      getLifecycleConfigWithHistory(),
+      LifecycleEmail.aggregate([
+        { $match: { createdAt: { $gte: since } } },   // DELIBERATELY UNSCOPED — see file header
+        { $group: { _id: { t: '$type', s: '$status', r: { $ifNull: ['$reason', 'none'] } }, n: { $sum: 1 } } },
+      ]),
+      LifecycleEmail.find({ status: 'failed', createdAt: { $gte: since } }, { userId: 1, type: 1, attempts: 1, updatedAt: 1 })
+        .sort({ updatedAt: -1 }).limit(10).lean(),
+    ]);
+
+    const counts = Object.fromEntries(TYPE_KEYS.map(t => [t, { sent: 0, failed: 0, skipped: 0, testOnly: 0, skippedBy: {} }]));
+    for (const g of grouped) {
+      const c = counts[g._id.t];
+      if (!c) continue;
+      if (g._id.s === 'sent') c.sent += g.n;
+      else if (g._id.s === 'failed') c.failed += g.n;
+      else if (g._id.s === 'skipped') {
+        if (g._id.r === 'test-mode') c.testOnly += g.n;
+        else { c.skipped += g.n; c.skippedBy[g._id.r] = (c.skippedBy[g._id.r] || 0) + g.n; }
+      }
+    }
+
+    const failUsers = await User.find({ _id: { $in: recentFailures.map(f => f.userId) } }, { email: 1 }).lean();
+    const emailOf = new Map(failUsers.map(u => [id(u._id), u.email]));
+
+    res.json({
+      config,
+      types: TYPE_KEYS.map(k => ({ key: k, label: TYPES[k].label })),
+      counts,
+      recentFailures: recentFailures.map(f => ({ email: emailOf.get(id(f.userId)) || '(deleted)', type: f.type, attempts: f.attempts, at: f.updatedAt })),
+      changes: changes.map(c => ({ field: c.field, value: c.value, byEmail: c.byEmail, at: c.at })),
+      readiness: {
+        sender: systemMail.isConfigured(),
+        links: !!unsubscribe.appUrl() && unsubscribe.isConfigured(),
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/emails', async (req, res) => {
+  try {
+    const { field, value } = req.body || {};
+    const me = await User.findById(req.userId, { email: 1 }).lean();
+    const config = await setLifecycleSwitch({ field: String(field || ''), value, admin: { id: req.userId, email: me.email } });
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'lifecycle-switch',
+      message: `Lifecycle emails: ${field} -> ${value ? 'on' : 'off'}`, meta: { field, value },
+    }).catch(() => {});
+    res.json({ config });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+/** Sends one type to the admin, built from the ADMIN'S own data. Ignores the switches. */
+router.post('/emails/sample', async (req, res) => {
+  try {
+    const type = String((req.body && req.body.type) || '');
+    if (!isType(type)) return res.status(400).json({ error: 'Unknown email type' });
+    if (!systemMail.isConfigured()) return res.status(400).json({ error: 'Set LIFECYCLE_FROM_EMAIL and RESEND_API_KEY first.' });
+    const me = await User.findById(req.userId, USER_FIELDS).lean();
+    const msg = await buildMessage(type, me, { manual: type === 'manual-report' });
+    await systemMail.sendSystemEmail({ ...msg, subject: `[Sample] ${msg.subject}`, to: me.email });
+    res.json({ ok: true, to: me.email });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+/** Turn one email type on/off for ONE account. Cannot touch that user's own opt-outs. */
+router.patch('/users/:id/emails', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Not a valid account id' });
+    const { type, blocked } = req.body || {};
+    if (!isType(type) || typeof blocked !== 'boolean') return res.status(400).json({ error: 'Send { type, blocked: true|false }' });
+    const target = await User.findById(req.params.id, { email: 1 }).lean();
+    if (!target) return res.status(404).json({ error: 'No such account' });
+    await User.updateOne({ _id: target._id }, blocked ? { $addToSet: { emailBlockedByAdmin: type } } : { $pull: { emailBlockedByAdmin: type } });
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'lifecycle-user-switch',
+      message: `${target.email}: ${TYPES[type].label} -> ${blocked ? 'off' : 'on'}`,
+      meta: { targetUserId: id(target._id), type, blocked },
+    }).catch(() => {});
+    const u = await User.findById(target._id, { emailBlockedByAdmin: 1 }).lean();
+    res.json({ ok: true, blockedByAdmin: u.emailBlockedByAdmin || [] });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

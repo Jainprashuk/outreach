@@ -24,6 +24,7 @@ const { resolveWorkerUser } = require('./lib/workerAuth');
 const { issueShareToken, revokeShareToken, resolveShareUser, hasShareToken } = require('./lib/shareAuth');
 const { usersByStaleness, runForUsers } = require('./lib/fanout');
 const { deadline } = require('./lib/http');
+const { touchActivity } = require('./lib/lifecycle/activity');
 const { classifyReply } = require('./lib/replyClassifier');
 const { runBackfillBatch } = require('./routes/contacts');
 const Lead = require('./models/Lead');
@@ -154,6 +155,10 @@ const PUBLIC_AUTH_PATHS = new Set([
   '/api/auth/session',
 ]);
 
+// Signed-link unsubscribe from an email — no session by definition. Exact path;
+// the HMAC token it carries is the credential (routes/email.js).
+const PUBLIC_EMAIL_PATHS = new Set(['/api/email/unsubscribe']);
+
 const requireAuth = async (req, res, next) => {
   // Local-development bypass. It resolves the owner here, beside the bypass, so
   // that attachUser can stay strict for every real request.
@@ -161,7 +166,7 @@ const requireAuth = async (req, res, next) => {
     try { await ensureDb(); req.userId = await resolveSoleUserId(); } catch (_) { /* no account yet */ }
     return next();
   }
-  if (req.path === '/login' || PUBLIC_AUTH_PATHS.has(req.path) || req.path.startsWith('/api/inngest')) return next();
+  if (req.path === '/login' || PUBLIC_AUTH_PATHS.has(req.path) || PUBLIC_EMAIL_PATHS.has(req.path) || req.path.startsWith('/api/inngest')) return next();
   // The React SPA shell is public so share/unauthenticated visitors can load it;
   // the client renders "Not authorised" for owner-only pages and all owner DATA
   // endpoints below stay gated. The share API self-guards.
@@ -200,6 +205,8 @@ const requireAuth = async (req, res, next) => {
     if (session) {
       req.session = session;
       req.userId = session.userId;
+      // A person is using the app: the inactivity email's "last visit".
+      touchActivity(session.userId);
       return next();
     }
   } catch (err) {
@@ -533,7 +540,11 @@ app.get('/api/share-link', requireDb, attachUser, async (req, res) => {
 const { serve } = require('inngest/express');
 const { inngest } = require('./inngest');
 const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip } = require('./inngest-fns');
-app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip] }));
+const { lifecycleDailySweep, weeklyReportSweep, lifecycleDeliver } = require('./lib/lifecycle/inngest');
+app.use('/api/inngest', serve({
+  client: inngest,
+  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, lifecycleDailySweep, weeklyReportSweep, lifecycleDeliver],
+}));
 
 // Sign-in is an emailed one-time code; see routes/auth.js and lib/loginCode.js.
 // Mounted ABOVE the /api stack below on purpose: none of these endpoints can
@@ -543,7 +554,10 @@ app.use('/api/inngest', serve({ client: inngest, functions: [sendEmailBatch, sen
 // what makes it possible to sign in at all.
 app.use('/api/auth', requireDb, require('./routes/auth'));
 
+// Public (signed link), so ahead of attachUser.
+app.use('/api/email', requireDb, require('./routes/email'));
 app.use('/api', requireDb, attachUser, auditHttpMutations);
+app.use('/api/reports', requireDb, require('./routes/reports'));
 app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
