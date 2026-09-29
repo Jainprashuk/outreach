@@ -40,10 +40,14 @@ router.get('/', async (req, res) => {
 // PUT /api/settings — atomic update, no binary loaded
 router.put('/', async (req, res) => {
   try {
-    const allowed = ['senderName', 'senderCompany', 'gmailEmail', 'customVariables'];
+    const allowed = ['senderName', 'senderCompany', 'gmailEmail', 'customVariables', 'replyProfile'];
     const update = {};
     for (const key of allowed) {
       if (key in req.body) update[key] = req.body[key];
+    }
+
+    if ('replyProfile' in update) {
+      update.replyProfile = String(update.replyProfile || '').slice(0, 2000);
     }
 
     if (update.customVariables) {

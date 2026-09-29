@@ -562,6 +562,7 @@ app.use('/api/reports', requireDb, require('./routes/reports'));
 app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/actions', requireDb, require('./routes/actions'));
+app.use('/api/replies', requireDb, require('./routes/replies'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));
 app.use('/api/jobs', requireDb, require('./routes/jobs'));
@@ -670,8 +671,10 @@ const cleanMsgId = (id) => (id || '').replace(/^<|>$/g, '') || null;
 
 // Has this exact message already been captured in the contact's thread? Lean
 // projections only carry `thread.messageId` here, not the full entries.
+// Compared bracket-free on both sides: ids the app records at send time come from
+// nodemailer as "<id>", ids captured from the mailbox are stored bare.
 const threadHasMessageId = (contact, messageId) =>
-  !!messageId && (contact.thread || []).some(t => t.messageId === messageId);
+  !!messageId && (contact.thread || []).some(t => cleanMsgId(t.messageId) === messageId);
 
 // tryMatchReply — uses pre-loaded lean maps; writes via findOneAndUpdate (no doc hydration).
 // Runs on every scan regardless of whether the contact already has a prior reply, so an
@@ -904,7 +907,7 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
       byEmail.set(addr, c);
       if (c.messageId) byMessageId.set(c.messageId.replace(/^<|>$/g, ''), c);
       for (const t of (c.thread || [])) {
-        if (t.messageId) byMessageId.set(t.messageId, c);
+        if (t.messageId) byMessageId.set(cleanMsgId(t.messageId), c);
       }
     }
   }

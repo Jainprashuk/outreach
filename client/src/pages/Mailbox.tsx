@@ -11,6 +11,7 @@ import { useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import ClassifierStatus from '../components/ClassifierStatus';
+import ReplyComposer from '../components/ReplyComposer';
 import SelectionBar, { RowCheck } from '../components/naukri/SelectionBar';
 import { useApp } from '../context/AppContext';
 import { useActionQueue } from '../context/ActionQueueContext';
@@ -401,7 +402,13 @@ export default function Mailbox() {
                       {selected.email}{selected.company ? ` · ${selected.company}` : ''}
                     </div>
                   </div>
-                  <ClassifierStatus contact={selected} />
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                    <ClassifierStatus contact={selected} />
+                    <a className="btn btn-sm" href={gmailUrl(selected, app.sender.email)} target="_blank" rel="noreferrer"
+                      title="Opens this conversation in Gmail, signed in as the account you send from">
+                      <i className="ti ti-brand-gmail" /> Open in Gmail
+                    </a>
+                  </div>
                 </div>
 
                 {selectedItem && (
@@ -449,11 +456,10 @@ export default function Mailbox() {
                       <option value="" disabled>Set category…</option>
                       {CATEGORY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                     </select>
-                    <a className="btn btn-sm" href={gmailUrl(selected, app.sender.email)} target="_blank" rel="noreferrer">
-                      <i className="ti ti-brand-gmail" /> Reply in Gmail
-                    </a>
                   </div>
                 )}
+
+                {selected.repliedAt && <ReplyComposer key={selected.id} contact={selected} />}
 
                 {orderedThread.length === 0 && selected.replySnippet && (
                   <div className="mailbox-bubble inbound">

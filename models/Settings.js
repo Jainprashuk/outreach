@@ -27,6 +27,10 @@ const settingsSchema = new mongoose.Schema({
   customVariables: { type: [variableSchema], default: [] },
   resume: { type: resumeSchema, default: null },
   lastMailboxCheckAt: { type: Date, default: null },
+  // Facts about you for AI reply drafts (lib/replyDraft.js) — role, experience, notice
+  // period, locations. The model is told to use only these, so they are what stops it
+  // inventing an answer.
+  replyProfile: { type: String, default: '', maxlength: 2000 },
 
   // ── Job-posting sync (see lib/postingSync.js) ────────────────────────────
   // Scalars, so the singleton is the right home; the boards themselves are a
