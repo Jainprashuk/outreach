@@ -85,6 +85,8 @@ contactSchema.index({ approvalStatus: 1 });
 contactSchema.index({ email: 1 });
 contactSchema.index({ messageId: 1 });
 contactSchema.index({ userId: 1, 'action.state': 1, 'action.dueAt': 1 });
+// Per-user list index — built on prod by scripts/build-perf-indexes.js.
+contactSchema.index({ userId: 1, status: 1, createdAt: -1 });
 
 contactSchema.set('toJSON', {
   transform: (doc, ret) => {

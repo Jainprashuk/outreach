@@ -68,6 +68,8 @@ const scrapeRunSchema = new mongoose.Schema({
 // every worker poll, so keep it indexed.
 scrapeRunSchema.index({ status: 1, createdAt: 1 });
 scrapeRunSchema.index({ createdAt: -1 });
+// Per-user list index — built on prod by scripts/build-perf-indexes.js.
+scrapeRunSchema.index({ userId: 1, createdAt: -1 });
 
 scrapeRunSchema.set('toJSON', {
   transform: (doc, ret) => {

@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Layout from '../components/Layout';
 import { loadActivityLogsApi, type ActivityLog } from '../lib/api';
+import { useVisibleInterval } from '../hooks/useVisibleInterval';
 
 export default function Logs() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -9,7 +10,7 @@ export default function Logs() {
   const [feature, setFeature] = useState<'all' | 'campaign' | 'outreach' | 'leads' | 'interviews' | 'postings' | 'classifier'>('all');
   const [eventType, setEventType] = useState<'all' | 'email' | 'changes' | 'failures'>('all');
   const load = () => loadActivityLogsApi().then(setLogs).catch(e => setError(e.message));
-  useEffect(() => { load(); const timer = setInterval(load, 3000); return () => clearInterval(timer); }, []);
+  useVisibleInterval(load, 3000);
   const filtered = useMemo(() => logs.filter(log => {
     const outreach = ['contacts', 'templates', 'settings', 'jobs', 'email'];
     if (feature === 'outreach' && !outreach.includes(log.category)) return false;

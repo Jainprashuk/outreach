@@ -261,7 +261,8 @@ router.get('/:id/file/:kind', async (req, res) => {
   const { kind } = req.params;
   if (!isKind(kind)) return res.status(400).json({ error: 'File kind must be "cv" or "jd"' });
   try {
-    const doc = await Interview.findOne({ _id: req.params.id, userId: req.userId, ...BASE_FILTER });
+    // Only the file being downloaded — CV and JD can each be several MB.
+    const doc = await Interview.findOne({ _id: req.params.id, userId: req.userId, ...BASE_FILTER }, { [kind]: 1 });
     if (!doc) return res.status(404).json({ error: 'Interview not found' });
     const file = doc[kind];
     if (!file || !file.data) return res.status(404).json({ error: `No ${kind.toUpperCase()} uploaded` });

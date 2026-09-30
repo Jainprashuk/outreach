@@ -163,7 +163,10 @@ async function outcomesByCampaign(campaignIds, userId) {
   const rows = await CampaignRow.aggregate([
     { $match: match },
     { $addFields: { cid: { $toObjectId: '$contactId' } } },
-    { $lookup: { from: 'contacts', localField: 'cid', foreignField: '_id', as: 'c' } },
+    // Only the three fields the stages below read; without this every joined
+    // contact dragged its whole mail thread through the pipeline.
+    { $lookup: { from: 'contacts', localField: 'cid', foreignField: '_id', as: 'c',
+      pipeline: [{ $project: { status: 1, deleted: 1, userId: 1 } }] } },
     { $unwind: '$c' },
     { $match: { 'c.deleted': { $ne: true }, 'c.userId': userId } },
     { $group: { _id: { campaignId: '$campaignId', status: '$c.status' }, n: { $sum: 1 } } },
@@ -209,7 +212,10 @@ router.get('/timeline', async (req, res) => {
 // GET /api/campaigns
 router.get('/', async (req, res) => {
   try {
-    const campaigns = await Campaign.find({ userId: req.userId, ...BASE_FILTER }).sort({ createdAt: -1 }).lean();
+    // The list never shows the release log or the sheet mapping — the detail page
+    // loads those from /:id. serialize() still fills them in as empty.
+    const campaigns = await Campaign.find({ userId: req.userId, ...BASE_FILTER },
+      { releases: 0, columnMap: 0, sourceColumns: 0 }).sort({ createdAt: -1 }).lean();
     const ids = campaigns.map(c => c._id);
     const [byCampaign, activeJobs] = await Promise.all([
       outcomesByCampaign(ids, req.userId),
@@ -466,7 +472,7 @@ router.get('/:id', async (req, res) => {
     const [jobs, activeJob] = await Promise.all([
       recent.length
         ? SendJob.find({ _id: { $in: recent.map(r => r.jobId) }, userId: req.userId },
-          { items: 1, status: 1, sendMode: 1, ratePerHour: 1, createdAt: 1 }).lean()
+          { 'items.status': 1, status: 1, sendMode: 1, ratePerHour: 1, createdAt: 1 }).lean()
         : [],
       SendJob.exists({ userId: req.userId, campaignId: String(campaign._id), status: { $in: ['pending', 'processing'] } }),
     ]);
@@ -599,7 +605,7 @@ router.post('/:id/pause', async (req, res) => {
     const jobIds = (updated.releases || []).slice(-3).map(r => r.jobId).filter(Boolean);
     const live = jobIds.length
       ? await SendJob.find({ _id: { $in: jobIds }, userId: req.userId, status: { $in: ['pending', 'processing'] } },
-          { items: 1, status: 1 }).lean()
+          { 'items.status': 1, status: 1 }).lean()
       : [];
 
     res.json({

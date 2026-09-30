@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { API_BASE, type SendJob } from '../lib/api';
 import { useToast } from '../context/ToastContext';
+import { useVisibleInterval } from '../hooks/useVisibleInterval';
 
 const MAX_CARDS = 4;      // beyond this, collapse the rest into a "+N more" line
 const DISMISS_MS = 8000;  // how long a finished job stays visible
@@ -34,7 +35,6 @@ export default function SendJobWidget() {
   const dragRef = useRef<{ offsetX: number; offsetY: number } | null>(null);
   const dismissTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   const dismissedRef = useRef<Set<string>>(new Set());
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isStep3 = location.pathname.startsWith('/send/step3');
 
@@ -78,12 +78,7 @@ export default function SendJobWidget() {
     } catch { /* transient */ }
   }, [finalize]);
 
-  useEffect(() => {
-    if (isStep3) return;
-    poll();
-    timerRef.current = setInterval(poll, 3000);
-    return () => { if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; } };
-  }, [isStep3, poll]);
+  useVisibleInterval(poll, 3000, !isStep3);
 
   useEffect(() => {
     const timers = dismissTimers.current;

@@ -11,6 +11,8 @@ const blocklistSchema = new mongoose.Schema({
 // scripts/migrate-multi-tenant.js — one user blocking an address must not stop
 // another user from contacting it.
 blocklistSchema.index({ userId: 1, type: 1, value: 1 }, { unique: true });
+// Per-user list index — built on prod by scripts/build-perf-indexes.js.
+blocklistSchema.index({ userId: 1, createdAt: -1 });
 
 blocklistSchema.set('toJSON', {
   transform: (doc, ret) => {

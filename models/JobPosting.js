@@ -94,6 +94,8 @@ jobPostingSchema.index({ firstSeenAt: -1 });                            // "new 
 jobPostingSchema.index({ applyStatus: 1 });
 jobPostingSchema.index({ company: 1 });
 jobPostingSchema.index({ queries: 1 });
+// Per-user list index — built on prod by scripts/build-perf-indexes.js.
+jobPostingSchema.index({ userId: 1, listingStatus: 1, postedAt: -1, firstSeenAt: -1 });
 
 jobPostingSchema.set('toJSON', {
   transform: (doc, ret) => {

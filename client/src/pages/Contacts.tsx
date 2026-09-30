@@ -140,10 +140,8 @@ export default function Contacts() {
     if (!confirm(`Delete ${selected.size} contact${selected.size !== 1 ? 's' : ''}? This will hide them from all views.`)) return;
     const ids = [...selected];
     let failed = 0;
-    for (const id of ids) {
-      try { await app.deleteContact(id); }
-      catch { failed++; }
-    }
+    try { ({ failed } = await app.deleteContacts(ids)); }
+    catch { failed = ids.length; }
     setSelected(new Set());
     toast(
       failed === 0 ? `${ids.length} contact${ids.length !== 1 ? 's' : ''} deleted.` : `${ids.length - failed} deleted, ${failed} failed.`,

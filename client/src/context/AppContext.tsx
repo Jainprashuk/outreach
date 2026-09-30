@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState, type
 import {
   type Contact, type Template, type Sender,
   loadContactsApi, loadTemplatesApi, loadSettingsApi,
-  createContactsApi, updateContactApi, bulkUpdateContactsApi, deleteContactApi,
+  createContactsApi, updateContactApi, bulkUpdateContactsApi, deleteContactApi, bulkDeleteContactsApi,
   checkMailboxApi, saveSettingsApi, createTemplateApi, updateTemplateApi, deleteTemplateApi,
   uploadResumeApi, deleteResumeApi, triggerReplyClassificationApi,
 } from '../lib/api';
@@ -31,6 +31,8 @@ interface AppStore {
   replaceContact: (c: Contact) => void;
   bulkUpdateContacts: (updates: Array<{ id: string } & Partial<Contact>>) => Promise<any>;
   deleteContact: (id: string) => Promise<void>;
+  /** Deletes many in one request; resolves with how many could not be deleted. */
+  deleteContacts: (ids: string[]) => Promise<{ failed: number }>;
   checkMailbox: () => Promise<any>;
   saveSettings: (patch: any) => Promise<any>;
   createTemplate: (data: Partial<Template>) => Promise<Template>;
@@ -145,6 +147,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async deleteContact(id) {
       await deleteContactApi(id);
       setContacts(prev => prev.filter(c => c.id !== id));
+    },
+    async deleteContacts(ids) {
+      const res = await bulkDeleteContactsApi(ids);
+      const gone = new Set(res.deleted);
+      setContacts(prev => prev.filter(c => !gone.has(c.id)));
+      return { failed: res.failed };
     },
     async checkMailbox() {
       const result = await checkMailboxApi();

@@ -59,6 +59,8 @@ leadSchema.index({ userId: 1, dedupeKey: 1 });
 leadSchema.index({ email: 1 });
 leadSchema.index({ queries: 1 });
 leadSchema.index({ applyStatus: 1 });
+// Per-user list index — built on prod by scripts/build-perf-indexes.js.
+leadSchema.index({ userId: 1, fitScore: -1, createdAt: -1 });
 
 leadSchema.set('toJSON', {
   transform: (doc, ret) => {

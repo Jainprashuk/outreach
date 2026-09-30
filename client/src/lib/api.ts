@@ -157,6 +157,12 @@ export const bulkUpdateContactsApi = (updates: Array<{ id: string } & Partial<Co
 export const deleteContactApi = (id: string) =>
   apiFetch<{ ok: boolean }>(`/api/contacts/${id}`, { method: 'DELETE' });
 
+/** Same soft delete as deleteContactApi, for many ids in one request. */
+export const bulkDeleteContactsApi = (ids: string[]) =>
+  apiFetch<{ ok: boolean; deleted: string[]; failed: number }>('/api/contacts/bulk-delete', {
+    method: 'POST', body: JSON.stringify({ ids }),
+  });
+
 export const checkMailboxApi = () =>
   apiFetch<any>('/api/check-mailbox', { method: 'POST' });
 

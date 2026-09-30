@@ -1,6 +1,8 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Contact = require('../models/Contact');
 const SendJob = require('../models/SendJob');
+const ActivityLog = require('../models/ActivityLog');
 const { COOLDOWN_LABEL, inCooldown, cooldownRemaining } = require('../lib/cooldown');
 const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
 const { importContacts } = require('../lib/contactImport');
@@ -116,7 +118,7 @@ router.get('/stats', async (req, res) => {
 // POST /api/contacts/retry-failed — reset all failed contacts to queued
 router.post('/retry-failed', async (req, res) => {
   try {
-    const failedContacts = await Contact.find({ ...BASE_FILTER, userId: req.userId, status: 'failed' }).lean();
+    const failedContacts = await Contact.find({ ...BASE_FILTER, userId: req.userId, status: 'failed' }, { _id: 1 }).lean();
     if (failedContacts.length === 0) return res.json({ ok: true, retried: 0 });
     await Contact.updateMany(
       { _id: { $in: failedContacts.map(c => c._id) }, userId: req.userId },
@@ -431,6 +433,50 @@ router.delete('/:id', async (req, res) => {
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     res.json({ ok: true });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/contacts/bulk-delete { ids } — the same soft delete as DELETE /:id,
+// for many contacts in one round trip instead of one request each.
+//
+// The Logs page must read exactly as if each contact had been deleted on its
+// own, so this writes the per-contact rows auditHttpMutations would have
+// written for those DELETEs, and opts out of its own single row.
+router.post('/bulk-delete', async (req, res) => {
+  req.skipAudit = true;
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    const valid = ids.filter(id => mongoose.isValidObjectId(id));
+    const found = valid.length
+      ? await Contact.find({ _id: { $in: valid }, userId: req.userId }, { _id: 1 }).lean()
+      : [];
+    const deleted = found.map(c => String(c._id));
+    if (deleted.length) {
+      await Contact.updateMany(
+        { _id: { $in: deleted }, userId: req.userId },
+        { deleted: true, deletedAt: new Date() },
+      );
+    }
+
+    // A bad id made the single route throw (500); a missing one returned 404.
+    const deletedSet = new Set(deleted);
+    const status = id => deletedSet.has(id) ? 200 : (mongoose.isValidObjectId(id) ? 404 : 500);
+    await ActivityLog.insertMany(ids.map(id => {
+      const code = status(id);
+      return {
+        userId: req.userId,
+        category: 'contacts',
+        action: code === 200 ? 'delete' : 'failed',
+        message: code === 200 ? 'Contacts deleted' : `Contacts action failed (HTTP ${code})`,
+        // Router-relative, as the middleware sees req.path once the response finishes.
+        meta: { path: `/${id}`, method: 'DELETE', statusCode: code },
+      };
+    })).catch(err => console.error('Activity log write failed:', err.message));
+
+    res.json({ ok: true, deleted, failed: ids.length - deleted.length });
+  } catch (err) {
+    req.skipAudit = false; // nothing was logged per contact — let the request itself be recorded
     res.status(500).json({ error: err.message });
   }
 });

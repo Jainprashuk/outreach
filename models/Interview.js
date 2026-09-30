@@ -100,6 +100,8 @@ interviewSchema.index({ status: 1, lastActivityAt: -1 });
 // The Contacts/Leads badge lookup joins on these.
 interviewSchema.index({ sourceType: 1, sourceId: 1 });
 interviewSchema.index({ email: 1 });
+// Per-user list index — built on prod by scripts/build-perf-indexes.js.
+interviewSchema.index({ userId: 1, interviewAt: 1 });
 
 interviewSchema.set('toJSON', {
   transform: (doc, ret) => {
