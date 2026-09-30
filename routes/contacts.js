@@ -55,8 +55,14 @@ const buildFilter = (tab) => {
 // GET /api/contacts
 router.get('/', async (req, res) => {
   try {
-    const { tab, page, limit, ids } = req.query;
+    const { tab, page, limit, ids, view } = req.query;
     const filter = { ...buildFilter(tab), userId: req.userId };
+    // ?view=mailbox — only the contacts the Mailbox can show: everyone in the action
+    // queue (the same match GET /api/actions uses) plus anyone with an inbound message
+    // (its "All" tab). Same objects, same order, as the full list — just those rows.
+    if (view === 'mailbox') {
+      filter.$or = [{ 'action.state': { $in: actionQueue.STATES } }, { 'thread.direction': 'inbound' }];
+    }
     if (ids) {
       const idList = ids.split(',').filter(Boolean);
       filter._id = { $in: idList };

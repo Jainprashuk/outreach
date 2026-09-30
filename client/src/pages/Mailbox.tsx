@@ -2,11 +2,12 @@
 // in one tab — Needs you, Waiting on them, Snoozed or Done — and the server decides which
 // (lib/actionQueue.js, via ActionQueueContext). This page never works a bucket out itself:
 // it takes the server's ids in the server's order and joins them onto the contacts already
-// loaded. "All" is the plain conversation list, newest message first.
+// loaded — only those it can show (GET /api/contacts?view=mailbox), not every contact.
+// "All" is the plain conversation list, newest message first.
 //
 // Renders each message's plain-text body only (never `html`) — no sanitizer needed since
 // nothing is ever injected into the DOM as markup.
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
@@ -111,7 +112,8 @@ export default function Mailbox() {
   const refreshBackfillCount = () => backfillReplyCountApi().then(r => setBackfillCount(r.count)).catch(() => {});
 
   useEffect(() => {
-    app.init().catch(err => setError(err.message)).finally(() => setLoading(false));
+    // Just the conversations this page can show, not every contact (see ?view=mailbox).
+    app.initMailbox().catch(err => setError(err.message)).finally(() => setLoading(false));
     refreshBackfillCount();
   }, []);
 
@@ -138,7 +140,7 @@ export default function Mailbox() {
         if (processed === 0 || remaining === 0) break;
       }
       setBackfillCount(remaining);
-      await app.loadContacts();
+      await app.loadMailboxContacts();
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -148,6 +150,20 @@ export default function Mailbox() {
 
   const now = useMemo(() => new Date(), [queue.items]);
   const contactsById = useMemo(() => new Map(app.contacts.map(c => [c.id, c])), [app.contacts]);
+
+  // The queue refreshes on its own (every few minutes); a reply found meanwhile by the
+  // scheduled mailbox check can name a contact this page's list doesn't hold yet.
+  // Reload the list once per new set of such ids rather than dropping them.
+  const missingKey = useMemo(
+    () => (loading ? '' : queue.items.filter(i => !contactsById.has(i.id)).map(i => i.id).sort().join(',')),
+    [loading, queue.items, contactsById],
+  );
+  const reloadedFor = useRef('');
+  useEffect(() => {
+    if (!missingKey || reloadedFor.current === missingKey) return;
+    reloadedFor.current = missingKey;
+    app.loadMailboxContacts().catch(() => {});
+  }, [missingKey]);
 
   // The conversations in this tab, in the server's order for a queue tab. "All" is every
   // conversation with a reply, newest message first — contacts who were only ever emailed

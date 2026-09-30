@@ -140,6 +140,8 @@ export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promi
 
 // ── Endpoint wrappers (1:1 with window._app) ─────────────────────────────────
 export const loadContactsApi = () => apiFetch<Contact[]>('/api/contacts');
+/** Only the contacts the Mailbox can show (queued or with an inbound message) — same objects as loadContactsApi. */
+export const loadMailboxContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=mailbox');
 export const loadTemplatesApi = () => apiFetch<Template[]>('/api/templates');
 
 /** Counts the Dashboard and Contacts headers show, over every contact. */

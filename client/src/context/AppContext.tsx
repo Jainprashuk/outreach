@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, useRef, useState, type
 import {
   type Contact, type Template, type Sender,
   loadContactsApi, loadTemplatesApi, loadSettingsApi,
+  loadMailboxContactsApi,
   createContactsApi, updateContactApi, bulkUpdateContactsApi, deleteContactApi, bulkDeleteContactsApi,
   checkMailboxApi, saveSettingsApi, createTemplateApi, updateTemplateApi, deleteTemplateApi,
   uploadResumeApi, deleteResumeApi, triggerReplyClassificationApi,
@@ -17,6 +18,7 @@ interface AppStore {
   contacts: Contact[];
   templates: Record<string, Template>;
   sender: Sender;
+  /** The FULL contact list is in `contacts` (init ran). False while the Mailbox subset is loaded. */
   loaded: boolean;
   /** Templates + settings are in (init or initMeta ran). */
   metaLoaded: boolean;
@@ -27,11 +29,15 @@ interface AppStore {
    */
   contactsVersion: number;
   loadContacts: () => Promise<Contact[]>;
+  /** Replaces `contacts` with just the Mailbox's conversations. */
+  loadMailboxContacts: () => Promise<Contact[]>;
   loadTemplates: () => Promise<Record<string, Template>>;
   loadSettings: () => Promise<Sender>;
   init: () => Promise<void>;
   /** init() without the full contact list — for pages that page contacts on the server. */
   initMeta: () => Promise<void>;
+  /** initMeta() plus the Mailbox's contacts. */
+  initMailbox: () => Promise<void>;
   getStats: () => Record<string, number>;
   filterContacts: (tab: string) => Contact[];
   createContacts: (rows: Partial<Contact>[]) => Promise<{ created: Contact[]; skipped: number }>;
@@ -72,15 +78,26 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [metaLoaded, setMetaLoaded] = useState(false);
   const [contactsVersion, setContactsVersion] = useState(0);
   const bump = useCallback(() => setContactsVersion(v => v + 1), []);
-  // Whether some page has loaded the full list, so a mailbox check knows to refresh it.
-  const contactsLoadedRef = useRef(false);
+  // Which list `contacts` holds, so a mailbox check refreshes that one (and only if one is loaded).
+  const contactsScopeRef = useRef<'all' | 'mailbox' | null>(null);
   // Refs mirror state so imperative flows read fresh values without re-subscribing
   const contactsRef = useRef(contacts); contactsRef.current = contacts;
 
   const loadContacts = useCallback(async () => {
     const list = await loadContactsApi();
-    contactsLoadedRef.current = true;
+    contactsScopeRef.current = 'all';
     setContacts(list);
+    bump();
+    return list;
+  }, [bump]);
+
+  const loadMailboxContacts = useCallback(async () => {
+    const list = await loadMailboxContactsApi();
+    contactsScopeRef.current = 'mailbox';
+    setContacts(list);
+    // Not the full list any more: a page that needs it (e.g. the campaign
+    // wizard's duplicate count) must load it again rather than trust this.
+    setLoaded(false);
     bump();
     return list;
   }, [bump]);
@@ -110,6 +127,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await Promise.all([loadTemplates(), loadSettings()]);
     setMetaLoaded(true);
   }, [loadTemplates, loadSettings]);
+
+  const initMailbox = useCallback(async () => {
+    await Promise.all([loadMailboxContacts(), loadTemplates(), loadSettings()]);
+    setMetaLoaded(true);
+  }, [loadMailboxContacts, loadTemplates, loadSettings]);
 
   const getStats = useCallback(() => ({
     total: contactsRef.current.length,
@@ -146,7 +168,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const store = useMemo<AppStore>(() => ({
     contacts, templates, sender, loaded, metaLoaded, contactsVersion,
-    loadContacts, loadTemplates, loadSettings, init, initMeta, getStats, filterContacts,
+    loadContacts, loadMailboxContacts, loadTemplates, loadSettings, init, initMeta, initMailbox, getStats, filterContacts,
 
     async createContacts(rows) {
       const res = await createContactsApi(rows);
@@ -187,7 +209,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       const result = await checkMailboxApi();
       // Only refresh the full list if a page actually uses it; paged views
       // refetch their own page off the version bump.
-      if (contactsLoadedRef.current) setContacts(await loadContactsApi());
+      if (contactsScopeRef.current === 'all') setContacts(await loadContactsApi());
+      else if (contactsScopeRef.current === 'mailbox') setContacts(await loadMailboxContactsApi());
       bump();
       return result;
     },
@@ -221,7 +244,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSenderMailboxCheckedAt(d) {
       setSender(prev => ({ ...prev, lastMailboxCheckAt: d }));
     },
-  }), [contacts, templates, sender, loaded, metaLoaded, contactsVersion, bump, loadContacts, loadTemplates, loadSettings, init, initMeta, getStats, filterContacts]);
+  }), [contacts, templates, sender, loaded, metaLoaded, contactsVersion, bump, loadContacts, loadMailboxContacts, loadTemplates, loadSettings, init, initMeta, initMailbox, getStats, filterContacts]);
 
   return <AppContext.Provider value={store}>{children}</AppContext.Provider>;
 }
