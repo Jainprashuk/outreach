@@ -142,6 +142,8 @@ export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promi
 export const loadContactsApi = () => apiFetch<Contact[]>('/api/contacts');
 /** Only the contacts the Mailbox can show (queued or with an inbound message) — same objects as loadContactsApi. */
 export const loadMailboxContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=mailbox');
+/** Every contact, carrying only the fields the Analytics page reads. Never put these in the app store. */
+export const loadAnalyticsContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=analytics');
 export const loadTemplatesApi = () => apiFetch<Template[]>('/api/templates');
 
 /** Counts the Dashboard and Contacts headers show, over every contact. */

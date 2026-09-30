@@ -52,6 +52,13 @@ const buildFilter = (tab) => {
   return { ...BASE_FILTER };
 };
 
+// Proven complete by scripts/parity/analytics-view.js, which records every field
+// the analytics code touches.
+const ANALYTICS_FIELDS = {
+  name: 1, email: 1, company: 1, status: 1, template: 1, statusHistory: 1,
+  lastSentAt: 1, repliedAt: 1, followUpSentAt: 1, createdAt: 1, updatedAt: 1,
+};
+
 // GET /api/contacts
 router.get('/', async (req, res) => {
   try {
@@ -69,7 +76,10 @@ router.get('/', async (req, res) => {
     }
     // Every page loads this list, so it leaves out each message's html body: the Mailbox
     // renders plain text only, and html is by far the heaviest part of a long thread.
-    const q = Contact.find(filter, { 'thread.html': 0 }).sort({ createdAt: -1 }).lean();
+    // ?view=analytics — every contact, but only the fields the Analytics page reads
+    // (lib/analytics.ts, lib/interviewAnalytics.ts, pages/Analytics.tsx).
+    const projection = view === 'analytics' ? ANALYTICS_FIELDS : { 'thread.html': 0 };
+    const q = Contact.find(filter, projection).sort({ createdAt: -1 }).lean();
 
     if (page && limit) {
       const p = Math.max(1, parseInt(page, 10));
