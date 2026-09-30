@@ -143,6 +143,8 @@ export const loadContactsApi = () => apiFetch<Contact[]>('/api/contacts');
 /** Only the contacts the Mailbox can show (queued or with an inbound message) — same objects as loadContactsApi. */
 export const loadMailboxContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=mailbox');
 /** Every contact, carrying only the fields the Analytics page reads. Never put these in the app store. */
+/** Only the contacts Send step 3 reads (approved + queued, or pending) — same objects as loadContactsApi. */
+export const loadSendContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=send');
 export const loadAnalyticsContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=analytics');
 export const loadTemplatesApi = () => apiFetch<Template[]>('/api/templates');
 

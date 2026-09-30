@@ -59,21 +59,48 @@ const ANALYTICS_FIELDS = {
   lastSentAt: 1, repliedAt: 1, followUpSentAt: 1, createdAt: 1, updatedAt: 1,
 };
 
+// Pages that only ever read a few of the contacts get just those — the same objects,
+// in the same order, that the full list gave them. The order is taken from the very
+// query the full list runs (only the fields the predicate needs are fetched), because
+// many contacts share a createdAt (a bulk import) and a narrower query can return
+// such ties in a different order — for Send step 3 that order is the send order.
+// The predicates are the pages' own, verbatim. Proven by scripts/parity/*-view.js.
+const SUBSET_VIEWS = {
+  // pages/Mailbox.tsx: queued (GET /api/actions' match) or with an inbound message.
+  mailbox: {
+    fields: { 'action.state': 1, 'thread.direction': 1 },
+    keep: c => actionQueue.STATES.includes(c.action && c.action.state)
+      || (c.thread || []).some(t => t.direction === 'inbound'),
+  },
+  // pages/send/Step3.tsx: the approved queue it sends, and the pending ones it counts.
+  send: {
+    fields: { status: 1, approvalStatus: 1 },
+    keep: c => (c.status === 'queued' && c.approvalStatus === 'approved') || c.approvalStatus === 'pending',
+  },
+};
+
+async function subsetView({ fields, keep }, filter) {
+  const order = await Contact.find(filter, fields).sort({ createdAt: -1 }).lean();
+  const ids = order.filter(keep).map(c => c._id);
+  if (!ids.length) return [];
+  const docs = await Contact.find({ ...filter, _id: { $in: ids } }, { 'thread.html': 0 }).lean();
+  const byId = new Map(docs.map(d => [String(d._id), d]));
+  return ids.map(id => byId.get(String(id))).filter(Boolean).map(serialize);
+}
+
 // GET /api/contacts
 router.get('/', async (req, res) => {
   try {
     const { tab, page, limit, ids, view } = req.query;
     const filter = { ...buildFilter(tab), userId: req.userId };
-    // ?view=mailbox — only the contacts the Mailbox can show: everyone in the action
-    // queue (the same match GET /api/actions uses) plus anyone with an inbound message
-    // (its "All" tab). Same objects, same order, as the full list — just those rows.
-    if (view === 'mailbox') {
-      filter.$or = [{ 'action.state': { $in: actionQueue.STATES } }, { 'thread.direction': 'inbound' }];
-    }
     if (ids) {
       const idList = ids.split(',').filter(Boolean);
       filter._id = { $in: idList };
     }
+    // ?view=mailbox / ?view=send — a subset of the full list: the same objects in the
+    // same order, just fewer of them. See SUBSET_VIEWS.
+    if (Object.hasOwn(SUBSET_VIEWS, view || '')) return res.json(await subsetView(SUBSET_VIEWS[view], filter));
+
     // Every page loads this list, so it leaves out each message's html body: the Mailbox
     // renders plain text only, and html is by far the heaviest part of a long thread.
     // ?view=analytics — every contact, but only the fields the Analytics page reads
@@ -571,3 +598,6 @@ router.patch('/:id', async (req, res) => {
 
 module.exports = router;
 module.exports.runBackfillBatch = runBackfillBatch;
+// For scripts/parity — the exact code the views run.
+module.exports.subsetView = subsetView;
+module.exports.SUBSET_VIEWS = SUBSET_VIEWS;

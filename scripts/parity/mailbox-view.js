@@ -17,6 +17,7 @@ require('dotenv').config();
 const assert = require('assert');
 const mongoose = require('mongoose');
 const Contact = require('../../models/Contact');
+const { subsetView, SUBSET_VIEWS } = require('../../routes/contacts');
 const actionQueue = require('../../lib/actionQueue');
 
 const env = process.env.NODE_ENV === 'prod' ? 'prod' : 'dev';
@@ -37,13 +38,12 @@ const asBrowser = docs => JSON.parse(JSON.stringify(docs.map(serialize)));
     const [fullDocs, viewDocs, queued] = await Promise.all([
       // GET /api/contacts
       Contact.find(base, { 'thread.html': 0 }).sort({ createdAt: -1 }).lean(),
-      // GET /api/contacts?view=mailbox
-      Contact.find({ ...base, $or: [{ 'action.state': { $in: actionQueue.STATES } }, { 'thread.direction': 'inbound' }] },
-        { 'thread.html': 0 }).sort({ createdAt: -1 }).lean(),
+      // GET /api/contacts?view=mailbox — the route's own code
+      subsetView(SUBSET_VIEWS.mailbox, base),
       // GET /api/actions — the queue's ids
       Contact.find({ ...base, 'action.state': { $in: actionQueue.STATES } }, { _id: 1 }).lean(),
     ]);
-    const full = asBrowser(fullDocs), view = asBrowser(viewDocs);
+    const full = asBrowser(fullDocs), view = JSON.parse(JSON.stringify(viewDocs));
     const inQueue = new Set(queued.map(c => String(c._id)));
 
     const expected = full.filter(c => inQueue.has(c.id) || (c.thread || []).some(t => t.direction === 'inbound'));

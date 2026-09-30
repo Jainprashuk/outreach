@@ -6,7 +6,7 @@ import Stepper from './Stepper';
 import ModePicker, { type SendMode } from './ModePicker';
 import { useApp } from '../../context/AppContext';
 import { useToast } from '../../context/ToastContext';
-import { API_BASE, type Contact, type SendJob } from '../../lib/api';
+import { API_BASE, loadSendContactsApi, type Contact, type SendJob } from '../../lib/api';
 import { renderTemplate } from '../../lib/format';
 
 export default function Step3() {
@@ -34,10 +34,17 @@ export default function Step3() {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const jobIdRef = useRef<string | null>(null);
 
+  // Held here rather than in the app store: only the contacts this page reads
+  // (GET /api/contacts?view=send), not every contact.
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [contactsLoaded, setContactsLoaded] = useState(false);
+
   useEffect(() => {
     (async () => {
       try {
-        await app.init();
+        const [list] = await Promise.all([loadSendContactsApi(), app.initMeta()]);
+        setContacts(list);
+        setContactsLoaded(true);
       } catch (err: any) {
         setError(err.message);
         return;
@@ -56,12 +63,12 @@ export default function Step3() {
     if (!serverPreconfigured && app.sender.email && !gmailEmail) setGmailEmail(app.sender.email);
   }, [app.sender.email, serverPreconfigured]);
 
-  const approved = useMemo(() => app.contacts.filter(c =>
+  const approved = useMemo(() => contacts.filter(c =>
     c.status === 'queued' && c.approvalStatus === 'approved' && (!filterIds || filterIds.has(c.id)),
-  ), [app.contacts]);
-  const pendingCount = useMemo(() => app.contacts.filter(c =>
+  ), [contacts]);
+  const pendingCount = useMemo(() => contacts.filter(c =>
     c.approvalStatus === 'pending' && (!filterIds || filterIds.has(c.id)),
-  ).length, [app.contacts]);
+  ).length, [contacts]);
 
   const emailFor = (a: Contact) => {
     const { subject, body } = renderTemplate(app.templates, app.sender, a.template, a);
@@ -207,7 +214,7 @@ export default function Step3() {
         <div className="send-summary">
           {error ? (
             <div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div>
-          ) : app.loaded && approved.length === 0 ? (
+          ) : contactsLoaded && approved.length === 0 ? (
             <div className="empty-state"><i className="ti ti-inbox" />No approved contacts to send. <Link to="/send/step2">Approve contacts first</Link>.</div>
           ) : (
             <>
