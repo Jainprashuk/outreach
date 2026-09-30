@@ -7,6 +7,7 @@ import { useToast } from '../context/ToastContext';
 import { Card, HBar } from '../components/AnalyticsCards';
 import LeadsAnalytics from '../components/LeadsAnalytics';
 import ReportsPanel from '../components/ReportsPanel';
+import { Skeleton } from '../components/Skeleton';
 import InterviewFunnelCard from '../components/InterviewFunnelCard';
 import { useInterviews } from '../context/InterviewContext';
 import {
@@ -435,12 +436,18 @@ export default function Analytics() {
   // Held here, not in the app store: these carry only the fields analytics reads
   // (GET /api/contacts?view=analytics), so no other page may mistake them for full contacts.
   const [contacts, setContacts] = useState<Contact[]>([]);
+  // Until the first load lands the Outreach view shows skeletons — an empty list
+  // would otherwise render every figure as a confident 0.
+  const [contactsLoaded, setContactsLoaded] = useState(false);
 
   const load = async () => {
     setRefreshing(true);
     try {
       if (view === 'leads') setLeadsRefresh(n => n + 1);
-      else await Promise.all([loadAnalyticsContactsApi().then(setContacts), app.loadTemplates()]);
+      else {
+        await Promise.all([loadAnalyticsContactsApi().then(setContacts), app.loadTemplates()]);
+        setContactsLoaded(true);
+      }
     } catch (err: any) {
       toast('Could not load analytics: ' + err.message, 'error');
     } finally {
@@ -448,7 +455,9 @@ export default function Analytics() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  // First time the Outreach view is shown — including when the page opened on
+  // Leads or Reports (?view=…) and you switch across afterwards.
+  useEffect(() => { if (view === 'outreach' && !contactsLoaded && !refreshing) load(); }, [view]);
 
   const A = useMemo(() => contacts.map(analyze), [contacts]);
   const m = useMemo(() => computeMetrics(A), [A]);
@@ -548,6 +557,37 @@ export default function Analytics() {
       </div>
     </div>
   );
+
+  if (view === 'outreach' && !(contactsLoaded && interviewsLoaded)) {
+    return (
+      <Layout title="Analytics" subtitle="Loading…"
+        actions={
+          // Also the way back if the load failed (the toast says why).
+          <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
+            <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} /> Refresh
+          </button>
+        }>
+        {switcher}
+        <div className="stat-grid" style={{ padding: '0 0 4px', marginBottom: 14 }} aria-busy="true">
+          {kpis.map(k => (
+            <div className="stat-card" key={k.label}>
+              <div className="stat-label">{k.label}</div>
+              <Skeleton w="45%" h={28} style={{ marginTop: 4 }} />
+              <Skeleton w="70%" h={10} style={{ marginTop: 10 }} />
+            </div>
+          ))}
+        </div>
+        <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
+          {[0, 1, 2, 3].map(i => (
+            <div className="an-card" key={i} style={{ padding: 18 }}>
+              <Skeleton w="40%" h={13} style={{ marginBottom: 16 }} />
+              {[0, 1, 2, 3, 4].map(r => <Skeleton key={r} w={`${88 - r * 11}%`} h={10} style={{ marginBottom: 10 }} />)}
+            </div>
+          ))}
+        </div>
+      </Layout>
+    );
+  }
 
   if (view === 'reports') {
     return (
