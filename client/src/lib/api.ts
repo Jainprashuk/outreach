@@ -141,6 +141,23 @@ export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promi
 // ── Endpoint wrappers (1:1 with window._app) ─────────────────────────────────
 export const loadContactsApi = () => apiFetch<Contact[]>('/api/contacts');
 export const loadTemplatesApi = () => apiFetch<Template[]>('/api/templates');
+
+/** Counts the Dashboard and Contacts headers show, over every contact. */
+export interface ContactListStats {
+  total: number; sent: number; bounced: number; replied: number; followUpReplied: number;
+  pending: number; remaining: number; followUpDue: number; followUpSent: number;
+  closed: number; noOpenings: number; inReview: number;
+  resumable: number; failed: number; unread: number;
+}
+export interface ContactListPage {
+  contacts: Contact[]; total: number; page: number; pages: number; limit: number;
+  stats: ContactListStats;
+  /** Every filtered id in order — only when asked for with ids=1. */
+  ids?: string[];
+}
+/** One filtered, sorted page of contacts (GET /api/contacts/list). */
+export const loadContactListApi = (params: Record<string, string>, signal?: AbortSignal) =>
+  apiFetch<ContactListPage>(`/api/contacts/list?${new URLSearchParams(params)}`, { signal });
 export const loadSettingsApi = () => apiFetch<any>('/api/settings');
 
 export const createContactsApi = (rows: Partial<Contact>[]) =>

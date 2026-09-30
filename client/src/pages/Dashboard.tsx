@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
@@ -9,6 +9,7 @@ import { useToast } from '../context/ToastContext';
 import { useActionQueue } from '../context/ActionQueueContext';
 import { retryFailedApi, type Contact } from '../lib/api';
 import { Skeleton, SkeletonRows } from '../components/Skeleton';
+import { useContactList, loadContactListIds } from '../hooks/useContactList';
 
 const PAGE_SIZE = 25;
 
@@ -42,17 +43,24 @@ export default function Dashboard() {
   const [error, setError] = useState('');
   const silentChecking = useRef(false);
 
-  const [loading, setLoading] = useState(!app.loaded);
+  const [replySnapshot, setReplySnapshot] = useState<Contact | null>(null);
 
+  // Templates + settings only: the table below pages its contacts on the server.
   useEffect(() => {
-    app.init().catch(err => setError(err.message)).finally(() => setLoading(false));
+    app.initMeta().catch(err => setError(err.message));
   }, []);
 
-  const busy = loading && app.contacts.length === 0;
+  const list = useContactList({
+    tab, search, status: statusFilter, approval: approvalFilter, template: templateFilter,
+    sort: sortCol, dir: sortDir,
+  }, page);
+  useEffect(() => { if (list.error) setError(list.error); }, [list.error]);
+
+  const busy = !list.data;
 
   // Auto mailbox check: on load if stale, every 15 min, and on tab re-focus (same as classic)
   useEffect(() => {
-    if (!app.loaded || !app.sender.email) return;
+    if (!app.metaLoaded || !app.sender.email) return;
     const STALE_MS = 10 * 60 * 1000;
 
     const silentCheck = async () => {
@@ -84,44 +92,22 @@ export default function Dashboard() {
     };
     document.addEventListener('visibilitychange', onVis);
     return () => { if (t) clearTimeout(t); clearInterval(interval); document.removeEventListener('visibilitychange', onVis); };
-  }, [app.loaded]);
+  }, [app.metaLoaded]);
 
-  const stats = useMemo(() => app.getStats(), [app.contacts]);
+  const stats = list.data?.stats || {
+    total: 0, sent: 0, bounced: 0, replied: 0, followUpReplied: 0, pending: 0, remaining: 0, followUpDue: 0,
+    followUpSent: 0, closed: 0, noOpenings: 0, inReview: 0, resumable: 0, failed: 0, unread: 0,
+  };
 
-  const sortContacts = (arr: Contact[]) => [...arr].sort((a, b) => {
-    let va: any, vb: any;
-    switch (sortCol) {
-      case 'name': va = (a.name || '').toLowerCase(); vb = (b.name || '').toLowerCase(); break;
-      case 'company': va = (a.company || '').toLowerCase(); vb = (b.company || '').toLowerCase(); break;
-      case 'template': va = (a.template || '').toLowerCase(); vb = (b.template || '').toLowerCase(); break;
-      case 'status': va = (a.status || '').toLowerCase(); vb = (b.status || '').toLowerCase(); break;
-      case 'approval': va = a.approvalStatus || ''; vb = b.approvalStatus || ''; break;
-      case 'lastSentAt': va = new Date(a.lastSentAt || 0); vb = new Date(b.lastSentAt || 0); break;
-      case 'repliedAt': va = new Date(a.repliedAt || 0); vb = new Date(b.repliedAt || 0); break;
-      default: va = new Date(a.createdAt || 0); vb = new Date(b.createdAt || 0);
-    }
-    if (va < vb) return sortDir === 'asc' ? -1 : 1;
-    if (va > vb) return sortDir === 'asc' ? 1 : -1;
-    return 0;
-  });
+  // Filtered, sorted and paged on the server (lib/contactList.js).
+  const filteredCount = list.data?.total ?? 0;
+  const totalPages = list.data?.pages ?? 1;
+  const safePage = list.data?.page ?? 1;
+  const paged = list.data?.contacts ?? [];
 
-  const filtered = useMemo(() => {
-    let list = app.filterContacts(tab);
-    const q = search.trim().toLowerCase();
-    if (q) list = list.filter(c => (c.name + c.email + c.company).toLowerCase().includes(q));
-    if (statusFilter) list = list.filter(c => c.status === statusFilter);
-    if (approvalFilter) list = list.filter(c => c.approvalStatus === approvalFilter);
-    if (templateFilter) list = list.filter(c => c.template === templateFilter);
-    return sortContacts(list);
-  }, [app.contacts, tab, search, statusFilter, approvalFilter, templateFilter, sortCol, sortDir]);
-
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
-  const safePage = Math.min(page, totalPages);
-  const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
-
-  const resumable = app.contacts.filter(c => c.status === 'queued' && c.approvalStatus === 'approved');
-  const failedCount = app.contacts.filter(c => c.status === 'failed').length;
-  const unreadCount = app.contacts.filter(c => c.status === 'replied' && !c.replyRead).length;
+  const resumableCount = stats.resumable;
+  const failedCount = stats.failed;
+  const unreadCount = stats.unread;
 
   const setSort = (col: SortCol) => {
     if (sortCol === col) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
@@ -164,7 +150,7 @@ export default function Dashboard() {
       const data = await retryFailedApi();
       if (data.retried === 0) { toast('No failed emails to retry.', 'info'); return; }
       toast(`${data.retried} contact${data.retried !== 1 ? 's' : ''} reset to queued.`, 'success');
-      await app.loadContacts();
+      list.reload();
     } catch (err: any) {
       toast(err.message, 'error');
     } finally {
@@ -173,7 +159,7 @@ export default function Dashboard() {
   };
 
   const lastChecked = app.sender.lastMailboxCheckAt;
-  const lastCheckedLabel = !app.loaded ? 'Loading...'
+  const lastCheckedLabel = !app.metaLoaded ? 'Loading...'
     : !lastChecked ? 'Mailbox not checked yet'
     : (() => {
       const mins = Math.round((Date.now() - lastChecked.getTime()) / 60000);
@@ -181,7 +167,7 @@ export default function Dashboard() {
     })();
 
   const showDetail = (c: Contact) => {
-    if (c.status === 'replied' || c.status === 'follow-up-replied') { setReplyContactId(c.id); return; }
+    if (c.status === 'replied' || c.status === 'follow-up-replied') { setReplySnapshot(c); setReplyContactId(c.id); return; }
     let msg = `Contact: ${c.name}\nEmail: ${c.email}\nCompany: ${c.company}\nStatus: ${c.status}`;
     if (c.status === 'bounced' && c.bounceReason) msg += `\nBounce reason: ${c.bounceReason}`;
     alert(msg);
@@ -191,12 +177,18 @@ export default function Dashboard() {
     setSelectedFu(prev => { const n = new Set(prev); if (checked) n.add(id); else n.delete(id); return n; });
   };
 
-  const selectLastN = (n: number) => {
-    const all = sortContacts(app.filterContacts('followup-due'));
-    setSelectedFu(new Set((isFinite(n) ? all.slice(0, n) : all).map(c => c.id)));
+  const selectLastN = async (n: number) => {
+    try {
+      // Every follow-up-due contact in the current sort, ignoring the other filters — as before.
+      const all = await loadContactListIds({ tab: 'followup-due', sort: sortCol, dir: sortDir });
+      setSelectedFu(new Set(isFinite(n) ? all.slice(0, n) : all));
+    } catch (err: any) { toast(err.message, 'error'); }
   };
 
-  const replyContact = replyContactId ? app.contacts.find(c => c.id === replyContactId) || null : null;
+  // The freshest copy on this page, else the one that was clicked.
+  const replyContact = replyContactId
+    ? paged.find(c => c.id === replyContactId) || (replySnapshot?.id === replyContactId ? replySnapshot : null)
+    : null;
   const isFuTab = tab === 'followup-due';
   const fuAllChecked = isFuTab && paged.length > 0 && paged.every(c => selectedFu.has(c.id));
 
@@ -215,9 +207,9 @@ export default function Dashboard() {
   return (
     <Layout title="Dashboard" subtitle={lastCheckedLabel} actions={
       <>
-        {resumable.length > 0 && (
+        {resumableCount > 0 && (
           <button className="btn btn-primary" onClick={() => navigate('/send/step3')} type="button">
-            <i className="ti ti-player-play" /> Resume sending ({resumable.length})
+            <i className="ti ti-player-play" /> Resume sending ({resumableCount})
           </button>
         )}
         {failedCount > 0 && (
@@ -264,7 +256,7 @@ export default function Dashboard() {
               </button>
             ))}
           </div>
-          <span className="contact-count-badge">{filtered.length} contacts</span>
+          <span className="contact-count-badge">{filteredCount} contacts</span>
         </div>
 
         {isFuTab && (

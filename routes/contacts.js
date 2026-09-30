@@ -9,6 +9,7 @@ const { importContacts } = require('../lib/contactImport');
 const { classifyReply } = require('../lib/replyClassifier');
 const { deadline } = require('../lib/http');
 const actionQueue = require('../lib/actionQueue');
+const contactList = require('../lib/contactList');
 
 const router = express.Router();
 
@@ -76,6 +77,42 @@ router.get('/', async (req, res) => {
 
     const contacts = await q;
     res.json(contacts.map(serialize));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/contacts/list — one page of the Dashboard / Contacts table, with the
+// tab counts, filtered and sorted on the server by lib/contactList.js (a port of
+// the browser code that used to do this over every contact).
+//   ?tab=&q=&status=&approval=&template=&category=&source=
+//   &createdFrom=&createdTo=&sentFrom=&sentTo=&repliedFrom=&repliedTo=  (ISO instants)
+//   &sort=&dir=   (Dashboard only)   &page=&limit=   &ids=1 (also every filtered id, in order)
+router.get('/list', async (req, res) => {
+  try {
+    const f = contactList.parseListQuery(req.query);
+    // Same filter and order as GET / — only the fields the filters read.
+    const slim = await Contact.find({ ...BASE_FILTER, userId: req.userId }, contactList.FILTER_FIELDS)
+      .sort({ createdAt: -1 }).lean();
+    const filtered = contactList.applyListQuery(slim, f);
+
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const pages = Math.ceil(filtered.length / limit) || 1;
+    const page = Math.min(Math.max(1, parseInt(req.query.page, 10) || 1), pages);
+    const pageIds = filtered.slice((page - 1) * limit, page * limit).map(c => c._id);
+
+    // The rows themselves, whole except the thread — which neither table reads.
+    const docs = pageIds.length
+      ? await Contact.find({ _id: { $in: pageIds }, userId: req.userId }, { thread: 0 }).lean()
+      : [];
+    const byId = new Map(docs.map(d => [String(d._id), d]));
+    const contacts = pageIds.map(id => byId.get(String(id))).filter(Boolean).map(serialize);
+
+    res.json({
+      contacts, total: filtered.length, page, pages, limit,
+      stats: contactList.getStats(slim),
+      ...(req.query.ids === '1' ? { ids: filtered.map(c => String(c._id)) } : {}),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

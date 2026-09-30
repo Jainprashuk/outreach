@@ -18,10 +18,20 @@ interface AppStore {
   templates: Record<string, Template>;
   sender: Sender;
   loaded: boolean;
+  /** Templates + settings are in (init or initMeta ran). */
+  metaLoaded: boolean;
+  /**
+   * Bumped on every contact mutation made through this store. Pages that load
+   * their own page of contacts from /api/contacts/list refetch when it changes,
+   * the way the in-memory list used to re-render.
+   */
+  contactsVersion: number;
   loadContacts: () => Promise<Contact[]>;
   loadTemplates: () => Promise<Record<string, Template>>;
   loadSettings: () => Promise<Sender>;
   init: () => Promise<void>;
+  /** init() without the full contact list — for pages that page contacts on the server. */
+  initMeta: () => Promise<void>;
   getStats: () => Record<string, number>;
   filterContacts: (tab: string) => Contact[];
   createContacts: (rows: Partial<Contact>[]) => Promise<{ created: Contact[]; skipped: number }>;
@@ -59,14 +69,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [templates, setTemplates] = useState<Record<string, Template>>({});
   const [sender, setSender] = useState<Sender>(DEFAULT_SENDER);
   const [loaded, setLoaded] = useState(false);
+  const [metaLoaded, setMetaLoaded] = useState(false);
+  const [contactsVersion, setContactsVersion] = useState(0);
+  const bump = useCallback(() => setContactsVersion(v => v + 1), []);
+  // Whether some page has loaded the full list, so a mailbox check knows to refresh it.
+  const contactsLoadedRef = useRef(false);
   // Refs mirror state so imperative flows read fresh values without re-subscribing
   const contactsRef = useRef(contacts); contactsRef.current = contacts;
 
   const loadContacts = useCallback(async () => {
     const list = await loadContactsApi();
+    contactsLoadedRef.current = true;
     setContacts(list);
+    bump();
     return list;
-  }, []);
+  }, [bump]);
 
   const loadTemplates = useCallback(async () => {
     const list = await loadTemplatesApi();
@@ -86,7 +103,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const init = useCallback(async () => {
     await Promise.all([loadContacts(), loadTemplates(), loadSettings()]);
     setLoaded(true);
+    setMetaLoaded(true);
   }, [loadContacts, loadTemplates, loadSettings]);
+
+  const initMeta = useCallback(async () => {
+    await Promise.all([loadTemplates(), loadSettings()]);
+    setMetaLoaded(true);
+  }, [loadTemplates, loadSettings]);
 
   const getStats = useCallback(() => ({
     total: contactsRef.current.length,
@@ -122,42 +145,50 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const store = useMemo<AppStore>(() => ({
-    contacts, templates, sender, loaded,
-    loadContacts, loadTemplates, loadSettings, init, getStats, filterContacts,
+    contacts, templates, sender, loaded, metaLoaded, contactsVersion,
+    loadContacts, loadTemplates, loadSettings, init, initMeta, getStats, filterContacts,
 
     async createContacts(rows) {
       const res = await createContactsApi(rows);
       setContacts(prev => [...res.created, ...prev]);
+      bump();
       return res;
     },
     async updateContact(id, patch) {
       const updated = await updateContactApi(id, patch);
       setContacts(prev => prev.map(c => (c.id === id ? updated : c)));
+      bump();
       return updated;
     },
     replaceContact(c) {
       setContacts(prev => prev.map(x => (x.id === c.id ? c : x)));
+      bump();
     },
     async classifyReply(id) {
       const updated = await triggerReplyClassificationApi(id);
       setContacts(prev => prev.map(c => (c.id === id ? updated : c)));
+      bump();
       return updated;
     },
     bulkUpdateContacts: (updates) => bulkUpdateContactsApi(updates),
     async deleteContact(id) {
       await deleteContactApi(id);
       setContacts(prev => prev.filter(c => c.id !== id));
+      bump();
     },
     async deleteContacts(ids) {
       const res = await bulkDeleteContactsApi(ids);
       const gone = new Set(res.deleted);
       setContacts(prev => prev.filter(c => !gone.has(c.id)));
+      bump();
       return { failed: res.failed };
     },
     async checkMailbox() {
       const result = await checkMailboxApi();
-      const list = await loadContactsApi();
-      setContacts(list);
+      // Only refresh the full list if a page actually uses it; paged views
+      // refetch their own page off the version bump.
+      if (contactsLoadedRef.current) setContacts(await loadContactsApi());
+      bump();
       return result;
     },
     async saveSettings(patch) {
@@ -190,7 +221,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSenderMailboxCheckedAt(d) {
       setSender(prev => ({ ...prev, lastMailboxCheckAt: d }));
     },
-  }), [contacts, templates, sender, loaded, loadContacts, loadTemplates, loadSettings, init, getStats, filterContacts]);
+  }), [contacts, templates, sender, loaded, metaLoaded, contactsVersion, bump, loadContacts, loadTemplates, loadSettings, init, initMeta, getStats, filterContacts]);
 
   return <AppContext.Provider value={store}>{children}</AppContext.Provider>;
 }
