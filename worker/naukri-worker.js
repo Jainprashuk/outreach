@@ -18,7 +18,7 @@
 // over approved ones, and a screening question with no matching answer skips the
 // job rather than guessing.
 //
-//   npm run naukri-worker          (wraps this in `caffeinate -is`)
+//   npm run naukri-worker          (macOS or Linux; holds sleep off itself)
 
 const path0 = require('path');
 // Load the outreach repo's .env (WORKER_SECRET, OUTREACH_URL), the same file
@@ -29,8 +29,9 @@ require('dotenv').config({ path: path0.join(__dirname, '..', '.env') });
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { spawn, execFile } = require('child_process');
+const { execFile } = require('child_process');
 const chromeLock = require('./chrome-lock');
+const { holdAwake, holdWhileAlive, nextWakeAt } = require('./power');
 
 const CFG = {
   outreachUrl: (process.env.OUTREACH_URL || 'http://localhost:3000').replace(/\/+$/, ''),
@@ -118,36 +119,6 @@ async function chromeUp() {
     });
     return res.ok;
   } catch (_) { return false; }
-}
-
-// `pmset -g sched` -> the next scheduled wake, so the tab can say "this runs at
-// 9:25am" instead of "eventually".
-async function nextWakeAt() {
-  const { ok, stdout } = await exec('pmset', ['-g', 'sched']);
-  if (!ok) return null;
-  const times = [];
-  for (const line of stdout.split('\n')) {
-    const m = /(?:wake|poweron)[^0-9]*(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2})/i.exec(line);
-    if (!m) continue;
-    const [date, time] = m[1].split(' ');
-    const [mo, d, y] = date.split('/').map(Number);
-    const [hh, mi, ss] = time.split(':').map(Number);
-    const at = new Date(y, mo - 1, d, hh, mi, ss);
-    if (!isNaN(at.getTime()) && at > new Date()) times.push(at);
-  }
-  times.sort((a, b) => a - b);
-  return times[0] ? times[0].toISOString() : null;
-}
-
-// ── power ───────────────────────────────────────────────────────────────────
-// After a scheduled wake nothing holds an assertion, so macOS re-sleeps within a
-// minute or two — possibly mid-claim. Buy five minutes the moment we notice we
-// just woke; if a run starts, its own assertion takes over.
-function holdAwake(seconds) {
-  try {
-    const p = spawn('caffeinate', ['-dimsu', '-t', String(seconds)], { detached: true, stdio: 'ignore' });
-    p.unref();
-  } catch (_) { /* not fatal — worst case the Mac sleeps and we retry next wake */ }
 }
 
 // ── the driver ──────────────────────────────────────────────────────────────
@@ -318,6 +289,7 @@ async function main() {
     process.exit(1);
   }
   claimLock();
+  holdWhileAlive();
 
   log(`naukri worker up — portal ${CFG.outreachUrl}, polling every ${CFG.pollMs / 1000}s`
     + (CFG.stub ? ' [STUB DRIVER — no browser, nothing real is applied to]' : ''));
@@ -327,7 +299,7 @@ async function main() {
     // A gap much larger than the poll interval means the machine was asleep.
     const gap = Date.now() - lastTick;
     if (gap > CFG.pollMs * 2) {
-      log(`woke after ${Math.round(gap / 1000)}s asleep — holding the Mac awake for 5 minutes`);
+      log(`woke after ${Math.round(gap / 1000)}s asleep — holding the machine awake for 5 minutes`);
       holdAwake(300);
     }
     lastTick = Date.now();

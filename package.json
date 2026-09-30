@@ -8,8 +8,9 @@
     "start": "node server.js",
     "dev:client": "cd client && npm run dev",
     "build:client": "cd client && npm install && npm run build",
-    "scrape-worker": "caffeinate -is node worker/scrape-worker.js",
-    "naukri-worker": "caffeinate -is node worker/naukri-worker.js",
+    "scrape-worker": "node worker/scrape-worker.js",
+    "naukri-worker": "node worker/naukri-worker.js",
+    "workers": "bash worker/start-all.sh",
     "naukri-worker:stub": "NAUKRI_STUB=1 node worker/naukri-worker.js"
   },
   "dependencies": {

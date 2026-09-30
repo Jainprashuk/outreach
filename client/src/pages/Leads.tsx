@@ -8,6 +8,7 @@ import LeadFilterPanel from '../components/LeadFilterPanel';
 import InterviewCell from '../components/InterviewCell';
 import { SkeletonRows } from '../components/Skeleton';
 import ScrapePanel from '../components/leads/ScrapePanel';
+import ScraperSetupGuide, { type GuideTab } from '../components/leads/ScraperSetupGuide';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import {
@@ -62,6 +63,7 @@ export default function Leads() {
   // Scrape and Import are both full-width panels; showing either replaces the
   // other rather than stacking two of them above the table.
   const [showScrape, setShowScrape] = useState(false);
+  const [guide, setGuide] = useState<GuideTab | null>(null);
   const [pasted, setPasted] = useState('');
   const [dragOver, setDragOver] = useState(false);
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -308,6 +310,10 @@ export default function Leads() {
       actions={
         <>
           <Link to="/contacts" className="btn btn-sm"><i className="ti ti-users" /> Contacts</Link>
+          <button className="btn btn-sm" type="button" onClick={() => setGuide('how')}
+            title="How lead scraping works and how to set it up">
+            <i className="ti ti-book" /> Guide
+          </button>
           <button className="btn btn-sm" type="button"
             onClick={() => { setShowScrape(v => !v); setShowImport(false); }}>
             <i className={showScrape ? 'ti ti-x' : 'ti ti-brand-linkedin'} /> {showScrape ? 'Close scrape' : 'Scrape'}
@@ -320,7 +326,9 @@ export default function Leads() {
       }
     >
       <ScrapePanel open={showScrape} onOpen={() => { setShowScrape(true); setShowImport(false); }}
-        onImported={reload} />
+        onImported={reload} onHelp={() => setGuide('setup')} />
+
+      {guide && <ScraperSetupGuide initialTab={guide} onClose={() => setGuide(null)} />}
 
       {showImport && (
         <div className="section" style={{ marginBottom: 18 }}>

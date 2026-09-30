@@ -13,8 +13,8 @@
 // back through the same importer the manual JSON upload uses, report the
 // outcome. One run at a time, forever, until a checkpoint stops it.
 //
-//   npm run scrape-worker          (wraps this in `caffeinate -s`)
-//   worker/install-worker.sh       (same thing, via launchd at login)
+//   npm run scrape-worker          (macOS or Linux; holds sleep off itself)
+//   worker/install-worker.sh       (same thing at login: launchd or systemd)
 
 const path0 = require('path');
 // Load the outreach repo's .env (WORKER_SECRET, OUTREACH_URL, JL_REPO), the
@@ -27,6 +27,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync, execFile } = require('child_process');
 const chromeLock = require('./chrome-lock');
+const { wrapAwake, holdAwake, holdWhileAlive, nextWakeAt } = require('./power');
 
 const CFG = {
   outreachUrl:  (process.env.OUTREACH_URL || 'http://localhost:3000').replace(/\/+$/, ''),
@@ -72,8 +73,8 @@ const isAlive = (pid) => {
 function killTree(pid, label) {
   if (!isAlive(pid)) return;
   log(`stopping ${label} (pid ${pid})`);
-  // Negative pid signals the whole process group: `caffeinate` forks `jl`
-  // rather than exec'ing it, so signalling the direct child alone would leave
+  // Negative pid signals the whole process group: the awake wrapper
+  // (`caffeinate` / `systemd-inhibit`) forks `jl` rather than exec'ing it, so signalling the direct child alone would leave
   // the Python process orphaned — which is exactly the bug this prevents.
   try { process.kill(-pid, 'SIGTERM'); } catch (_) { try { process.kill(pid, 'SIGTERM'); } catch (_) {} }
   for (let waited = 0; waited < 5000 && isAlive(pid); waited += 200) sleepSync(200);
@@ -91,7 +92,7 @@ const killLiveHarvest = () => {
 };
 
 // A worker killed without running its exit handler (SIGKILL, a crashed
-// terminal, a panic) leaves its harvest reparented to launchd and spinning.
+// terminal, a panic) leaves its harvest reparented to launchd/init and spinning.
 // Clear any such ghost before taking the lock.
 function reapStrayHarvest() {
   const { stdout } = spawnSync('pgrep', ['-f', `${jlBin()} harvest`], { encoding: 'utf8' });
@@ -175,41 +176,11 @@ async function linkedinLoggedIn() {
   return flat.includes('li_at cookie present');
 }
 
-// `pmset -g sched` -> the next scheduled wake, so the portal can say
-// "this will run at 9:25am" instead of "eventually".
-async function nextWakeAt() {
-  const { ok, stdout } = await run('pmset', ['-g', 'sched']);
-  if (!ok) return null;
-  const times = [];
-  for (const line of stdout.split('\n')) {
-    const m = /(?:wake|poweron)[^0-9]*(\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2})/i.exec(line);
-    if (!m) continue;
-    const [date, time] = m[1].split(' ');
-    const [mo, d, y] = date.split('/').map(Number);
-    const [hh, mi, ss] = time.split(':').map(Number);
-    const at = new Date(y, mo - 1, d, hh, mi, ss);
-    if (!isNaN(at.getTime()) && at > new Date()) times.push(at);
-  }
-  times.sort((a, b) => a - b);
-  return times[0] ? times[0].toISOString() : null;
-}
-
 function defaultQueries() {
   try {
     const cfg = JSON.parse(fs.readFileSync(path.join(CFG.jlRepo, 'config.json'), 'utf8'));
     return Array.isArray(cfg.queries) ? cfg.queries : [];
   } catch (_) { return []; }
-}
-
-// ── power ───────────────────────────────────────────────────────────────────
-// After a scheduled wake nothing holds an assertion, so macOS re-sleeps within
-// a minute or two — possibly mid-claim. Buy five minutes the moment we notice
-// we just woke; if a run starts, its own assertion takes over.
-function holdAwake(seconds) {
-  try {
-    const p = spawn('caffeinate', ['-dimsu', '-t', String(seconds)], { detached: true, stdio: 'ignore' });
-    p.unref();
-  } catch (_) { /* not fatal — worst case the Mac sleeps and we retry next wake */ }
 }
 
 // ── the harvest ─────────────────────────────────────────────────────────────
@@ -223,7 +194,7 @@ const RE_TALLY  = /^\s*(\d+)\s+posts seen,\s*(\d+)\s+hiring,\s*(\d+)\s+new\s*$/;
 
 function runHarvest(queries, briefPath, onProgress) {
   return new Promise((resolve) => {
-    const args = ['-dimsu', jlBin(), 'harvest'];
+    const args = ['harvest'];
     for (const q of queries) args.push('-q', q);
     // --brief to a per-run temp file so nothing ever reads a half-written one.
     // Deliberately NOT passing --store/--runs-dir: the run must write the
@@ -232,12 +203,14 @@ function runHarvest(queries, briefPath, onProgress) {
     args.push('--brief', briefPath);
 
     log(`harvest: ${queries.length} queries`);
-    // `detached` puts caffeinate and its `jl` child in their own process group,
+    // `detached` puts the awake wrapper (caffeinate on macOS, systemd-inhibit
+    // on Linux) and its `jl` child in their own process group,
     // so killTree can signal the pair as a unit. It also means a Ctrl-C aimed
     // at the worker no longer reaches the harvest by accident — the SIGINT
     // handler tears it down deliberately instead, which is the only path that
     // also reports the run as failed.
-    const child = spawn('caffeinate', args, { cwd: CFG.jlRepo, detached: true });
+    const [bin, argv] = wrapAwake(jlBin(), args);
+    const child = spawn(bin, argv, { cwd: CFG.jlRepo, detached: true });
     liveHarvest = child;
 
     let tail = [];
@@ -410,6 +383,7 @@ async function main() {
     process.exit(1);
   }
   claimLock();
+  holdWhileAlive();
 
   log(`worker up — portal ${CFG.outreachUrl}, scraper ${CFG.jlRepo}, polling every ${CFG.pollMs / 1000}s`);
 
@@ -418,7 +392,7 @@ async function main() {
     // A gap much larger than the poll interval means the machine was asleep.
     const gap = Date.now() - lastTick;
     if (gap > CFG.pollMs * 2) {
-      log(`woke after ${Math.round(gap / 1000)}s asleep — holding the Mac awake for 5 minutes`);
+      log(`woke after ${Math.round(gap / 1000)}s asleep — holding the machine awake for 5 minutes`);
       holdAwake(300);
     }
     lastTick = Date.now();

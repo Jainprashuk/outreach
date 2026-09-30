@@ -46,14 +46,14 @@ function readiness(s: ScrapeStatus): Readiness {
   const { worker, nextOccurrence } = s;
   if (!worker.everSeen) {
     return { tone: 'idle', icon: 'ti-plug-connected-x', verb: 'Queue scrape',
-      text: 'Worker has never checked in. Run `npm run scrape-worker` on your Mac.' };
+      text: 'Worker has never checked in. Set it up on your computer — see the setup guide.' };
   }
   if (!worker.online) {
     const when = worker.nextWakeAt
       ? `at the next wake, ${fmtTime(worker.nextWakeAt)}`
-      : 'when you next open your Mac';
+      : 'when your computer is next awake';
     return { tone: 'idle', icon: 'ti-zzz', verb: 'Queue scrape',
-      text: `Your Mac is asleep. This will be queued and run ${when}.` };
+      text: `Your computer is asleep or the worker is stopped. This will be queued and run ${when}.` };
   }
   if (!worker.linkedinLoggedIn) {
     return { tone: 'warn', icon: 'ti-lock', verb: 'Queue scrape',
@@ -104,9 +104,11 @@ type Props = {
   open: boolean;
   onOpen: () => void;
   onImported: () => void;
+  /** Opens the setup guide — offered whenever the worker isn't ready. */
+  onHelp?: () => void;
 };
 
-export default function ScrapePanel({ open, onOpen, onImported }: Props) {
+export default function ScrapePanel({ open, onOpen, onImported, onHelp }: Props) {
   const toast = useToast();
   const [status, setStatus] = useState<ScrapeStatus | null>(null);
   const [runs, setRuns] = useState<ScrapeRun[]>([]);
@@ -287,6 +289,11 @@ export default function ScrapePanel({ open, onOpen, onImported }: Props) {
             style={ready.tone === 'warn' ? { background: 'var(--amber-bg)', color: 'var(--amber)' } : undefined}>
             <i className={`ti ${ready.icon}`} />
             <span>{ready.text}</span>
+            {ready.tone !== 'ok' && onHelp && (
+              <button className="btn btn-xs" onClick={onHelp} style={{ marginLeft: 'auto', flexShrink: 0 }} type="button">
+                <i className="ti ti-book" /> Setup guide
+              </button>
+            )}
           </div>
 
           {active ? (

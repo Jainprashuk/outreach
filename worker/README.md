@@ -1,6 +1,6 @@
 # LinkedIn scrape worker
 
-Runs on the Mac. Polls the portal for queued scrape runs, executes `jl harvest`
+Runs on your own machine — macOS or Linux (a desktop session, not a server). Polls the portal for queued scrape runs, executes `jl harvest`
 in the scraper repo, and posts the leads back through the same importer the
 manual JSON upload uses.
 
@@ -39,7 +39,7 @@ harvest to a datacenter IP with a lifted `li_at` cookie would trade that away.
 3. Start the worker:
    ```bash
    npm run scrape-worker          # by hand, easiest to watch
-   worker/install-worker.sh       # or as a launchd agent, starts at login
+   worker/install-worker.sh       # or at login: launchd on macOS, a systemd user unit on Linux
    ```
 
 ## Sleep and wake
@@ -48,7 +48,8 @@ harvest to a datacenter IP with a lifted `li_at` cookie would trade that away.
 both freeze; there is no setting that keeps a process alive through sleep. The
 only way to "keep running" is to not sleep.
 
-Both the npm script and the launchd agent wrap the worker in `caffeinate -is`:
+The worker holds `caffeinate -is -w <its pid>` for its own lifetime, however it
+was started (`worker/power.js`):
 
 - `-i` prevents idle system sleep on **any** power source.
 - `-s` adds a stronger assertion that is **AC-only** (`man caffeinate`).
@@ -87,6 +88,27 @@ Two things that fail silently and are worth knowing:
 
 The portal cannot wake the Mac on demand — it runs on Vercel and your laptop is
 behind your router. Wake-on-LAN is not a workaround: it produces a dark wake.
+
+## Linux
+
+Same worker, same rules, with these differences (all in `worker/power.js`):
+
+- Sleep is held off with `systemd-inhibit --what=sleep:idle` instead of
+  `caffeinate`. It is probed once at startup; if logind refuses the lock (no
+  session, a polkit rule), the worker runs without one and you keep the machine
+  awake yourself.
+- There is no `pmset`, so the portal shows no "next wake" time. `rtcwake` can
+  schedule one, but needs root and is one-shot.
+- `chrome-debug.sh` finds `google-chrome` / `google-chrome-stable` on PATH.
+- It needs a real desktop session. The debug Chrome has to draw into a visible
+  window, so a headless server or an SSH-only box cannot harvest — for the same
+  reason a dark wake on the Mac cannot.
+- `install-worker.sh` writes `~/.config/systemd/user/outreach-scrape-worker.service`.
+  Run it from a terminal inside the desktop session so it can capture `DISPLAY`
+  / `WAYLAND_DISPLAY`.
+
+Windows is not supported: no process groups for the harvest teardown, a
+different venv layout, and a bash-only Chrome launcher.
 
 ## Failure handling
 
