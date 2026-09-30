@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
+import { RefreshBar, Refreshing } from '../components/RefreshBar';
 import Layout from '../components/Layout';
 import { useToast } from '../context/ToastContext';
 import { useSession } from '../context/SessionContext';
@@ -59,19 +60,28 @@ export default function Admin() {
   }, [toast]);
   useEffect(() => { loadEmails(); }, [loadEmails]);
 
+  // Switching the range (or the requests filter) keeps what is shown, dimmed.
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  const [requestsLoading, setRequestsLoading] = useState(false);
+
   const load = useCallback(async (d: number) => {
+    setOverviewLoading(true);
     try {
       setData(await adminOverviewApi(d));
       setError('');
     } catch (e: any) {
       setError(e.message || 'Could not load');
+    } finally {
+      setOverviewLoading(false);
     }
   }, []);
 
   const loadRequests = useCallback(async (f: 'pending' | 'all') => {
+    setRequestsLoading(true);
     try {
       setRequests((await accessRequestsApi(f)).requests);
     } catch { /* the overview tile still shows the count */ }
+    finally { setRequestsLoading(false); }
   }, []);
 
   useEffect(() => { load(days); }, [load, days]);
@@ -152,7 +162,7 @@ export default function Admin() {
             <button
               key={d} type="button" className={`btn btn-xs${days === d ? ' active' : ''}`}
               onClick={() => setDays(d)}
-            >{d}d</button>
+            >{days === d && overviewLoading && data && <i className="ti ti-loader" aria-hidden="true" />}{d}d</button>
           ))}
         </div>
       }
@@ -161,6 +171,8 @@ export default function Admin() {
         {error && <div className="login-error" style={{ textAlign: 'left' }}>{error}</div>}
         {!data && !error && <div className="skeleton" style={{ height: 120 }} />}
 
+        <RefreshBar active={overviewLoading && !!data} />
+        <Refreshing active={overviewLoading && !!data}>
         {data && (
           <>
             {/* Only appears when it is actually true: the unique index on
@@ -242,6 +254,7 @@ export default function Admin() {
                 </div>
               </div>
               <div className="an-card-body">
+                <Refreshing active={requestsLoading}>
                 {requests.length === 0 ? (
                   <div className="an-empty">
                     {reqFilter === 'pending' ? 'Nothing waiting.' : 'No requests yet.'}
@@ -301,6 +314,7 @@ export default function Admin() {
                     </div>
                   </div>
                 ))}
+                </Refreshing>
               </div>
             </div>
 
@@ -465,6 +479,7 @@ export default function Admin() {
             </p>
           </>
         )}
+        </Refreshing>
       </div>
     </Layout>
   );

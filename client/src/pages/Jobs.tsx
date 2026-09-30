@@ -6,6 +6,7 @@ import PostingDetailModal from '../components/PostingDetailModal';
 import PostingFilterPanel from '../components/PostingFilterPanel';
 import SyncReportBanner from '../components/SyncReportBanner';
 import { SkeletonRows } from '../components/Skeleton';
+import { RefreshBar, Refreshing } from '../components/RefreshBar';
 import { useToast } from '../context/ToastContext';
 import {
   bulkUpdatePostingsApi, deletePostingApi, deletePostingsApi, loadBoardsApi,
@@ -77,6 +78,8 @@ export default function Jobs() {
   };
 
   useEffect(() => { setLoading(true); reload(); }, [includeClosed]);
+  // Skeletons only until the first list arrives; later reloads dim the rows instead.
+  const firstLoad = loading && postings.length === 0;
 
   // Leads are only needed to suggest boards from their ATS links — best effort,
   // and never a reason for this page to fail.
@@ -328,6 +331,9 @@ export default function Jobs() {
             </div>
           )}
 
+          {/* Toggling closed listings refetches: keep the rows, dimmed, after the first load. */}
+          <RefreshBar active={loading && !firstLoad} />
+          <Refreshing active={loading && !firstLoad}>
           <div className="table-card">
             <table>
               <thead>
@@ -343,9 +349,9 @@ export default function Jobs() {
                 </tr>
               </thead>
               <tbody>
-                {loading && <SkeletonRows rows={6} cols={8} />}
+                {firstLoad && <SkeletonRows rows={6} cols={8} />}
 
-                {!loading && pageRows.length === 0 && (
+                {!firstLoad && pageRows.length === 0 && (
                   <tr>
                     <td colSpan={8}>
                       <div className="empty-state">
@@ -356,7 +362,7 @@ export default function Jobs() {
                   </tr>
                 )}
 
-                {!loading && pageRows.map(p => {
+                {!firstLoad && pageRows.map(p => {
                   const fresh = p.listingStatus === 'open' &&
                     isNewSince(p, ctx.previousSyncAt, p.boardId ? ctx.boardFirstSync[p.boardId] : null);
                   return (
@@ -436,6 +442,7 @@ export default function Jobs() {
               </tbody>
             </table>
           </div>
+          </Refreshing>
 
           {totalPages > 1 && (
             <div className="pagination-bar">

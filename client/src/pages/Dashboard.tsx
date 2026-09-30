@@ -9,6 +9,7 @@ import { useToast } from '../context/ToastContext';
 import { useActionQueue } from '../context/ActionQueueContext';
 import { retryFailedApi, type Contact } from '../lib/api';
 import { Skeleton, SkeletonRows } from '../components/Skeleton';
+import { RefreshBar, Refreshing, CountOrSpinner } from '../components/RefreshBar';
 import { useContactList, loadContactListIds } from '../hooks/useContactList';
 
 const PAGE_SIZE = 25;
@@ -57,6 +58,8 @@ export default function Dashboard() {
   useEffect(() => { if (list.error) setError(list.error); }, [list.error]);
 
   const busy = !list.data;
+  // A refetch with rows already on screen (first loads show skeletons instead).
+  const refreshing = list.loading && !!list.data;
 
   // Auto mailbox check: on load if stale, every 15 min, and on tab re-focus (same as classic)
   useEffect(() => {
@@ -177,12 +180,16 @@ export default function Dashboard() {
     setSelectedFu(prev => { const n = new Set(prev); if (checked) n.add(id); else n.delete(id); return n; });
   };
 
+  // Which quick-select is waiting on the server for its ids.
+  const [selecting, setSelecting] = useState<number | null>(null);
   const selectLastN = async (n: number) => {
+    setSelecting(n);
     try {
       // Every follow-up-due contact in the current sort, ignoring the other filters — as before.
       const all = await loadContactListIds({ tab: 'followup-due', sort: sortCol, dir: sortDir });
       setSelectedFu(new Set(isFinite(n) ? all.slice(0, n) : all));
     } catch (err: any) { toast(err.message, 'error'); }
+    finally { setSelecting(null); }
   };
 
   // The freshest copy on this page, else the one that was clicked.
@@ -256,16 +263,20 @@ export default function Dashboard() {
               </button>
             ))}
           </div>
-          <span className="contact-count-badge">{filteredCount} contacts</span>
+          <span className="contact-count-badge"><CountOrSpinner loading={refreshing}>{filteredCount} contacts</CountOrSpinner></span>
         </div>
 
         {isFuTab && (
           <div className="quick-select" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 500 }}>Quick select:</span>
             {[10, 25, 50, 100].map(n => (
-              <button key={n} className="btn btn-xs" onClick={() => selectLastN(n)} type="button">Last {n}</button>
+              <button key={n} className="btn btn-xs" disabled={selecting !== null} onClick={() => selectLastN(n)} type="button">
+                {selecting === n && <i className="ti ti-loader" aria-hidden="true" />} Last {n}
+              </button>
             ))}
-            <button className="btn btn-xs" onClick={() => selectLastN(Infinity)} type="button">All</button>
+            <button className="btn btn-xs" disabled={selecting !== null} onClick={() => selectLastN(Infinity)} type="button">
+              {selecting === Infinity && <i className="ti ti-loader" aria-hidden="true" />} All
+            </button>
             <button className="btn btn-xs" style={{ color: 'var(--text3)' }} onClick={() => setSelectedFu(new Set())} type="button">Clear</button>
           </div>
         )}
@@ -296,6 +307,9 @@ export default function Dashboard() {
           }}>Clear filters</button>
         </div>
 
+        {/* Refetching after a tab / filter / sort / page change: keep the rows, dimmed. */}
+        <RefreshBar active={refreshing} />
+        <Refreshing active={refreshing}>
         <div className="table-card">
           {tab === 'replied' ? (
             <table>
@@ -443,6 +457,7 @@ export default function Dashboard() {
             </table>
           )}
         </div>
+        </Refreshing>
 
         {totalPages > 1 && (
           <div className="pagination-bar">

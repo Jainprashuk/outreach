@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { RefreshBar, Refreshing } from '../RefreshBar';
 import type { NaukriJob, NaukriOverview } from '../../lib/api';
 import { listNaukriJobsApi, decideNaukriJobsApi, queueNaukriRunApi, bulkNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty, Notice } from './ui';
@@ -51,6 +52,8 @@ export default function QueuedJobs({ overview, onChanged }: {
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [parked, setParked] = useState<NaukriJob[]>([]);
   const [loading, setLoading] = useState(true);
+  // After the first load, reloads keep the list on screen (dimmed) instead of blanking it.
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [sel, setSel] = useState<Set<string>>(new Set());
@@ -77,7 +80,7 @@ export default function QueuedJobs({ overview, onChanged }: {
       // is the one mistake this screen must not allow.
       setSel(new Set());
     } catch (e: any) { setMsg(e?.message || 'Could not load'); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setLoadedOnce(true); }
   }, [type]);
 
   useEffect(() => { load(); }, [load]);
@@ -137,7 +140,7 @@ export default function QueuedJobs({ overview, onChanged }: {
     } finally { setBusy(false); }
   };
 
-  if (loading) return <Empty icon="ti-loader">Loading…</Empty>;
+  if (loading && !loadedOnce) return <Empty icon="ti-loader">Loading…</Empty>;
 
   const t = trigger(overview);
   const perRun = overview.appliedToday >= 0 ? 20 : 20;
@@ -146,6 +149,9 @@ export default function QueuedJobs({ overview, onChanged }: {
   const batches = Math.ceil(total / perRun);
 
   return (
+    <>
+      <RefreshBar active={loading} />
+      <Refreshing active={loading}>
     <>
       <Notice tone={t.tone === 'ok' ? 'info' : 'warn'} icon={t.tone === 'ok' ? 'ti-clock' : 'ti-alert-triangle'}>
         {t.text}
@@ -240,6 +246,8 @@ export default function QueuedJobs({ overview, onChanged }: {
         </Card>
       )}
 
+    </>
+      </Refreshing>
     </>
   );
 }

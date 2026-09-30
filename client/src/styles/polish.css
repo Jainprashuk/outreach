@@ -421,3 +421,41 @@ td.cell-actions > * + * { margin-left: 4px; }
   }
   .sidebar-backdrop.open { visibility: visible; opacity: 1; }
 }
+
+/* ── Refresh loaders ───────────────────────────────────────────────────────
+   components/RefreshBar.tsx. A list that is re-fetching after a filter, sort,
+   tab or page change keeps its rows on screen, dimmed, under a thin sweep —
+   rather than blanking to a spinner (jarring) or sitting stale with no sign
+   anything is happening (reads as broken). */
+.refresh-bar {
+  height: 2px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: transparent;
+  transition: background .15s var(--ease);
+}
+.refresh-bar.on { background: var(--border); }
+.refresh-bar-fill {
+  height: 100%;
+  width: 35%;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transform: translateX(-100%);
+}
+.refresh-bar.on .refresh-bar-fill {
+  opacity: 1;
+  animation: refresh-sweep 1.1s var(--ease) infinite;
+}
+@keyframes refresh-sweep {
+  from { transform: translateX(-100%); }
+  to   { transform: translateX(300%); }
+}
+.refreshing-wrap { transition: opacity .15s var(--ease); }
+.refreshing-wrap.is-refreshing { opacity: .55; }
+.refreshing-wrap.is-refreshing,
+.refreshing-wrap.is-refreshing * { cursor: progress; }
+@media (prefers-reduced-motion: reduce) {
+  /* No sweep — a solid bar still says "working" without moving. */
+  .refresh-bar.on .refresh-bar-fill { animation: none; width: 100%; transform: none; opacity: .6; }
+}

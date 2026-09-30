@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { RefreshBar, Refreshing } from '../RefreshBar';
 import type { NaukriJob } from '../../lib/api';
 import { listNaukriJobsApi, bulkNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty } from './ui';
@@ -32,6 +33,8 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [tab, setTab] = useState<Tab>('answer');
   const [loading, setLoading] = useState(true);
+  // After the first load, reloads keep the list on screen (dimmed) instead of blanking it.
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [busy, setBusy] = useState(false);
   const [sel, setSel] = useState<Set<string>>(new Set());
   const toast = useToast();
@@ -43,7 +46,7 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
       setSel(new Set());
     }
     catch (e: any) { toast(e?.message || 'Could not load', 'error'); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setLoadedOnce(true); }
   }, [toast]);
 
   useEffect(() => { load(); }, [load]);
@@ -80,7 +83,7 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
     return next;
   });
 
-  if (loading) return <Empty icon="ti-loader">Loading…</Empty>;
+  if (loading && !loadedOnce) return <Empty icon="ti-loader">Loading…</Empty>;
   if (!jobs.length) return <Empty icon="ti-player-skip-forward">Nothing has been skipped.</Empty>;
 
   const TABS: Array<[Tab, string, string, number]> = [
@@ -127,6 +130,9 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
 
   return (
     <>
+      <RefreshBar active={loading} />
+      <Refreshing active={loading}>
+    <>
       <div className="section-head">
         <div className="nav-tabs">
           {/* Clearing the selection on a tab change is not tidiness: the action
@@ -167,6 +173,8 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
           </>
         )}
       </Card>
+    </>
+      </Refreshing>
     </>
   );
 }

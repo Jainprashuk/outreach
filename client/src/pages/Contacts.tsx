@@ -11,6 +11,7 @@ import { API_BASE, resetForSendApi, type Contact } from '../lib/api';
 import { CATEGORY_OPTIONS } from '../lib/format';
 import { parseCsvText, readFileText } from '../lib/csv';
 import { SkeletonRows } from '../components/Skeleton';
+import { RefreshBar, Refreshing, CountOrSpinner } from '../components/RefreshBar';
 import { useContactList, loadContactListIds, type ContactListQuery } from '../hooks/useContactList';
 import CreateContactCampaignModal from '../components/CreateContactCampaignModal';
 import ContactDateFilterPanel, {
@@ -65,6 +66,10 @@ export default function Contacts() {
   useEffect(() => { if (list.error) setError(list.error); }, [list.error]);
 
   const busy = !list.data;
+  // A refetch with rows already on screen (first loads show skeletons instead).
+  const refreshing = list.loading && !!list.data;
+  // "First N" / "All" wait on the server for the matching ids; which one is running.
+  const [selecting, setSelecting] = useState<number | 'all' | null>(null);
   const filteredCount = list.data?.total ?? 0;
 
   const dateFilterCount = countActiveDateFilters(dateFilters);
@@ -90,13 +95,16 @@ export default function Contacts() {
   // Quick-select the first N contacts of the current filtered list (replaces the
   // current selection so counts stay predictable across pages).
   const selectFirst = async (n: number) => {
+    setSelecting(n);
     try {
       const ids = await loadContactListIds(query);
       setSelected(new Set(ids.slice(0, n)));
     } catch (err: any) { toast(err.message, 'error'); }
+    finally { setSelecting(null); }
   };
 
   const toggleAll = async (checked: boolean) => {
+    setSelecting('all');
     try {
       const ids = await loadContactListIds(query);
       setSelected(prev => {
@@ -105,6 +113,7 @@ export default function Contacts() {
         return next;
       });
     } catch (err: any) { toast(err.message, 'error'); }
+    finally { setSelecting(null); }
   };
 
   const confirmDelete = async (c: Contact) => {
@@ -223,7 +232,7 @@ export default function Contacts() {
             </button>
           ))}
         </div>
-        <span className="contact-count-badge">{filteredCount} contacts</span>
+        <span className="contact-count-badge"><CountOrSpinner loading={refreshing}>{filteredCount} contacts</CountOrSpinner></span>
       </div>
 
       <div className="filter-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
@@ -295,18 +304,23 @@ export default function Contacts() {
       <div className="quick-select" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '14px 0 10px' }}>
         <span style={{ fontSize: 12, color: 'var(--text3)' }}>Quick select:</span>
         {[50, 100, 200, 500].map(n => (
-          <button key={n} className="btn btn-sm" type="button" disabled={filteredCount === 0}
+          <button key={n} className="btn btn-sm" type="button" disabled={filteredCount === 0 || selecting !== null}
             onClick={() => selectFirst(n)}
             title={`Select the first ${n} contacts in this view`}>
-            First {n}
+            {selecting === n && <i className="ti ti-loader" aria-hidden="true" />} First {n}
           </button>
         ))}
-        <button className="btn btn-sm" type="button" disabled={filteredCount === 0}
-          onClick={() => toggleAll(true)}>All ({filteredCount})</button>
+        <button className="btn btn-sm" type="button" disabled={filteredCount === 0 || selecting !== null}
+          onClick={() => toggleAll(true)}>
+          {selecting === 'all' && <i className="ti ti-loader" aria-hidden="true" />} All ({filteredCount})
+        </button>
         <button className="btn btn-sm" type="button" disabled={selected.size === 0}
           onClick={() => setSelected(new Set())}>Clear selection</button>
       </div>
 
+      {/* Refetching after a tab / filter / page change: keep the rows, dimmed. */}
+      <RefreshBar active={refreshing} />
+      <Refreshing active={refreshing}>
       <div className="table-card">
         <table>
           <thead>
@@ -314,6 +328,7 @@ export default function Contacts() {
               <th className="cb-col">
                 <input type="checkbox" className="row-cb" checked={allChecked}
                   ref={el => { if (el) el.indeterminate = !allChecked && someChecked; }}
+                  disabled={selecting !== null}
                   onChange={e => toggleAll(e.target.checked)} title="Select all" />
               </th>
               <th>Contact</th><th>Company</th><th>Role</th><th>Template</th><th>Status</th><th>Category</th><th>Approval</th><th>Interview</th><th></th>
@@ -381,6 +396,7 @@ export default function Contacts() {
           </tbody>
         </table>
       </div>
+      </Refreshing>
 
       {totalPages > 1 && (
         <div className="pagination-bar">

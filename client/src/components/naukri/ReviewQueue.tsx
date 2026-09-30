@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { RefreshBar, Refreshing } from '../RefreshBar';
 import type { NaukriJob } from '../../lib/api';
 import { listNaukriJobsApi, decideNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty } from './ui';
@@ -136,7 +137,8 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
         total={total} showing={jobs.length} truncated={truncated} typeCounts={typeCounts}
       />
 
-      {loading && <Muted style={{ display: 'block', marginBottom: 8 }}>Loading…</Muted>}
+      {/* First load: a loader. After that a filter change keeps the list, dimmed. */}
+      {loading && !jobs.length ? <Empty icon="ti-loader">Loading…</Empty> : <RefreshBar active={loading} />}
 
       {!loading && !jobs.length && (
         filtered
@@ -144,6 +146,7 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
           : <Empty icon="ti-checklist">Nothing waiting. Run a harvest to collect new listings.</Empty>
       )}
 
+      <Refreshing active={loading}>
       {jobs.length > 0 && (<>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 6 }}>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13 }}>
@@ -176,6 +179,7 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
         <Row key={j.id} job={j} selected={sel.has(j.id)} onToggle={() => toggle(j.id)} />
       ))}
       </>)}
+      </Refreshing>
     </Card>
   );
 }

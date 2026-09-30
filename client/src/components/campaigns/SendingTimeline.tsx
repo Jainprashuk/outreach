@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { RefreshBar, Refreshing } from '../RefreshBar';
 import {
   loadTimelineApi, type Timeline, type TimelineBucket, type TimelineRange, type TimelineScope,
 } from '../../lib/api';
@@ -157,6 +158,9 @@ export default function SendingTimeline() {
           <i className={`ti ti-${asTable ? 'chart-bar' : 'table'}`} /> {asTable ? 'Chart' : 'Table'}
         </button>
       </div>
+      {/* Switching range / scope: the old chart stays, dimmed, until the new one lands. */}
+      <RefreshBar active={loading} />
+      <Refreshing active={loading}>
 
       <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>
         {totals.sent.toLocaleString()} sent · {totals.scheduled.toLocaleString()} still to come ·
@@ -266,6 +270,7 @@ export default function SendingTimeline() {
           </div>
         </>
       )}
+      </Refreshing>
     </div>
   );
 }

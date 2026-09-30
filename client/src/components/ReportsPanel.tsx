@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { RefreshBar, Refreshing } from './RefreshBar';
 import { useToast } from '../context/ToastContext';
 import {
   reportApi, reportPdfUrl, reportWeeksApi, emailReportApi,
@@ -130,6 +131,9 @@ export default function ReportsPanel() {
         </div>
       </div>
 
+      {/* Generating another period: the current report stays, dimmed, until the new one is in. */}
+      <RefreshBar active={loading && !!report} />
+      <Refreshing active={loading && !!report}>
       {report && (
         <>
           <div className="section-head" style={{ margin: '18px 0 10px' }}>
@@ -263,6 +267,7 @@ export default function ReportsPanel() {
           </div>
         </>
       )}
+      </Refreshing>
     </>
   );
 }

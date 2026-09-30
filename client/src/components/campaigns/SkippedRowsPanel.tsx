@@ -5,6 +5,7 @@ import {
   loadCampaignRowsApi, restoreCampaignRowsApi, type Campaign, type CampaignRow,
 } from '../../lib/api';
 import { SKIP_REASON_BADGE, SKIP_REASON_LABEL } from '../../lib/campaigns';
+import { RefreshBar, Refreshing } from '../RefreshBar';
 
 /** Rows that never became contacts, and why. */
 export default function SkippedRowsPanel({ campaign, status, onChanged }: {
@@ -19,6 +20,8 @@ export default function SkippedRowsPanel({ campaign, status, onChanged }: {
   const [pages, setPages] = useState(1);
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // Paging / switching status with rows already shown: keep them, dimmed.
+  const [loading, setLoading] = useState(false);
 
   const PAGE_SIZE = 100;
   // The endpoint caps a page at 500. Reading one page and calling its length the
@@ -26,12 +29,15 @@ export default function SkippedRowsPanel({ campaign, status, onChanged }: {
   const FETCH_MAX = 500;
 
   const load = async (p = page) => {
-    const res = await loadCampaignRowsApi(campaign.id, {
-      status, page: String(p), limit: String(PAGE_SIZE),
-    });
-    setRows(res.rows);
-    setTotal(res.total);
-    setPages(Math.max(1, res.pages));
+    setLoading(true);
+    try {
+      const res = await loadCampaignRowsApi(campaign.id, {
+        status, page: String(p), limit: String(PAGE_SIZE),
+      });
+      setRows(res.rows);
+      setTotal(res.total);
+      setPages(Math.max(1, res.pages));
+    } finally { setLoading(false); }
   };
   useEffect(() => { load(page).catch((e) => toast(e.message, 'error')); },
     [campaign.id, status, page, campaign.stats.skipped, campaign.stats.removed]);
@@ -126,6 +132,8 @@ export default function SkippedRowsPanel({ campaign, status, onChanged }: {
             : <><i className="ti ti-file-export" /> Download all as CSV</>}
         </button>
       </div>
+      <RefreshBar active={loading} />
+      <Refreshing active={loading}>
       <div className="table-card">
         <table>
           <thead>
@@ -159,6 +167,7 @@ export default function SkippedRowsPanel({ campaign, status, onChanged }: {
           </tbody>
         </table>
       </div>
+      </Refreshing>
 
       {pages > 1 && (
         <div className="pagination-bar">

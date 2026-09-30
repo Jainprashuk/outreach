@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { RefreshBar, Refreshing } from '../RefreshBar';
 import type { NaukriJob, NaukriApplyStatus } from '../../lib/api';
 import { listNaukriJobsApi, updateNaukriJobApi } from '../../lib/api';
 import { Card, Muted, Empty } from './ui';
@@ -25,6 +26,8 @@ const BADGE: Partial<Record<NaukriApplyStatus, string>> = {
 export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [loading, setLoading] = useState(true);
+  // After the first load, reloads keep the list on screen (dimmed) instead of blanking it.
+  const [loadedOnce, setLoadedOnce] = useState(false);
   const [msg, setMsg] = useState('');
   const toast = useToast();
 
@@ -34,7 +37,7 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
     // skipped or failed on. Those have their own tab.
     try { setJobs((await listNaukriJobsApi({ applyStatus: 'sent', limit: 200 })).jobs); }
     catch (e: any) { setMsg(e?.message || 'Could not load'); }
-    finally { setLoading(false); }
+    finally { setLoading(false); setLoadedOnce(true); }
   }, []);
 
   useEffect(() => { load(); }, [load]);
@@ -48,7 +51,7 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
     } catch (e: any) { const m = e?.message || 'Could not update'; toast(m, 'error'); setMsg(m); }
   };
 
-  if (loading) return <Empty icon="ti-loader">Loading…</Empty>;
+  if (loading && !loadedOnce) return <Empty icon="ti-loader">Loading…</Empty>;
   if (!jobs.length) {
     return (
       <Empty icon="ti-send">
@@ -58,6 +61,9 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
   }
 
   return (
+    <>
+      <RefreshBar active={loading} />
+      <Refreshing active={loading}>
     <Card title={`${jobs.length} application${jobs.length === 1 ? '' : 's'}`} icon="ti-send">
       {msg && <Muted style={{ display: 'block', marginBottom: 8 }}>{msg}</Muted>}
       {jobs.map(job => (
@@ -83,5 +89,7 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
         </div>
       ))}
     </Card>
+      </Refreshing>
+    </>
   );
 }
