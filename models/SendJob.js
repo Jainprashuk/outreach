@@ -29,6 +29,10 @@ const sendJobSchema = new mongoose.Schema({
   ratePerHour:       { type: Number, default: 5 },
 }, { timestamps: true });
 
+// Per-user list index — built on prod by scripts/build-perf-indexes.js.
+sendJobSchema.index({ userId: 1, status: 1, createdAt: -1 });
+sendJobSchema.index({ userId: 1, 'items.processedAt': 1 });
+
 sendJobSchema.set('toJSON', {
   transform: (doc, ret) => {
     ret.id = ret._id.toString();

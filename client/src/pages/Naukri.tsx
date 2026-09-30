@@ -10,6 +10,7 @@ import AppliedTable from '../components/naukri/AppliedTable';
 import QueuedJobs from '../components/naukri/QueuedJobs';
 import SkippedJobs from '../components/naukri/SkippedJobs';
 import ConnectionCard from '../components/naukri/config/ConnectionCard';
+import { useVisibleInterval } from '../hooks/useVisibleInterval';
 import ScheduleCard from '../components/naukri/config/ScheduleCard';
 import SearchesCard from '../components/naukri/config/SearchesCard';
 import FiltersCard from '../components/naukri/config/FiltersCard';
@@ -62,11 +63,7 @@ export default function Naukri() {
     try { setConfig((await naukriConfigApi()).config); } catch { /* cards keep what they have */ }
   }, []);
 
-  useEffect(() => {
-    load();
-    const t = setInterval(load, POLL_MS);
-    return () => clearInterval(t);
-  }, [load]);
+  useVisibleInterval(load, POLL_MS);
 
   useEffect(() => { if (view === 'config' && !config) loadConfig(); }, [view, config, loadConfig]);
 

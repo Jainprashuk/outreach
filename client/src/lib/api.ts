@@ -140,7 +140,30 @@ export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promi
 
 // ── Endpoint wrappers (1:1 with window._app) ─────────────────────────────────
 export const loadContactsApi = () => apiFetch<Contact[]>('/api/contacts');
+/** Only the contacts the Mailbox can show (queued or with an inbound message) — same objects as loadContactsApi. */
+export const loadMailboxContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=mailbox');
+/** Every contact, carrying only the fields the Analytics page reads. Never put these in the app store. */
+/** Only the contacts Send step 3 reads (approved + queued, or pending) — same objects as loadContactsApi. */
+export const loadSendContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=send');
+export const loadAnalyticsContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=analytics');
 export const loadTemplatesApi = () => apiFetch<Template[]>('/api/templates');
+
+/** Counts the Dashboard and Contacts headers show, over every contact. */
+export interface ContactListStats {
+  total: number; sent: number; bounced: number; replied: number; followUpReplied: number;
+  pending: number; remaining: number; followUpDue: number; followUpSent: number;
+  closed: number; noOpenings: number; inReview: number;
+  resumable: number; failed: number; unread: number;
+}
+export interface ContactListPage {
+  contacts: Contact[]; total: number; page: number; pages: number; limit: number;
+  stats: ContactListStats;
+  /** Every filtered id in order — only when asked for with ids=1. */
+  ids?: string[];
+}
+/** One filtered, sorted page of contacts (GET /api/contacts/list). */
+export const loadContactListApi = (params: Record<string, string>, signal?: AbortSignal) =>
+  apiFetch<ContactListPage>(`/api/contacts/list?${new URLSearchParams(params)}`, { signal });
 export const loadSettingsApi = () => apiFetch<any>('/api/settings');
 
 export const createContactsApi = (rows: Partial<Contact>[]) =>
@@ -156,6 +179,12 @@ export const bulkUpdateContactsApi = (updates: Array<{ id: string } & Partial<Co
 
 export const deleteContactApi = (id: string) =>
   apiFetch<{ ok: boolean }>(`/api/contacts/${id}`, { method: 'DELETE' });
+
+/** Same soft delete as deleteContactApi, for many ids in one request. */
+export const bulkDeleteContactsApi = (ids: string[]) =>
+  apiFetch<{ ok: boolean; deleted: string[]; failed: number }>('/api/contacts/bulk-delete', {
+    method: 'POST', body: JSON.stringify({ ids }),
+  });
 
 export const checkMailboxApi = () =>
   apiFetch<any>('/api/check-mailbox', { method: 'POST' });
@@ -374,6 +403,8 @@ export interface LeadOutcome {
 export type LeadOutcomeMap = Record<string, LeadOutcome>;
 
 export const loadLeadsApi = () => apiFetch<Lead[]>('/api/leads');
+/** Every lead with only links/applyUrl/postUrl — enough to suggest job boards, nothing else. */
+export const loadLeadBoardLinksApi = () => apiFetch<Lead[]>('/api/leads?view=boards');
 
 export const loadLeadOutcomesApi = () =>
   apiFetch<{ outcomes: LeadOutcomeMap; count: number }>('/api/leads/outcomes');

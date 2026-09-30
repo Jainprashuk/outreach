@@ -17,7 +17,7 @@ import {
   computeMetrics, countActivity, cvar, dayKey, fmtAgo, fmtDur, pct,
   STATUS_META, type ActivityWindowKey, type Analyzed, type Metrics,
 } from '../lib/analytics';
-import type { Interview } from '../lib/api';
+import { loadAnalyticsContactsApi, type Contact, type Interview } from '../lib/api';
 
 // ── Time-series chart (2-series, hover crosshair) ────────────────────────────
 const TS = { W: 720, H: 210, padL: 32, padR: 12, padT: 12, padB: 26 };
@@ -432,12 +432,15 @@ export default function Analytics() {
   const [range, setRange] = useState(30);
   const [statusMode, setStatusMode] = useState<'current' | 'ever'>('current');
   const [refreshing, setRefreshing] = useState(false);
+  // Held here, not in the app store: these carry only the fields analytics reads
+  // (GET /api/contacts?view=analytics), so no other page may mistake them for full contacts.
+  const [contacts, setContacts] = useState<Contact[]>([]);
 
   const load = async () => {
     setRefreshing(true);
     try {
       if (view === 'leads') setLeadsRefresh(n => n + 1);
-      else await Promise.all([app.loadContacts(), app.loadTemplates()]);
+      else await Promise.all([loadAnalyticsContactsApi().then(setContacts), app.loadTemplates()]);
     } catch (err: any) {
       toast('Could not load analytics: ' + err.message, 'error');
     } finally {
@@ -447,15 +450,15 @@ export default function Analytics() {
 
   useEffect(() => { load(); }, []);
 
-  const A = useMemo(() => app.contacts.map(analyze), [app.contacts]);
+  const A = useMemo(() => contacts.map(analyze), [contacts]);
   const m = useMemo(() => computeMetrics(A), [A]);
   // Interviews live in their own store keyed on (sourceType, sourceId), so the
   // join has to happen here — no contact field records that someone interviewed.
   const iv = useMemo(
     () => (interviewsLoaded
-      ? interviewFunnel(app.contacts, indexInterviews(interviews), 'contact', c => c.email)
+      ? interviewFunnel(contacts, indexInterviews(interviews), 'contact', c => c.email)
       : EMPTY_FUNNEL),
-    [app.contacts, interviews, interviewsLoaded],
+    [contacts, interviews, interviewsLoaded],
   );
   const series = useMemo(() => buildDailySeries(A, range), [A, range]);
   const allPairs = useMemo(() => A.flatMap(a => a.pairs), [A]);

@@ -1,12 +1,15 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Contact = require('../models/Contact');
 const SendJob = require('../models/SendJob');
+const ActivityLog = require('../models/ActivityLog');
 const { COOLDOWN_LABEL, inCooldown, cooldownRemaining } = require('../lib/cooldown');
 const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
 const { importContacts } = require('../lib/contactImport');
 const { classifyReply } = require('../lib/replyClassifier');
 const { deadline } = require('../lib/http');
 const actionQueue = require('../lib/actionQueue');
+const contactList = require('../lib/contactList');
 
 const router = express.Router();
 
@@ -49,18 +52,61 @@ const buildFilter = (tab) => {
   return { ...BASE_FILTER };
 };
 
+// Proven complete by scripts/parity/analytics-view.js, which records every field
+// the analytics code touches.
+const ANALYTICS_FIELDS = {
+  name: 1, email: 1, company: 1, status: 1, template: 1, statusHistory: 1,
+  lastSentAt: 1, repliedAt: 1, followUpSentAt: 1, createdAt: 1, updatedAt: 1,
+};
+
+// Pages that only ever read a few of the contacts get just those — the same objects,
+// in the same order, that the full list gave them. The order is taken from the very
+// query the full list runs (only the fields the predicate needs are fetched), because
+// many contacts share a createdAt (a bulk import) and a narrower query can return
+// such ties in a different order — for Send step 3 that order is the send order.
+// The predicates are the pages' own, verbatim. Proven by scripts/parity/*-view.js.
+const SUBSET_VIEWS = {
+  // pages/Mailbox.tsx: queued (GET /api/actions' match) or with an inbound message.
+  mailbox: {
+    fields: { 'action.state': 1, 'thread.direction': 1 },
+    keep: c => actionQueue.STATES.includes(c.action && c.action.state)
+      || (c.thread || []).some(t => t.direction === 'inbound'),
+  },
+  // pages/send/Step3.tsx: the approved queue it sends, and the pending ones it counts.
+  send: {
+    fields: { status: 1, approvalStatus: 1 },
+    keep: c => (c.status === 'queued' && c.approvalStatus === 'approved') || c.approvalStatus === 'pending',
+  },
+};
+
+async function subsetView({ fields, keep }, filter) {
+  const order = await Contact.find(filter, fields).sort({ createdAt: -1 }).lean();
+  const ids = order.filter(keep).map(c => c._id);
+  if (!ids.length) return [];
+  const docs = await Contact.find({ ...filter, _id: { $in: ids } }, { 'thread.html': 0 }).lean();
+  const byId = new Map(docs.map(d => [String(d._id), d]));
+  return ids.map(id => byId.get(String(id))).filter(Boolean).map(serialize);
+}
+
 // GET /api/contacts
 router.get('/', async (req, res) => {
   try {
-    const { tab, page, limit, ids } = req.query;
+    const { tab, page, limit, ids, view } = req.query;
     const filter = { ...buildFilter(tab), userId: req.userId };
     if (ids) {
       const idList = ids.split(',').filter(Boolean);
       filter._id = { $in: idList };
     }
+    // ?view=mailbox / ?view=send — a subset of the full list: the same objects in the
+    // same order, just fewer of them. See SUBSET_VIEWS.
+    if (Object.hasOwn(SUBSET_VIEWS, view || '')) return res.json(await subsetView(SUBSET_VIEWS[view], filter));
+
     // Every page loads this list, so it leaves out each message's html body: the Mailbox
     // renders plain text only, and html is by far the heaviest part of a long thread.
-    const q = Contact.find(filter, { 'thread.html': 0 }).sort({ createdAt: -1 }).lean();
+    // ?view=analytics — every contact, but only the fields the Analytics page reads
+    // (lib/analytics.ts, lib/interviewAnalytics.ts, pages/Analytics.tsx).
+    const projection = view === 'analytics' ? ANALYTICS_FIELDS : { 'thread.html': 0 };
+    const q = Contact.find(filter, projection).sort({ createdAt: -1 }).lean();
 
     if (page && limit) {
       const p = Math.max(1, parseInt(page, 10));
@@ -74,6 +120,42 @@ router.get('/', async (req, res) => {
 
     const contacts = await q;
     res.json(contacts.map(serialize));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/contacts/list — one page of the Dashboard / Contacts table, with the
+// tab counts, filtered and sorted on the server by lib/contactList.js (a port of
+// the browser code that used to do this over every contact).
+//   ?tab=&q=&status=&approval=&template=&category=&source=
+//   &createdFrom=&createdTo=&sentFrom=&sentTo=&repliedFrom=&repliedTo=  (ISO instants)
+//   &sort=&dir=   (Dashboard only)   &page=&limit=   &ids=1 (also every filtered id, in order)
+router.get('/list', async (req, res) => {
+  try {
+    const f = contactList.parseListQuery(req.query);
+    // Same filter and order as GET / — only the fields the filters read.
+    const slim = await Contact.find({ ...BASE_FILTER, userId: req.userId }, contactList.FILTER_FIELDS)
+      .sort({ createdAt: -1 }).lean();
+    const filtered = contactList.applyListQuery(slim, f);
+
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 25));
+    const pages = Math.ceil(filtered.length / limit) || 1;
+    const page = Math.min(Math.max(1, parseInt(req.query.page, 10) || 1), pages);
+    const pageIds = filtered.slice((page - 1) * limit, page * limit).map(c => c._id);
+
+    // The rows themselves, whole except the thread — which neither table reads.
+    const docs = pageIds.length
+      ? await Contact.find({ _id: { $in: pageIds }, userId: req.userId }, { thread: 0 }).lean()
+      : [];
+    const byId = new Map(docs.map(d => [String(d._id), d]));
+    const contacts = pageIds.map(id => byId.get(String(id))).filter(Boolean).map(serialize);
+
+    res.json({
+      contacts, total: filtered.length, page, pages, limit,
+      stats: contactList.getStats(slim),
+      ...(req.query.ids === '1' ? { ids: filtered.map(c => String(c._id)) } : {}),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -116,7 +198,7 @@ router.get('/stats', async (req, res) => {
 // POST /api/contacts/retry-failed — reset all failed contacts to queued
 router.post('/retry-failed', async (req, res) => {
   try {
-    const failedContacts = await Contact.find({ ...BASE_FILTER, userId: req.userId, status: 'failed' }).lean();
+    const failedContacts = await Contact.find({ ...BASE_FILTER, userId: req.userId, status: 'failed' }, { _id: 1 }).lean();
     if (failedContacts.length === 0) return res.json({ ok: true, retried: 0 });
     await Contact.updateMany(
       { _id: { $in: failedContacts.map(c => c._id) }, userId: req.userId },
@@ -435,6 +517,50 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// POST /api/contacts/bulk-delete { ids } — the same soft delete as DELETE /:id,
+// for many contacts in one round trip instead of one request each.
+//
+// The Logs page must read exactly as if each contact had been deleted on its
+// own, so this writes the per-contact rows auditHttpMutations would have
+// written for those DELETEs, and opts out of its own single row.
+router.post('/bulk-delete', async (req, res) => {
+  req.skipAudit = true;
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(String) : [];
+    const valid = ids.filter(id => mongoose.isValidObjectId(id));
+    const found = valid.length
+      ? await Contact.find({ _id: { $in: valid }, userId: req.userId }, { _id: 1 }).lean()
+      : [];
+    const deleted = found.map(c => String(c._id));
+    if (deleted.length) {
+      await Contact.updateMany(
+        { _id: { $in: deleted }, userId: req.userId },
+        { deleted: true, deletedAt: new Date() },
+      );
+    }
+
+    // A bad id made the single route throw (500); a missing one returned 404.
+    const deletedSet = new Set(deleted);
+    const status = id => deletedSet.has(id) ? 200 : (mongoose.isValidObjectId(id) ? 404 : 500);
+    await ActivityLog.insertMany(ids.map(id => {
+      const code = status(id);
+      return {
+        userId: req.userId,
+        category: 'contacts',
+        action: code === 200 ? 'delete' : 'failed',
+        message: code === 200 ? 'Contacts deleted' : `Contacts action failed (HTTP ${code})`,
+        // Router-relative, as the middleware sees req.path once the response finishes.
+        meta: { path: `/${id}`, method: 'DELETE', statusCode: code },
+      };
+    })).catch(err => console.error('Activity log write failed:', err.message));
+
+    res.json({ ok: true, deleted, failed: ids.length - deleted.length });
+  } catch (err) {
+    req.skipAudit = false; // nothing was logged per contact — let the request itself be recorded
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/contacts/:id
 router.patch('/:id', async (req, res) => {
   try {
@@ -472,3 +598,6 @@ router.patch('/:id', async (req, res) => {
 
 module.exports = router;
 module.exports.runBackfillBatch = runBackfillBatch;
+// For scripts/parity — the exact code the views run.
+module.exports.subsetView = subsetView;
+module.exports.SUBSET_VIEWS = SUBSET_VIEWS;

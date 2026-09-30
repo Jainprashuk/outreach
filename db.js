@@ -8,7 +8,9 @@ const { ONBOARDING_VERSION } = require('./lib/onboarding');
 async function backfillStatusHistory() {
   const contacts = await Contact.find({
     $or: [{ statusHistory: { $exists: false } }, { statusHistory: { $size: 0 } }],
-  }).lean();
+  // Only what the history builder below reads — never the mail thread.
+  }, { createdAt: 1, updatedAt: 1, lastSentAt: 1, sentSubject: 1, messageId: 1, followUpSentAt: 1,
+    status: 1, bounceReason: 1, failReason: 1, repliedAt: 1 }).lean();
 
   if (contacts.length === 0) return;
 
@@ -71,7 +73,8 @@ async function backfillStatusHistory() {
 // operators like $lt never match a missing field, so these contacts silently vanish from
 // the followup-due filter no matter how stale they are).
 async function backfillSendTimestamps() {
-  const contacts = await Contact.find({ lastSentAt: { $exists: false } }).lean();
+  const contacts = await Contact.find({ lastSentAt: { $exists: false } },
+    { statusHistory: 1, followUpSentAt: 1 }).lean();
 
   if (contacts.length === 0) return;
 
@@ -106,10 +109,13 @@ async function backfillSendTimestamps() {
 // was already sent. Without this they'd stay mislabeled forever (nothing else touches
 // old statusHistory/status once written).
 async function backfillFollowUpReplied() {
+  // The $expr is the same test the loop applies, moved into the query so rows it
+  // would skip are never loaded — this runs on every cold start.
   const contacts = await Contact.find({
     status: 'replied',
     followUpSentAt: { $ne: null },
-  }).lean();
+    $expr: { $gt: ['$repliedAt', '$followUpSentAt'] },
+  }, { repliedAt: 1, followUpSentAt: 1 }).lean();
 
   const ops = [];
   for (const c of contacts) {

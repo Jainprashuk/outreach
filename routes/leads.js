@@ -189,15 +189,21 @@ router.post('/bulk-delete', async (req, res) => {
 });
 
 // GET /api/leads — best-fit first, so hard rejects sink to the bottom
+// Proven sufficient by scripts/parity/lead-boards-view.js.
+const LEAD_BOARD_FIELDS = { links: 1, applyUrl: 1, postUrl: 1 };
+
 router.get('/', async (req, res) => {
   try {
-    const { status, hideRejects, ids, page, limit } = req.query;
+    const { status, hideRejects, ids, page, limit, view } = req.query;
     const filter = { userId: req.userId, ...BASE_FILTER };
     if (status && status !== 'all') filter.status = status;
     if (hideRejects === '1') filter.fitScore = { $ne: HARD_REJECT };
     if (ids) filter._id = { $in: ids.split(',').filter(Boolean) };
 
-    const q = Lead.find(filter).sort({ fitScore: -1, createdAt: -1 }).lean();
+    // ?view=boards — only the three link fields the Jobs page reads to suggest boards
+    // (lib/postings.ts suggestedBoardsFromLeads). Same filter and order as the full list.
+    const projection = view === 'boards' ? LEAD_BOARD_FIELDS : {};
+    const q = Lead.find(filter, projection).sort({ fitScore: -1, createdAt: -1 }).lean();
 
     if (page && limit) {
       const p = Math.max(1, parseInt(page, 10));

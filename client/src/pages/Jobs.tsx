@@ -9,7 +9,7 @@ import { SkeletonRows } from '../components/Skeleton';
 import { useToast } from '../context/ToastContext';
 import {
   bulkUpdatePostingsApi, deletePostingApi, deletePostingsApi, loadBoardsApi,
-  loadLeadsApi, loadPostingsApi, loadPostingsMetaApi, syncPostingsApi,
+  loadLeadBoardLinksApi, loadPostingsApi, loadPostingsMetaApi, syncPostingsApi,
   type JobBoard, type Lead, type Posting, type PostingsMeta, type SyncRunReport,
   type TrackStatus,
 } from '../lib/api';
@@ -80,7 +80,8 @@ export default function Jobs() {
 
   // Leads are only needed to suggest boards from their ATS links — best effort,
   // and never a reason for this page to fail.
-  useEffect(() => { loadLeadsApi().then(setLeads).catch(() => setLeads([])); }, []);
+  // Only the link fields that suggestion reads (?view=boards), not whole leads.
+  useEffect(() => { loadLeadBoardLinksApi().then(setLeads).catch(() => setLeads([])); }, []);
 
   // previousSyncAt comes from the last run report when we have one, since that
   // is the only place that knows the value from BEFORE the run overwrote it.

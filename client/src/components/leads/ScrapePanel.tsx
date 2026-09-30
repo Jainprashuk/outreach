@@ -4,6 +4,7 @@ import {
   type ScrapeStatus, type ScrapeRun,
 } from '../../lib/api';
 import { useToast } from '../../context/ToastContext';
+import { useVisibleInterval } from '../../hooks/useVisibleInterval';
 
 // Harvesting runs on a worker on the Mac — `jl harvest` drives a real logged-in
 // Chrome over CDP and cannot run on Vercel. So the button always QUEUES; the
@@ -146,8 +147,8 @@ export default function ScrapePanel({ open, onOpen, onImported, onHelp }: Props)
     } catch { /* a transient poll failure shouldn't blank the panel */ }
   }, [loadRuns]);
 
-  useEffect(() => { load(); loadRuns(); const t = setInterval(load, POLL_MS); return () => clearInterval(t); },
-    [load, loadRuns]);
+  useEffect(() => { loadRuns(); }, [loadRuns]);
+  useVisibleInterval(load, POLL_MS);
 
   useEffect(() => {
     if (!status?.activeRun) return;

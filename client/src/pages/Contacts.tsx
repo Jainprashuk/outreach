@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
@@ -11,22 +11,11 @@ import { API_BASE, resetForSendApi, type Contact } from '../lib/api';
 import { CATEGORY_OPTIONS } from '../lib/format';
 import { parseCsvText, readFileText } from '../lib/csv';
 import { SkeletonRows } from '../components/Skeleton';
+import { useContactList, loadContactListIds, type ContactListQuery } from '../hooks/useContactList';
 import CreateContactCampaignModal from '../components/CreateContactCampaignModal';
 import ContactDateFilterPanel, {
   countActiveDateFilters, DEFAULT_DATE_FILTERS, type ContactDateFilters,
 } from '../components/ContactDateFilterPanel';
-
-// A local yyyy-mm-dd (from <input type="date">) compared against an ISO timestamp. `to` is
-// inclusive of the whole day, so picking the same date for from/to still matches contacts
-// updated at any time on that day rather than only at midnight.
-const inDateRange = (iso: string | null | undefined, from: string, to: string) => {
-  if (!from && !to) return true;
-  if (!iso) return false;
-  const t = new Date(iso).getTime();
-  if (from && t < new Date(`${from}T00:00:00`).getTime()) return false;
-  if (to && t > new Date(`${to}T23:59:59.999`).getTime()) return false;
-  return true;
-};
 
 const PAGE_SIZE = 25;
 
@@ -58,48 +47,35 @@ export default function Contacts() {
   const [dragOver, setDragOver] = useState(false);
   const [importOk, setImportOk] = useState(false);
   const [error, setError] = useState('');
-  const [loading, setLoading] = useState(!app.loaded);
   const fileRef = useRef<HTMLInputElement>(null);
   const [failReasons, setFailReasons] = useState<Record<string, string>>({});
   const [creatingCampaign, setCreatingCampaign] = useState(false);
 
+  // Templates + settings only: the table pages its contacts on the server.
   useEffect(() => {
-    app.init().catch(err => setError(err.message)).finally(() => setLoading(false));
+    app.initMeta().catch(err => setError(err.message));
   }, []);
 
-  const busy = loading && app.contacts.length === 0;
+  const query: ContactListQuery = {
+    tab, search, status: statusFilter, approval: approvalFilter, template: templateFilter,
+    category: categoryFilter, source: sourceFilter, ...dateFilters,
+  };
+  // Filtered ids are only needed to draw the select-all checkbox, i.e. once something is selected.
+  const list = useContactList(query, page, { withIds: selected.size > 0 });
+  useEffect(() => { if (list.error) setError(list.error); }, [list.error]);
 
-  const filtered = useMemo(() => {
-    let list = app.filterContacts(tab);
-    const q = search.trim().toLowerCase();
-    if (q) list = list.filter(c => (c.name + c.email + c.company).toLowerCase().includes(q));
-    if (statusFilter) list = list.filter(c => c.status === statusFilter);
-    if (approvalFilter) list = list.filter(c => c.approvalStatus === approvalFilter);
-    if (templateFilter) list = list.filter(c => c.template === templateFilter);
-    if (categoryFilter) list = list.filter(c => c.replyCategory === categoryFilter);
-    // Contacts imported before `source` existed are backfilled at boot (db.js), so
-    // a missing value here only ever means an old cached row — treat it as direct.
-    if (sourceFilter) list = list.filter(c => (c.source || 'outreach') === sourceFilter);
-    if (dateFilters.createdFrom || dateFilters.createdTo) {
-      list = list.filter(c => inDateRange(c.createdAt, dateFilters.createdFrom, dateFilters.createdTo));
-    }
-    if (dateFilters.sentFrom || dateFilters.sentTo) {
-      list = list.filter(c => inDateRange(c.lastSentAt, dateFilters.sentFrom, dateFilters.sentTo));
-    }
-    if (dateFilters.repliedFrom || dateFilters.repliedTo) {
-      list = list.filter(c => inDateRange(c.repliedAt, dateFilters.repliedFrom, dateFilters.repliedTo));
-    }
-    return list;
-  }, [app.contacts, tab, search, statusFilter, approvalFilter, templateFilter, categoryFilter, sourceFilter, dateFilters]);
+  const busy = !list.data;
+  const filteredCount = list.data?.total ?? 0;
 
   const dateFilterCount = countActiveDateFilters(dateFilters);
 
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
-  const safePage = Math.min(page, totalPages);
-  const paged = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  const totalPages = list.data?.pages ?? 1;
+  const safePage = list.data?.page ?? 1;
+  const paged = list.data?.contacts ?? [];
 
-  const allChecked = filtered.length > 0 && filtered.every(c => selected.has(c.id));
-  const someChecked = filtered.some(c => selected.has(c.id));
+  const filteredIds = list.data?.ids ?? [];
+  const allChecked = selected.size > 0 && filteredIds.length > 0 && filteredIds.every(id => selected.has(id));
+  const someChecked = selected.size > 0 && filteredIds.some(id => selected.has(id));
 
   const resetPage = () => setPage(1);
 
@@ -113,16 +89,22 @@ export default function Contacts() {
 
   // Quick-select the first N contacts of the current filtered list (replaces the
   // current selection so counts stay predictable across pages).
-  const selectFirst = (n: number) => {
-    setSelected(new Set(filtered.slice(0, n).map(c => c.id)));
+  const selectFirst = async (n: number) => {
+    try {
+      const ids = await loadContactListIds(query);
+      setSelected(new Set(ids.slice(0, n)));
+    } catch (err: any) { toast(err.message, 'error'); }
   };
 
-  const toggleAll = (checked: boolean) => {
-    setSelected(prev => {
-      const next = new Set(prev);
-      filtered.forEach(c => { if (checked) next.add(c.id); else next.delete(c.id); });
-      return next;
-    });
+  const toggleAll = async (checked: boolean) => {
+    try {
+      const ids = await loadContactListIds(query);
+      setSelected(prev => {
+        const next = new Set(prev);
+        ids.forEach(id => { if (checked) next.add(id); else next.delete(id); });
+        return next;
+      });
+    } catch (err: any) { toast(err.message, 'error'); }
   };
 
   const confirmDelete = async (c: Contact) => {
@@ -140,10 +122,8 @@ export default function Contacts() {
     if (!confirm(`Delete ${selected.size} contact${selected.size !== 1 ? 's' : ''}? This will hide them from all views.`)) return;
     const ids = [...selected];
     let failed = 0;
-    for (const id of ids) {
-      try { await app.deleteContact(id); }
-      catch { failed++; }
-    }
+    try { ({ failed } = await app.deleteContacts(ids)); }
+    catch { failed = ids.length; }
     setSelected(new Set());
     toast(
       failed === 0 ? `${ids.length} contact${ids.length !== 1 ? 's' : ''} deleted.` : `${ids.length - failed} deleted, ${failed} failed.`,
@@ -157,7 +137,7 @@ export default function Contacts() {
     const ids = [...selected];
     try {
       await app.bulkUpdateContacts(ids.map(id => ({ id, template })));
-      await app.loadContacts();
+      list.reload();
       toast(`Template updated for ${ids.length} contact${ids.length !== 1 ? 's' : ''}.`, 'success');
     } catch (err: any) {
       toast('Could not update template: ' + err.message, 'error');
@@ -189,7 +169,7 @@ export default function Contacts() {
           ].filter(Boolean).join(' '),
           contacts.length === 0 ? 'error' : 'info',
         );
-        await app.loadContacts();
+        list.reload();
       }
       if (contacts.length === 0) return;
       navigate(`/send/step2?from=contacts&ids=${contacts.map(c => c.id).join(',')}`);
@@ -210,7 +190,7 @@ export default function Contacts() {
         skipped > 0 && created.length === 0 ? 'error' : 'success',
       );
       setImportOk(true);
-      await app.loadContacts();
+      list.reload();
       setPage(1);
       setTimeout(() => setImportOk(false), 3000);
     } catch (err: any) {
@@ -229,7 +209,7 @@ export default function Contacts() {
   const tplName = (key: string) => app.templates[key]?.name || key;
 
   return (
-    <Layout title="Contacts" subtitle={`${filtered.length} contacts`} actions={
+    <Layout title="Contacts" subtitle={`${filteredCount} contacts`} actions={
       <a href="#" className="btn btn-primary" onClick={(e) => { e.preventDefault(); navigate('/add-contacts'); }}>
         <i className="ti ti-user-plus" /> Add contacts
       </a>
@@ -243,7 +223,7 @@ export default function Contacts() {
             </button>
           ))}
         </div>
-        <span className="contact-count-badge">{filtered.length} contacts</span>
+        <span className="contact-count-badge">{filteredCount} contacts</span>
       </div>
 
       <div className="filter-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
@@ -284,7 +264,7 @@ export default function Contacts() {
           {showDateFilters && (
             <ContactDateFilterPanel filters={dateFilters} onChange={patch => { setDateFilters(prev => ({ ...prev, ...patch })); resetPage(); }}
               onReset={() => { setDateFilters(DEFAULT_DATE_FILTERS); resetPage(); }}
-              matched={filtered.length} total={app.contacts.length} onClose={() => setShowDateFilters(false)} />
+              matched={filteredCount} total={list.data?.stats.total ?? 0} onClose={() => setShowDateFilters(false)} />
           )}
         </div>
         <button className="btn btn-sm" type="button" onClick={() => {
@@ -315,14 +295,14 @@ export default function Contacts() {
       <div className="quick-select" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', margin: '14px 0 10px' }}>
         <span style={{ fontSize: 12, color: 'var(--text3)' }}>Quick select:</span>
         {[50, 100, 200, 500].map(n => (
-          <button key={n} className="btn btn-sm" type="button" disabled={filtered.length === 0}
+          <button key={n} className="btn btn-sm" type="button" disabled={filteredCount === 0}
             onClick={() => selectFirst(n)}
             title={`Select the first ${n} contacts in this view`}>
             First {n}
           </button>
         ))}
-        <button className="btn btn-sm" type="button" disabled={filtered.length === 0}
-          onClick={() => toggleAll(true)}>All ({filtered.length})</button>
+        <button className="btn btn-sm" type="button" disabled={filteredCount === 0}
+          onClick={() => toggleAll(true)}>All ({filteredCount})</button>
         <button className="btn btn-sm" type="button" disabled={selected.size === 0}
           onClick={() => setSelected(new Set())}>Clear selection</button>
       </div>

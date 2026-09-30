@@ -9,4 +9,6 @@ const activityLogSchema = new mongoose.Schema({
 }, { timestamps: { createdAt: true, updatedAt: false } });
 
 activityLogSchema.index({ createdAt: -1 });
+// Per-user list index — built on prod by scripts/build-perf-indexes.js.
+activityLogSchema.index({ userId: 1, createdAt: -1 });
 module.exports = mongoose.model('ActivityLog', activityLogSchema);

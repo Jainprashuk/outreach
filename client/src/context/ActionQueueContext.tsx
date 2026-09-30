@@ -56,11 +56,13 @@ export function ActionQueueProvider({ children }: { children: ReactNode }) {
   // Coalesced: marking several replies read in a row is one reload, not one each.
   const pending = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (!enabled || !app.loaded) return;
+    // contactsVersion moves on every contact change the in-memory list used to show,
+    // including on pages that no longer hold that list.
+    if (!enabled || !(app.loaded || app.metaLoaded)) return;
     if (pending.current) clearTimeout(pending.current);
     pending.current = setTimeout(() => reload().catch(() => {}), 400);
     return () => { if (pending.current) clearTimeout(pending.current); };
-  }, [app.contacts, app.loaded, enabled, reload]);
+  }, [app.contactsVersion, app.loaded, app.metaLoaded, enabled, reload]);
 
   const store = useMemo<ActionQueueStore>(() => ({
     loaded, counts, items,

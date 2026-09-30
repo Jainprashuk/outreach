@@ -84,7 +84,8 @@ router.get('/stats/sent-24h', async (req, res) => {
 
     const jobs = await SendJob.find(
       { userId: req.userId, 'items.processedAt': { $gte: since } },
-      { items: 1 }
+      // Only the two fields the loop reads — each item also carries its full email body.
+      { 'items.status': 1, 'items.processedAt': 1 }
     ).lean();
 
     let total = 0;
@@ -108,7 +109,10 @@ router.get('/stats/sent-24h', async (req, res) => {
 });
 
 const ACTIVE_STATUSES = ['pending', 'processing', 'paused'];
-const ACTIVE_PROJECTION = { items: 1, status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1, ratePerHour: 1, campaignId: 1 };
+// Every item field except `body` — nothing in the browser reads the email body
+// back, and it is by far the heaviest part of a polled job.
+const ITEM_FIELDS = ['contactId', 'to', 'name', 'subject', 'status', 'messageId', 'error', 'processedAt'];
+const ACTIVE_PROJECTION = { ...Object.fromEntries(ITEM_FIELDS.map(f => [`items.${f}`, 1])), status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1, ratePerHour: 1, campaignId: 1 };
 
 // Auto-cancel jobs stuck in pending/processing for over 24h with zero progress.
 // These are ghost jobs where Inngest never ran (e.g. server was down when the event fired).
@@ -160,7 +164,7 @@ router.get('/active-all', async (req, res) => {
 // GET /api/jobs/latest — most recent job (any status); used by done.html to find jobId
 router.get('/latest', async (req, res) => {
   try {
-    const job = await SendJob.findOne({ userId: req.userId }).sort({ createdAt: -1 }).lean();
+    const job = await SendJob.findOne({ userId: req.userId }, { 'items.body': 0 }).sort({ createdAt: -1 }).lean();
     res.json(job ? serialize(job) : null);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -216,7 +220,7 @@ router.post('/:id/repair', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const job = await SendJob.findOne({ _id: req.params.id, userId: req.userId }).lean();
+    const job = await SendJob.findOne({ _id: req.params.id, userId: req.userId }, { 'items.body': 0 }).lean();
     if (!job) return res.status(404).json({ error: 'Job not found' });
     res.json(serialize(job));
   } catch (err) {

@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const compression = require('compression');
 const mongoose = require('mongoose');
 const { ImapFlow } = require('imapflow');
 const { simpleParser } = require('mailparser');
@@ -33,6 +34,9 @@ const { serialize: serializeLead, leadOutcomes } = require('./routes/leads');
 
 const app = express();
 app.use(cors());
+// gzip for clients that ask (Accept-Encoding) — the contact lists are JSON that
+// shrinks ~10x. Inngest's handler is left alone: that SDK owns its responses.
+app.use(compression({ filter: (req, res) => !req.path.startsWith('/api/inngest') && compression.filter(req, res) }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false }));
 

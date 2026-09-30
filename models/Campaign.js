@@ -81,6 +81,8 @@ const campaignSchema = new mongoose.Schema({
 // The due-campaign scan.
 campaignSchema.index({ status: 1, deleted: 1 });
 campaignSchema.index({ createdAt: -1 });
+// Per-user list index — built on prod by scripts/build-perf-indexes.js.
+campaignSchema.index({ userId: 1, createdAt: -1 });
 
 campaignSchema.set('toJSON', {
   transform: (doc, ret) => {
