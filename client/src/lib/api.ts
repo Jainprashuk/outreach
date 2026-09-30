@@ -403,6 +403,8 @@ export interface LeadOutcome {
 export type LeadOutcomeMap = Record<string, LeadOutcome>;
 
 export const loadLeadsApi = () => apiFetch<Lead[]>('/api/leads');
+/** Every lead with only links/applyUrl/postUrl — enough to suggest job boards, nothing else. */
+export const loadLeadBoardLinksApi = () => apiFetch<Lead[]>('/api/leads?view=boards');
 
 export const loadLeadOutcomesApi = () =>
   apiFetch<{ outcomes: LeadOutcomeMap; count: number }>('/api/leads/outcomes');
