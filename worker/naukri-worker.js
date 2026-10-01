@@ -31,6 +31,7 @@ const os = require('os');
 const path = require('path');
 const { execFile } = require('child_process');
 const chromeLock = require('./chrome-lock');
+const chromeHealth = require('./chrome-health');
 const { holdAwake, holdWhileAlive, nextWakeAt } = require('./power');
 
 const CFG = {
@@ -319,7 +320,12 @@ async function main() {
       let session = null;
       if (releaseChrome && (chrome || CFG.stub)) {
         try { session = await driver.connect({ cdpPort: CFG.cdpPort }); }
-        catch (err) { log('could not attach to Chrome:', err.message.split('\n')[0]); }
+        catch (err) {
+          log('could not attach to Chrome:', err.message.split('\n')[0]);
+          // Usually a frozen background tab, not anything Naukri-specific.
+          const stuck = await chromeHealth.stuckTabs(CFG.cdpPort).catch(() => []);
+          if (stuck.length) log(chromeHealth.stuckTabsError(stuck));
+        }
       }
 
       let claimed;

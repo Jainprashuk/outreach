@@ -27,6 +27,7 @@ const os = require('os');
 const path = require('path');
 const { spawn, spawnSync, execFile } = require('child_process');
 const chromeLock = require('./chrome-lock');
+const chromeHealth = require('./chrome-health');
 const { wrapAwake, holdAwake, holdWhileAlive, nextWakeAt } = require('./power');
 
 const CFG = {
@@ -162,18 +163,14 @@ async function chromeUp() {
   } catch (_) { return false; }
 }
 
-// `jl doctor` reports the li_at cookie without touching the page.
-//
-// doctor.py emits exactly one positive string for this row, `li_at cookie
-// present`, against three negatives (`logged out …`, `Chrome has no browser
-// context open`, `run ./chrome-debug.sh first`). Match the positive rather
-// than searching for 'li_at', which also appears inside the logged-out row.
-// Rich draws a table, so strip its borders and collapse whitespace first.
+// Read the li_at cookie straight from the browser over CDP. This used to shell
+// out to `jl doctor`, but doctor does a full Playwright attach first, and one
+// frozen background tab hangs that attach past our 20s timeout — the empty
+// output then read as "logged out" while the cookie was sitting right there.
+// See chrome-health.js.
 async function linkedinLoggedIn() {
-  if (!fs.existsSync(jlBin())) return false;
-  const { stdout, stderr } = await run(jlBin(), ['doctor'], { cwd: CFG.jlRepo });
-  const flat = (stdout + stderr).replace(/[│┃|]/g, ' ').replace(/\s+/g, ' ').toLowerCase();
-  return flat.includes('li_at cookie present');
+  try { return await chromeHealth.hasCookie(CFG.cdpPort, 'li_at', 'linkedin.com'); }
+  catch (_) { return false; }
 }
 
 function defaultQueries() {
@@ -308,6 +305,12 @@ async function executeRun(runDoc) {
     }
     if (!await chromeUp()) {
       return finish('failed', { error: 'Could not open Chrome on the debug port. Run chrome-debug.sh by hand.' });
+    }
+    // `jl harvest` attaches to every tab; a frozen one hangs it. Name them
+    // now instead of failing in a way that looks like something else.
+    const stuck = await chromeHealth.stuckTabs(CFG.cdpPort).catch(() => []);
+    if (stuck.length) {
+      return finish('failed', { error: chromeHealth.stuckTabsError(stuck) });
     }
     if (!await linkedinLoggedIn()) {
       // A login wall is a human problem. Retrying would just burn runs.
