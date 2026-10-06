@@ -140,6 +140,16 @@ async function main() {
     r = await api(`/api/prospects/search/${intruderSearch._id}`);
     ok("another user's search is 404", r.status === 404);
 
+    // ── cancel ─────────────────────────────────────────────────────────────
+    const mine = await ProspectSearch.create({ userId, domain: DOMAIN, status: 'queued', steps: ProspectSearch.STEP_KEYS.map(key => ({ key })) });
+    r = await api(`/api/prospects/search/${mine._id}/cancel`, { method: 'POST' });
+    ok('cancel a running search', r.status === 200 && r.body.cancelled === true && r.body.search.status === 'error' && r.body.search.error === 'Cancelled', r.text);
+    ok('its waiting steps are skipped', r.body.search.steps.every(st => st.status === 'skipped'));
+    r = await api(`/api/prospects/search/${mine._id}/cancel`, { method: 'POST' });
+    ok('cancelling a finished search changes nothing', r.status === 200 && r.body.cancelled === false);
+    r = await api(`/api/prospects/search/${intruderSearch._id}/cancel`, { method: 'POST' });
+    ok("can't cancel another user's search", r.status === 404 && (await ProspectSearch.findById(intruderSearch._id).lean()).status === 'queued');
+
     // ── shared inbox ───────────────────────────────────────────────────────
     r = await api('/api/prospects/add-generic', { method: 'POST', body: { domain: DOMAIN, email: `careers@${DOMAIN}` } });
     ok('shared inbox added as generic', r.status === 201 && r.body.prospect.emailConfidence === 'generic', r.text);
