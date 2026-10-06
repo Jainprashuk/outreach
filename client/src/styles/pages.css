@@ -276,3 +276,14 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
 /* Discover: history */
 .tc-hist-row td { vertical-align: middle; }
 .tc-mini { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+
+/* Sidebar ⓘ: what each tab does. Faint until the row is hovered, so the rail stays calm. */
+.nav-item .nav-tip { margin-left: auto; display: inline-flex; align-items: center; padding: 2px; border-radius: 6px; color: var(--text3); opacity: .35; transition: opacity .12s, color .12s; cursor: help; outline: none; }
+.nav-item:hover .nav-tip, .nav-item .nav-tip:focus-visible { opacity: 1; }
+.nav-item .nav-tip:hover, .nav-item .nav-tip:focus-visible { color: var(--accent); }
+.nav-item .nav-tip .ti { font-size: 14px; margin: 0; }
+.nav-tip-body {
+  position: fixed; transform: translateY(-50%); z-index: 1000; pointer-events: none;
+  padding: 9px 11px; border-radius: 8px; background: var(--text); color: var(--bg);
+  font-size: 12px; line-height: 1.45; box-shadow: 0 6px 20px rgba(0,0,0,.2);
+}

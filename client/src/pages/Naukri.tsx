@@ -4,6 +4,7 @@ import { naukriOverviewApi, naukriConfigApi, queueNaukriRunApi, cancelNaukriRunA
 import Layout from '../components/Layout';
 import { useToast } from '../context/ToastContext';
 import StatusHeader, { readiness } from '../components/naukri/StatusHeader';
+import NaukriSetupGuide, { type NaukriGuideTab } from '../components/naukri/NaukriSetupGuide';
 import RunTimeline, { ActiveRun } from '../components/naukri/RunTimeline';
 import ReviewQueue from '../components/naukri/ReviewQueue';
 import AppliedTable from '../components/naukri/AppliedTable';
@@ -47,6 +48,7 @@ const TABS: Array<[View, string, string]> = [
 export default function Naukri() {
   const [overview, setOverview] = useState<NaukriOverview | null>(null);
   const [config, setConfig] = useState<NaukriConfig | null>(null);
+  const [guide, setGuide] = useState<NaukriGuideTab | null>(null);
   const [view, setView] = useState<View>('activity');
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -99,8 +101,10 @@ export default function Naukri() {
 
   if (!overview) {
     return (
-      <Layout title="Naukri" subtitle="Auto-apply worker">
+      <Layout title="Naukri" subtitle="Auto-apply worker"
+        actions={<button className="btn btn-sm" type="button" onClick={() => setGuide('how')}><i className="ti ti-book" /> Guide</button>}>
         <Empty icon="ti-loader">{error || 'Loading…'}</Empty>
+        {guide && <NaukriSetupGuide initialTab={guide} onClose={() => setGuide(null)} />}
       </Layout>
     );
   }
@@ -128,6 +132,10 @@ export default function Naukri() {
       subtitle={subtitle}
       actions={
         <>
+          <button className="btn btn-sm" type="button" onClick={() => setGuide(overview.worker.everSeen ? 'how' : 'setup')}
+            title="How the Naukri worker works and how to set it up">
+            <i className="ti ti-book" /> Guide
+          </button>
           <button className="btn btn-sm" type="button" onClick={() => start('refresh')} disabled={!canStart}>
             <i className="ti ti-refresh" /> Refresh
           </button>
@@ -152,7 +160,7 @@ export default function Naukri() {
         </div>
       </div>
 
-      <StatusHeader overview={overview} />
+      <StatusHeader overview={overview} onHelp={() => setGuide('setup')} />
 
       {error && <Notice tone="danger" icon="ti-alert-triangle">{error}</Notice>}
 
@@ -248,6 +256,7 @@ export default function Naukri() {
           </>
         ) : <Empty icon="ti-loader">Loading configuration…</Empty>
       )}
+      {guide && <NaukriSetupGuide initialTab={guide} onClose={() => setGuide(null)} />}
     </Layout>
   );
 }
