@@ -5,6 +5,7 @@ import { useSession } from '../context/SessionContext';
 import { useInterviews } from '../context/InterviewContext';
 import { useActionQueue } from '../context/ActionQueueContext';
 import SendJobWidget from './SendJobWidget';
+import NavTip from './NavTip';
 
 export default function Layout({ title, subtitle, actions, children, wide, minimal }: {
   title: string;
@@ -62,9 +63,11 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
       {!minimal && (<>
       <NavLink to="/" end className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-layout-dashboard" /> Dashboard
+        <NavTip text="Your outreach at a glance — replies waiting on you, sent, bounced and follow-ups due — with every contact below it." />
       </NavLink>
       <NavLink to="/analytics" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-chart-histogram" /> Analytics
+        <NavTip text="How your outreach is doing: the reply funnel, which templates and companies work, response speed — plus reports as a PDF or by email." />
       </NavLink>
       {/* High up on purpose: the people who actually got back to you are the
           ones worth checking first. Both Contacts and Leads feed this. */}
@@ -73,30 +76,38 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
         {needsAttention > 0 && (
           <span className="tab-badge" title="Upcoming interviews or follow-ups due">{needsAttention}</span>
         )}
+        <NavTip text="People who got back to you, and the interviews in progress — stages, dates and reminders." />
       </NavLink>
       <NavLink to="/contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-users" /> Contacts
+        <NavTip text="Everyone in your outreach. Search and filter by status, edit details, or pick people to email." />
       </NavLink>
       <NavLink to="/mailbox" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-mail-opened" /> Mailbox
         {needsYou > 0 && (
           <span className="tab-badge" title="Replies waiting on you">{needsYou}</span>
         )}
+        <NavTip text="Replies to your emails. “Needs you” lists the ones waiting for your answer — reply right from here." />
       </NavLink>
       <NavLink to="/leads" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-target-arrow" /> Leads
+        <NavTip text="Hiring posts collected from LinkedIn, with recruiters’ emails and apply links. Move the good ones to outreach." />
       </NavLink>
       <NavLink to="/discover" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-compass" /> Discover
+        <NavTip text="Type a company: find people who work there and guess their work email. You choose who moves to outreach." />
       </NavLink>
       <NavLink to="/naukri" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-briefcase-2" /> Naukri
+        <NavTip text="Keeps your Naukri profile fresh and applies to the jobs you approve, using a worker on your computer." />
       </NavLink>
       <NavLink to="/campaigns" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-calendar-repeat" /> Campaigns
+        <NavTip text="Hands-off sending: give it a list and it emails a set number of people a day for you." />
       </NavLink>
       <NavLink to="/logs" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-list-details" /> Logs
+        <NavTip text="A record of everything the app did — sends, imports, scrapes, errors — for checking what happened and when." />
       </NavLink>
 
       <button type="button" className={`nav-item nav-group${inOthers && !othersOpen ? ' has-active' : ''}`}
@@ -108,30 +119,37 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
       <div id="nav-others" className="nav-children" hidden={!showOthers}>
         <NavLink to="/add-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
           <i className="ti ti-user-plus" /> Add Contacts
+          <NavTip text="Add people to your outreach — upload a CSV or type them in." />
         </NavLink>
         <NavLink to="/jobs" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
           <i className="ti ti-briefcase" /> Jobs
+          <NavTip text="Open roles pulled from company job boards (Greenhouse, Lever and others) that match what you’re looking for." />
         </NavLink>
         <NavLink to="/templates" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
           <i className="ti ti-file-text" /> Templates
+          <NavTip text="The emails you send, written once with {{name}}-style blanks that fill in for each person." />
         </NavLink>
         <NavLink to="/blocklist" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
           <i className="ti ti-ban" /> Blocklist
+          <NavTip text="Addresses and whole companies that must never be emailed." />
         </NavLink>
         <NavLink to="/export-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
           <i className="ti ti-file-export" /> Export Contacts
+          <NavTip text="Download your contacts as a spreadsheet, or share a read-only link to them." />
         </NavLink>
       </div>
 
       <div className="nav-section-label">Account</div>
       <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-settings" /> Settings
+        <NavTip text="Your sender name, Gmail connection, resume, and the keys and tokens the app uses." />
       </NavLink>
       {/* Display only. routes/admin.js re-checks isAdmin on every request and is
           the actual boundary; hiding the link just keeps it out of the way. */}
       {isAdmin && (
         <NavLink to="/admin" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
           <i className="ti ti-shield-lock" /> Admin
+          <NavTip text="Manage who can use the app and see app-wide numbers. Admins only." />
         </NavLink>
       )}
       </>)}

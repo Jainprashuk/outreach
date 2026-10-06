@@ -73,7 +73,7 @@ const Dot = ({ on, children }: { on: boolean; children: React.ReactNode }) => (
   </span>
 );
 
-export default function StatusHeader({ overview }: { overview: NaukriOverview }) {
+export default function StatusHeader({ overview, onHelp }: { overview: NaukriOverview; onHelp?: () => void }) {
   const r = readiness(overview);
   const w = overview.worker;
 
@@ -90,6 +90,11 @@ export default function StatusHeader({ overview }: { overview: NaukriOverview })
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ fontSize: 13, color: r.tone === 'bad' ? 'var(--red)' : 'var(--text)', lineHeight: 1.5 }}>
           {r.text}
+          {onHelp && !overview.worker.everSeen && (
+            <button className="btn btn-xs" type="button" onClick={onHelp} style={{ marginLeft: 8 }}>
+              <i className="ti ti-book" /> Setup guide
+            </button>
+          )}
         </div>
         {/* The raw facts under the sentence, so a state the sentence does not
             cover is still diagnosable without opening the database. */}

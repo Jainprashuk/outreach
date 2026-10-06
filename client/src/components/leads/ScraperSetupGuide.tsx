@@ -510,3 +510,6 @@ export default function ScraperSetupGuide({ onClose, initialTab = 'how' }: {
 }
 
 export type { Tab as GuideTab };
+// Shared with the Naukri guide (components/naukri/NaukriSetupGuide.tsx) so both read alike.
+export { Code, C, Step, Note, H, P, detectOs, SCRAPER_REPO, PORTAL_REPO };
+export type { Os };
