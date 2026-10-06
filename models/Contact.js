@@ -13,6 +13,12 @@ const contactSchema = new mongoose.Schema({
   // spreadsheet. Default is 'outreach' because that is what a bare insert means.
   source:       { type: String, enum: ['outreach', 'lead'], default: 'outreach' },
   sourceLeadId: { type: String, default: null },
+  // Set only on contacts moved in from the Discover tab, whose address was
+  // guessed (see lib/patternScore.js). No defaults on purpose: every other contact
+  // keeps no such key at all, so nothing that reads them changes.
+  prospectId:      { type: String },
+  emailConfidence: { type: String, enum: ['high', 'medium', 'low', 'generic'] },
+  emailPattern:    { type: String },
   status: { type: String, enum: ['queued', 'in-campaign', 'sent', 'follow-up-sent', 'failed', 'bounced', 'replied', 'follow-up-replied', 'closed', 'no-openings', 'in-review', 'blocked'], default: 'queued' },
   approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   editedSubject: { type: String, default: null },
