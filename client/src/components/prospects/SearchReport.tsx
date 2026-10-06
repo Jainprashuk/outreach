@@ -159,9 +159,10 @@ const COLOR: Record<Tone, string> = {
   good: 'var(--green)', info: 'var(--blue)', warn: 'var(--amber)', bad: 'var(--red)', muted: 'var(--text3)', busy: 'var(--accent)',
 };
 
-export default function SearchReport({ search, onSetOrg, defaultOpen }: {
+export default function SearchReport({ search, onSetOrg, onCancel, defaultOpen }: {
   search: ProspectSearch;
   onSetOrg?: () => void;
+  onCancel?: () => void;
   defaultOpen?: boolean;
 }) {
   const running = search.status === 'queued' || search.status === 'running';
@@ -174,7 +175,7 @@ export default function SearchReport({ search, onSetOrg, defaultOpen }: {
   const summary = running
     ? `Searching ${search.companyName || search.domain}… step ${Math.min(done + 1, search.steps.length)} of ${search.steps.length}`
     : search.status === 'error'
-      ? (search.error || 'This search failed')
+      ? (search.error === 'Cancelled' ? 'You cancelled this search — people already found are kept' : (search.error || 'This search failed'))
       : `Found ${plural(c.people || 0, 'person', 'people')}${c.added != null ? ` (${c.added} new)` : ''} · ${ago(search.finishedAt || search.createdAt)}`;
 
   return (
@@ -190,6 +191,13 @@ export default function SearchReport({ search, onSetOrg, defaultOpen }: {
           </span>
         </span>
         {needsYou && !running && !isOpen && <span className="badge badge-pending">Tips inside</span>}
+        {running && onCancel && (
+          <span role="button" tabIndex={0} className="btn btn-xs btn-danger"
+            onClick={e => { e.stopPropagation(); onCancel(); }}
+            onKeyDown={e => { if (e.key === 'Enter') { e.stopPropagation(); onCancel(); } }}>
+            <i className="ti ti-x" /> Cancel
+          </span>
+        )}
         <i className={`ti ti-chevron-down nav-caret${isOpen ? ' open' : ''}`} />
       </button>
       {running && (

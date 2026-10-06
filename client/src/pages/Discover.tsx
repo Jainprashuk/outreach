@@ -12,7 +12,7 @@ import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useVisibleInterval } from '../hooks/useVisibleInterval';
 import {
-  addGenericProspectApi, clearHistoryApi, companyFormatApi, prospectHistoryApi, removeSearchApi, discardProspectsApi, discoveryConfigApi, loadProspectsApi,
+  addGenericProspectApi, cancelSearchApi, clearHistoryApi, companyFormatApi, prospectHistoryApi, removeSearchApi, discardProspectsApi, discoveryConfigApi, loadProspectsApi,
   moveProspectsApi, prospectCompaniesApi, prospectSearchApi, recheckCompanyApi, restoreProspectsApi,
   setGithubOrgApi, startProspectSearchApi, lookupCompanyApi, updateProspectApi,
   type CompanyCandidate, type CompanyFormat, type DiscoveryConfigView, type EmailConfidence, type MoveProspectsResult,
@@ -724,7 +724,17 @@ export default function Discover() {
           onAddGeneric={addGeneric} onSetOrg={setOrg} />
       )}
 
-      {search && search.domain === domain && <SearchReport key={search.id} search={search} onSetOrg={setOrg} />}
+      {search && search.domain === domain && (
+        <SearchReport key={search.id} search={search} onSetOrg={setOrg}
+          onCancel={async () => {
+            try {
+              const r = await cancelSearchApi(search.id);
+              setSearch(r.search);
+              toast(r.cancelled ? 'Search cancelled — anyone already found is kept' : 'That search had already finished', 'info');
+              loadHistory();
+            } catch (err: any) { toast(err.message, 'error'); }
+          }} />
+      )}
 
       {domain && (
         <>

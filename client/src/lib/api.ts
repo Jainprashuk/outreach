@@ -1872,6 +1872,8 @@ export const removeDiscoveryKeyApi = (provider: DiscoveryProvider) =>
 export const startProspectSearchApi = (body: { domain: string; companyName?: string; roles?: string[]; force?: boolean }) =>
   apiFetch<{ search: ProspectSearch }>('/api/prospects/search', { method: 'POST', ...json(body) });
 export const prospectSearchApi = (id: string) => apiFetch<{ search: ProspectSearch }>(`/api/prospects/search/${id}`);
+export const cancelSearchApi = (id: string) =>
+  apiFetch<{ ok: boolean; cancelled: boolean; search: ProspectSearch }>(`/api/prospects/search/${id}/cancel`, { method: 'POST' });
 export const prospectHistoryApi = () => apiFetch<{ searches: ProspectSearch[] }>('/api/prospects/searches');
 export const removeSearchApi = (id: string) => apiFetch<{ ok: boolean }>(`/api/prospects/searches/${id}`, { method: 'DELETE' });
 export const clearHistoryApi = () => apiFetch<{ ok: boolean; cleared: number }>('/api/prospects/searches', { method: 'DELETE' });

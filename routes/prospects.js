@@ -189,6 +189,23 @@ router.delete('/searches', async (req, res) => {
   } catch (err) { err500(res, err); }
 });
 
+// POST /api/prospects/search/:id/cancel — stop a running search. The background
+// function checks the status before every step, so it stops at the next one; people
+// already found stay.
+router.post('/search/:id/cancel', async (req, res) => {
+  try {
+    if (!isId(req.params.id)) return res.status(404).json({ error: 'Not found' });
+    const r = await ProspectSearch.updateOne(
+      { _id: req.params.id, userId: req.userId, status: { $in: ['queued', 'running'] } },
+      { $set: { status: 'error', error: 'Cancelled', finishedAt: new Date(), 'steps.$[s].status': 'skipped' } },
+      { arrayFilters: [{ 's.status': { $in: ['pending', 'running'] } }] },
+    );
+    const s = await ProspectSearch.findOne({ _id: req.params.id, userId: req.userId }).lean();
+    if (!s) return res.status(404).json({ error: 'Not found' });
+    res.json({ ok: true, cancelled: r.modifiedCount === 1, search: serialize(present(s)) });
+  } catch (err) { err500(res, err); }
+});
+
 // GET /api/prospects/companies — every company you've searched, newest first.
 router.get('/companies', async (req, res) => {
   try {
