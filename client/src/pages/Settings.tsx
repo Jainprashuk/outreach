@@ -12,6 +12,7 @@ import SmtpChart from '../components/SmtpChart';
 import TokenCard from '../components/TokenCard';
 import EmailPrefsCard from '../components/EmailPrefsCard';
 import ReplyProfileCard from '../components/ReplyProfileCard';
+import DiscoveryKeysCard from '../components/DiscoveryKeysCard';
 
 const VARIABLE_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
@@ -239,6 +240,8 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      <DiscoveryKeysCard />
 
       {/* RESUME */}
       <div className="s-card" style={{ animationDelay: '.12s' }}>

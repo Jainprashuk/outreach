@@ -54,6 +54,10 @@ export interface Contact {
   /** Where the contact entered outreach: promoted from the Leads board, or fed in directly. */
   source: 'outreach' | 'lead';
   sourceLeadId: string | null;
+  /** Only on contacts moved in from the Discover tab, whose address was guessed. */
+  prospectId?: string;
+  emailConfidence?: EmailConfidence;
+  emailPattern?: string;
   status: ContactStatus;
   approvalStatus: ApprovalStatus;
   editedSubject: string | null;
@@ -1741,3 +1745,168 @@ export const reportPdfUrl = (q: ReportPeriodQuery) => `${API_BASE}/api/reports/p
 export const reportWeeksApi = () => apiFetch<{ weeks: Array<{ week: string; label: string }> }>('/api/reports/weeks');
 export const emailReportApi = (q: ReportPeriodQuery) =>
   apiFetch<{ ok: true; to: string }>(`/api/reports/email?${reportQueryString(q)}`, { method: 'POST' });
+
+// ── Discover (prospects) ──────────────────────────────────────────────
+
+export type EmailConfidence = 'high' | 'medium' | 'low' | 'generic';
+export type ProspectStatus = 'new' | 'ready' | 'moved' | 'discarded' | 'error';
+export type DiscoveryProvider = 'tavily' | 'serpapi' | 'hunter' | 'github';
+
+export interface Prospect {
+  id: string;
+  domain: string;
+  company: string;
+  name: string;
+  title: string;
+  linkedin: string | null;
+  foundVia: string[];
+  roleMatch: boolean;
+  knownEmail: string | null;
+  email: string | null;
+  emailPattern: string | null;
+  emailConfidence: EmailConfidence | null;
+  emailSource: string | null;
+  note: string;
+  status: ProspectStatus;
+  existingContactId: string | null;
+  contactedAs: string | null;
+  contactId: string | null;
+  movedAt: string | null;
+  createdAt: string;
+}
+
+export interface ProspectSearchStep {
+  key: 'company' | 'people-search' | 'github' | 'website' | 'pattern' | 'emails';
+  status: 'pending' | 'running' | 'done' | 'skipped' | 'error';
+  found: number;
+  detail: string;
+  /** Facts for the plain-English report; shape varies per step. */
+  info?: Record<string, any>;
+  at: string | null;
+}
+
+export interface ProspectSearch {
+  id: string;
+  domain: string;
+  companyName: string;
+  roles: string[];
+  status: 'queued' | 'running' | 'done' | 'error';
+  steps: ProspectSearchStep[];
+  counts: { people: number; withEmail: number; added?: number; high?: number; medium?: number; low?: number; generic?: number; manual?: number; none?: number };
+  error: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface ProspectCompany {
+  domain: string;
+  companyName: string;
+  lastSearchAt: string;
+  lastSearchId: string;
+  total: number;
+  open: number;
+  moved: number;
+}
+
+export interface PatternSummary {
+  pattern: string;
+  score: number;
+  replies: number;
+  delivered: number;
+  hardBounces: number;
+  real: number;
+  hunter: boolean;
+}
+
+export interface CompanyFormat {
+  domain: string;
+  companyName: string;
+  hasMx: boolean | null;
+  githubOrg: string | null;
+  githubOrgManual: boolean;
+  githubCheckedAt: string | null;
+  websiteCheckedAt: string | null;
+  hunterAskedAt: string | null;
+  genericEmails: string[];
+  samples: Record<string, number>;
+  contactsAtDomain: number;
+  decision: {
+    pattern: string;
+    confidence: 'high' | 'medium' | 'low';
+    source: string;
+    runnerUp: string | null;
+    patterns: PatternSummary[];
+  };
+  defaultGuess: string;
+}
+
+export interface DiscoveryConfigView {
+  keys: Record<DiscoveryProvider, boolean>;
+  usage: { month: string; tavily: number; serpapi: number; hunter: number };
+  caps: Record<DiscoveryProvider, number | null>;
+  canStoreKeys: boolean;
+  dailyGuessCap: number;
+  guessesMovedToday: number;
+}
+
+export interface MoveProspectsResult {
+  ok: boolean;
+  moved: number;
+  alreadyMoved: number;
+  notReady: number;
+  blocked: number;
+  duplicates: number;
+  overCap: number;
+  guessesLeftToday: number;
+  dailyGuessCap: number;
+}
+
+const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
+
+export const discoveryConfigApi = () => apiFetch<DiscoveryConfigView>('/api/prospects/config');
+export const saveDiscoveryKeysApi = (keys: Partial<Record<DiscoveryProvider, string>>) =>
+  apiFetch<DiscoveryConfigView>('/api/prospects/config', { method: 'PUT', ...json(keys) });
+export const removeDiscoveryKeyApi = (provider: DiscoveryProvider) =>
+  apiFetch<DiscoveryConfigView>(`/api/prospects/config/${provider}`, { method: 'DELETE' });
+
+export const startProspectSearchApi = (body: { domain: string; companyName?: string; roles?: string[]; force?: boolean }) =>
+  apiFetch<{ search: ProspectSearch }>('/api/prospects/search', { method: 'POST', ...json(body) });
+export const prospectSearchApi = (id: string) => apiFetch<{ search: ProspectSearch }>(`/api/prospects/search/${id}`);
+export const prospectHistoryApi = () => apiFetch<{ searches: ProspectSearch[] }>('/api/prospects/searches');
+export const removeSearchApi = (id: string) => apiFetch<{ ok: boolean }>(`/api/prospects/searches/${id}`, { method: 'DELETE' });
+export const clearHistoryApi = () => apiFetch<{ ok: boolean; cleared: number }>('/api/prospects/searches', { method: 'DELETE' });
+export const prospectCompaniesApi = () => apiFetch<{ companies: ProspectCompany[] }>('/api/prospects/companies');
+export interface CompanyCandidate {
+  domain: string;
+  name: string;
+  source: 'contacts' | 'directory' | 'guess' | 'typed';
+  contacts: number;
+  /** Safe to pick without asking. */
+  exact: boolean;
+}
+export const lookupCompanyApi = (q: string) =>
+  apiFetch<{ candidates: CompanyCandidate[] }>(`/api/prospects/lookup?q=${encodeURIComponent(q)}`);
+export const suggestDomainsApi = (q: string) =>
+  apiFetch<{ domains: { domain: string; contacts: number }[] }>(`/api/prospects/domains/suggest?q=${encodeURIComponent(q)}`);
+
+export const loadProspectsApi = (params: { domain?: string; status?: string; confidence?: string; q?: string }) => {
+  const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
+  return apiFetch<{ prospects: Prospect[]; total: number; page: number; pages: number }>(`/api/prospects?${qs}`);
+};
+export const updateProspectApi = (id: string, patch: { name?: string; title?: string; email?: string }) =>
+  apiFetch<{ prospect: Prospect }>(`/api/prospects/${id}`, { method: 'PATCH', ...json(patch) });
+export const moveProspectsApi = (ids: string[], template: string) =>
+  apiFetch<MoveProspectsResult>('/api/prospects/move', { method: 'POST', ...json({ ids, template }) });
+export const discardProspectsApi = (ids: string[]) =>
+  apiFetch<{ ok: boolean; discarded: number }>('/api/prospects/discard', { method: 'POST', ...json({ ids }) });
+export const restoreProspectsApi = (ids: string[]) =>
+  apiFetch<{ ok: boolean; restored: number }>('/api/prospects/restore', { method: 'POST', ...json({ ids }) });
+export const addGenericProspectApi = (domain: string, email: string) =>
+  apiFetch<{ prospect: Prospect; existed?: boolean }>('/api/prospects/add-generic', { method: 'POST', ...json({ domain, email }) });
+
+export const companyFormatApi = (domain: string) => apiFetch<CompanyFormat>(`/api/prospects/patterns/${encodeURIComponent(domain)}`);
+export const setGithubOrgApi = (domain: string, githubOrg: string) =>
+  apiFetch<{ ok: boolean; githubOrg: string | null }>(`/api/prospects/patterns/${encodeURIComponent(domain)}`, { method: 'PATCH', ...json({ githubOrg }) });
+export const recheckCompanyApi = (domain: string) =>
+  apiFetch<{ ok: boolean; people: number; withEmail: number; pattern: string; confidence: string }>(
+    `/api/prospects/patterns/${encodeURIComponent(domain)}/recheck`, { method: 'POST' });

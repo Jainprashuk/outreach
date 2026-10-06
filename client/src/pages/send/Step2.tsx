@@ -3,6 +3,7 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import Avatar from '../../components/Avatar';
 import StatusBadge from '../../components/StatusBadge';
+import ConfidenceBadge from '../../components/ConfidenceBadge';
 import Stepper from './Stepper';
 import { useApp } from '../../context/AppContext';
 import { useToast } from '../../context/ToastContext';
@@ -63,8 +64,12 @@ export default function Step2() {
   const setApproval = (idx: number, val: ApprovalStatus) =>
     setApprovals(as => as.map((a, i) => (i === idx ? { ...a, localApproval: val } : a)));
 
+  // A low-confidence address (guessed on the Discover tab with no proof) is
+  // never approved in bulk — each one is checked by hand. Every other contact has
+  // no emailConfidence at all, so for them this is exactly the old behaviour.
   const approveAll = () =>
-    setApprovals(as => as.map(a => (a.localApproval === 'pending' ? { ...a, localApproval: 'approved' } : a)));
+    setApprovals(as => as.map(a => (a.localApproval === 'pending' && a.emailConfidence !== 'low' ? { ...a, localApproval: 'approved' } : a)));
+  const lowPending = approvals.filter(a => a.emailConfidence === 'low' && a.localApproval === 'pending').length;
 
   const openEdit = (idx: number) => {
     const a = approvals[idx];
@@ -122,7 +127,13 @@ export default function Step2() {
           <i className="ti ti-info-circle" style={{ fontSize: 15, flexShrink: 0, marginTop: 1 }} />
           {' '}Review the personalised email for each contact. Approve, edit, or reject before sending. Rejected contacts will be skipped.
         </div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12 }}>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+          {lowPending > 0 && (
+            <span style={{ fontSize: 12, color: 'var(--text2)' }}
+              title="Guessed addresses with no proof. Approve all leaves them for you to check one by one.">
+              <i className="ti ti-alert-triangle" style={{ color: 'var(--red)' }} /> {lowPending} low-confidence guess{lowPending !== 1 ? 'es' : ''} to check one by one
+            </span>
+          )}
           <button className="btn btn-sm" onClick={approveAll} type="button"><i className="ti ti-checks" /> Approve all</button>
         </div>
 
@@ -148,7 +159,10 @@ export default function Step2() {
                     <div style={{ fontSize: 11, color: 'var(--text2)', wordBreak: 'break-word' }}>{a.email} · {app.templates[a.template]?.name || a.template}</div>
                   </div>
                 </div>
-                <StatusBadge status={a.localApproval} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                  {a.emailConfidence && <ConfidenceBadge confidence={a.emailConfidence} pattern={a.emailPattern} />}
+                  <StatusBadge status={a.localApproval} />
+                </div>
               </div>
               <div className="template-preview" style={isRejected ? { opacity: 0.45 } : undefined}>
                 <div className="subject"><i className="ti ti-mail" style={{ fontSize: 13, marginRight: 4 }} />{displaySubject}</div>

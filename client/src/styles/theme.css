@@ -161,7 +161,9 @@ body {
   background: var(--accent-grad); color: #fff; border-color: transparent;
   box-shadow: 0 4px 14px -2px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.25);
 }
-.btn-primary:hover { filter: brightness(1.06); box-shadow: 0 8px 22px -3px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.25); transform: translateY(-1px); }
+/* Keeps the gradient: the generic .btn:hover above outranks .btn-primary and would
+   swap it for the light hover background, leaving white text on near-white. */
+.btn-primary:hover { background: var(--accent-grad); filter: brightness(1.06); box-shadow: 0 8px 22px -3px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.25); transform: translateY(-1px); }
 .btn-success { background: var(--green-bg); color: var(--green); border-color: color-mix(in srgb, var(--green) 26%, transparent); box-shadow: none; }
 .btn-danger  { background: var(--red-bg);   color: var(--red);   border-color: color-mix(in srgb, var(--red) 26%, transparent);   box-shadow: none; }
 .btn-sm { padding: 6px 11px; font-size: 12.5px; border-radius: 8px; }

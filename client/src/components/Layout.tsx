@@ -86,6 +86,9 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
       <NavLink to="/leads" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-target-arrow" /> Leads
       </NavLink>
+      <NavLink to="/discover" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
+        <i className="ti ti-compass" /> Discover
+      </NavLink>
       <NavLink to="/naukri" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
         <i className="ti ti-briefcase-2" /> Naukri
       </NavLink>

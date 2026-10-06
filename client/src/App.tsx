@@ -4,6 +4,7 @@ import Dashboard from './pages/Dashboard';
 import Contacts from './pages/Contacts';
 import Mailbox from './pages/Mailbox';
 import Leads from './pages/Leads';
+import Discover from './pages/Discover';
 import Naukri from './pages/Naukri';
 import Jobs from './pages/Jobs';
 import CampaignsRouter from './pages/campaigns/CampaignsRouter';
@@ -23,6 +24,12 @@ import Step3 from './pages/send/Step3';
 import Done from './pages/send/Done';
 import NotAuthorised from './components/NotAuthorised';
 import { useSession } from './context/SessionContext';
+
+// /target-company was this tab's first name; old links and bookmarks still land.
+function DiscoverRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={`/discover${search}`} replace />;
+}
 
 // Owner-only pages render "Not authorised" for share/unauthenticated visitors.
 function OwnerOnly({ children }: { children: ReactNode }) {
@@ -74,6 +81,8 @@ export default function App() {
     <Routes>
       <Route path="/" element={owner(<Dashboard />)} />
       <Route path="/leads" element={owner(<Leads />)} />
+      <Route path="/discover" element={owner(<Discover />)} />
+      <Route path="/target-company" element={<DiscoverRedirect />} />
       <Route path="/jobs" element={owner(<Jobs />)} />
       <Route path="/naukri" element={owner(<Naukri />)} />
       {/* Splat route: the list, wizard and detail screens live in CampaignsRouter. */}
