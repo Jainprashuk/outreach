@@ -167,10 +167,8 @@ async function main() {
     r = await api('/api/prospects/add-generic', { method: 'POST', body: { domain: DOMAIN, email: `ceo@${DOMAIN}` } });
     ok('only addresses actually found on the site', r.status === 404);
 
-    // ── daily cap on guesses ───────────────────────────────────────────────
-    console.log('\ndaily cap');
-    r = await api('/api/prospects/config');
-    const left = r.body.dailyGuessCap - r.body.guessesMovedToday;
+    // ── no daily limit on guesses ──────────────────────────────────────────
+    console.log('\nmove many');
     const names = ['Aarav Shah', 'Diya Nair', 'Kabir Rao', 'Isha Jain', 'Vivaan Das', 'Anaya Bose', 'Reyansh Iyer', 'Myra Sen',
       'Arjun Pillai', 'Sia Gill', 'Advik Roy', 'Kiara Dutta', 'Ayaan Ghosh', 'Pari Menon', 'Ishaan Bhat', 'Navya Kapoor'];
     const lows = await Prospect.insertMany(names.map(n => ({
@@ -178,10 +176,7 @@ async function main() {
       email: `${n.toLowerCase().replace(' ', '.')}@${DOMAIN2}`, emailConfidence: 'low', emailPattern: 'first.last', emailSource: 'default',
     })));
     r = await api('/api/prospects/move', { method: 'POST', body: { ids: lows.map(d => String(d._id)), template: '' } });
-    const expect = Math.max(0, Math.min(16, left));
-    ok(`at most ${left} guesses move today`, r.body.moved === expect && r.body.overCap === 16 - expect, r.text);
-    r = await api('/api/prospects/config');
-    ok('cap counter updated', r.body.guessesMovedToday === r.body.dailyGuessCap - Math.max(0, left - expect));
+    ok('16 low guesses all move at once — no daily limit', r.body.moved === 16 && !('overCap' in r.body), r.text);
 
     // ── keys ───────────────────────────────────────────────────────────────
     console.log('\nkeys');

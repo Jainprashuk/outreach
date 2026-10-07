@@ -1875,8 +1875,6 @@ export interface DiscoveryConfigView {
   usage: { month: string; tavily: number; serpapi: number; hunter: number };
   caps: Record<DiscoveryProvider, number | null>;
   canStoreKeys: boolean;
-  dailyGuessCap: number;
-  guessesMovedToday: number;
 }
 
 export interface MoveProspectsResult {
@@ -1886,9 +1884,6 @@ export interface MoveProspectsResult {
   notReady: number;
   blocked: number;
   duplicates: number;
-  overCap: number;
-  guessesLeftToday: number;
-  dailyGuessCap: number;
 }
 
 const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });

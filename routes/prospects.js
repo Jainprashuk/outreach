@@ -24,11 +24,6 @@ const router = express.Router();
 
 const BASE_FILTER = { deleted: { $ne: true } };
 const OPEN = ['new', 'ready', 'error'];
-// Guessed (medium/low) addresses moved into outreach per day. Bounces on guesses hurt
-// the sender's Gmail for ALL sending, so their volume is capped; confirmed (high),
-// shared mailboxes (generic) and addresses you typed yourself are not.
-const DAILY_GUESS_CAP = 15;
-const GUESSED = ['medium', 'low'];
 const MAX_IDS = 500;
 
 const isId = (id) => mongoose.isValidObjectId(id);
@@ -41,14 +36,6 @@ const serialize = (doc) => {
   return obj;
 };
 
-/** Midnight today in India time, as a Date. */
-function startOfDayIST(now = new Date()) {
-  const off = 5.5 * 3600 * 1000;
-  const d = new Date(now.getTime() + off);
-  d.setUTCHours(0, 0, 0, 0);
-  return new Date(d.getTime() - off);
-}
-
 function idList(raw) {
   if (!Array.isArray(raw)) return null;
   const ids = [...new Set(raw.map(String))].filter(isId);
@@ -60,9 +47,6 @@ function cleanRoles(raw) {
   return [...new Set(list.map(r => String(r || '').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean))].slice(0, 5);
 }
 
-const guessesMovedToday = (userId) => Prospect.countDocuments({
-  userId, status: 'moved', movedAt: { $gte: startOfDayIST() }, emailConfidence: { $in: GUESSED },
-});
 
 // ── Keys for the free discovery services ───────────────────────────────────
 
@@ -75,8 +59,6 @@ async function configView(userId) {
     usage: await usage.getUsage(userId),
     caps,
     canStoreKeys: credentials.isConfigured(),
-    dailyGuessCap: DAILY_GUESS_CAP,
-    guessesMovedToday: await guessesMovedToday(userId),
   };
 }
 
@@ -428,23 +410,14 @@ router.post('/move', async (req, res) => {
 
     const docs = await Prospect.find({ _id: { $in: ids }, userId: req.userId, ...BASE_FILTER }).lean();
     const block = await loadBlocklistSets(req.userId);
-    let allowance = Math.max(0, DAILY_GUESS_CAP - await guessesMovedToday(req.userId));
 
-    // Strongest first, so the daily cap is spent on the best guesses.
-    const rank = (d) => (d.emailConfidence ? (CONF_ORDER[d.emailConfidence] ?? 9) : 1);
-    docs.sort((a, b) => rank(a) - rank(b));
-
-    const out = { moved: 0, alreadyMoved: 0, notReady: 0, blocked: 0, duplicates: 0, overCap: 0 };
+    const out = { moved: 0, alreadyMoved: 0, notReady: 0, blocked: 0, duplicates: 0 };
     const rows = [];
     for (const d of docs) {
       if (d.status === 'moved') { out.alreadyMoved++; continue; }
       if (d.status !== 'ready' || !d.email) { out.notReady++; continue; }
       if (isBlocked(d.email, block)) { out.blocked++; continue; }
       if (d.existingContactId) { out.duplicates++; continue; }
-      if (GUESSED.includes(d.emailConfidence)) {
-        if (allowance <= 0) { out.overCap++; continue; }
-        allowance--;
-      }
       rows.push({
         _prospectId: String(d._id),
         name: d.name,
@@ -483,7 +456,7 @@ router.post('/move', async (req, res) => {
     });
     if (ops.length) await Prospect.bulkWrite(ops, { ordered: false });
 
-    res.json({ ok: true, ...out, guessesLeftToday: allowance, dailyGuessCap: DAILY_GUESS_CAP });
+    res.json({ ok: true, ...out });
   } catch (err) { err500(res, err); }
 });
 
@@ -541,4 +514,3 @@ router.post('/add-generic', async (req, res) => {
 });
 
 module.exports = router;
-module.exports.startOfDayIST = startOfDayIST;
