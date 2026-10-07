@@ -390,9 +390,8 @@ function EmailCell({ p, onSaved }: { p: Prospect; onSaved: (p: Prospect) => void
 
 // ── Move modal ───────────────────────────────────────────────────────────────
 
-function MoveModal({ prospects, config, onClose, onDone }: {
+function MoveModal({ prospects, onClose, onDone }: {
   prospects: Prospect[];
-  config: DiscoveryConfigView | null;
   onClose: () => void;
   onDone: (r: MoveProspectsResult) => void;
 }) {
@@ -410,8 +409,6 @@ function MoveModal({ prospects, config, onClose, onDone }: {
   }, [onClose, saving]);
 
   const by = (c: EmailConfidence | 'manual') => prospects.filter(p => (c === 'manual' ? p.emailSource === 'manual' : p.emailSource !== 'manual' && p.emailConfidence === c)).length;
-  const guessed = by('medium') + by('low');
-  const left = config ? Math.max(0, config.dailyGuessCap - config.guessesMovedToday) : null;
 
   const confirm = async () => {
     setSaving(true); setError('');
@@ -436,17 +433,6 @@ function MoveModal({ prospects, config, onClose, onDone }: {
             ))}
             {by('manual') > 0 && <span className="contact-count-badge">Edited by you: {by('manual')}</span>}
           </div>
-          {left !== null && guessed > 0 && (
-            <div className={`info-box${guessed > left ? ' danger' : ''}`}>
-              <i className="ti ti-shield-check" style={{ fontSize: 15, flexShrink: 0 }} />
-              <div>
-                To protect your Gmail from bounces, up to {config!.dailyGuessCap} medium or low guesses can move per day —
-                {' '}<strong>{left} left today</strong>.
-                {guessed > left && ` ${guessed - left} of these will stay here until tomorrow (the strongest go first).`}
-                {' '}High-confidence addresses and shared inboxes aren’t limited.
-              </div>
-            </div>
-          )}
           <div className="form-group">
             <label className="form-label">Template</label>
             <select value={template} onChange={e => setTemplate(e.target.value)}>
@@ -618,7 +604,6 @@ export default function Discover() {
     setSelected(new Set());
     const parts = [`${r.moved} moved to outreach`];
     if (r.duplicates) parts.push(`${r.duplicates} already contacts`);
-    if (r.overCap) parts.push(`${r.overCap} over today’s limit`);
     if (r.blocked) parts.push(`${r.blocked} blocklisted`);
     if (r.notReady) parts.push(`${r.notReady} without an address`);
     toast(parts.join(' · '), r.moved ? 'success' : 'info');
@@ -843,7 +828,7 @@ export default function Discover() {
       </div>
 
       {moveOpen && movable.length > 0 && (
-        <MoveModal prospects={movable} config={config} onClose={() => setMoveOpen(false)} onDone={afterMove} />
+        <MoveModal prospects={movable} onClose={() => setMoveOpen(false)} onDone={afterMove} />
       )}
     </Layout>
   );
