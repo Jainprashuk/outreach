@@ -45,7 +45,10 @@ function idList(raw) {
 
 function cleanRoles(raw) {
   const list = Array.isArray(raw) ? raw : String(raw || '').split(',');
-  return [...new Set(list.map(r => String(r || '').replace(/\s+/g, ' ').trim().slice(0, 60)).filter(Boolean))].slice(0, 5);
+  const seen = new Set();
+  return list.map(r => String(r || '').replace(/\s+/g, ' ').trim().slice(0, 60))
+    .filter(r => r && !seen.has(r.toLowerCase()) && seen.add(r.toLowerCase()))
+    .slice(0, 5);
 }
 
 
@@ -60,6 +63,7 @@ async function configView(userId) {
     usage: await usage.getUsage(userId),
     caps,
     canStoreKeys: credentials.isConfigured(),
+    defaultRoles: (doc && doc.defaultRoles) || [],
   };
 }
 
@@ -67,21 +71,24 @@ router.get('/config', async (req, res) => {
   try { res.json(await configView(req.userId)); } catch (err) { err500(res, err); }
 });
 
-// PUT /api/prospects/config — { tavily?, serpapi?, hunter?, github? }; a non-empty
-// string stores (replaces) that key. Removing one is DELETE /config/:provider.
+// PUT /api/prospects/config — { tavily?, serpapi?, hunter?, github?, defaultRoles? };
+// a non-empty string stores (replaces) that key, and defaultRoles replaces your saved
+// roles ([] clears them). Removing a key is DELETE /config/:provider.
 router.put('/config', async (req, res) => {
   try {
-    if (!credentials.isConfigured()) {
+    const set = {};
+    if (req.body && req.body.defaultRoles !== undefined) set.defaultRoles = cleanRoles(req.body.defaultRoles);
+    const givesKey = DiscoveryConfig.PROVIDERS.some(p => typeof (req.body || {})[p] === 'string' && req.body[p].trim());
+    if (givesKey && !credentials.isConfigured()) {
       return res.status(503).json({ error: 'CREDENTIAL_KEY is not set, so a key cannot be stored safely.' });
     }
-    const set = {};
     for (const p of DiscoveryConfig.PROVIDERS) {
       const v = req.body && req.body[p];
       if (typeof v !== 'string' || !v.trim()) continue;
       if (v.trim().length > 300) return res.status(400).json({ error: `${p} key is too long` });
       set[`${p}Enc`] = credentials.encrypt(v.trim());
     }
-    if (!Object.keys(set).length) return res.status(400).json({ error: 'No key given' });
+    if (!Object.keys(set).length) return res.status(400).json({ error: 'Nothing to save' });
     await DiscoveryConfig.updateOne({ userId: req.userId }, { $set: set, $setOnInsert: { userId: req.userId } }, { upsert: true });
     res.json(await configView(req.userId));
   } catch (err) { err500(res, err); }

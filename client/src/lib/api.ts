@@ -1877,6 +1877,8 @@ export interface DiscoveryConfigView {
   usage: { month: string; tavily: number; serpapi: number; hunter: number };
   caps: Record<DiscoveryProvider, number | null>;
   canStoreKeys: boolean;
+  /** Roles the Discover search box starts filled with. */
+  defaultRoles: string[];
 }
 
 export interface MoveProspectsResult {
@@ -1893,6 +1895,8 @@ const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) });
 export const discoveryConfigApi = () => apiFetch<DiscoveryConfigView>('/api/prospects/config');
 export const saveDiscoveryKeysApi = (keys: Partial<Record<DiscoveryProvider, string>>) =>
   apiFetch<DiscoveryConfigView>('/api/prospects/config', { method: 'PUT', ...json(keys) });
+export const saveDefaultRolesApi = (defaultRoles: string[]) =>
+  apiFetch<DiscoveryConfigView>('/api/prospects/config', { method: 'PUT', ...json({ defaultRoles }) });
 export const removeDiscoveryKeyApi = (provider: DiscoveryProvider) =>
   apiFetch<DiscoveryConfigView>(`/api/prospects/config/${provider}`, { method: 'DELETE' });
 
@@ -1969,7 +1973,7 @@ export const lookupCompanyApi = (q: string) =>
 export const suggestDomainsApi = (q: string) =>
   apiFetch<{ domains: { domain: string; contacts: number }[] }>(`/api/prospects/domains/suggest?q=${encodeURIComponent(q)}`);
 
-export const loadProspectsApi = (params: { domain?: string; status?: string; confidence?: string; q?: string }) => {
+export const loadProspectsApi = (params: { domain?: string; status?: string; confidence?: string; q?: string; limit?: string }) => {
   const qs = new URLSearchParams(Object.entries(params).filter(([, v]) => v) as [string, string][]).toString();
   return apiFetch<{ prospects: Prospect[]; total: number; page: number; pages: number }>(`/api/prospects?${qs}`);
 };

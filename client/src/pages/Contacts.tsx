@@ -290,6 +290,7 @@ export default function Contacts() {
         <select value={sourceFilter} onChange={e => { setSourceFilter(e.target.value); resetPage(); }} style={{ width: 'auto', minWidth: 140 }}>
           <option value="">All sources</option>
           <option value="lead">From a lead</option>
+          <option value="discover">From Discover</option>
           <option value="outreach">Added directly</option>
         </select>
         <div style={{ position: 'relative' }}>
@@ -385,6 +386,10 @@ export default function Contacts() {
                         {c.name}
                         {c.source === 'lead' && (
                           <i className="ti ti-target-arrow" title="Promoted from a lead"
+                            style={{ marginLeft: 6, fontSize: 13, color: 'var(--text3)' }} />
+                        )}
+                        {c.prospectId && (
+                          <i className="ti ti-compass" title="Found with Discover — address guessed"
                             style={{ marginLeft: 6, fontSize: 13, color: 'var(--text3)' }} />
                         )}
                       </div>
