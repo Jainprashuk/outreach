@@ -1683,7 +1683,7 @@ export const deleteNaukriResumeApi = () =>
 
 // ── Lifecycle emails & reports ───────────────────────────────────────────────
 
-export type LifecycleType = 'welcome' | 'setup-reminder' | 'inactive' | 'weekly-report' | 'manual-report';
+export type LifecycleType = 'welcome' | 'setup-reminder' | 'inactive' | 'weekly-report' | 'manual-report' | 'admin-daily';
 
 export interface LifecycleConfig {
   enabled: boolean;
@@ -1707,6 +1707,9 @@ export const adminSetEmailSwitchApi = (field: string, value: boolean) =>
   apiFetch<{ config: LifecycleConfig }>('/api/admin/emails', { method: 'PUT', body: JSON.stringify({ field, value }) });
 export const adminSendSampleApi = (type: LifecycleType) =>
   apiFetch<{ ok: true; to: string }>('/api/admin/emails/sample', { method: 'POST', body: JSON.stringify({ type }) });
+/** Sends the daily admin digest (today so far) to the admin who clicks. Ignores the switches. */
+export const adminSendDigestNowApi = () =>
+  apiFetch<{ ok: true; to: string }>('/api/admin/emails/daily-digest', { method: 'POST' });
 /** One gate answer: will it send, and if not, the first switch that stops it. */
 export interface EmailVerdict { send: boolean; reason: string | null; testMode: boolean }
 export interface UpcomingEmail {
@@ -1719,7 +1722,7 @@ export interface UpcomingEmail {
 }
 export interface AdminUpcomingEmails {
   generatedAt: string; until: string; days: number; masterOn: boolean;
-  runs: Array<{ at: string; kind: 'daily' | 'weekly'; items: UpcomingEmail[] }>;
+  runs: Array<{ at: string; kind: 'daily' | 'weekly' | 'admin-daily'; items: UpcomingEmail[] }>;
   midSetup: Array<{ userId: string; email: string; name: string }>;
 }
 export interface LifecycleLogRow {

@@ -10,6 +10,7 @@ export interface EmailTypeMeta {
   pref: 'reminders' | 'weekly-report' | null;
   what: string;             // one line: what the email says
   when: string;             // one line: when it goes out
+  adminOnly?: boolean;      // only ever sent to admin accounts
 }
 
 export const EMAIL_TYPES: EmailTypeMeta[] = [
@@ -38,6 +39,11 @@ export const EMAIL_TYPES: EmailTypeMeta[] = [
     what: 'The button on Analytics → Reports that emails the user a report they generated.',
     when: 'Only when the user clicks it, up to 5 a day. Download PDF works regardless.',
   },
+  {
+    key: 'admin-daily', label: 'Daily admin digest', icon: 'ti-layout-dashboard', pref: null, adminOnly: true,
+    what: "What happened across every account today: sends, replies (and how many interested), bounces, contacts added, finished campaigns, plus anything that needs a look. Counts only, no contact details.",
+    when: 'Every day at 21:00 IST, to admins only. "Send today\'s digest now" sends it to you at any time.',
+  },
 ];
 
 export type EffectiveTone = 'on' | 'off' | 'blocked' | 'optout' | 'test';
@@ -49,6 +55,7 @@ export function effectiveState(t: EmailTypeMeta, row: AdminUserRow, config: Life
   const blocked = row.emails?.blockedByAdmin || [];
   const optOut = row.emails?.optOut || [];
   if (row.status === 'disabled') return { tone: 'off', label: 'Account disabled', detail: 'Disabled accounts get no email.' };
+  if (t.adminOnly && !row.isAdmin) return { tone: 'off', label: 'Admins only', detail: 'Only admin accounts get this email.' };
   if (!config) return { tone: 'off', label: '…', detail: 'Loading switches' };
   if (!config.enabled) return { tone: 'off', label: 'Master switch off', detail: 'All lifecycle emails are switched off app-wide.' };
   if (!config.types[t.key]) return { tone: 'off', label: 'Off app-wide', detail: 'Switched off for everyone. Turn it on in Admin → Lifecycle emails.' };
