@@ -19,6 +19,7 @@ const finder = require('../lib/patternFinder');
 const { applyEmails, present, isActive } = require('../lib/prospectSearch');
 const { lookupCompany } = require('../lib/discovery/companyLookup');
 const { discoverAnalytics } = require('../lib/prospectAnalytics');
+const { hiringCompanies } = require('../lib/discovery/hiringCompanies');
 
 const router = express.Router();
 
@@ -231,6 +232,24 @@ router.get('/analytics', async (req, res) => {
   try {
     const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 7), 90);
     res.json(await discoverAnalytics(req.userId, { days }));
+  } catch (err) { err500(res, err); }
+});
+
+// GET /api/prospects/hiring?days=30 — companies you already know are hiring, from
+// LinkedIn hiring posts and Naukri jobs. days=0 means all time.
+router.get('/hiring', async (req, res) => {
+  try {
+    const raw = parseInt(req.query.days, 10);
+    const days = raw === 0 ? null : Math.min(Math.max(raw || 30, 1), 365);
+    const source = ['linkedin', 'naukri'].includes(req.query.source) ? req.query.source : '';
+    res.json(await hiringCompanies(new mongoose.Types.ObjectId(String(req.userId)), {
+      days,
+      q: String(req.query.q || '').slice(0, 80),
+      source,
+      hideSearched: req.query.hideSearched === '1',
+      page: parseInt(req.query.page, 10) || 1,
+      limit: Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 10), 100),
+    }));
   } catch (err) { err500(res, err); }
 });
 

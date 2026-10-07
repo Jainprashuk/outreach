@@ -1926,6 +1926,32 @@ export interface DiscoverAnalytics {
   month: string;
 }
 export const discoverAnalyticsApi = (days = 30) => apiFetch<DiscoverAnalytics>(`/api/prospects/analytics?days=${days}`);
+export interface HiringCompany {
+  key: string;
+  company: string;
+  /** Known for LinkedIn posts (from the email); null for a Naukri-only company. */
+  domain: string | null;
+  linkedin: number;
+  naukri: number;
+  roles: string[];
+  lastSeenAt: string | null;
+  signals: number;
+  sources: ('linkedin' | 'naukri')[];
+  searchedAt: string | null;
+  people: number;
+}
+export interface HiringPage {
+  companies: HiringCompany[];
+  total: number; page: number; pages: number;
+  counts: { all: number; linkedin: number; naukri: number; searched: number };
+}
+export const hiringCompaniesApi = (p: { days: number; q?: string; source?: string; hideSearched?: boolean; page?: number }) => {
+  const qs = new URLSearchParams({
+    days: String(p.days), page: String(p.page || 1),
+    ...(p.q ? { q: p.q } : {}), ...(p.source ? { source: p.source } : {}), ...(p.hideSearched ? { hideSearched: '1' } : {}),
+  });
+  return apiFetch<HiringPage>(`/api/prospects/hiring?${qs}`);
+};
 export const prospectHistoryApi = () => apiFetch<{ searches: ProspectSearch[] }>('/api/prospects/searches');
 export const removeSearchApi = (id: string) => apiFetch<{ ok: boolean }>(`/api/prospects/searches/${id}`, { method: 'DELETE' });
 export const clearHistoryApi = () => apiFetch<{ ok: boolean; cleared: number }>('/api/prospects/searches', { method: 'DELETE' });
