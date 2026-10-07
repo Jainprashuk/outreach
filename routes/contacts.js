@@ -297,9 +297,21 @@ router.post('/', async (req, res) => {
 
     // Dedupe + insert live in lib/contactImport.js so /api/leads/move-to-outreach
     // applies exactly the same rules.
-    const { created } = await importContacts(rows, req.userId);
+    const { created, invalidEmails } = await importContacts(rows, req.userId);
+    if (created.length === 0 && invalidEmails.length === rows.length) {
+      return res.status(400).json({
+        error: `None of these are valid email addresses (e.g. "${invalidEmails[0]}"). Check which column is mapped to Email.`,
+        invalidEmails: invalidEmails.slice(0, 20),
+      });
+    }
 
-    res.status(201).json({ created, skipped: rows.length - created.length });
+    res.status(201).json({
+      created,
+      // `skipped` keeps meaning "already existed" — invalid rows are reported apart.
+      skipped: rows.length - created.length - invalidEmails.length,
+      invalid: invalidEmails.length,
+      invalidEmails: invalidEmails.slice(0, 20),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

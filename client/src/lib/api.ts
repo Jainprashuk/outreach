@@ -185,7 +185,7 @@ export const loadContactListApi = (params: Record<string, string>, signal?: Abor
 export const loadSettingsApi = () => apiFetch<any>('/api/settings');
 
 export const createContactsApi = (rows: Partial<Contact>[]) =>
-  apiFetch<{ created: Contact[]; skipped: number }>('/api/contacts', {
+  apiFetch<{ created: Contact[]; skipped: number; invalid?: number }>('/api/contacts', {
     method: 'POST', body: JSON.stringify(rows),
   });
 
