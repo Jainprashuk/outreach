@@ -1904,6 +1904,31 @@ export const startProspectSearchApi = (body: { domain: string; companyName?: str
 export const prospectSearchApi = (id: string) => apiFetch<{ search: ProspectSearch }>(`/api/prospects/search/${id}`);
 export const cancelSearchApi = (id: string) =>
   apiFetch<{ ok: boolean; cancelled: boolean; search: ProspectSearch }>(`/api/prospects/search/${id}/cancel`, { method: 'POST' });
+export interface DiscoverLabelRow {
+  label: 'high' | 'medium' | 'low' | 'generic' | 'manual';
+  found: number; moved: number; emailed: number; replied: number; bounced: number; hardBounced: number; waiting: number;
+}
+export interface DiscoverCompanyRow {
+  domain: string; company: string; people: number; high: number; medium: number; low: number;
+  moved: number; emailed: number; replied: number; bounced: number;
+}
+export interface DiscoverAnalytics {
+  days: number;
+  totals: {
+    found: number; withEmail: number; moved: number; emailed: number; replied: number; bounced: number;
+    hardBounced: number; waiting: number; searches: number; searchesLastDays: number; companies: number;
+  };
+  byLabel: DiscoverLabelRow[];
+  status: { open: number; moved: number; discarded: number };
+  via: { search: number; github: number; website: number };
+  runs: { done: number; failed: number; cancelled: number; running: number };
+  searchesPerDay: { day: string; n: number }[];
+  topRoles: { role: string; n: number }[];
+  companies: DiscoverCompanyRow[];
+  allowance: { provider: 'tavily' | 'serpapi' | 'hunter'; hasKey: boolean; used: number; cap: number }[];
+  month: string;
+}
+export const discoverAnalyticsApi = (days = 30) => apiFetch<DiscoverAnalytics>(`/api/prospects/analytics?days=${days}`);
 export const prospectHistoryApi = () => apiFetch<{ searches: ProspectSearch[] }>('/api/prospects/searches');
 export const removeSearchApi = (id: string) => apiFetch<{ ok: boolean }>(`/api/prospects/searches/${id}`, { method: 'DELETE' });
 export const clearHistoryApi = () => apiFetch<{ ok: boolean; cleared: number }>('/api/prospects/searches', { method: 'DELETE' });

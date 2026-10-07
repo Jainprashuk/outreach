@@ -18,6 +18,7 @@ const usage = require('../lib/discovery/usage');
 const finder = require('../lib/patternFinder');
 const { applyEmails, present, isActive } = require('../lib/prospectSearch');
 const { lookupCompany } = require('../lib/discovery/companyLookup');
+const { discoverAnalytics } = require('../lib/prospectAnalytics');
 
 const router = express.Router();
 
@@ -239,6 +240,15 @@ router.get('/companies', async (req, res) => {
         moved: byDomain.get(s._id)?.moved || 0,
       })),
     });
+  } catch (err) { err500(res, err); }
+});
+
+// GET /api/prospects/analytics — Analytics → Discover: searches, people found, and
+// how the guessed addresses performed once emailed, per confidence label.
+router.get('/analytics', async (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days, 10) || 30, 7), 90);
+    res.json(await discoverAnalytics(req.userId, { days }));
   } catch (err) { err500(res, err); }
 });
 

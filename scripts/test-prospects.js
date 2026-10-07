@@ -131,6 +131,17 @@ async function main() {
     r = await api(`/api/prospects/${id['Neha Gupta']}`, { method: 'PATCH', body: { title: 'x' } });
     ok("a moved prospect can't be edited", r.status === 409);
 
+    // ── analytics ──────────────────────────────────────────────────────────
+    console.log('\nanalytics');
+    await Contact.updateOne({ userId, email: `neha.gupta@${DOMAIN}` }, { $set: { status: 'replied', lastSentAt: new Date(Date.now() - 2 * DAY), repliedAt: new Date() } });
+    r = await api('/api/prospects/analytics');
+    const high = r.body && r.body.byLabel.find(x => x.label === 'high');
+    const manual = r.body && r.body.byLabel.find(x => x.label === 'manual');
+    ok('analytics responds', r.status === 200, r.text.slice(0, 200));
+    ok('a moved high guess that replied is counted', high && high.moved >= 1 && high.emailed >= 1 && high.replied >= 1, JSON.stringify(high));
+    ok('a typed address counts as manual, not as a guess', manual && manual.moved >= 1, JSON.stringify(manual));
+    ok("another user's prospects aren't counted", !r.body.companies.some(c => c.people > 0 && c.domain === DOMAIN && c.people > 6));
+
     // ── discard / restore ──────────────────────────────────────────────────
     console.log('\ndiscard');
     r = await api('/api/prospects/discard', { method: 'POST', body: { ids: [id['Ravi Kumar'], id['Sara Intruder']] } });
