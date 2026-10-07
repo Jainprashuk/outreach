@@ -8,10 +8,14 @@ import { SessionProvider } from './context/SessionContext';
 import { InterviewProvider } from './context/InterviewContext';
 import { ActionQueueProvider } from './context/ActionQueueContext';
 import InterviewReminders from './components/InterviewReminders';
+import ErrorBoundary from './components/ErrorBoundary';
+import { installGlobalIssueHandlers } from './lib/issueReporter';
 import './styles/pages.css';
 import './styles/theme.css';
 import './styles/responsive.css';
 import './styles/polish.css';
+
+installGlobalIssueHandlers();
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
@@ -21,7 +25,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
           <AppProvider>
             <InterviewProvider>
               <ActionQueueProvider>
-                <App />
+                <ErrorBoundary>
+                  <App />
+                </ErrorBoundary>
                 {/* Sibling of <App /> so it survives client-side navigation and
                     fires once per fresh load, not once per route change. */}
                 <InterviewReminders />

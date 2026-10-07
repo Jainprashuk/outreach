@@ -73,6 +73,8 @@ router.post('/request-code', async (req, res) => {
     // A genuine server fault, not a refused sign-in.
     console.error(`[auth] request-code failed: ${err.message}`);
     logEvent({ userId: null, category: 'auth', action: 'failed', message: `Sign-in code request failed: ${err.message}` }).catch(() => {});
+    // The response below is deliberately generic; the Issues tab gets the real cause.
+    res.locals.issueError = err;
     res.status(500).json({ error: 'Could not send a sign-in code. Try again in a moment.' });
   }
 });

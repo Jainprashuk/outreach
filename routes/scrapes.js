@@ -6,6 +6,7 @@ const { importLeads, isUsableSourceLead } = require('../lib/leadImport');
 const { dueOccurrence, nextOccurrence, parseTime } = require('../lib/scrapeSchedule');
 const { issueWorkerToken, revokeWorkerToken } = require('../lib/workerAuth');
 const User = require('../models/User');
+const { reportIssue } = require('../lib/issues');
 
 const router = express.Router();
 
@@ -47,11 +48,31 @@ const cleanQueries = (input, limit = MAX_QUERIES) => {
 
 // A run left 'running' by a worker that was killed mid-harvest would block the
 // queue forever, since /claim only ever starts one at a time.
-const failStaleRuns = (userId) =>
-  ScrapeRun.updateMany(
+const failStaleRuns = (userId) => {
+  const now = new Date();
+  return ScrapeRun.updateMany(
     { ...(userId ? { userId } : {}), status: 'running', claimedAt: { $lt: new Date(Date.now() - STALE_RUN_MS) }, ...BASE_FILTER },
-    { $set: { status: 'failed', error: 'Worker stopped responding mid-run', finishedAt: new Date() } }
-  );
+    { $set: { status: 'failed', error: 'Worker stopped responding mid-run', finishedAt: now } }
+  ).then(r => reportStaleRuns(ScrapeRun, 'scrape', userId, now, r));
+};
+
+// Reported only when a run was actually swept, so the common no-op call costs
+// nothing extra.
+const reportStaleRuns = async (Model, area, userId, since, result) => {
+  if (!result || !result.modifiedCount) return result;
+  const runs = await Model.find(
+    { ...(userId ? { userId } : {}), status: 'failed', error: 'Worker stopped responding mid-run', finishedAt: { $gte: since } },
+    { userId: 1, startedAt: 1, claimedAt: 1 },
+  ).lean().catch(() => []);
+  for (const r of runs) {
+    reportIssue({
+      userId: r.userId, source: 'job', area, kind: 'run_stalled',
+      message: 'Worker stopped responding mid-run — the run was marked failed',
+      meta: { runId: String(r._id), claimedAt: r.claimedAt || null },
+    });
+  }
+  return result;
+};
 
 const blockedUntilOf = (worker) => {
   const until = worker && worker.blockedUntil ? new Date(worker.blockedUntil) : null;
@@ -384,6 +405,18 @@ router.post('/finish', async (req, res) => {
 
     const run = await ScrapeRun.findOneAndUpdate({ _id: runId, userId: req.userId, ...BASE_FILTER }, { $set: update }, { new: true });
     if (!run) return res.status(404).json({ error: 'No such run' });
+
+    if (status !== 'done') {
+      reportIssue({
+        userId: req.userId, source: 'job', area: 'scrape', kind: `run_${status}`,
+        message: status === 'blocked'
+          ? `LinkedIn showed a checkpoint — scraping paused for a week${error ? `: ${error}` : ''}`
+          : `LinkedIn scrape run failed${error ? `: ${error}` : ''}`,
+        detail: error ? String(error) : '',
+        key: `scrape ${status} ${exitCode == null ? '' : exitCode}`,
+        meta: { runId: String(runId), exitCode: exitCode ?? null, stats: stats || null },
+      });
+    }
 
     // A checkpoint means LinkedIn challenged the session. TRACK-SCROLL.md is
     // explicit that the answer is to stop for a week, so the block lives here

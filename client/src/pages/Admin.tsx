@@ -6,12 +6,14 @@ import { useSession } from '../context/SessionContext';
 import { fmtAgo } from '../lib/analytics';
 import AdminEmailsCard from '../components/AdminEmailsCard';
 import AdminEmailSchedule from '../components/AdminEmailSchedule';
+import AdminIssues from '../components/AdminIssues';
+import AdminSending from '../components/AdminSending';
 import UserEmailsModal from '../components/UserEmailsModal';
 import InfoTip from '../components/InfoTip';
 import { EMAIL_TYPES, effectiveState, TONE_COLOR } from '../lib/lifecycleTypes';
 import {
   adminOverviewApi, adminInviteApi, adminUpdateUserApi, adminRevokeSessionsApi,
-  accessRequestsApi, approveAccessApi, rejectAccessApi, clearAccessRequestApi, adminEmailsApi,
+  accessRequestsApi, approveAccessApi, rejectAccessApi, clearAccessRequestApi, adminEmailsApi, adminIssuesApi,
   type AdminOverview, type AdminUserRow, type AccessRequestRow, type AdminEmailsView,
 } from '../lib/api';
 
@@ -53,12 +55,25 @@ export default function Admin() {
   const [requests, setRequests] = useState<AccessRequestRow[]>([]);
   const [reqFilter, setReqFilter] = useState<'pending' | 'all'>('pending');
   const [emailsOpen, setEmailsOpen] = useState<string | null>(null);
-  // The lifecycle email switches, schedule and history live on their own tab.
-  const [tab, setTab] = useState<'overview' | 'emails'>(() => (window.location.hash === '#emails' ? 'emails' : 'overview'));
-  const pickTab = (t: 'overview' | 'emails') => {
+  // The lifecycle email switches, schedule and history live on their own tab,
+  // and so does the Issues log.
+  type Tab = 'overview' | 'sending' | 'emails' | 'issues';
+  const [tab, setTab] = useState<Tab>(() => {
+    const h = window.location.hash.slice(1);
+    return h === 'sending' || h === 'emails' || h === 'issues' ? h : 'overview';
+  });
+  const pickTab = (t: Tab) => {
     setTab(t);
-    window.history.replaceState(null, '', t === 'emails' ? '#emails' : window.location.pathname + window.location.search);
+    window.history.replaceState(null, '', t === 'overview' ? window.location.pathname + window.location.search : `#${t}`);
   };
+  // Shown on the tab itself, so a new failure is visible from the Overview too.
+  const [openIssues, setOpenIssues] = useState<number | null>(null);
+  const [sendingCritical, setSendingCritical] = useState(0);
+  useEffect(() => {
+    adminIssuesApi({ status: 'open', limit: '1' })
+      .then(d => setOpenIssues(Object.values(d.open).reduce((n, g) => n + (g?.issues || 0), 0)))
+      .catch(() => {});
+  }, []);
   // Shared by the Lifecycle emails card and the accounts table, so a switch
   // flipped in one is reflected in the other's "will it actually send" view.
   const [emails, setEmails] = useState<AdminEmailsView | null>(null);
@@ -161,9 +176,14 @@ export default function Admin() {
   return (
     <Layout
       title="Admin"
-      subtitle="Every account, in aggregate. No one else's contacts or emails are shown here."
+      subtitle={tab === 'issues'
+        ? 'Everything that failed for anyone, with the raw error — including recipient addresses.'
+        : tab === 'sending'
+          ? 'How email is moving across every account: live batches, what is scheduled, what ran, and whether the scheduler is firing.'
+          : "Every account, in aggregate. No one else's contacts or emails are shown here."}
       wide
-      actions={
+      // The range only drives the Overview; Sending has its own window.
+      actions={tab !== 'overview' ? undefined :
         <div className="seg-toggle">
           {RANGES.map(d => (
             <button
@@ -177,12 +197,19 @@ export default function Admin() {
       <div className="section" style={{ flex: 1 }}>
         <div className="section-head" style={{ marginBottom: 14 }}>
           <div className="nav-tabs" role="tablist">
-            {([['overview', 'Overview'], ['emails', 'Lifecycle emails']] as const).map(([key, label]) => (
+            {([['overview', 'Overview'], ['sending', 'Sending'], ['emails', 'Lifecycle emails'], ['issues', 'Issues']] as const).map(([key, label]) => (
               <button type="button" role="tab" aria-selected={tab === key} key={key}
-                className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => pickTab(key)}>{label}</button>
+                className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => pickTab(key)}>
+                {label}
+                {key === 'issues' && !!openIssues && <span className="tab-badge" style={{ marginLeft: 6 }}>{openIssues}</span>}
+                {key === 'sending' && sendingCritical > 0 && <span className="tab-badge" style={{ marginLeft: 6 }}>{sendingCritical}</span>}
+              </button>
             ))}
           </div>
         </div>
+
+        {tab === 'sending' && <AdminSending onAlertCount={setSendingCritical} />}
+        {tab === 'issues' && <AdminIssues onOpenCount={setOpenIssues} />}
 
         {tab === 'emails' && (
           <>

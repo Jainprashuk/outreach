@@ -7,6 +7,7 @@ const NaukriWorker = require('../models/NaukriWorker');
 const { dueOccurrence, nextOccurrence, kindsFor, parseTime } = require('../lib/naukriSchedule');
 const { resolveAnswer } = require('../lib/naukriAnswers');
 const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = require('../lib/naukriFilters');
+const { reportIssue } = require('../lib/issues');
 
 const router = express.Router();
 
@@ -105,11 +106,31 @@ const num = (v, { min = null, max = null, integer = false } = {}) => {
 
 // A run left 'running' by a worker that was killed would block the queue
 // forever, since /claim only ever starts one at a time.
-const failStaleRuns = (userId) =>
-  NaukriRun.updateMany(
+const failStaleRuns = (userId) => {
+  const now = new Date();
+  return NaukriRun.updateMany(
     { userId, status: 'running', claimedAt: { $lt: new Date(Date.now() - STALE_RUN_MS) }, ...BASE_FILTER },
-    { $set: { status: 'failed', error: 'Worker stopped responding mid-run', finishedAt: new Date() } }
-  );
+    { $set: { status: 'failed', error: 'Worker stopped responding mid-run', finishedAt: now } }
+  ).then(r => reportStaleRuns(NaukriRun, 'naukri', userId, now, r));
+};
+
+// Reported only when a run was actually swept, so the common no-op call costs
+// nothing extra.
+const reportStaleRuns = async (Model, area, userId, since, result) => {
+  if (!result || !result.modifiedCount) return result;
+  const runs = await Model.find(
+    { ...(userId ? { userId } : {}), status: 'failed', error: 'Worker stopped responding mid-run', finishedAt: { $gte: since } },
+    { userId: 1, startedAt: 1, claimedAt: 1 },
+  ).lean().catch(() => []);
+  for (const r of runs) {
+    reportIssue({
+      userId: r.userId, source: 'job', area, kind: 'run_stalled',
+      message: 'Worker stopped responding mid-run — the run was marked failed',
+      meta: { runId: String(r._id), claimedAt: r.claimedAt || null },
+    });
+  }
+  return result;
+};
 
 const blockedUntilOf = (worker) => {
   const until = worker && worker.blockedUntil ? new Date(worker.blockedUntil) : null;
@@ -1085,6 +1106,15 @@ router.post('/result', async (req, res) => {
       await job.save();
     }
 
+    if (outcome === 'failed') {
+      reportIssue({
+        userId: req.userId, source: 'job', area: 'naukri', kind: 'apply_failed',
+        message: `Naukri apply failed for "${job.title}" at ${job.company}${reason ? `: ${str(reason, 500)}` : ''}`,
+        key: `apply_failed ${str(reason, 500).replace(/\d+/g, '')}`,
+        meta: { runId: String(runId), jobId: String(job._id) },
+      });
+    }
+
     await NaukriRun.updateOne(
       { _id: runId, userId: req.userId, status: 'running', ...BASE_FILTER },
       { $push: { results: {
@@ -1125,6 +1155,18 @@ router.post('/finish', async (req, res) => {
       { new: true }
     );
     if (!run) return res.status(404).json({ error: 'No such run' });
+
+    if (status !== 'done') {
+      reportIssue({
+        userId: req.userId, source: 'job', area: 'naukri', kind: `run_${status}`,
+        message: status === 'blocked'
+          ? `Naukri showed a captcha — runs paused${error ? `: ${error}` : ''}`
+          : `Naukri run failed${error ? `: ${error}` : ''}`,
+        detail: error ? String(error) : '',
+        key: `naukri ${status} ${exitCode == null ? '' : exitCode}`,
+        meta: { runId: String(runId), exitCode: exitCode ?? null, stats: stats || null },
+      });
+    }
 
     // A captcha means Naukri challenged the session. The answer is to stop for a
     // week, so the block lives here rather than in the worker — a restarted
