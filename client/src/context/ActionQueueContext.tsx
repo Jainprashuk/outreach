@@ -36,7 +36,9 @@ export function ActionQueueProvider({ children }: { children: ReactNode }) {
   const [counts, setCounts] = useState(EMPTY_COUNTS);
   const [loaded, setLoaded] = useState(false);
 
+  const lastLoadAt = useRef(0);
   const reload = useCallback(async () => {
+    lastLoadAt.current = Date.now();
     const q = await loadActionQueueApi();
     setItems(q.items);
     setCounts({ ...EMPTY_COUNTS, ...q.counts });
@@ -46,11 +48,19 @@ export function ActionQueueProvider({ children }: { children: ReactNode }) {
   const enabled = !sessionLoading && !!owner;
 
   // Share/unauthenticated visitors would just get a 401 here, so don't ask.
+  // Ticks are skipped while the tab is hidden — a forgotten background tab used to
+  // cost 480 requests a day. Coming back to a tab that missed a tick reloads at
+  // once, so what is on screen is never staler than with the plain interval.
   useEffect(() => {
     if (!enabled) return;
+    const visible = () => document.visibilityState === 'visible';
     reload().catch(() => {});
-    const t = setInterval(() => reload().catch(() => {}), REFRESH_MS);
-    return () => clearInterval(t);
+    const t = setInterval(() => { if (visible()) reload().catch(() => {}); }, REFRESH_MS);
+    const onVisibility = () => {
+      if (visible() && Date.now() - lastLoadAt.current >= REFRESH_MS) reload().catch(() => {});
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onVisibility); };
   }, [enabled, reload]);
 
   // Coalesced: marking several replies read in a row is one reload, not one each.

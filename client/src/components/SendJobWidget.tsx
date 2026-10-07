@@ -4,12 +4,13 @@
 // concurrently, and a single-job widget silently hid all but the most recent one.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { API_BASE, type SendJob } from '../lib/api';
+import { API_BASE, JOBS_CHANGED_EVENT, type SendJob } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { useVisibleInterval } from '../hooks/useVisibleInterval';
 
 const MAX_CARDS = 4;      // beyond this, collapse the rest into a "+N more" line
 const DISMISS_MS = 8000;  // how long a finished job stays visible
+const IDLE_POLL_MS = 30_000; // nothing in flight: only catching jobs started elsewhere (cron, another tab)
 
 const fmtTime = (ms: number) => {
   if (ms <= 0) return 'finishing…';
@@ -78,7 +79,18 @@ export default function SendJobWidget() {
     } catch { /* transient */ }
   }, [finalize]);
 
-  useVisibleInterval(poll, 3000, !isStep3);
+  // 3s only while there is a card to keep current. With nothing in flight the
+  // widget renders nothing, and a 3s poll of an empty list was ~1,200 requests
+  // an hour per open tab. Jobs started from this tab announce themselves (see
+  // JOBS_CHANGED_EVENT in lib/api.ts), so they still appear immediately.
+  useVisibleInterval(poll, jobs.length > 0 ? 3000 : IDLE_POLL_MS, !isStep3);
+
+  useEffect(() => {
+    if (isStep3) return;
+    const onChanged = () => { poll(); };
+    window.addEventListener(JOBS_CHANGED_EVENT, onChanged);
+    return () => window.removeEventListener(JOBS_CHANGED_EVENT, onChanged);
+  }, [poll, isStep3]);
 
   useEffect(() => {
     const timers = dismissTimers.current;

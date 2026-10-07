@@ -378,7 +378,10 @@ const needsBackfillFilter = {
   ...BASE_FILTER,
   repliedAt: { $ne: null },
   $or: [
-    { thread: { $not: { $elemMatch: { direction: 'outbound' } } } },
+    // Only when there was a send to recover: runBackfillBatch adds the outbound entry only
+    // if `lastSentAt` is set. Without this guard a contact who replied but was never
+    // emailed by the app matched forever, so the Mailbox backfill loop never emptied.
+    { lastSentAt: { $ne: null }, thread: { $not: { $elemMatch: { direction: 'outbound' } } } },
     { thread: { $not: { $elemMatch: { direction: 'inbound' } } } },
     { replyClassifierOk: { $ne: true } },
   ],

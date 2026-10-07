@@ -132,6 +132,14 @@ export interface SendJob {
   items: JobItem[];
 }
 
+/**
+ * Fired after any successful write to /api/jobs or /api/campaigns — anything that
+ * can start, pause, resume or cancel a send job. SendJobWidget polls slowly while
+ * nothing is in flight and listens for this to pick a new job up immediately.
+ */
+export const JOBS_CHANGED_EVENT = 'outreach:jobs-changed';
+const JOB_WRITE_PATH = /^\/api\/(jobs|campaigns)(\/|\?|$)/;
+
 export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
@@ -139,6 +147,10 @@ export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promi
   });
   const data = await res.json();
   if (!res.ok) throw new Error((data as any).error || `Request to ${path} failed`);
+  const method = (opts?.method || 'GET').toUpperCase();
+  if (method !== 'GET' && JOB_WRITE_PATH.test(path) && typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(JOBS_CHANGED_EVENT));
+  }
   return data as T;
 }
 
