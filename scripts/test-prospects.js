@@ -20,6 +20,8 @@ const Prospect = require('../models/Prospect');
 const ProspectSearch = require('../models/ProspectSearch');
 const CompanyPattern = require('../models/CompanyPattern');
 const DiscoveryConfig = require('../models/DiscoveryConfig');
+const Lead = require('../models/Lead');
+const NaukriJob = require('../models/NaukriJob');
 const { createSession } = require('../lib/session');
 const crypto = require('crypto');
 
@@ -50,6 +52,8 @@ const api = async (path, opts = {}) => {
 const stamp = Date.now();
 const DOMAIN = `tc-test-${stamp}.example`;
 const DOMAIN2 = `tc-cap-${stamp}.example`;
+const HIRING = `Hirezzq${stamp}`;            // a made-up company name, unique to this run
+const HIRING_DOMAIN = `${HIRING.toLowerCase()}.example`;
 const INTRUDER = new mongoose.Types.ObjectId();
 const DAY = 24 * 3600 * 1000;
 
@@ -178,6 +182,26 @@ async function main() {
     r = await api('/api/prospects/move', { method: 'POST', body: { ids: lows.map(d => String(d._id)), template: '' } });
     ok('16 low guesses all move at once — no daily limit', r.body.moved === 16 && !('overCap' in r.body), r.text);
 
+    // ── hiring now ─────────────────────────────────────────────────────────
+    console.log('\nhiring now');
+    await Lead.insertMany([
+      { userId, authorName: 'Riya Sen', email: `riya@${HIRING_DOMAIN}`, company: HIRING, dedupeKey: `e:riya@${HIRING_DOMAIN}` },
+      { userId: INTRUDER, authorName: 'Other', email: `x@intruder-${HIRING_DOMAIN}`, company: `${HIRING}Other`, dedupeKey: `e:x@intruder-${HIRING_DOMAIN}` },
+    ]);
+    await NaukriJob.insertMany([
+      { userId, sourceId: `t1-${stamp}`, sourceKey: `naukri:t1-${stamp}`, title: 'Backend Engineer', company: `${HIRING} Pvt Ltd` },
+      { userId, sourceId: `t2-${stamp}`, sourceKey: `naukri:t2-${stamp}`, title: 'Data Analyst', company: `Solo${HIRING}` },
+    ]);
+    r = await api(`/api/prospects/hiring?days=0&q=${HIRING.toLowerCase()}`);
+    const hit = r.body && r.body.companies.find(c => c.domain === HIRING_DOMAIN);
+    ok('hiring list responds', r.status === 200, r.text.slice(0, 200));
+    ok('a LinkedIn post gives the company with its website', !!hit && hit.linkedin === 1, JSON.stringify(r.body && r.body.companies));
+    ok('a Naukri job under the same name merges into it', !!hit && hit.naukri === 1 && hit.roles.includes('Backend Engineer'), JSON.stringify(hit));
+    ok('a Naukri-only company is listed without a website', r.body.companies.some(c => c.company === `Solo${HIRING}` && c.domain === null && c.naukri === 1));
+    ok("another user's companies aren't listed", !r.body.companies.some(c => (c.domain || '').startsWith('intruder-')));
+    r = await api(`/api/prospects/hiring?days=0&q=${HIRING.toLowerCase()}&source=naukri`);
+    ok('the Naukri filter keeps companies with Naukri jobs', r.body.companies.length === 2 && r.body.companies.every(c => c.naukri > 0), JSON.stringify(r.body.companies.map(c => c.company)));
+
     // ── keys ───────────────────────────────────────────────────────────────
     console.log('\nkeys');
     const before = await DiscoveryConfig.findOne({ userId }).lean();
@@ -207,6 +231,8 @@ async function main() {
     await Contact.deleteMany({ userId, email: { $regex: `@(${DOMAIN}|${DOMAIN2})$`.replace(/\./g, '\\.') } });
     await CompanyPattern.deleteMany({ domain: { $in: [DOMAIN, DOMAIN2] } });
     await ProspectSearch.deleteMany({ domain: { $in: [DOMAIN, DOMAIN2] } });
+    await Lead.deleteMany({ dedupeKey: { $in: [`e:riya@${HIRING_DOMAIN}`, `e:x@intruder-${HIRING_DOMAIN}`] } });
+    await NaukriJob.deleteMany({ sourceId: { $in: [`t1-${stamp}`, `t2-${stamp}`] } });
     await Session.deleteOne({ tokenHash: crypto.createHash('sha256').update(token).digest('hex') });
   }
 

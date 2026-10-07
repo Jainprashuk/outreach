@@ -8,6 +8,7 @@ import Avatar from '../components/Avatar';
 import ConfidenceBadge from '../components/ConfidenceBadge';
 import { SkeletonRows } from '../components/Skeleton';
 import SearchReport, { ago } from '../components/prospects/SearchReport';
+import HiringView from '../components/prospects/HiringView';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useVisibleInterval } from '../hooks/useVisibleInterval';
@@ -15,7 +16,7 @@ import {
   addGenericProspectApi, cancelSearchApi, clearHistoryApi, companyFormatApi, prospectHistoryApi, removeSearchApi, discardProspectsApi, discoveryConfigApi, loadProspectsApi,
   moveProspectsApi, prospectCompaniesApi, prospectSearchApi, recheckCompanyApi, restoreProspectsApi,
   setGithubOrgApi, startProspectSearchApi, lookupCompanyApi, updateProspectApi,
-  type CompanyCandidate, type CompanyFormat, type DiscoveryConfigView, type EmailConfidence, type MoveProspectsResult,
+  type CompanyCandidate, type CompanyFormat, type HiringCompany, type DiscoveryConfigView, type EmailConfidence, type MoveProspectsResult,
   type Prospect, type ProspectCompany, type ProspectSearch,
 } from '../lib/api';
 import { CONFIDENCE_LABEL, PATTERN_EXAMPLE, SOURCE_LABEL } from '../lib/prospects';
@@ -44,10 +45,12 @@ const autoPick = (list: CompanyCandidate[]) => {
   return top.source === 'contacts' || top.source === 'typed' || !list.slice(1).some(c => c.exact) ? top : null;
 };
 
-function SearchCard({ config, busy, onSearch }: {
+function SearchCard({ config, busy, onSearch, prefill }: {
   config: DiscoveryConfigView | null;
   busy: boolean;
   onSearch: (domain: string, roles: string[], companyName: string) => void;
+  /** Fill the box from elsewhere (Hiring now) and show the matches to choose from. */
+  prefill?: { text: string; roles: string[]; n: number } | null;
 }) {
   const [query, setQuery] = useState('');
   const [roles, setRoles] = useState('');
@@ -56,6 +59,13 @@ function SearchCard({ config, busy, onSearch }: {
   const [open, setOpen] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const lastQuery = useRef('');
+
+  useEffect(() => {
+    if (!prefill) return;
+    setQuery(prefill.text);
+    setRoles(prefill.roles.join(', '));
+    setOpen(true);
+  }, [prefill?.n]);
 
   const lookup = async (q: string) => {
     lastQuery.current = q;
@@ -463,7 +473,7 @@ export default function Discover() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const domain = params.get('domain') || '';
-  const view = params.get('view') === 'history' ? 'history' : 'find';
+  const view = params.get('view') === 'history' ? 'history' : params.get('view') === 'hiring' ? 'hiring' : 'find';
   const runId = params.get('run') || '';
 
   const [config, setConfig] = useState<DiscoveryConfigView | null>(null);
@@ -482,6 +492,7 @@ export default function Discover() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [moveOpen, setMoveOpen] = useState(false);
   const wasRunning = useRef(false);
+  const [prefill, setPrefill] = useState<{ text: string; roles: string[]; n: number } | null>(null);
   const [history, setHistory] = useState<ProspectSearch[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const loadHistory = () => {
@@ -504,7 +515,8 @@ export default function Discover() {
     app.loadTemplates().catch(() => { /* the modal shows the empty state */ });
     loadHistory();
     loadCompanies().then(list => {
-      if (!params.get('domain') && list[0] && params.get('view') !== 'history') setParams({ domain: list[0].domain }, { replace: true });
+      // Open on your latest company — only on Find people; History and Hiring now keep their view.
+      if (!params.get('domain') && list[0] && !params.get('view')) setParams({ domain: list[0].domain }, { replace: true });
     }).catch(err => setError(err.message));
   }, []);
   useEffect(() => { if (view === 'history') loadHistory(); }, [view]);
@@ -562,6 +574,21 @@ export default function Discover() {
     } catch (err: any) {
       toast(err.message, 'error');
     } finally { setStarting(false); }
+  };
+
+  // From Hiring now. A LinkedIn company's website is known (from the post's email);
+  // a Naukri one is looked up by name, and started only when the match is certain —
+  // otherwise the Find tab opens with the name filled in and the matches to pick from.
+  const findHiring = async (c: HiringCompany, roles: string[]) => {
+    if (c.domain) return startSearch(c.domain, roles, c.company);
+    try {
+      const r = await lookupCompanyApi(c.company);
+      const sure = autoPick(r.candidates);
+      if (sure) return startSearch(sure.domain, roles, sure.name || c.company);
+    } catch { /* fall through to choosing by hand */ }
+    go({});
+    setPrefill({ text: c.company, roles, n: Date.now() });
+    toast(`Pick which ${c.company} you mean`, 'info');
   };
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -664,11 +691,16 @@ export default function Discover() {
         <button type="button" className={`nav-tab${view === 'find' ? ' active' : ''}`} onClick={() => go({ domain })}>
           <i className="ti ti-search" style={{ marginRight: 4 }} />Find people
         </button>
+        <button type="button" className={`nav-tab${view === 'hiring' ? ' active' : ''}`} onClick={() => go({ view: 'hiring', domain })}>
+          <i className="ti ti-briefcase" style={{ marginRight: 4 }} />Hiring now
+        </button>
         <button type="button" className={`nav-tab${view === 'history' ? ' active' : ''}`} onClick={() => go({ view: 'history', domain })}>
           <i className="ti ti-history" style={{ marginRight: 4 }} />History
           <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{history.length}</span>
         </button>
       </div>
+
+      {view === 'hiring' && <HiringView busy={starting || running} onFind={findHiring} />}
 
       {view === 'history' && (
         <HistoryView searches={history} loading={historyLoading} busy={starting || running}
@@ -686,7 +718,7 @@ export default function Discover() {
       )}
 
       {view === 'find' && (<>
-      <SearchCard config={config} busy={starting || running} onSearch={(d, roles, name) => startSearch(d, roles, name)} />
+      <SearchCard config={config} busy={starting || running} prefill={prefill} onSearch={(d, roles, name) => startSearch(d, roles, name)} />
 
       {companies.length > 1 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
