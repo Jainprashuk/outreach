@@ -5,6 +5,7 @@ import { useToast } from '../context/ToastContext';
 import { useSession } from '../context/SessionContext';
 import { fmtAgo } from '../lib/analytics';
 import AdminEmailsCard from '../components/AdminEmailsCard';
+import AdminEmailSchedule from '../components/AdminEmailSchedule';
 import UserEmailsModal from '../components/UserEmailsModal';
 import InfoTip from '../components/InfoTip';
 import { EMAIL_TYPES, effectiveState, TONE_COLOR } from '../lib/lifecycleTypes';
@@ -52,6 +53,12 @@ export default function Admin() {
   const [requests, setRequests] = useState<AccessRequestRow[]>([]);
   const [reqFilter, setReqFilter] = useState<'pending' | 'all'>('pending');
   const [emailsOpen, setEmailsOpen] = useState<string | null>(null);
+  // The lifecycle email switches, schedule and history live on their own tab.
+  const [tab, setTab] = useState<'overview' | 'emails'>(() => (window.location.hash === '#emails' ? 'emails' : 'overview'));
+  const pickTab = (t: 'overview' | 'emails') => {
+    setTab(t);
+    window.history.replaceState(null, '', t === 'emails' ? '#emails' : window.location.pathname + window.location.search);
+  };
   // Shared by the Lifecycle emails card and the accounts table, so a switch
   // flipped in one is reflected in the other's "will it actually send" view.
   const [emails, setEmails] = useState<AdminEmailsView | null>(null);
@@ -168,6 +175,23 @@ export default function Admin() {
       }
     >
       <div className="section" style={{ flex: 1 }}>
+        <div className="section-head" style={{ marginBottom: 14 }}>
+          <div className="nav-tabs" role="tablist">
+            {([['overview', 'Overview'], ['emails', 'Lifecycle emails']] as const).map(([key, label]) => (
+              <button type="button" role="tab" aria-selected={tab === key} key={key}
+                className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => pickTab(key)}>{label}</button>
+            ))}
+          </div>
+        </div>
+
+        {tab === 'emails' && (
+          <>
+            <AdminEmailsCard data={emails} reload={loadEmails} />
+            <AdminEmailSchedule />
+          </>
+        )}
+
+        <div hidden={tab !== 'overview'}>
         {error && <div className="login-error" style={{ textAlign: 'left' }}>{error}</div>}
         {!data && !error && <div className="skeleton" style={{ height: 120 }} />}
 
@@ -317,8 +341,6 @@ export default function Admin() {
                 </Refreshing>
               </div>
             </div>
-
-            <AdminEmailsCard data={emails} reload={loadEmails} />
 
             <div className="an-card" style={{ marginTop: 16 }}>
               <div className="an-card-head">
@@ -480,6 +502,7 @@ export default function Admin() {
           </>
         )}
         </Refreshing>
+        </div>
       </div>
     </Layout>
   );

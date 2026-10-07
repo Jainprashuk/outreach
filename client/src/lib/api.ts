@@ -1705,6 +1705,36 @@ export const adminSetEmailSwitchApi = (field: string, value: boolean) =>
   apiFetch<{ config: LifecycleConfig }>('/api/admin/emails', { method: 'PUT', body: JSON.stringify({ field, value }) });
 export const adminSendSampleApi = (type: LifecycleType) =>
   apiFetch<{ ok: true; to: string }>('/api/admin/emails/sample', { method: 'POST', body: JSON.stringify({ type }) });
+/** One gate answer: will it send, and if not, the first switch that stops it. */
+export interface EmailVerdict { send: boolean; reason: string | null; testMode: boolean }
+export interface UpcomingEmail {
+  userId: string; email: string; name: string; type: LifecycleType; due: string;
+  missing?: string[];                       // setup reminder: readiness keys still missing
+  since?: string;                           // inactive: when the quiet spell began
+  period?: { from: string; to: string };    // weekly report: the week it covers
+  now: EmailVerdict;                        // with the switches as saved
+  ifOn: EmailVerdict;                       // as if the master switch were on
+}
+export interface AdminUpcomingEmails {
+  generatedAt: string; until: string; days: number; masterOn: boolean;
+  runs: Array<{ at: string; kind: 'daily' | 'weekly'; items: UpcomingEmail[] }>;
+  midSetup: Array<{ userId: string; email: string; name: string }>;
+}
+export interface LifecycleLogRow {
+  id: string; userId: string; email: string; name: string; type: LifecycleType;
+  status: 'sent' | 'skipped' | 'failed' | 'claimed'; reason: string | null; testMode: boolean;
+  attempts: number; about: string | null; sentAt: string | null; createdAt: string; updatedAt: string;
+}
+export const adminUpcomingEmailsApi = (days = 3) =>
+  apiFetch<AdminUpcomingEmails>(`/api/admin/emails/upcoming?days=${days}`);
+export const adminEmailLogApi = (q: { type?: string; status?: string; before?: string | null; limit?: number } = {}) => {
+  const p = new URLSearchParams();
+  if (q.type) p.set('type', q.type);
+  if (q.status) p.set('status', q.status);
+  if (q.before) p.set('before', q.before);
+  p.set('limit', String(q.limit || 50));
+  return apiFetch<{ rows: LifecycleLogRow[]; next: string | null }>(`/api/admin/emails/log?${p}`);
+};
 /** `type: null` = every email type at once (Enable all / Disable all). */
 export const adminSetUserEmailApi = (id: string, type: LifecycleType | null, blocked: boolean) =>
   apiFetch<{ ok: true; blockedByAdmin: LifecycleType[] }>(`/api/admin/users/${id}/emails`, {
