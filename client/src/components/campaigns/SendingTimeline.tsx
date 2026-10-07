@@ -33,7 +33,13 @@ function label(t: number, granularity: 'day' | 'hour', long = false) {
  * on an hourly bucket the two coincide by definition and the marker rides the
  * bar top, which is the honest picture rather than a second invented series.
  */
-export default function SendingTimeline() {
+/**
+ * `load` swaps the data source — the admin's Sending tab passes the fleet-wide
+ * endpoint. Defaults to this account's own timeline.
+ */
+export default function SendingTimeline({ load = loadTimelineApi }: {
+  load?: (range: TimelineRange, scope: TimelineScope) => Promise<Timeline>;
+} = {}) {
   const [range, setRange] = useState<TimelineRange>('7d');
   // Both measures as bars, one at a time. Overlaying the rate as a tick inside
   // the volume bar was legible in principle and not in practice.
@@ -54,7 +60,7 @@ export default function SendingTimeline() {
     let retry: ReturnType<typeof setTimeout> | undefined;
     setLoading(true);
     const run = (tries: number) => {
-      loadTimelineApi(range, scope)
+      load(range, scope)
         .then((d) => { if (alive) { setData(d); setError(''); setLoading(false); } })
         .catch((e) => {
           if (!alive) return;
@@ -69,7 +75,7 @@ export default function SendingTimeline() {
     };
     const start = setTimeout(() => run(0), attempt === 0 ? 350 : 0);
     return () => { alive = false; clearTimeout(start); if (retry) clearTimeout(retry); };
-  }, [range, scope, attempt]);
+  }, [range, scope, attempt, load]);
 
   if (loading && !data) {
     return <div className="empty-state"><i className="ti ti-loader-2" /> Building the timeline…</div>;
@@ -108,11 +114,11 @@ export default function SendingTimeline() {
     : { sent: x.sent, scheduled: x.scheduled };
   // The cap belongs to daily volume only — it is meaningless against an hourly
   // bucket or a per-hour rate.
-  const showCap = !rate && !hourly;
+  const showCap = !rate && !hourly && data.dailyCap != null;
   const dataMax = Math.max(1, ...b.map((x) => valOf(x).sent + valOf(x).scheduled));
   // Fold the cap into the scale. Without this the line is drawn above the plot
   // whenever the cap exceeds the data, where it strikes through the text above.
-  const max = showCap ? Math.max(dataMax, data.dailyCap) : dataMax;
+  const max = showCap ? Math.max(dataMax, data.dailyCap!) : dataMax;
   const h = (v: number) => (v / max) * (H - PAD_B - 12);
   const nowX = PAD_L + ((data.now - data.from) / (data.to - data.from)) * plotW;
   const every = Math.max(1, Math.ceil(b.length / 12));
@@ -217,9 +223,9 @@ export default function SendingTimeline() {
 
             {showCap && (
               <>
-                <line x1={PAD_L} y1={H - PAD_B - h(data.dailyCap)} x2={W - 10} y2={H - PAD_B - h(data.dailyCap)}
+                <line x1={PAD_L} y1={H - PAD_B - h(data.dailyCap!)} x2={W - 10} y2={H - PAD_B - h(data.dailyCap!)}
                   stroke="var(--amber)" strokeWidth="1.5" strokeDasharray="4 3" />
-                <text x={W - 11} y={H - PAD_B - h(data.dailyCap) - 4} textAnchor="end" fontSize="9"
+                <text x={W - 11} y={H - PAD_B - h(data.dailyCap!) - 4} textAnchor="end" fontSize="9"
                   fill="var(--amber)">cap {data.dailyCap}/day</text>
               </>
             )}

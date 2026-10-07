@@ -14,6 +14,12 @@
  *
  * Deliberately aggregates-only: there is no drill-in to another account's rows
  * and no impersonation. Support questions get answered with counts.
+ *
+ * ONE EXCEPTION, BY THE OWNER'S CHOICE (2026-10-08): the /issues endpoints at
+ * the bottom of this file return raw error text — failed recipients, SMTP
+ * replies, stack traces, request bodies — because a failure cannot be
+ * diagnosed from a count. Invariant 2 above applies to everything else.
+ * Credential-shaped keys are still redacted at write time (lib/issues.js).
  */
 const express = require('express');
 const mongoose = require('mongoose');
@@ -31,6 +37,9 @@ const Interview = require('../models/Interview');
 const ActivityLog = require('../models/ActivityLog');
 const LoginCode = require('../models/LoginCode');
 const AccessRequest = require('../models/AccessRequest');
+const Issue = require('../models/Issue');
+const CronBeat = require('../models/CronBeat');
+const { buildTimeline, istDateKey, DAILY_SEND_CAP } = require('../lib/campaignRunner');
 const { destroyAllForUser } = require('../lib/session');
 const { logEvent } = require('../lib/activityLog');
 const { sendAccessApproved } = require('../lib/emailOtp');
@@ -919,6 +928,317 @@ router.patch('/users/:id/emails', async (req, res) => {
     }).catch(() => {});
     const u = await User.findById(target._id, { emailBlockedByAdmin: 1 }).lean();
     res.json({ ok: true, blockedByAdmin: u.emailBlockedByAdmin || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Issues ────────────────────────────────────────────────────────────────────
+// Everything that went wrong for anybody. Written by lib/issues.js.
+
+const ISSUE_SOURCES = ['server', 'validation', 'job', 'client'];
+const escapeRe = (v) => String(v).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** GET /api/admin/issues?status=open|resolved|all&source=&userId=&q=&limit= */
+router.get('/issues', async (req, res) => {
+  try {
+    const status = ['open', 'resolved', 'all'].includes(req.query.status) ? req.query.status : 'open';
+    const limit = Math.min(500, Math.max(1, Number(req.query.limit) || 200));
+    const filter = {};
+    if (status !== 'all') filter.status = status;
+    if (ISSUE_SOURCES.includes(req.query.source)) filter.source = req.query.source;
+    if (req.query.userId === 'none') filter.userId = null;
+    else if (req.query.userId) {
+      if (!mongoose.isValidObjectId(req.query.userId)) return res.status(400).json({ error: 'Not a valid account id' });
+      filter.userId = new mongoose.Types.ObjectId(String(req.query.userId));
+    }
+    const q = String(req.query.q || '').trim().slice(0, 100);
+    if (q) {
+      const re = new RegExp(escapeRe(q), 'i');
+      filter.$or = [{ message: re }, { area: re }, { kind: re }];
+    }
+
+    const [rows, total, openBySource, users] = await Promise.all([
+      Issue.find(filter).sort({ lastSeenAt: -1 }).limit(limit).lean(),
+      Issue.countDocuments(filter),
+      Issue.aggregate([
+        { $match: { status: 'open' } },
+        { $group: { _id: '$source', issues: { $sum: 1 }, occurrences: { $sum: '$count' } } },
+      ]),
+      User.find({}, { email: 1 }).lean(),
+    ]);
+    const emailOf = new Map(users.map(u => [id(u._id), u.email]));
+
+    res.json({
+      issues: rows.map(r => ({
+        id: id(r._id), userId: id(r.userId), userEmail: r.userId ? (emailOf.get(id(r.userId)) || '(deleted account)') : null,
+        source: r.source, area: r.area, kind: r.kind, message: r.message, detail: r.detail, meta: r.meta || {},
+        count: r.count, firstSeenAt: r.firstSeenAt, lastSeenAt: r.lastSeenAt, status: r.status, resolvedAt: r.resolvedAt,
+      })),
+      total,
+      open: Object.fromEntries(openBySource.map(g => [g._id, { issues: g.issues, occurrences: g.occurrences }])),
+      users: users.map(u => ({ id: id(u._id), email: u.email })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/admin/issues/status { ids: [...], status: 'open'|'resolved' }
+ * Explicit ids only — never "everything matching a filter", so what changes is
+ * exactly what the admin was looking at.
+ */
+router.post('/issues/status', async (req, res) => {
+  try {
+    const { ids, status } = req.body || {};
+    if (!['open', 'resolved'].includes(status)) return res.status(400).json({ error: 'status must be open or resolved' });
+    if (!Array.isArray(ids) || !ids.length || ids.length > 500 || !ids.every(v => mongoose.isValidObjectId(v))) {
+      return res.status(400).json({ error: 'Send 1-500 issue ids' });
+    }
+    const r = await Issue.updateMany(
+      { _id: { $in: ids } },
+      { $set: { status, resolvedAt: status === 'resolved' ? new Date() : null } },
+    );
+    res.json({ ok: true, updated: r.modifiedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Sending ───────────────────────────────────────────────────────────────────
+// How the app is coping with email across every account: what is sending right
+// now, what ran, what is scheduled, how close each Gmail is to its cap, and
+// whether the scheduler is actually firing. Counts, timestamps and the senders'
+// own addresses — no recipient, subject or body leaves this endpoint, except
+// the raw failure reason on a batch (same choice as the Issues tab).
+
+const LIVE_JOB = ['pending', 'processing', 'paused'];
+const MIN = 60_000;
+const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
+const IST_MS = 5.5 * HOUR;
+
+// What each scheduled endpoint is ASKED to do (.github/workflows).
+const CRONS = [
+  { name: '/api/check-mailbox', label: 'Mailbox check', everyMin: 5 },
+  { name: '/api/campaigns/run-due', label: 'Campaign releases', everyMin: 60 },
+  { name: '/api/postings/sync', label: 'Job postings sync', everyMin: 360 },
+];
+
+const countWhere = (cond) => ({ $size: { $filter: { input: '$items', as: 'i', cond } } });
+const st = (v) => ({ $eq: ['$$i.status', v] });
+
+/** How long before a live batch with nothing happening counts as stuck. */
+function stallAfterMs(job) {
+  if (job.sendMode === 'drip') return Math.max(3 * HOUR / Math.max(1, job.ratePerHour || 5), 20 * MIN);
+  return 10 * MIN;
+}
+
+/** Most common failure text of a batch, with its count. */
+function topError(errors) {
+  const m = new Map();
+  for (const e of errors || []) if (e) m.set(e, (m.get(e) || 0) + 1);
+  let best = null;
+  for (const [msg, n] of m) if (!best || n > best.n) best = { msg, n };
+  return best;
+}
+
+/** When a running campaign next releases, IST hour rules as runDueCampaigns. */
+function nextRelease(c, now) {
+  const today = istDateKey(new Date(now));
+  const ist = new Date(now + IST_MS);
+  const slotToday = Date.UTC(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate(), c.runHourIst || 0, 0, 0) - IST_MS;
+  const releasedToday = c.lastReleaseOn === today;
+  if (!releasedToday && now >= slotToday) return { at: slotToday, dueNow: true };
+  return { at: releasedToday ? slotToday + DAY : slotToday, dueNow: false };
+}
+
+/** GET /api/admin/sending?days=7 */
+router.get('/sending', async (req, res) => {
+  try {
+    const days = Math.min(30, Math.max(1, Number(req.query.days) || 7));
+    const now = Date.now();
+    const since = new Date(now - days * DAY);
+    const todayStart = istMidnight(new Date(now));
+
+    const [jobs, campaigns, users, beats] = await Promise.all([
+      SendJob.aggregate([   // DELIBERATELY UNSCOPED — see file header
+        { $match: { $or: [
+          { status: { $in: LIVE_JOB } },
+          { createdAt: { $gte: since } },
+          { updatedAt: { $gte: todayStart } },
+        ] } },
+        { $project: {
+          userId: 1, campaignId: 1, status: 1, sendMode: 1, ratePerHour: 1, chunkSize: 1,
+          senderEmail: 1, createdAt: 1, updatedAt: 1,
+          total: { $size: '$items' },
+          sent: countWhere(st('sent')),
+          failed: countWhere(st('failed')),
+          skipped: countWhere(st('skipped')),
+          pending: countWhere(st('pending')),
+          sentToday: countWhere({ $and: [st('sent'), { $gte: ['$$i.processedAt', todayStart] }] }),
+          failedToday: countWhere({ $and: [st('failed'), { $gte: ['$$i.processedAt', todayStart] }] }),
+          firstAt: { $min: '$items.processedAt' },
+          lastAt: { $max: '$items.processedAt' },
+          errors: { $slice: [{ $map: {
+            input: { $filter: { input: '$items', as: 'i', cond: st('failed') } }, as: 'i', in: '$$i.error',
+          } }, 100] },
+        } },
+        { $sort: { createdAt: -1 } },
+        { $limit: 1000 },
+      ]),
+      Campaign.find({ deleted: { $ne: true } },
+        { userId: 1, name: 1, status: 1, contactsPerDay: 1, ratePerHour: 1, runHourIst: 1,
+          lastReleaseOn: 1, lastReleaseAt: 1, lastError: 1, stats: 1 }).lean(),
+      User.find({}, { email: 1, status: 1 }).lean(),
+      CronBeat.find({}).lean(),
+    ]);
+
+    const emailOf = new Map(users.map(u => [id(u._id), u.email]));
+    const campName = new Map(campaigns.map(c => [id(c._id), c.name]));
+    const who = (uid) => (uid ? emailOf.get(id(uid)) || '(deleted account)' : '(no account)');
+
+    const shape = (j) => {
+      const lastAt = j.lastAt ? new Date(j.lastAt).getTime() : null;
+      const createdAt = new Date(j.createdAt).getTime();
+      const delay = j.sendMode === 'drip' ? HOUR / Math.max(1, j.ratePerHour || 5) : 1500;
+      const live = LIVE_JOB.includes(j.status);
+      // Drip items are fanned out at creation with fixed spacing, so the
+      // last one is due at createdAt + (total-1)*delay.
+      const etaAt = live && j.pending > 0 ? Math.max(now, createdAt + (j.total - 1) * delay) : null;
+      const idleMs = now - (lastAt || createdAt);
+      const stalled = (j.status === 'processing' || j.status === 'pending') && j.pending > 0
+        && idleMs > stallAfterMs(j)
+        // A drip that has not reached its next slot yet is waiting, not stuck.
+        && !(j.sendMode === 'drip' && createdAt + (j.total - j.pending) * delay > now - stallAfterMs(j));
+      const top = topError(j.errors);
+      return {
+        id: id(j._id), userId: id(j.userId), userEmail: who(j.userId), senderEmail: j.senderEmail || '',
+        campaignId: j.campaignId || null, campaignName: j.campaignId ? campName.get(String(j.campaignId)) || '(deleted campaign)' : null,
+        status: j.status, sendMode: j.sendMode || 'sequential', ratePerHour: j.ratePerHour || null,
+        total: j.total, sent: j.sent, failed: j.failed, skipped: j.skipped, pending: j.pending,
+        createdAt: j.createdAt, firstAt: j.firstAt || null, lastAt: j.lastAt || null, updatedAt: j.updatedAt,
+        etaAt: etaAt ? new Date(etaAt) : null, idleMs, stalled,
+        topError: top ? top.msg : null, topErrorCount: top ? top.n : 0,
+      };
+    };
+
+    const shaped = jobs.map(shape);
+    const live = shaped.filter(j => LIVE_JOB.includes(j.status));
+    const past = shaped.filter(j => !LIVE_JOB.includes(j.status) && new Date(j.createdAt) >= since);
+
+    // Per-account Gmail load today. inFlight counts promised-but-unsent items,
+    // like sendHeadroom(), so three drips cannot each look safe on their own.
+    const load = new Map();
+    for (const j of jobs) {
+      const k = id(j.userId);
+      const cur = load.get(k) || { userId: k, userEmail: who(j.userId), sentToday: 0, failedToday: 0, inFlight: 0, errors: [] };
+      cur.sentToday += j.sentToday;
+      cur.failedToday += j.failedToday;
+      if (j.status === 'pending' || j.status === 'processing') cur.inFlight += j.pending;
+      if (j.failedToday) cur.errors.push(...(j.errors || []));
+      load.set(k, cur);
+    }
+    const accounts = [...load.values()]
+      .filter(a => a.sentToday || a.failedToday || a.inFlight)
+      .map(({ errors, ...a }) => {
+        const top = topError(errors);
+        return { ...a, cap: DAILY_SEND_CAP, usedPct: Math.round(((a.sentToday + a.inFlight) / DAILY_SEND_CAP) * 100),
+          failRate: a.sentToday + a.failedToday ? Math.round((a.failedToday / (a.sentToday + a.failedToday)) * 100) : 0,
+          topError: top ? top.msg : null };
+      })
+      .sort((a, b) => (b.sentToday + b.inFlight) - (a.sentToday + a.inFlight));
+
+    // Scheduled campaign batches.
+    const upcoming = campaigns
+      .filter(c => c.status === 'running' && (c.stats?.pending || 0) > 0)
+      .map(c => {
+        const nr = nextRelease(c, now);
+        const per = Math.max(1, c.contactsPerDay || 20);
+        const pending = c.stats.pending;
+        return {
+          campaignId: id(c._id), name: c.name, userId: id(c.userId), userEmail: who(c.userId),
+          nextAt: new Date(nr.at), dueNow: nr.dueNow, overdueMs: nr.dueNow ? now - nr.at : 0,
+          batch: Math.min(per, pending), pending, perDay: per, ratePerHour: c.ratePerHour || 5,
+          batchHours: Math.round((Math.min(per, pending) / Math.max(1, c.ratePerHour || 5)) * 10) / 10,
+          daysLeft: Math.ceil(pending / per), lastReleaseAt: c.lastReleaseAt || null, lastError: c.lastError || null,
+        };
+      })
+      .sort((a, b) => a.nextAt - b.nextAt);
+
+    const crons = CRONS.map(c => {
+      const b = beats.find(x => x.name === c.name);
+      const recent = (b?.recent || []).map(d => new Date(d).getTime());
+      const in24h = recent.filter(t => t >= now - DAY);
+      const gaps = in24h.slice(1).map((t, i) => t - in24h[i]);
+      return {
+        ...c, lastAt: b?.lastAt || null, lastStatus: b?.lastStatus ?? null, lastMs: b?.lastMs ?? null,
+        lastOkAt: b?.lastOkAt || null, lastSummary: b?.lastSummary || null,
+        runs24h: in24h.length, expected24h: Math.round(1440 / c.everyMin),
+        medianGapMin: gaps.length ? Math.round(gaps.sort((x, y) => x - y)[Math.floor(gaps.length / 2)] / MIN) : null,
+      };
+    });
+
+    // ── Things worth a look, worst first ──
+    const alerts = [];
+    for (const j of live.filter(x => x.stalled)) {
+      alerts.push({ level: 'critical', area: 'batch', text: `A ${j.sendMode} batch for ${j.userEmail} has sent nothing for ${Math.round(j.idleMs / MIN)} min with ${j.pending} still queued.`, ref: j.id, userId: j.userId });
+    }
+    for (const a of accounts) {
+      if (a.failedToday >= 5 && a.failRate >= 50) {
+        alerts.push({ level: 'critical', area: 'account', text: `${a.userEmail}: ${a.failRate}% of today's sends failed (${a.failedToday}). Most common: ${a.topError || 'unknown'}`, ref: a.userId, userId: a.userId });
+      }
+      if (a.usedPct >= 100) alerts.push({ level: 'critical', area: 'account', text: `${a.userEmail} is at ${a.sentToday + a.inFlight} of ${a.cap} for today, counting what is queued — over the Gmail daily cap.`, ref: a.userId, userId: a.userId });
+      else if (a.usedPct >= 80) alerts.push({ level: 'warning', area: 'account', text: `${a.userEmail} is at ${a.usedPct}% of the ${a.cap}/day Gmail cap, counting what is queued.`, ref: a.userId, userId: a.userId });
+    }
+    for (const u of upcoming.filter(x => x.dueNow && x.overdueMs > 2 * HOUR)) {
+      alerts.push({ level: 'warning', area: 'campaign', text: `Campaign "${u.name}" (${u.userEmail}) has been due for ${Math.round(u.overdueMs / HOUR)}h and not released — waiting on the scheduler.`, ref: u.campaignId, userId: u.userId });
+    }
+    for (const c of campaigns.filter(x => x.status === 'failed')) {
+      alerts.push({ level: 'critical', area: 'campaign', text: `Campaign "${c.name}" (${who(c.userId)}) is in a failed state: ${c.lastError || 'no error recorded'}`, ref: id(c._id), userId: id(c.userId) });
+    }
+    for (const j of live.filter(x => x.status === 'paused' && now - new Date(x.updatedAt).getTime() > DAY)) {
+      alerts.push({ level: 'info', area: 'batch', text: `A batch for ${j.userEmail} has been paused for ${Math.round((now - new Date(j.updatedAt).getTime()) / DAY)} day(s) with ${j.pending} unsent.`, ref: j.id, userId: j.userId });
+    }
+    for (const c of crons) {
+      if (!c.lastAt) alerts.push({ level: 'warning', area: 'scheduler', text: `${c.label} has not been seen since tracking started.`, ref: c.name });
+      else if (c.lastStatus >= 400) alerts.push({ level: 'critical', area: 'scheduler', text: `${c.label}'s last run returned HTTP ${c.lastStatus}.`, ref: c.name });
+      else if (now - new Date(c.lastAt).getTime() > Math.max(3 * c.everyMin * MIN, 3 * HOUR)) {
+        alerts.push({ level: 'warning', area: 'scheduler', text: `${c.label} last ran ${Math.round((now - new Date(c.lastAt).getTime()) / HOUR)}h ago (asked for every ${c.everyMin} min).`, ref: c.name });
+      }
+    }
+    const rank = { critical: 0, warning: 1, info: 2 };
+    alerts.sort((a, b) => rank[a.level] - rank[b.level]);
+
+    const sum = (arr, k) => arr.reduce((n, x) => n + (x[k] || 0), 0);
+    res.json({
+      now: new Date(now), days, dailyCap: DAILY_SEND_CAP,
+      totals: {
+        liveBatches: live.filter(j => j.status !== 'paused').length,
+        pausedBatches: live.filter(j => j.status === 'paused').length,
+        stalled: live.filter(j => j.stalled).length,
+        queued: sum(live.filter(j => j.status !== 'paused'), 'pending'),
+        sentToday: sum(accounts, 'sentToday'),
+        failedToday: sum(accounts, 'failedToday'),
+        sendingAccounts: accounts.length,
+        pastBatches: past.length,
+        pastSent: sum(past, 'sent'), pastFailed: sum(past, 'failed'), pastSkipped: sum(past, 'skipped'),
+        scheduledToday: upcoming.filter(u => new Date(u.nextAt).getTime() < todayStart.getTime() + DAY).reduce((n, u) => n + u.batch, 0),
+      },
+      alerts, live, past: past.slice(0, 300), upcoming, accounts, crons,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/admin/sending/timeline?range=24h|7d|30d&scope=all|campaigns — every account on one chart. */
+router.get('/sending/timeline', async (req, res) => {
+  try {
+    const range = ['24h', '7d', '30d'].includes(req.query.range) ? req.query.range : '7d';
+    const scope = req.query.scope === 'campaigns' ? 'campaigns' : 'all';
+    res.json(await buildTimeline({ range, scope, fleet: true }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

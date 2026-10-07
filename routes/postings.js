@@ -349,7 +349,7 @@ router.post('/sync', async (req, res) => {
       const report = await runForUsers(
         userIds,
         (userId) => syncAllBoards({ boardIds: null, dryRun: !!dryRun, userId }),
-        { budget: deadline(45_000) },
+        { budget: deadline(45_000), area: 'postings' },
       );
       return res.json({ ...report, massCloseWarnThreshold: MASS_CLOSE_WARN });
     }

@@ -18,6 +18,8 @@ const credentials = require('./lib/credentials');
 // createSession/setCookieHeader moved to routes/auth.js with the sign-in flow.
 const { resolveSession, destroySession, clearCookieHeader } = require('./lib/session');
 const { auditHttpMutations } = require('./lib/activityLog');
+const { captureHttpIssues } = require('./lib/issues');
+const { recordCronBeats } = require('./lib/cronBeat');
 const { attachUser, resolveSoleUserId } = require('./lib/currentUser');
 const { isOnboarded } = require('./lib/onboarding');
 const { requireOnboarded } = require('./lib/onboardingGuard');
@@ -40,6 +42,9 @@ app.use(cors());
 app.use(compression({ filter: (req, res) => !req.path.startsWith('/api/inngest') && compression.filter(req, res) }));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: false }));
+// Every failed /api response lands in the admin's Issues tab. Ahead of the auth
+// guard so sign-in failures are seen too; it reads the user only on finish.
+app.use('/api', captureHttpIssues);
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 const AUTH_PASSWORD = process.env.AUTH_PASSWORD;
@@ -238,6 +243,8 @@ const requireAuth = async (req, res, next) => {
 };
 
 app.use(requireAuth);
+// After requireAuth, which is what sets req.isCron. Feeds the admin's Sending tab.
+app.use(recordCronBeats);
 
 app.get('/login', (_req, res) => res.sendFile(path.join(__dirname, 'login.html')));
 
@@ -545,12 +552,12 @@ app.get('/api/share-link', requireDb, attachUser, async (req, res) => {
 // owner from the SendJob it was handed, never from the request.
 const { serve } = require('inngest/express');
 const { inngest } = require('./inngest');
-const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip } = require('./inngest-fns');
+const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, reportFailedFunctions } = require('./inngest-fns');
 const { lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver } = require('./lib/lifecycle/inngest');
 const { prospectsSearch } = require('./lib/prospectSearch');
 app.use('/api/inngest', serve({
   client: inngest,
-  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch],
+  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch, reportFailedFunctions],
 }));
 
 // Sign-in is an emailed one-time code; see routes/auth.js and lib/loginCode.js.
@@ -589,6 +596,8 @@ app.use('/api/blocklist', requireDb, require('./routes/blocklist'));
 // First-run setup. Below the /api stack above, so it inherits attachUser and
 // the mutation audit log like every other owner-scoped router.
 app.use('/api/onboarding', requireDb, require('./routes/onboarding'));
+// The browser reporting its own crashes for the admin's Issues tab.
+app.use('/api/issues', requireDb, require('./routes/issues'));
 // Fleet-wide admin. Mounted BELOW the /api stack so it inherits attachUser and
 // auditHttpMutations like everything else — moving it above those would lose the
 // audit trail on exactly the routes that most need one.
@@ -1092,7 +1101,7 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
     // More than a handful of accounts needs the Inngest fan-out (one event per
     // user, workers in parallel) rather than this serial sweep.
     const userIds = await usersByStaleness('lastMailboxCheckAt');
-    const report = await runForUsers(userIds, checkMailboxForUser, { budget: deadline(25_000) });
+    const report = await runForUsers(userIds, checkMailboxForUser, { budget: deadline(25_000), area: 'mailbox' });
     res.json(report);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1133,6 +1142,7 @@ app.get('/api/status', requireDb, async (req, res) => {
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {
   console.error('[unhandled]', err.message);
+  res.locals.issueError = err;   // gives the Issues tab the stack trace
   if (!res.headersSent) res.status(500).json({ error: err.message || 'Internal server error' });
 });
 

@@ -1,5 +1,7 @@
 // Port of the API layer from js/app.js — same endpoints, same semantics.
 
+import { reportClientIssue } from './issueReporter';
+
 // Always same-origin: Express serves the SPA at /app in prod, and the Vite dev
 // server proxies /api → localhost:3000 in dev. Relative URLs work in both.
 export const API_BASE = '';
@@ -141,13 +143,28 @@ export const JOBS_CHANGED_EVENT = 'outreach:jobs-changed';
 const JOB_WRITE_PATH = /^\/api\/(jobs|campaigns)(\/|\?|$)/;
 
 export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { 'Content-Type': 'application/json' },
-    ...opts,
-  });
-  const data = await res.json();
-  if (!res.ok) throw new Error((data as any).error || `Request to ${path} failed`);
   const method = (opts?.method || 'GET').toUpperCase();
+  let res: Response;
+  let data: any;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      headers: { 'Content-Type': 'application/json' },
+      ...opts,
+    });
+  } catch (err: any) {
+    // A deliberate cancel is not a failure.
+    if (err?.name !== 'AbortError') reportClientIssue('network_error', `${method} ${path}: ${err?.message || 'request failed'}`, { url: path, method });
+    throw err;
+  }
+  try {
+    data = await res.json();
+  } catch (err: any) {
+    // No JSON back — a platform timeout or an HTML error page, which the
+    // server's own capture never saw.
+    reportClientIssue('network_error', `${method} ${path}: HTTP ${res.status} with no readable response`, { url: path, method });
+    throw err;
+  }
+  if (!res.ok) throw new Error((data as any).error || `Request to ${path} failed`);
   if (method !== 'GET' && JOB_WRITE_PATH.test(path) && typeof window !== 'undefined') {
     window.dispatchEvent(new Event(JOBS_CHANGED_EVENT));
   }
@@ -1061,7 +1078,8 @@ export interface Timeline {
   now: number;
   from: number;
   to: number;
-  dailyCap: number;
+  /** Null on the admin's fleet view: the cap is per Gmail account. */
+  dailyCap: number | null;
   buckets: TimelineBucket[];
 }
 
@@ -2009,3 +2027,76 @@ export const setGithubOrgApi = (domain: string, githubOrg: string) =>
 export const recheckCompanyApi = (domain: string) =>
   apiFetch<{ ok: boolean; people: number; withEmail: number; pattern: string; confidence: string }>(
     `/api/prospects/patterns/${encodeURIComponent(domain)}/recheck`, { method: 'POST' });
+
+// ── Admin: Issues ────────────────────────────────────────────────────────────
+export type IssueSource = 'server' | 'validation' | 'job' | 'client';
+export interface IssueRow {
+  id: string;
+  userId: string | null;
+  userEmail: string | null;
+  source: IssueSource;
+  area: string;
+  kind: string;
+  message: string;
+  detail: string;
+  meta: Record<string, unknown>;
+  count: number;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  status: 'open' | 'resolved';
+  resolvedAt: string | null;
+}
+export interface IssuesView {
+  issues: IssueRow[];
+  total: number;
+  open: Partial<Record<IssueSource, { issues: number; occurrences: number }>>;
+  users: Array<{ id: string; email: string }>;
+}
+export const adminIssuesApi = (params: Record<string, string>) =>
+  apiFetch<IssuesView>(`/api/admin/issues?${new URLSearchParams(params)}`);
+export const adminSetIssueStatusApi = (ids: string[], status: 'open' | 'resolved') =>
+  apiFetch<{ ok: true; updated: number }>('/api/admin/issues/status', { method: 'POST', body: JSON.stringify({ ids, status }) });
+
+// ── Admin: Sending ───────────────────────────────────────────────────────────
+export interface SendingBatch {
+  id: string; userId: string | null; userEmail: string; senderEmail: string;
+  campaignId: string | null; campaignName: string | null;
+  status: 'pending' | 'processing' | 'paused' | 'done' | 'cancelled';
+  sendMode: 'sequential' | 'bulk' | 'drip'; ratePerHour: number | null;
+  total: number; sent: number; failed: number; skipped: number; pending: number;
+  createdAt: string; firstAt: string | null; lastAt: string | null; updatedAt: string;
+  etaAt: string | null; idleMs: number; stalled: boolean;
+  topError: string | null; topErrorCount: number;
+}
+export interface SendingUpcoming {
+  campaignId: string; name: string; userId: string; userEmail: string;
+  nextAt: string; dueNow: boolean; overdueMs: number;
+  batch: number; pending: number; perDay: number; ratePerHour: number; batchHours: number;
+  daysLeft: number; lastReleaseAt: string | null; lastError: string | null;
+}
+export interface SendingAccount {
+  userId: string; userEmail: string; sentToday: number; failedToday: number; inFlight: number;
+  cap: number; usedPct: number; failRate: number; topError: string | null;
+}
+export interface SendingCron {
+  name: string; label: string; everyMin: number;
+  lastAt: string | null; lastStatus: number | null; lastMs: number | null; lastOkAt: string | null;
+  lastSummary: Record<string, number | string> | null;
+  runs24h: number; expected24h: number; medianGapMin: number | null;
+}
+/** `userId` is absent on scheduler alerts, which concern every account. */
+export interface SendingAlert { level: 'critical' | 'warning' | 'info'; area: string; text: string; ref: string; userId?: string | null }
+export interface SendingView {
+  now: string; days: number; dailyCap: number;
+  totals: {
+    liveBatches: number; pausedBatches: number; stalled: number; queued: number;
+    sentToday: number; failedToday: number; sendingAccounts: number;
+    pastBatches: number; pastSent: number; pastFailed: number; pastSkipped: number; scheduledToday: number;
+  };
+  alerts: SendingAlert[];
+  live: SendingBatch[]; past: SendingBatch[]; upcoming: SendingUpcoming[];
+  accounts: SendingAccount[]; crons: SendingCron[];
+}
+export const adminSendingApi = (days: number) => apiFetch<SendingView>(`/api/admin/sending?days=${days}`);
+export const adminSendingTimelineApi = (range: TimelineRange, scope: TimelineScope) =>
+  apiFetch<Timeline>(`/api/admin/sending/timeline?range=${range}&scope=${scope}`);

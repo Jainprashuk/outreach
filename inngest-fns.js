@@ -10,6 +10,7 @@ const { INTERVIEW_ERROR, isInInterview, loadInterviewSets } = require('./lib/int
 const { REPLIED_ERROR, hasUnansweredReply } = require('./lib/actionQueue');
 const { notifyCampaignJobFinished } = require('./lib/campaignNotifications');
 const { logEvent } = require('./lib/activityLog');
+const { reportIssue } = require('./lib/issues');
 const db = require('./db');
 
 // A send was skipped (cooldown, blocklist or interview): make sure the contact isn't left
@@ -259,6 +260,12 @@ const sendSingleEmail = inngest.createFunction(
         });
         logEvent({ userId: job.userId, category: 'email', action: 'failed', message: `Email failed for ${item.to}`, meta: { jobId, contactId, error: err.message } })
           .catch(logErr => console.error('Activity log write failed:', logErr.message));
+        reportIssue({
+          userId: job.userId, source: 'job', area: 'email', kind: 'send_failed',
+          message: `Email to ${item.to} failed: ${err.message}`, detail: err.stack,
+          key: `send ${err.responseCode || err.code || ''} ${String(err.message).replace(/\S+@\S+/g, '')}`,
+          meta: { jobId, contactId, to: item.to, code: err.code || null, responseCode: err.responseCode || null, response: err.response || null },
+        });
       }
     });
   }
@@ -463,6 +470,12 @@ const sendEmailBulk = inngest.createFunction(
                 $set: { status: 'failed', failReason: err.message },
                 $push: { statusHistory: { status: 'failed', changedAt: new Date(), note: err.message } },
               });
+              reportIssue({
+                userId: job.userId, source: 'job', area: 'email', kind: 'send_failed',
+                message: `Email to ${item.to} failed: ${err.message}`, detail: err.stack,
+                key: `send ${err.responseCode || err.code || ''} ${String(err.message).replace(/\S+@\S+/g, '')}`,
+                meta: { jobId, contactId: String(item.contactId), to: item.to, code: err.code || null, responseCode: err.responseCode || null, response: err.response || null, bulk: true },
+              });
             }
           }
         } finally {
@@ -521,4 +534,32 @@ const sendEmailDrip = inngest.createFunction(
   }
 );
 
-module.exports = { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip };
+// Any Inngest function that exhausted its retries — a send batch that could not
+// load its job, a lifecycle email Resend refused, a prospect search that threw —
+// lands in the admin's Issues tab. One handler for all of them, so a function
+// added later is covered without anyone remembering to wire it up.
+const reportFailedFunctions = inngest.createFunction(
+  { id: 'report-failed-functions', retries: 0, triggers: [{ event: 'inngest/function.failed' }] },
+  async ({ event }) => {
+    await ensureDb();
+    const { function_id: fnId, run_id: runId, error = {}, event: original = {} } = event.data || {};
+    const data = original.data || {};
+    // A paused drip throws this ON PURPOSE so Inngest holds the send; running
+    // out of retries that way is the pause working, not a failure.
+    if (/Job paused/i.test(error.message || '')) return;
+    let userId = data.userId || null;
+    if (!userId && data.jobId) {
+      const job = await SendJob.findById(data.jobId, { userId: 1 }).lean().catch(() => null);
+      userId = job ? job.userId : null;
+    }
+    await reportIssue({
+      userId, source: 'job', area: 'background', kind: 'function_failed',
+      message: `${fnId}: ${error.message || 'failed'}`,
+      detail: error.stack || '',
+      key: `${fnId} ${error.name || ''} ${String(error.message || '').replace(/\S+@\S+/g, '')}`,
+      meta: { functionId: fnId, runId, trigger: original.name || null, eventData: data },
+    });
+  }
+);
+
+module.exports = { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, reportFailedFunctions };
