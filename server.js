@@ -2,8 +2,9 @@ require('dotenv').config();
 const express = require('express');
 const compression = require('compression');
 const mongoose = require('mongoose');
-const { ImapFlow } = require('imapflow');
-const { simpleParser } = require('mailparser');
+// imapflow and mailparser are only needed by the mailbox scan, and cost ~95ms of CPU to
+// load. Required on first use so the cold start of every other request skips them.
+const simpleParser = (...args) => require('mailparser').simpleParser(...args);
 const cors = require('cors');
 const crypto = require('crypto');
 const path = require('path');
@@ -880,6 +881,7 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
     ? new Date(Date.now() - sentLookbackDays * 24 * 60 * 60 * 1000)
     : replySince;
 
+  const { ImapFlow } = require('imapflow');
   const client = new ImapFlow({
     host: 'imap.gmail.com', port: 993, secure: true,
     auth: { user: sender.email, pass: sender.appPassword },

@@ -132,12 +132,24 @@ export default function Mailbox() {
     try {
       let remaining = backfillCount;
       let processedTotal = 0;
-      while (true) {
+      // `processed` counts rows touched, not rows resolved: a row whose classification
+      // failed (provider rate-limited) is processed and still remaining. Stopping only on
+      // processed === 0 looped back-to-back forever on such rows — 39K requests in Sep 2026.
+      // So also stop when a batch didn't shrink the backlog, and never run more rounds
+      // than the backlog could need. Unresolved rows retry on the mailbox cron.
+      // Compared against the server's own previous answer, not the count loaded with the
+      // page, so a backlog that grew since then is still drained rather than cut short.
+      let prevLeft: number | null = null;
+      let maxRounds = Infinity;
+      for (let round = 0; round < maxRounds; round++) {
         const { processed, remaining: left } = await backfillRepliesApi(20);
         processedTotal += processed;
+        if (prevLeft === null) maxRounds = Math.ceil((left + processed) / 20) + 2;
+        const shrank = prevLeft === null || left < prevLeft;
+        prevLeft = left;
         remaining = left;
         setBackfillProgress(processedTotal);
-        if (processed === 0 || remaining === 0) break;
+        if (processed === 0 || remaining === 0 || !shrank) break;
       }
       setBackfillCount(remaining);
       await app.loadMailboxContacts();

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
+import { useVisibleInterval } from '../../hooks/useVisibleInterval';
 import { Link } from 'react-router-dom';
 import { scrapeStatusApi, workerTokenStatusApi, type ScrapeStatus } from '../../lib/api';
 
@@ -452,11 +453,8 @@ export default function ScraperSetupGuide({ onClose, initialTab = 'how' }: {
     ]);
     setProgress({ token, status });
   }, []);
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
-  }, [load]);
+  // Paused while the tab is hidden; refreshes the moment it is visible again.
+  useVisibleInterval(load, 5000);
 
   const origin = window.location.origin;
 

@@ -119,11 +119,17 @@ const sendSingleEmail = inngest.createFunction(
 
     await step.run('send', async () => {
       await ensureDb();
-      const job = await SendJob.findById(jobId).lean();
+      // Only this send's item, not every item's body: a 100-email drip otherwise pulled the
+      // whole job (100 rendered emails) once per email. $elemMatch returns the first item
+      // matching both conditions — exactly what items.find() below used to pick.
+      const job = await SendJob.findById(jobId, {
+        status: 1, userId: 1, attachResume: 1, senderEmail: 1, senderName: 1, senderAppPassword: 1,
+        items: { $elemMatch: { contactId, status: 'pending' } },
+      }).lean();
       if (!job || job.status === 'cancelled') return;
       if (job.status === 'paused') throw new Error('Job paused — will retry');
 
-      const item = job.items.find(i => i.contactId === contactId && i.status === 'pending');
+      const item = (job.items || []).find(i => i.contactId === contactId && i.status === 'pending');
       if (!item) return; // already handled by a concurrent worker or a retry
 
       // Cooldown check — skip if this contact was emailed inside the cooldown window
@@ -205,12 +211,13 @@ const sendSingleEmail = inngest.createFunction(
         const followUpSubject = isFollowUp && contactDoc?.sentSubject && !/^re:/i.test(item.subject)
           ? `Re: ${contactDoc.sentSubject}`
           : item.subject;
+        const bodyHtml = bodyToHtml(item.body); // sent and stored in the thread: render once
         const info = await transporter.sendMail({
           from: `"${senderName}" <${senderEmail}>`,
           to: item.to,
           subject: followUpSubject,
           text: item.body,
-          html: bodyToHtml(item.body),
+          html: bodyHtml,
           ...threadHeaders,
           ...(attachments ? { attachments } : {}),
         });
@@ -233,7 +240,7 @@ const sendSingleEmail = inngest.createFunction(
           $push: {
             statusHistory: { status: newStatus, changedAt: sentAt, note: isFollowUp ? 'Follow-up email sent' : 'Email sent' },
             thread: {
-              direction: 'outbound', subject: followUpSubject, text: item.body, html: bodyToHtml(item.body),
+              direction: 'outbound', subject: followUpSubject, text: item.body, html: bodyHtml,
               messageId: info.messageId || null, inReplyTo: threadHeaders.inReplyTo || null, at: sentAt,
             },
           },
@@ -400,12 +407,13 @@ const sendEmailBulk = inngest.createFunction(
               const followUpSubject = isFollowUp && contactDoc?.sentSubject && !/^re:/i.test(item.subject)
                 ? `Re: ${contactDoc.sentSubject}`
                 : item.subject;
+              const bodyHtml = bodyToHtml(item.body); // sent and stored in the thread: render once
               const info = await transporter.sendMail({
                 from: `"${senderName}" <${senderEmail}>`,
                 to: item.to,
                 subject: followUpSubject,
                 text: item.body,
-                html: bodyToHtml(item.body),
+                html: bodyHtml,
                 ...threadHeaders,
                 ...(attachments ? { attachments } : {}),
               });
@@ -434,7 +442,7 @@ const sendEmailBulk = inngest.createFunction(
                 $push: {
                   statusHistory: { status: newStatus, changedAt: sentAt, note: isFollowUp ? 'Follow-up email sent' : 'Email sent' },
                   thread: {
-                    direction: 'outbound', subject: followUpSubject, text: item.body, html: bodyToHtml(item.body),
+                    direction: 'outbound', subject: followUpSubject, text: item.body, html: bodyHtml,
                     messageId: info.messageId || null, inReplyTo: threadHeaders.inReplyTo || null, at: sentAt,
                   },
                 },
