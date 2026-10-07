@@ -144,6 +144,8 @@ export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promi
 
 // ── Endpoint wrappers (1:1 with window._app) ─────────────────────────────────
 export const loadContactsApi = () => apiFetch<Contact[]>('/api/contacts');
+/** Your companies with a contact count each — for the Contacts company filter. */
+export const loadContactCompaniesApi = () => apiFetch<{ companies: { company: string; n: number }[] }>('/api/contacts/companies');
 /** Only the contacts the Mailbox can show (queued or with an inbound message) — same objects as loadContactsApi. */
 export const loadMailboxContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=mailbox');
 /** Every contact, carrying only the fields the Analytics page reads. Never put these in the app store. */

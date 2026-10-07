@@ -162,6 +162,33 @@ router.get('/list', async (req, res) => {
 });
 
 // GET /api/contacts/stats — single aggregation instead of 4 countDocuments
+// GET /api/contacts/companies — your companies with how many contacts each, for the
+// Contacts company filter. Spelling variants that differ only in case or spacing
+// are one company, shown as its most common spelling.
+router.get('/companies', async (req, res) => {
+  try {
+    const rows = await Contact.aggregate([
+      { $match: { ...BASE_FILTER, userId: new mongoose.Types.ObjectId(String(req.userId)), company: { $nin: [null, ''] } } },
+      { $group: { _id: '$company', n: { $sum: 1 } } },
+    ]);
+    const by = new Map();
+    for (const r of rows) {
+      const name = String(r._id).trim().replace(/\s+/g, ' ');
+      if (!name) continue;
+      const key = name.toLowerCase();
+      const e = by.get(key) || { company: name, n: 0, best: 0 };
+      e.n += r.n;
+      if (r.n > e.best) { e.best = r.n; e.company = name; }
+      by.set(key, e);
+    }
+    const companies = [...by.values()].sort((a, b) => b.n - a.n || a.company.localeCompare(b.company))
+      .map(({ company, n }) => ({ company, n }));
+    res.json({ companies });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/stats', async (req, res) => {
   try {
     const [agg] = await Contact.aggregate([
