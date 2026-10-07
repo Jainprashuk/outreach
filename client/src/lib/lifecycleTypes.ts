@@ -51,7 +51,7 @@ export function effectiveState(t: EmailTypeMeta, row: AdminUserRow, config: Life
   if (row.status === 'disabled') return { tone: 'off', label: 'Account disabled', detail: 'Disabled accounts get no email.' };
   if (!config) return { tone: 'off', label: '…', detail: 'Loading switches' };
   if (!config.enabled) return { tone: 'off', label: 'Master switch off', detail: 'All lifecycle emails are switched off app-wide.' };
-  if (!config.types[t.key]) return { tone: 'off', label: 'Off app-wide', detail: 'Switched off for everyone. Turn it on in the Lifecycle emails card.' };
+  if (!config.types[t.key]) return { tone: 'off', label: 'Off app-wide', detail: 'Switched off for everyone. Turn it on in Admin → Lifecycle emails.' };
   if (blocked.includes(t.key)) return { tone: 'blocked', label: 'Off for this user', detail: 'You switched this off for this account.' };
   if (t.pref && optOut.includes(t.pref)) return { tone: 'optout', label: 'User opted out', detail: 'They opted out themselves. An admin cannot override that.' };
   if (config.testMode && row.email.toLowerCase() !== (config.testRecipient || '').toLowerCase()) {

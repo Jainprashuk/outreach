@@ -37,7 +37,6 @@ const systemMail = require('../lib/systemMail');
 // rather than "sender not configured" because this laptop lacks the env var.
 systemMail.setTransportForTests(async () => { throw new Error('lifecycle-preview never sends'); });
 
-const User = require('../models/User');
 const Settings = require('../models/Settings');
 const { getLifecycleConfig } = require('../lib/lifecycle/config');
 const { decide, REASONS } = require('../lib/lifecycle/gate');
@@ -46,7 +45,7 @@ const { buildMessage } = require('../lib/lifecycle/deliver');
 const { buildReportStats } = require('../lib/reportStats');
 const { checkReadiness } = require('../lib/onboarding');
 const { TYPES, TYPE_KEYS } = require('../lib/lifecycle/types');
-const { nextIstTime, labelFor } = require('../lib/reportPeriod');
+const { forecast, masterOnConfig } = require('../lib/lifecycle/forecast');
 
 const arg = (name, dflt) => {
   const hit = process.argv.find(a => a.startsWith(`--${name}=`));
@@ -99,52 +98,20 @@ async function main() {
   //   --test=off                            also assume test mode switched off
   const typesArg = arg('types', '');
   const assumeTypes = typesArg === 'all' ? TYPE_KEYS : typesArg.split(',').filter(t => TYPE_KEYS.includes(t));
-  const hypothetical = {
-    ...config,
-    enabled: true,
-    firstEnabledAt: config.firstEnabledAt || now,
-    testMode: arg('test', '') === 'off' ? false : config.testMode,
-    types: { ...config.types, ...Object.fromEntries(assumeTypes.map(t => [t, true])) },
-  };
+  const hypothetical = masterOnConfig(config, now, { types: assumeTypes, testOff: arg('test', '') === 'off' });
   const assumed = ['master on', ...(assumeTypes.length ? [`types on: ${assumeTypes.join(', ')}`] : []), ...(arg('test', '') === 'off' ? ['test mode off'] : [])];
   console.log(`Simulating: ${assumed.join(' + ')} (everything else as saved)\n`);
-  // The preview cannot write, so remember what an earlier sweep in the window
-  // would already have sent. Otherwise a setup reminder due today would be
-  // counted again every day.
-  const planned = new Set();
   const perUser = new Map();
 
-  const runs = [];
-  // Every sweep that fires in the window. Later ones assume nothing changes in
-  // between (nobody visits, nobody finishes setup), so read them as upper bounds.
-  for (let t = nextIstTime(now, 10); t <= until; t = nextIstTime(t, 10)) {
-    const at = t;
-    runs.push({ at, label: 'Daily sweep (setup reminders + inactivity)', find: async (cfg) => [...await cands.setupReminderCandidates(at), ...await cands.inactiveCandidates(at, cfg)] });
-  }
-  for (let t = nextIstTime(now, 9, 0); t <= until; t = nextIstTime(t, 9, 0)) {
-    const at = t;
-    runs.push({ at, label: 'Weekly report sweep', find: async () => cands.weeklyReportCandidates(at) });
-  }
+  const { runs, midSetup: pending } = await forecast({ now, until, config, hypothetical });
 
   let totalNow = 0, totalIfOn = 0;
-  for (const run of runs.sort((a, b) => a.at - b.at)) {
+  for (const run of runs) {
     console.log(`── ${run.label} — fires ${ist(run.at)} IST ──`);
-    const [listNow, listIfOn] = await Promise.all([run.find(config), run.find(hypothetical)]);
-    const byKey = new Map([...listIfOn, ...listNow]
-      .filter(c => !planned.has(`${c.userId}|${c.type}|${c.key}`))
-      .map(c => [`${c.userId}|${c.type}|${c.key}`, c]));
-    if (!byKey.size) { console.log('  nobody is due\n'); continue; }
-    for (const c of byKey.values()) {
-      const inNow = listNow.some(x => String(x.userId) === String(c.userId) && x.type === c.type && x.key === c.key);
-      const dNow = inNow ? decide(c.type, c.user, config) : { send: false, reason: 'not-due' };
-      const dOn = decide(c.type, c.user, hypothetical);
+    if (!run.items.length) { console.log('  nobody is due\n'); continue; }
+    for (const { c, dNow, dOn } of run.items) {
       if (dNow.send) totalNow++;
       if (dOn.send) totalIfOn++;
-      // A slot is used up by a real send, or by a recorded skip (anything but a
-      // pause or a test-mode skip, which do not consume it).
-      if (dOn.send || !['master-off', 'test-mode', 'test-mode-no-recipient', 'sender-not-configured', 'links-not-configured'].includes(dOn.reason)) {
-        planned.add(`${c.userId}|${c.type}|${c.key}`);
-      }
       const who = perUser.get(c.user.email) || [];
       who.push(`${ist(run.at)}  ${TYPES[c.type].label}: ${dOn.send ? `SENT to ${dOn.to}` : `not sent (${REASONS[dOn.reason] || dOn.reason})`}`);
       perUser.set(c.user.email, who);
@@ -161,7 +128,6 @@ async function main() {
   if (!runs.length) console.log('No sweep fires in this window.\n');
 
   // Welcome is event-driven: whoever finishes setup in the window gets one.
-  const pending = await User.find({ status: 'active', 'onboarding.completedAt': null }, { email: 1 }).lean();
   console.log('── Welcome (sent when someone finishes setup) ──');
   console.log(pending.length
     ? `  ${pending.length} signed-in account(s) have not finished setup and would get one on finishing: ${pending.map(u => u.email).join(', ')}`

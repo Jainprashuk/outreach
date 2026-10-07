@@ -34,9 +34,10 @@ const AccessRequest = require('../models/AccessRequest');
 const { destroyAllForUser } = require('../lib/session');
 const { logEvent } = require('../lib/activityLog');
 const { sendAccessApproved } = require('../lib/emailOtp');
-const { ONBOARDING_VERSION } = require('../lib/onboarding');
+const { ONBOARDING_VERSION, checkReadiness } = require('../lib/onboarding');
 const LifecycleEmail = require('../models/LifecycleEmail');
-const { getLifecycleConfigWithHistory, setLifecycleSwitch } = require('../lib/lifecycle/config');
+const { getLifecycleConfig, getLifecycleConfigWithHistory, setLifecycleSwitch } = require('../lib/lifecycle/config');
+const { forecast, masterOnConfig } = require('../lib/lifecycle/forecast');
 const { TYPES, TYPE_KEYS, isType } = require('../lib/lifecycle/types');
 const { buildMessage } = require('../lib/lifecycle/deliver');
 const { USER_FIELDS } = require('../lib/lifecycle/candidates');
@@ -726,6 +727,114 @@ router.put('/emails', async (req, res) => {
     res.json({ config });
   } catch (err) {
     res.status(400).json({ error: err.message });
+  }
+});
+
+/**
+ * Which lifecycle emails fall due in the next few days, per sweep. Read-only:
+ * the same forecast scripts/lifecycle-preview.js prints (lib/lifecycle/forecast.js),
+ * minus the subject lines and report numbers — per the file header, only
+ * account emails, enum keys and dates leave here.
+ *
+ * Each item answers twice: `now` with the switches as saved, `ifOn` as if the
+ * master switch were on with everything else as saved.
+ */
+router.get('/emails/upcoming', async (req, res) => {
+  try {
+    const days = Math.min(7, Math.max(1, Number(req.query.days) || 3));
+    const now = new Date();
+    const until = new Date(now.getTime() + days * 24 * 60 * 60 * 1000);
+    const config = await getLifecycleConfig();
+    const { runs, midSetup } = await forecast({ now, until, config, hypothetical: masterOnConfig(config, now) });
+
+    // What a setup reminder would ask for — readiness keys, nothing else.
+    const setupIds = runs.flatMap(r => r.items).filter(i => i.c.type === 'setup-reminder').map(i => i.c.userId);
+    const settings = setupIds.length
+      ? await Settings.find({ userId: { $in: setupIds } }, { userId: 1, gmailAppPasswordEnc: 1, senderName: 1 }).lean()
+      : [];
+    const missingOf = new Map(settings.map(st => [id(st.userId),
+      Object.entries(checkReadiness(st)).filter(([, ok]) => !ok).map(([k]) => k)]));
+
+    const verdict = (d) => ({ send: !!d.send, reason: d.reason || null, testMode: !!d.testMode });
+    res.json({
+      generatedAt: now,
+      until,
+      days,
+      masterOn: !!config.enabled,
+      runs: runs.map(r => ({
+        at: r.at,
+        kind: r.kind,
+        items: r.items.map(({ c, dNow, dOn }) => ({
+          userId: id(c.userId),
+          email: c.user.email,
+          name: c.user.name || '',
+          type: c.type,
+          due: c.due,
+          ...(c.type === 'setup-reminder' ? { missing: missingOf.get(id(c.userId)) || ['gmail', 'identity'] } : {}),
+          ...(c.type === 'inactive' ? { since: c.context.since } : {}),
+          ...(c.type === 'weekly-report' ? { period: { from: c.context.period.from, to: c.context.period.to } } : {}),
+          now: verdict(dNow),
+          ifOn: verdict(dOn),
+        })),
+      })),
+      midSetup: midSetup.map(u => ({ userId: id(u._id), email: u.email, name: u.name || '' })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * The lifecycle send log, newest first: one row per slot (sent, skipped,
+ * failed or claimed). Paged with `before` (an ISO date from the last row).
+ * Leaves are enum keys, dates, counts and the account's own email — the
+ * provider error text stays out, per the file header.
+ */
+router.get('/emails/log', async (req, res) => {
+  try {
+    const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 50));
+    const q = {};   // DELIBERATELY UNSCOPED — see file header
+    if (isType(String(req.query.type || ''))) q.type = String(req.query.type);
+    if (['sent', 'skipped', 'failed', 'claimed'].includes(String(req.query.status || ''))) q.status = String(req.query.status);
+    if (req.query.testMode === 'only') q.testMode = true;
+    const before = req.query.before ? new Date(String(req.query.before)) : null;
+    if (before && !Number.isNaN(before.getTime())) q.createdAt = { $lt: before };
+
+    const rows = await LifecycleEmail.find(q, {
+      userId: 1, type: 1, key: 1, status: 1, reason: 1, testMode: 1, attempts: 1, sentAt: 1, createdAt: 1, updatedAt: 1,
+    }).sort({ createdAt: -1 }).limit(limit + 1).lean();
+    const page = rows.slice(0, limit);
+    const users = await User.find({ _id: { $in: [...new Set(page.map(r => id(r.userId)))] } }, { email: 1, name: 1 }).lean();
+    const who = new Map(users.map(u => [id(u._id), u]));
+
+    res.json({
+      rows: page.map(r => {
+        const u = who.get(id(r.userId));
+        // The key's tail is a date for inactive ('inactive:<ISO>') and weekly
+        // ('week:<YYYY-MM-DD>') slots — what the email was about.
+        const tail = String(r.key || '').split(':').slice(1).join(':');
+        const about = (r.type === 'inactive' || r.type === 'weekly-report') && tail && !Number.isNaN(new Date(tail.replace(/#test$/, '')).getTime())
+          ? new Date(tail.replace(/#test$/, '')) : null;
+        return {
+          id: id(r._id),
+          userId: id(r.userId),
+          email: u ? u.email : '(deleted)',
+          name: (u && u.name) || '',
+          type: r.type,
+          status: r.status,
+          reason: r.reason || null,
+          testMode: !!r.testMode || /#test$/.test(String(r.key || '')),
+          attempts: r.attempts || 0,
+          about,
+          sentAt: r.sentAt,
+          createdAt: r.createdAt,
+          updatedAt: r.updatedAt,
+        };
+      }),
+      next: rows.length > limit ? page[page.length - 1].createdAt : null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
