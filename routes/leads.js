@@ -1,7 +1,7 @@
 const express = require('express');
 const Lead = require('../models/Lead');
 const Contact = require('../models/Contact');
-const { importContacts } = require('../lib/contactImport');
+const { importContacts, isValidEmail } = require('../lib/contactImport');
 const { importLeads, readSourceLeads, normText } = require('../lib/leadImport');
 
 const router = express.Router();
@@ -110,10 +110,12 @@ router.post('/move-to-outreach', async (req, res) => {
 
     // Email-less leads can never become contacts (Contact.email is required). The
     // UI disables their checkbox; this is the server-side backstop.
-    const promotable = docs.filter(d => d.email);
+    // An unusable address counts as none: importContacts would drop it, and the
+    // lead would then be marked promoted with no contact behind it.
+    const promotable = docs.filter(d => d.email && isValidEmail(d.email));
     const skippedNoEmail = docs.length - promotable.length;
     if (promotable.length === 0) {
-      return res.status(400).json({ error: 'None of the selected leads have an email address' });
+      return res.status(400).json({ error: 'None of the selected leads have a valid email address' });
     }
 
     const rows = promotable.map(d => {

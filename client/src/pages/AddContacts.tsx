@@ -42,11 +42,11 @@ export default function AddContacts() {
     if (validRows.length === 0) { toast('Please add at least one contact.', 'error'); return; }
     setSaving(true);
     try {
-      const { created, skipped } = await app.createContacts(validRows.map(r => ({
+      const { created, skipped, invalid = 0 } = await app.createContacts(validRows.map(r => ({
         name: r.name.trim(), email: r.email.trim(), company: r.company.trim(), role: r.role.trim(), template: r.template || defaultTpl,
       })));
       if (created.length === 0) { toast('All contacts already exist — nothing added.', 'error'); return; }
-      toast(`${created.length} added${skipped > 0 ? `, ${skipped} skipped (duplicate)` : ''}.`, 'success');
+      toast(`${created.length} added${skipped > 0 ? `, ${skipped} skipped (duplicate)` : ''}${invalid > 0 ? `, ${invalid} skipped (not a valid email)` : ''}.`, invalid > 0 ? 'error' : 'success');
       navigate('/contacts');
     } catch (err: any) {
       toast('Could not save contacts: ' + err.message, 'error');

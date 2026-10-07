@@ -40,7 +40,7 @@ interface AppStore {
   initMailbox: () => Promise<void>;
   getStats: () => Record<string, number>;
   filterContacts: (tab: string) => Contact[];
-  createContacts: (rows: Partial<Contact>[]) => Promise<{ created: Contact[]; skipped: number }>;
+  createContacts: (rows: Partial<Contact>[]) => Promise<{ created: Contact[]; skipped: number; invalid?: number }>;
   updateContact: (id: string, patch: Partial<Contact>) => Promise<Contact>;
   classifyReply: (id: string) => Promise<Contact>;
   /** Swap in a contact the server just returned (e.g. after sending a reply). */

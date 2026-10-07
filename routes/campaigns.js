@@ -315,7 +315,10 @@ router.post('/from-contacts', async (req, res) => {
       .select('name email company role status lastSentAt').lean();
     // Contacts already in the interview pipeline never enter a campaign at all.
     const interviewSets = await loadInterviewSets(req.userId);
-    const contacts = candidates.filter(c => !inCooldown(c) && !isInInterview({ id: c._id, email: c.email }, interviewSets));
+    // A contact whose email is not an address would be reserved here and then
+    // fail at send time with "No recipients defined" — leave it out instead.
+    const contacts = candidates.filter(c => EMAIL_RE.test(normEmail(c.email))
+      && !inCooldown(c) && !isInInterview({ id: c._id, email: c.email }, interviewSets));
     if (!contacts.length) return res.status(400).json({ error: 'None of the selected contacts are available.' });
 
     const runHourIst = Number.isInteger(Number(b.runHourIst))
