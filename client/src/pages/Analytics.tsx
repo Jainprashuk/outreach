@@ -6,6 +6,7 @@ import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { Card, HBar } from '../components/AnalyticsCards';
 import LeadsAnalytics from '../components/LeadsAnalytics';
+import DiscoverAnalytics from '../components/DiscoverAnalytics';
 import ReportsPanel from '../components/ReportsPanel';
 import { Skeleton } from '../components/Skeleton';
 import InterviewFunnelCard from '../components/InterviewFunnelCard';
@@ -425,11 +426,12 @@ export default function Analytics() {
   const { interviews, loaded: interviewsLoaded } = useInterviews();
   // ?view=reports is where the Monday email's "View in the app" button lands.
   const [search] = useSearchParams();
-  const [view, setView] = useState<'outreach' | 'leads' | 'reports'>(() => {
+  const [view, setView] = useState<'outreach' | 'leads' | 'discover' | 'reports'>(() => {
     const v = search.get('view');
-    return v === 'leads' || v === 'reports' ? v : 'outreach';
+    return v === 'leads' || v === 'reports' || v === 'discover' ? v : 'outreach';
   });
   const [leadsRefresh, setLeadsRefresh] = useState(0);
+  const [discoverRefresh, setDiscoverRefresh] = useState(0);
   const [range, setRange] = useState(30);
   const [statusMode, setStatusMode] = useState<'current' | 'ever'>('current');
   const [refreshing, setRefreshing] = useState(false);
@@ -444,6 +446,7 @@ export default function Analytics() {
     setRefreshing(true);
     try {
       if (view === 'leads') setLeadsRefresh(n => n + 1);
+      else if (view === 'discover') setDiscoverRefresh(n => n + 1);
       else {
         await Promise.all([loadAnalyticsContactsApi().then(setContacts), app.loadTemplates()]);
         setContactsLoaded(true);
@@ -551,6 +554,9 @@ export default function Analytics() {
         <button type="button" className={`nav-tab${view === 'leads' ? ' active' : ''}`} onClick={() => setView('leads')}>
           <i className="ti ti-target-arrow" /> Leads
         </button>
+        <button type="button" className={`nav-tab${view === 'discover' ? ' active' : ''}`} onClick={() => setView('discover')}>
+          <i className="ti ti-compass" /> Discover
+        </button>
         <button type="button" className={`nav-tab${view === 'reports' ? ' active' : ''}`} onClick={() => setView('reports')}>
           <i className="ti ti-file-analytics" /> Reports
         </button>
@@ -594,6 +600,20 @@ export default function Analytics() {
       <Layout title="Analytics" subtitle="Reports for any period — on screen, as a PDF, or emailed to you">
         {switcher}
         <ReportsPanel />
+      </Layout>
+    );
+  }
+
+  if (view === 'discover') {
+    return (
+      <Layout title="Analytics" subtitle="People found with Discover, and how their guessed emails performed"
+        actions={
+          <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
+            <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} /> Refresh
+          </button>
+        }>
+        {switcher}
+        <DiscoverAnalytics refreshToken={discoverRefresh} />
       </Layout>
     );
   }
