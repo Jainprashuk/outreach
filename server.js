@@ -545,11 +545,11 @@ app.get('/api/share-link', requireDb, attachUser, async (req, res) => {
 const { serve } = require('inngest/express');
 const { inngest } = require('./inngest');
 const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip } = require('./inngest-fns');
-const { lifecycleDailySweep, weeklyReportSweep, lifecycleDeliver } = require('./lib/lifecycle/inngest');
+const { lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver } = require('./lib/lifecycle/inngest');
 const { prospectsSearch } = require('./lib/prospectSearch');
 app.use('/api/inngest', serve({
   client: inngest,
-  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, lifecycleDailySweep, weeklyReportSweep, lifecycleDeliver, prospectsSearch],
+  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch],
 }));
 
 // Sign-in is an emailed one-time code; see routes/auth.js and lib/loginCode.js.

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useToast } from '../context/ToastContext';
 import { fmtAgo } from '../lib/analytics';
-import { adminSetEmailSwitchApi, adminSendSampleApi, type AdminEmailsView, type LifecycleType } from '../lib/api';
+import { adminSetEmailSwitchApi, adminSendSampleApi, adminSendDigestNowApi, type AdminEmailsView, type LifecycleType } from '../lib/api';
 import { EMAIL_TYPES } from '../lib/lifecycleTypes';
 import InfoTip from './InfoTip';
 import Switch from './Switch';
@@ -49,6 +49,19 @@ export default function AdminEmailsCard({ data, reload }: { data: AdminEmailsVie
       toast(`Sample sent to ${r.to}`, 'success');
     } catch (e: any) {
       toast(e.message || 'Could not send the sample', 'error');
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const digestNow = async () => {
+    setBusy('digest-now');
+    try {
+      const r = await adminSendDigestNowApi();
+      toast(`Today's digest sent to ${r.to}`, 'success');
+      await reload();
+    } catch (e: any) {
+      toast(e.message || 'Could not send the digest', 'error');
     } finally {
       setBusy(null);
     }
@@ -138,6 +151,13 @@ export default function AdminEmailsCard({ data, reload }: { data: AdminEmailsVie
                       onClick={() => sample(t.key)} style={{ marginLeft: 4 }}>
                       <i className="ti ti-send" /> Sample
                     </button>
+                    {t.key === 'admin-daily' && (
+                      <button className="btn btn-xs btn-primary" type="button" disabled={busy === 'digest-now' || !data.readiness.sender}
+                        title="Email you today's digest so far, right now. Ignores the switches. Up to 5 a day."
+                        onClick={digestNow}>
+                        <i className="ti ti-mail-bolt" /> Send today's digest now
+                      </button>
+                    )}
                   </div>
                   <div style={{ fontSize: 11.5, color: 'var(--text3)', marginTop: 2 }}>
                     30 days: <span style={{ color: 'var(--text2)' }}>{c.sent} sent</span>

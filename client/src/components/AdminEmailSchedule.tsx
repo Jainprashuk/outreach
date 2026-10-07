@@ -124,7 +124,7 @@ function Upcoming() {
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, flexWrap: 'wrap', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
               <strong style={{ fontSize: 13 }}>{dayTime(run.at)} IST</strong>
               <span style={{ fontSize: 12, color: 'var(--text3)' }}>
-                {run.kind === 'weekly' ? 'Weekly report check' : 'Daily check: setup reminders and inactivity'}
+                {run.kind === 'weekly' ? 'Weekly report check' : run.kind === 'admin-daily' ? 'Daily admin digest' : 'Daily check: setup reminders and inactivity'}
               </span>
               <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text2)', fontVariantNumeric: 'tabular-nums' }}>
                 {run.items.length ? `${run.items.length} due` : 'nobody due'}

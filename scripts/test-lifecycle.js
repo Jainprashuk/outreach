@@ -63,7 +63,7 @@ const mkUser = (o = {}) => User.create({
   emailOptOut: o.emailOptOut || [], emailBlockedByAdmin: o.emailBlockedByAdmin || [],
 });
 const admin = (u) => ({ id: u._id, email: u.email });
-const ALL_TYPES = ['welcome', 'setup-reminder', 'inactive', 'weekly-report', 'manual-report'];
+const ALL_TYPES = ['welcome', 'setup-reminder', 'inactive', 'weekly-report', 'manual-report', 'admin-daily'];
 const allTypesOn = async (a) => {
   for (const t of ALL_TYPES) await setLifecycleSwitch({ field: `type:${t}`, value: true, admin: admin(a) });
 };
@@ -292,6 +292,71 @@ async function main() {
     const forged = `${Buffer.from(`${new mongoose.Types.ObjectId()}.weekly-report`).toString('base64url')}.${sig}`;
     ok(readToken(forged) === null, 'a token edited to another account is rejected');
     ok(readToken(`${b64}.${sig.slice(0, -2)}xx`) === null, 'a tampered signature is rejected');
+  }
+
+  console.log('\nDaily admin digest');
+  await reset();
+  {
+    const Campaign = require('../models/Campaign');
+    const { buildAdminDigest } = require('../lib/adminDigestStats');
+    const { lastNDays } = require('../lib/reportPeriod');
+    await Campaign.deleteMany({});
+    const a = await mkUser({ email: 'boss@example.com', isAdmin: true, onboarded: true, lastActiveAt: new Date() });
+    await liveMode(a);
+    const u1 = await mkUser({ email: 'one@example.com', onboarded: true });
+    const u2 = await mkUser({ email: 'two@example.com', onboarded: true });
+    await mkUser({ email: 'gone@example.com', status: 'disabled' });
+    const t = new Date(Date.now() - 1000);
+    await Contact.create({ userId: u1._id, name: 'Keen Person', email: 'k@co.com', company: 'KeenCo', repliedAt: t, replyCategory: 'reviewing', replyClassifierOk: true,
+      statusHistory: [{ status: 'sent', changedAt: t }, { status: 'replied', changedAt: t }] });
+    await Contact.create({ userId: u1._id, name: 'Secret Person', email: 's@co.com', company: 'SecretCo', repliedAt: t, replyClassifierOk: false,
+      statusHistory: [{ status: 'replied', changedAt: t }] });
+    await Contact.create({ userId: u2._id, name: 'C', email: 'c@co.com', statusHistory: [{ status: 'sent', changedAt: t }] });
+    const old = await Contact.create({ userId: u2._id, name: 'Old', email: 'o@co.com', statusHistory: [{ status: 'sent', changedAt: days(2) }] });
+    // Raw driver: Mongoose treats createdAt as immutable and would drop the $set.
+    await Contact.collection.updateOne({ _id: old._id }, { $set: { createdAt: days(2) } });
+    await Campaign.create({ userId: u2._id, name: 'Backend roles', templateKey: 'x', status: 'completed', completedAt: t });
+    const now = new Date();   // after the rows above, so their createdAt falls inside "today so far"
+
+    const due = await cands.adminDigestCandidates(now);
+    ok(due.length === 1 && String(due[0].userId) === String(a._id), 'only admins are due the digest');
+
+    const s = await buildAdminDigest(lastNDays(1, now), { now });
+    const one = s.accounts.find(r => r.email === 'one@example.com');
+    ok(s.totals.sent === 2 && s.totals.replies === 2, 'totals add up every account (yesterday excluded)');
+    ok(one.interested === 1 && one.notSorted === 1 && one.contactsAdded === 2, 'per-account interested, not sorted and contacts added');
+    ok(s.totals.contactsAdded === 3, "contacts added counts today's only");
+    ok(s.campaignsFinished.length === 1 && s.campaignsFinished[0].email === 'two@example.com', 'finished campaign is listed with its account');
+    ok(s.totals.accounts === 3, 'disabled accounts are left out');
+    ok(s.flags.some(f => /not sorted/.test(f)), 'unsorted replies raise a flag');
+
+    const key = cands.dayKey(now);
+    const r = await deliver({ type: 'admin-daily', userId: a._id, key }, { now });
+    const m = sent.at(-1);
+    ok(r.status === 'sent' && m.to === 'boss@example.com', 'the digest goes to the admin');
+    ok(/Outreach today: 2 sent, 2 replies/.test(m.subject), 'subject carries the day\'s totals');
+    ok(m.html.includes('one@example.com') && m.html.includes('2 replies (1 interested)') && m.html.includes('Backend roles'), 'body lists accounts, interested replies and the finished campaign');
+    ok(!/Keen Person|Secret Person|KeenCo|SecretCo|k@co\.com/.test(m.html + m.text), 'no contact names, companies or addresses in the digest');
+    ok(!(m.attachments || []).length, 'no PDF');
+    const again = await deliver({ type: 'admin-daily', userId: a._id, key }, { now });
+    ok(again.reason === 'already-handled' && sent.length === 1, 'once per day');
+    const stale = await deliver({ type: 'admin-daily', userId: a._id, key: 'day:2000-01-01' }, { now });
+    ok(stale.reason === 'not-due', "a digest for another day is dropped");
+    const nonAdmin = await deliver({ type: 'admin-daily', userId: u1._id, key }, { now });
+    ok(nonAdmin.reason === 'not-due' && sent.length === 1, 'never sent to a non-admin');
+
+    await LifecycleEmail.deleteMany({});
+    await setLifecycleSwitch({ field: 'type:admin-daily', value: false, admin: admin(a) });
+    const off = await deliver({ type: 'admin-daily', userId: a._id, key }, { now });
+    ok(off.reason === 'type-off' && sent.length === 1, 'switched off app-wide = not sent');
+
+    await LifecycleEmail.deleteMany({});
+    await setLifecycleSwitch({ field: 'type:admin-daily', value: true, admin: admin(a) });
+    await Promise.all([Contact.deleteMany({}), Campaign.deleteMany({})]);
+    await User.updateOne({ _id: a._id }, { $set: { lastActiveAt: days(2) } });
+    await deliver({ type: 'admin-daily', userId: a._id, key }, { now });
+    ok(/quiet day/.test(sent.at(-1).subject), 'a quiet day sends the one-line note');
+    await Campaign.deleteMany({});
   }
 
   console.log('\nFailed sends retry, but not forever');

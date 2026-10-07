@@ -38,7 +38,8 @@ const { ONBOARDING_VERSION, checkReadiness } = require('../lib/onboarding');
 const LifecycleEmail = require('../models/LifecycleEmail');
 const { getLifecycleConfig, getLifecycleConfigWithHistory, setLifecycleSwitch } = require('../lib/lifecycle/config');
 const { forecast, masterOnConfig } = require('../lib/lifecycle/forecast');
-const { TYPES, TYPE_KEYS, isType } = require('../lib/lifecycle/types');
+const { TYPES, TYPE_KEYS, isType, MANUAL_EMAILS_PER_DAY } = require('../lib/lifecycle/types');
+const { istMidnight } = require('../lib/reportPeriod');
 const { buildMessage } = require('../lib/lifecycle/deliver');
 const { USER_FIELDS } = require('../lib/lifecycle/candidates');
 const systemMail = require('../lib/systemMail');
@@ -852,6 +853,44 @@ router.post('/emails/sample', async (req, res) => {
     const me = await User.findById(req.userId, USER_FIELDS).lean();
     const msg = await buildMessage(type, me, { manual: type === 'manual-report' });
     await systemMail.sendSystemEmail({ ...msg, subject: `[Sample] ${msg.subject}`, to: me.email });
+    res.json({ ok: true, to: me.email });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
+});
+
+/**
+ * "Send today's digest now": the daily admin digest, today so far, to the admin
+ * who clicked. Like a sample it ignores the switches (the click is the consent,
+ * and it only ever goes to the clicker), but it is recorded in the ledger under
+ * `now:<ms>` so the History panel shows it, and capped per day.
+ */
+router.post('/emails/daily-digest', async (req, res) => {
+  try {
+    if (!systemMail.isConfigured()) return res.status(400).json({ error: 'Set LIFECYCLE_FROM_EMAIL and RESEND_API_KEY first.' });
+    if (!unsubscribe.appUrl() || !unsubscribe.isConfigured()) {
+      return res.status(400).json({ error: 'Set OUTREACH_URL (the app\'s public URL) and CREDENTIAL_KEY first, or the links in the email will not work.' });
+    }
+    const now = new Date();
+    const sentToday = await LifecycleEmail.countDocuments({
+      userId: req.userId, type: 'admin-daily', key: /^now:/, createdAt: { $gte: istMidnight(now) },
+    });
+    if (sentToday >= MANUAL_EMAILS_PER_DAY) {
+      return res.status(429).json({ error: `You can send the digest by hand up to ${MANUAL_EMAILS_PER_DAY} times a day. It still goes out at 21:00 IST.` });
+    }
+    const me = await User.findById(req.userId, USER_FIELDS).lean();
+    const row = await LifecycleEmail.create({ userId: me._id, type: 'admin-daily', key: `now:${now.getTime()}`, status: 'claimed', to: me.email, attempts: 1 });
+    try {
+      const msg = await buildMessage('admin-daily', me, { now });
+      const { id: providerId } = await systemMail.sendSystemEmail({ ...msg, subject: `[Now] ${msg.subject}`, to: me.email });
+      await LifecycleEmail.updateOne({ _id: row._id }, { $set: { status: 'sent', providerId, sentAt: new Date(), reason: msg.quiet ? 'quiet-note' : null } });
+    } catch (err) {
+      await LifecycleEmail.updateOne({ _id: row._id }, { $set: { status: 'failed', error: String(err.message).slice(0, 300) } });
+      throw err;
+    }
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'admin-digest-now', message: 'Sent the daily admin digest by hand',
+    }).catch(() => {});
     res.json({ ok: true, to: me.email });
   } catch (err) {
     res.status(502).json({ error: err.message });
