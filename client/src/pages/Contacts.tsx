@@ -7,7 +7,7 @@ import ClassifierStatus from '../components/ClassifierStatus';
 import InterviewCell from '../components/InterviewCell';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
-import { API_BASE, resetForSendApi, type Contact } from '../lib/api';
+import { API_BASE, loadContactCompaniesApi, resetForSendApi, type Contact } from '../lib/api';
 import { CATEGORY_OPTIONS } from '../lib/format';
 import { parseCsvText, readFileText } from '../lib/csv';
 import { SkeletonRows } from '../components/Skeleton';
@@ -41,6 +41,11 @@ export default function Contacts() {
   const [templateFilter, setTemplateFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [sourceFilter, setSourceFilter] = useState(params.get('source') || '');
+  // The company being filtered on, and what's typed in its box (a filter only applies
+  // once the text names one of your companies, so half a word doesn't empty the table).
+  const [companyFilter, setCompanyFilter] = useState(params.get('company') || '');
+  const [companyText, setCompanyText] = useState(params.get('company') || '');
+  const [companies, setCompanies] = useState<{ company: string; n: number }[]>([]);
   const [dateFilters, setDateFilters] = useState<ContactDateFilters>(DEFAULT_DATE_FILTERS);
   const [showDateFilters, setShowDateFilters] = useState(false);
   const [page, setPage] = useState(1);
@@ -55,11 +60,20 @@ export default function Contacts() {
   // Templates + settings only: the table pages its contacts on the server.
   useEffect(() => {
     app.initMeta().catch(err => setError(err.message));
+    loadContactCompaniesApi().then(r => setCompanies(r.companies)).catch(() => { /* the box still accepts typing */ });
   }, []);
+
+  const pickCompany = (text: string) => {
+    setCompanyText(text);
+    const t = text.trim().replace(/\s+/g, ' ').toLowerCase();
+    const hit = t ? companies.find(c => c.company.toLowerCase() === t) : null;
+    const next = !t ? '' : hit ? hit.company : companyFilter;
+    if (next !== companyFilter) { setCompanyFilter(next); resetPage(); }
+  };
 
   const query: ContactListQuery = {
     tab, search, status: statusFilter, approval: approvalFilter, template: templateFilter,
-    category: categoryFilter, source: sourceFilter, ...dateFilters,
+    category: categoryFilter, source: sourceFilter, company: companyFilter, ...dateFilters,
   };
   // Filtered ids are only needed to draw the select-all checkbox, i.e. once something is selected.
   const list = useContactList(query, page, { withIds: selected.size > 0 });
@@ -258,6 +272,21 @@ export default function Contacts() {
           <option value="">All reply categories</option>
           {CATEGORY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
         </select>
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+          <input type="text" list="contact-companies" value={companyText} placeholder="All companies"
+            title="Show one company's contacts — pick from the list"
+            onChange={e => pickCompany(e.target.value)}
+            style={{ width: 180, paddingRight: companyText ? 28 : undefined, ...(companyFilter ? { borderColor: 'var(--accent)' } : {}) }} />
+          <datalist id="contact-companies">
+            {companies.slice(0, 1500).map(c => <option key={c.company} value={c.company}>{c.n} contact{c.n === 1 ? '' : 's'}</option>)}
+          </datalist>
+          {companyText && (
+            <button type="button" aria-label="Clear company" onClick={() => pickCompany('')}
+              style={{ position: 'absolute', right: 6, background: 'none', border: 0, cursor: 'pointer', color: 'var(--text3)', padding: 2 }}>
+              <i className="ti ti-x" />
+            </button>
+          )}
+        </div>
         <select value={sourceFilter} onChange={e => { setSourceFilter(e.target.value); resetPage(); }} style={{ width: 'auto', minWidth: 140 }}>
           <option value="">All sources</option>
           <option value="lead">From a lead</option>
@@ -278,6 +307,7 @@ export default function Contacts() {
         </div>
         <button className="btn btn-sm" type="button" onClick={() => {
           setSearch(''); setStatusFilter(''); setApprovalFilter(''); setTemplateFilter(''); setCategoryFilter(''); setSourceFilter('');
+          setCompanyFilter(''); setCompanyText('');
           setDateFilters(DEFAULT_DATE_FILTERS); setTab('all'); resetPage();
         }}>Clear filters</button>
       </div>

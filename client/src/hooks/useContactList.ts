@@ -11,6 +11,8 @@ export interface ContactListQuery {
   template?: string;
   category?: string;
   source?: string;
+  /** One company, exact name (case and spacing don't matter). */
+  company?: string;
   /** Local yyyy-mm-dd from <input type="date">, as ContactDateFilterPanel gives them. */
   createdFrom?: string; createdTo?: string;
   sentFrom?: string; sentTo?: string;
@@ -29,7 +31,7 @@ const dayEnd = (d?: string) => (d ? new Date(`${d}T23:59:59.999`).toISOString() 
 export function toListParams(q: ContactListQuery): Record<string, string> {
   const raw: Record<string, string | undefined> = {
     tab: q.tab, q: q.search, status: q.status, approval: q.approval, template: q.template,
-    category: q.category, source: q.source,
+    category: q.category, source: q.source, company: q.company,
     createdFrom: dayStart(q.createdFrom), createdTo: dayEnd(q.createdTo),
     sentFrom: dayStart(q.sentFrom), sentTo: dayEnd(q.sentTo),
     repliedFrom: dayStart(q.repliedFrom), repliedTo: dayEnd(q.repliedTo),
