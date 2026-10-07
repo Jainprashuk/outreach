@@ -123,7 +123,17 @@ function dateSamples(cs) {
       for (const v of approvals) one(`approval=${v}`, { approvalFilter: v }, { approval: v });
       for (const v of templates) one(`template=${v}`, { templateFilter: v }, { template: v });
       for (const v of categories) one(`category=${v}`, { categoryFilter: v }, { category: v });
-      for (const v of sources) one(`source=${v}`, { sourceFilter: v }, { source: v });
+      // 'Added directly' no longer includes contacts moved in from Discover — they have
+      // their own 'From Discover' option (lib/contactList.js sourceOf). That is the one
+      // intended change, so the old result is compared with exactly those removed.
+      for (const v of sources) {
+        const want = ref.contactsFiltered(browser, { tab, search: '', statusFilter: '', approvalFilter: '', templateFilter: '', categoryFilter: '', sourceFilter: v, dateFilters: NO_DATES })
+          .filter(c => !(v === 'outreach' && c.prospectId));
+        same(`contacts tab=${tab} source=${v}`, want, contactList.applyListQuery(slim, q({ tab, source: v })));
+      }
+      same(`contacts tab=${tab} source=discover`,
+        ref.contactsFiltered(browser, { tab, search: '', statusFilter: '', approvalFilter: '', templateFilter: '', categoryFilter: '', sourceFilter: '', dateFilters: NO_DATES }).filter(c => c.prospectId),
+        contactList.applyListQuery(slim, q({ tab, source: 'discover' })));
       for (const [from, to] of dateSamples(browser)) for (const f of ['created', 'sent', 'replied']) {
         one(`${f} ${from}..${to}`, { dateFilters: { ...NO_DATES, [`${f}From`]: from, [`${f}To`]: to } },
           { [`${f}From`]: fromInstant(from), [`${f}To`]: toInstant(to) });

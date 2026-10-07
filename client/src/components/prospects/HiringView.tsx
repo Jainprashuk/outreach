@@ -1,24 +1,29 @@
 // Discover → Hiring now: companies you already know are hiring — from your LinkedIn
 // hiring posts and Naukri jobs — each one click away from a people search.
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { SkeletonRows } from '../Skeleton';
 import { hiringCompaniesApi, type HiringCompany, type HiringPage } from '../../lib/api';
 import { ago } from './SearchReport';
+import RolesInput, { MAX_ROLES, parseRoles } from './RolesInput';
 
 const PERIODS: [number, string][] = [[7, 'Last 7 days'], [30, 'Last 30 days'], [90, 'Last 90 days'], [0, 'All time']];
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
-export default function HiringView({ onFind, busy }: {
+export default function HiringView({ onFind, busy, defaults, onDefaultsSaved }: {
   onFind: (c: HiringCompany, roles: string[]) => void;
   busy: boolean;
+  defaults: string[];
+  onDefaultsSaved: (roles: string[]) => void;
 }) {
   const [days, setDays] = useState(30);
   const [source, setSource] = useState<'' | 'linkedin' | 'naukri'>('');
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
   const [hideSearched, setHideSearched] = useState(false);
-  const [roles, setRoles] = useState('');
+  const [roles, setRoles] = useState(defaults.join(', '));
+  const rolesTouched = useRef(false);
+  useEffect(() => { if (!rolesTouched.current) setRoles(defaults.join(', ')); }, [defaults.join('|')]);
   const [page, setPage] = useState(1);
   const [data, setData] = useState<HiringPage | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,7 +43,7 @@ export default function HiringView({ onFind, busy }: {
   }, [days, source, debounced, hideSearched, page]);
 
   const counts = data?.counts;
-  const roleList = () => roles.split(',').map(r => r.trim()).filter(Boolean);
+  const roleList = () => parseRoles(roles).slice(0, MAX_ROLES);
   const find = async (c: HiringCompany) => {
     setFinding(c.key);
     try { await onFind(c, roleList()); } finally { setFinding(null); }
@@ -68,10 +73,13 @@ export default function HiringView({ onFind, busy }: {
               <input type="checkbox" checked={hideSearched} onChange={e => setHideSearched(e.target.checked)} />
               Hide companies already searched{counts?.searched ? ` (${counts.searched})` : ''}
             </label>
-            <input type="text" value={roles} onChange={e => setRoles(e.target.value)}
-              placeholder="Roles to look for (optional), e.g. engineering manager"
-              title="Used for every Find people you start from this list"
-              style={{ flex: 1, minWidth: 220 }} />
+          </div>
+          <div style={{ marginTop: 12 }}>
+            <label className="form-label">
+              Roles to look for <span style={{ fontWeight: 400, color: 'var(--text3)' }}>(optional, up to {MAX_ROLES} — used for every Find people below)</span>
+            </label>
+            <RolesInput value={roles} onChange={t => { rolesTouched.current = true; setRoles(t); }}
+              defaults={defaults} onDefaultsSaved={onDefaultsSaved} />
           </div>
         </div>
       </div>

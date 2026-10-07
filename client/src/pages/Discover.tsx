@@ -9,6 +9,7 @@ import ConfidenceBadge from '../components/ConfidenceBadge';
 import { SkeletonRows } from '../components/Skeleton';
 import SearchReport, { ago } from '../components/prospects/SearchReport';
 import HiringView from '../components/prospects/HiringView';
+import RolesInput, { MAX_ROLES, parseRoles } from '../components/prospects/RolesInput';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useVisibleInterval } from '../hooks/useVisibleInterval';
@@ -45,8 +46,9 @@ const autoPick = (list: CompanyCandidate[]) => {
   return top.source === 'contacts' || top.source === 'typed' || !list.slice(1).some(c => c.exact) ? top : null;
 };
 
-function SearchCard({ config, busy, onSearch, prefill }: {
+function SearchCard({ config, busy, onSearch, prefill, onDefaultsSaved }: {
   config: DiscoveryConfigView | null;
+  onDefaultsSaved: (roles: string[]) => void;
   busy: boolean;
   onSearch: (domain: string, roles: string[], companyName: string) => void;
   /** Fill the box from elsewhere (Hiring now) and show the matches to choose from. */
@@ -54,6 +56,11 @@ function SearchCard({ config, busy, onSearch, prefill }: {
 }) {
   const [query, setQuery] = useState('');
   const [roles, setRoles] = useState('');
+  // Start from your saved roles, once — never overwrite something you've typed.
+  const rolesTouched = useRef(false);
+  useEffect(() => {
+    if (!rolesTouched.current && config?.defaultRoles?.length) setRoles(config.defaultRoles.join(', '));
+  }, [config?.defaultRoles?.join('|')]);
   const [candidates, setCandidates] = useState<CompanyCandidate[]>([]);
   const [looking, setLooking] = useState(false);
   const [open, setOpen] = useState(false);
@@ -63,6 +70,7 @@ function SearchCard({ config, busy, onSearch, prefill }: {
   useEffect(() => {
     if (!prefill) return;
     setQuery(prefill.text);
+    rolesTouched.current = true;
     setRoles(prefill.roles.join(', '));
     setOpen(true);
   }, [prefill?.n]);
@@ -87,7 +95,7 @@ function SearchCard({ config, busy, onSearch, prefill }: {
     return () => clearTimeout(t);
   }, [query]);
 
-  const roleList = () => roles.split(',').map(r => r.trim()).filter(Boolean);
+  const roleList = () => parseRoles(roles).slice(0, MAX_ROLES);
   const pick = (c: CompanyCandidate) => {
     setOpen(false);
     setQuery(c.name || c.domain);
@@ -107,7 +115,7 @@ function SearchCard({ config, busy, onSearch, prefill }: {
   return (
     <div className="s-card" style={{ marginBottom: 16, overflow: 'visible', position: 'relative', zIndex: 5 }}>
       <div className="s-body">
-        <div className="form-grid" style={{ alignItems: 'end' }}>
+        <div className="form-grid" style={{ alignItems: 'start' }}>
           <div className="form-group" style={{ position: 'relative' }}>
             <label className="form-label">Company *</label>
             <input type="text" value={query} placeholder="Company name, e.g. Zerodha — or its website"
@@ -144,9 +152,9 @@ function SearchCard({ config, busy, onSearch, prefill }: {
             )}
           </div>
           <div className="form-group">
-            <label className="form-label">Roles <span style={{ fontWeight: 400, color: 'var(--text3)' }}>(optional)</span></label>
-            <input type="text" value={roles} placeholder="engineering manager, CTO — empty finds anyone"
-              onChange={e => setRoles(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') submit(); }} />
+            <label className="form-label">Roles <span style={{ fontWeight: 400, color: 'var(--text3)' }}>(optional, up to {MAX_ROLES})</span></label>
+            <RolesInput value={roles} onChange={t => { rolesTouched.current = true; setRoles(t); }}
+              defaults={config?.defaultRoles || []} onDefaultsSaved={onDefaultsSaved} onEnter={submit} />
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
@@ -475,6 +483,8 @@ export default function Discover() {
   const domain = params.get('domain') || '';
   const view = params.get('view') === 'history' ? 'history' : params.get('view') === 'hiring' ? 'hiring' : 'find';
   const runId = params.get('run') || '';
+  // Everyone found, across every company, in one table.
+  const allMode = view === 'find' && params.get('all') === '1';
 
   const [config, setConfig] = useState<DiscoveryConfigView | null>(null);
   const [companies, setCompanies] = useState<ProspectCompany[]>([]);
@@ -503,7 +513,14 @@ export default function Discover() {
 
   const loadCompanies = () => prospectCompaniesApi().then(r => { setCompanies(r.companies); return r.companies; });
   const loadConfig = () => discoveryConfigApi().then(setConfig).catch(() => { /* card shows nothing */ });
+  const [allTotal, setAllTotal] = useState(0);
   const loadProspects = async (d = domain) => {
+    if (allMode) {
+      const r = await loadProspectsApi({ status: 'all', limit: '500' });
+      setProspects(r.prospects);
+      setAllTotal(r.total);
+      return;
+    }
     if (!d) { setProspects([]); return; }
     const r = await loadProspectsApi({ domain: d, status: 'all' });
     setProspects(r.prospects);
@@ -516,7 +533,7 @@ export default function Discover() {
     loadHistory();
     loadCompanies().then(list => {
       // Open on your latest company — only on Find people; History and Hiring now keep their view.
-      if (!params.get('domain') && list[0] && !params.get('view')) setParams({ domain: list[0].domain }, { replace: true });
+      if (!params.get('domain') && list[0] && !params.get('view') && !params.get('all')) setParams({ domain: list[0].domain }, { replace: true });
     }).catch(err => setError(err.message));
   }, []);
   useEffect(() => { if (view === 'history') loadHistory(); }, [view]);
@@ -526,6 +543,12 @@ export default function Discover() {
     setSelected(new Set());
     setFormat(null);
     setSearch(null);
+    if (allMode) {
+      setLoading(true);
+      setError('');
+      loadProspects().catch(err => setError(err.message)).finally(() => setLoading(false));
+      return;
+    }
     if (!domain) { setProspects([]); return; }
     setLoading(true);
     setError('');
@@ -536,7 +559,7 @@ export default function Discover() {
     const c = companies.find(x => x.domain === domain);
     const id = runId || c?.lastSearchId;
     if (id) prospectSearchApi(id).then(r => setSearch(r.search)).catch(() => { /* no run to show */ });
-  }, [domain, runId, companies.length]);
+  }, [domain, runId, allMode, companies.length]);
 
   // While a run is going, poll it and show people as they're found.
   const running = isRunning(search);
@@ -576,6 +599,8 @@ export default function Discover() {
     } finally { setStarting(false); }
   };
 
+  const saveDefaults = (roles: string[]) => setConfig(c => (c ? { ...c, defaultRoles: roles } : c));
+
   // From Hiring now. A LinkedIn company's website is known (from the post's email);
   // a Naukri one is looked up by name, and started only when the match is certain —
   // otherwise the Find tab opens with the name filled in and the matches to pick from.
@@ -605,7 +630,7 @@ export default function Discover() {
     const needle = q.trim().toLowerCase();
     return prospects.filter(p => inTab(p)
       && (!confidence || (confidence === 'none' ? !p.emailConfidence : p.emailConfidence === confidence))
-      && (!needle || `${p.name} ${p.title} ${p.email || ''}`.toLowerCase().includes(needle)));
+      && (!needle || `${p.name} ${p.title} ${p.email || ''} ${p.company} ${p.domain}`.toLowerCase().includes(needle)));
   }, [prospects, tab, confidence, q]);
 
   const selectable = shown.filter(p => p.status !== 'moved');
@@ -700,7 +725,10 @@ export default function Discover() {
         </button>
       </div>
 
-      {view === 'hiring' && <HiringView busy={starting || running} onFind={findHiring} />}
+      {view === 'hiring' && (
+        <HiringView busy={starting || running} onFind={findHiring}
+          defaults={config?.defaultRoles || []} onDefaultsSaved={saveDefaults} />
+      )}
 
       {view === 'history' && (
         <HistoryView searches={history} loading={historyLoading} busy={starting || running}
@@ -718,13 +746,18 @@ export default function Discover() {
       )}
 
       {view === 'find' && (<>
-      <SearchCard config={config} busy={starting || running} prefill={prefill} onSearch={(d, roles, name) => startSearch(d, roles, name)} />
+      <SearchCard config={config} busy={starting || running} prefill={prefill} onDefaultsSaved={saveDefaults}
+        onSearch={(d, roles, name) => startSearch(d, roles, name)} />
 
-      {companies.length > 1 && (
+      {companies.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
-          <span style={{ fontSize: 12, color: 'var(--text2)' }}>Recent:</span>
+          <button type="button" className={`btn btn-xs${allMode ? ' btn-primary' : ''}`} onClick={() => go({ all: '1' })}
+            title="Everyone you've found, across every company">
+            <i className="ti ti-list" /> All companies
+          </button>
+          <span style={{ fontSize: 12, color: 'var(--text2)', marginLeft: 4 }}>Recent:</span>
           {companies.slice(0, 8).map(c => (
-            <button key={c.domain} type="button" className={`btn btn-xs${c.domain === domain ? ' btn-primary' : ''}`}
+            <button key={c.domain} type="button" className={`btn btn-xs${!allMode && c.domain === domain ? ' btn-primary' : ''}`}
               onClick={() => go({ domain: c.domain })} title={`${c.open} to review · ${c.moved} in outreach`}>
               {c.companyName || c.domain}{c.open ? ` · ${c.open}` : ''}
             </button>
@@ -735,13 +768,24 @@ export default function Discover() {
         </div>
       )}
 
-      {domain && format && (
+      {allMode && (
+        <div className="info-box" style={{ marginBottom: 14 }}>
+          <i className="ti ti-list" style={{ fontSize: 15, flexShrink: 0 }} />
+          <div>
+            Everyone you’ve found across <strong>{companies.length} compan{companies.length === 1 ? 'y' : 'ies'}</strong>.
+            {allTotal > prospects.length && ` Showing the first ${prospects.length} of ${allTotal} — narrow it with the search box or pick a company.`}
+            {' '}Tick people from any company and move them together.
+          </div>
+        </div>
+      )}
+
+      {!allMode && domain && format && (
         <CompanyCard format={format} prospects={prospects} busy={working || running} onRecheck={recheck}
           onSearchAgain={() => startSearch(domain, search?.roles || [], current?.companyName || '', true)}
           onAddGeneric={addGeneric} onSetOrg={setOrg} />
       )}
 
-      {search && search.domain === domain && (
+      {!allMode && search && search.domain === domain && (
         <SearchReport key={search.id} search={search} onSetOrg={setOrg}
           onCancel={async () => {
             try {
@@ -753,7 +797,7 @@ export default function Discover() {
           }} />
       )}
 
-      {domain && (
+      {(domain || allMode) && (
         <>
           <div className="section-head">
             <div className="nav-tabs">
@@ -764,7 +808,7 @@ export default function Discover() {
               ))}
             </div>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder="Search name or title" style={{ width: 180 }} />
+              <input type="search" value={q} onChange={e => setQ(e.target.value)} placeholder={allMode ? 'Search name, title or company' : 'Search name or title'} style={{ width: allMode ? 240 : 200 }} />
               <select value={confidence} onChange={e => setConfidence(e.target.value)} style={{ width: 'auto' }}>
                 <option value="">Any label</option>
                 <option value="high">High</option>
@@ -785,16 +829,16 @@ export default function Discover() {
                       ref={el => { if (el) el.indeterminate = !allChecked && someChecked; }}
                       onChange={e => toggleAll(e.target.checked)} title="Select everyone in this view" />
                   </th>
-                  <th>Person</th><th>Email</th><th>Label</th><th>Found via</th><th>Status</th>
+                  <th>Person</th>{allMode && <th>Company</th>}<th>Email</th><th>Label</th><th>Found via</th><th>Status</th>
                 </tr>
               </thead>
               <tbody>
                 {busy ? (
-                  <SkeletonRows rows={6} cols={6} chipCol={1} />
+                  <SkeletonRows rows={6} cols={allMode ? 7 : 6} chipCol={1} />
                 ) : error ? (
-                  <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
+                  <tr><td colSpan={allMode ? 7 : 6}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
                 ) : shown.length === 0 ? (
-                  <tr><td colSpan={6}><div className="empty-state">
+                  <tr><td colSpan={allMode ? 7 : 6}><div className="empty-state">
                     <i className="ti ti-building" />
                     {running ? 'Looking for people…' : prospects.length === 0 ? 'Nobody found here yet — try Search again, or add a free Tavily key in Settings' : 'No one matches these filters'}
                   </div></td></tr>
@@ -816,6 +860,15 @@ export default function Discover() {
                         </div>
                       </div>
                     </td>
+                    {allMode && (
+                      <td style={{ fontSize: 12 }}>
+                        <button type="button" onClick={() => go({ domain: p.domain })} title="Open this company"
+                          style={{ background: 'none', border: 0, padding: 0, cursor: 'pointer', textAlign: 'left', color: 'var(--text)' }}>
+                          <div style={{ fontWeight: 500 }}>{p.company || p.domain}</div>
+                          <div style={{ color: 'var(--text3)' }}>{p.domain}</div>
+                        </button>
+                      </td>
+                    )}
                     <td style={{ fontSize: 13 }}><EmailCell p={p} onSaved={replaceRow} /></td>
                     <td><ConfidenceBadge confidence={p.emailConfidence} pattern={p.emailPattern} source={p.emailSource} /></td>
                     <td style={{ fontSize: 12, color: 'var(--text2)' }}>{p.foundVia.map(v => VIA_LABEL[v] || v).join(', ') || '—'}</td>

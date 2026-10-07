@@ -135,6 +135,15 @@ async function main() {
     r = await api(`/api/prospects/${id['Neha Gupta']}`, { method: 'PATCH', body: { title: 'x' } });
     ok("a moved prospect can't be edited", r.status === 409);
 
+    // ── contacts source filter ─────────────────────────────────────────────
+    console.log('\ncontacts source');
+    r = await api(`/api/contacts/list?tab=all&source=discover&q=${encodeURIComponent(DOMAIN)}&limit=50`);
+    ok('"From Discover" lists contacts moved from Discover', r.status === 200 && r.body.contacts.some(c => c.email === `neha.gupta@${DOMAIN}`), r.text.slice(0, 200));
+    ok('…and not ones added directly', !r.body.contacts.some(c => c.email === `anil.mehta@${DOMAIN}`));
+    r = await api(`/api/contacts/list?tab=all&source=outreach&q=${encodeURIComponent(DOMAIN)}&limit=50`);
+    ok('"Added directly" no longer includes Discover contacts', r.body.contacts.some(c => c.email === `anil.mehta@${DOMAIN}`)
+      && !r.body.contacts.some(c => c.email === `neha.gupta@${DOMAIN}`), JSON.stringify(r.body.contacts.map(c => c.email)));
+
     // ── analytics ──────────────────────────────────────────────────────────
     console.log('\nanalytics');
     await Contact.updateOne({ userId, email: `neha.gupta@${DOMAIN}` }, { $set: { status: 'replied', lastSentAt: new Date(Date.now() - 2 * DAY), repliedAt: new Date() } });
@@ -219,6 +228,16 @@ async function main() {
       r = await api('/api/prospects/config/tavily', { method: 'DELETE' });
       ok('key removed', r.body.keys.tavily === false);
     }
+
+    // ── default roles ──────────────────────────────────────────────────────
+    console.log('\ndefault roles');
+    const beforeRoles = (await api('/api/prospects/config')).body.defaultRoles || [];
+    r = await api('/api/prospects/config', { method: 'PUT', body: { defaultRoles: ['Engineering Manager', ' CTO ', 'cto', 'a', 'b', 'c', 'd'] } });
+    ok('default roles saved, trimmed, de-duplicated and capped at 5', r.status === 200
+      && JSON.stringify(r.body.defaultRoles) === JSON.stringify(['Engineering Manager', 'CTO', 'a', 'b', 'c']), JSON.stringify(r.body.defaultRoles));
+    ok('saving roles needs no key', r.status === 200);
+    r = await api('/api/prospects/config', { method: 'PUT', body: { defaultRoles: beforeRoles } });
+    ok('roles restored', JSON.stringify(r.body.defaultRoles) === JSON.stringify(beforeRoles));
 
     // ── search validation ──────────────────────────────────────────────────
     console.log('\nsearch validation');
