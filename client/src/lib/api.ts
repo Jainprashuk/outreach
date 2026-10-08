@@ -2100,3 +2100,47 @@ export interface SendingView {
 export const adminSendingApi = (days: number) => apiFetch<SendingView>(`/api/admin/sending?days=${days}`);
 export const adminSendingTimelineApi = (range: TimelineRange, scope: TimelineScope) =>
   apiFetch<Timeline>(`/api/admin/sending/timeline?range=${range}&scope=${scope}`);
+
+// ── Admin: Gemini logs ───────────────────────────────────────────────────────
+export type AiFeature = 'classify' | 'draft' | 'discover' | 'other';
+export type AiOutcome = 'ok' | 'rate-limited' | 'auth' | 'transient' | 'bad-output' | 'aborted';
+export interface AiTokens { input?: number | null; output?: number | null; thinking?: number | null; total?: number | null }
+export interface AiContext { contactEmail?: string | null; contactName?: string | null; contactId?: string | null; company?: string | null }
+export interface AiCallRow {
+  id: string; at: string;
+  userId: string | null; userEmail: string | null;
+  feature: AiFeature; runId: string | null; attempt: number;
+  provider: string; model: string | null; method: 'classify' | 'complete';
+  outcome: AiOutcome | string; status: number | null; latencyMs: number | null; error: string | null;
+  finishReason: string | null; tokens: AiTokens; result: { category?: string; reasoning?: string } | null; context: AiContext;
+  promptPreview: string; outputPreview: string;
+  /** 'history': rebuilt from the activity log for a call made before this log existed. */
+  source: 'live' | 'history'; note: string | null;
+}
+export interface AiProviderStats {
+  provider: string; calls: number; ok: number; rateLimited: number; failed: number;
+  avgLatencyMs: number | null; maxLatencyMs: number | null;
+  tokensIn: number; tokensOut: number; tokensThinking: number;
+  lastAt: string | null; lastFailure: { at: string; error: string | null; outcome: string } | null;
+}
+export interface AiCallsView {
+  range: string;
+  calls: AiCallRow[];
+  total: number;
+  nextBefore: string | null;
+  providers: AiProviderStats[];
+  features: Partial<Record<AiFeature, { calls: number; ok: number }>>;
+  geminiToday: number;
+  geminiModel: string;
+  providerOrder: string[];
+  configured: string[];
+  models: string[];
+  users: Array<{ id: string; email: string }>;
+}
+export interface AiCallDetail extends Omit<AiCallRow, 'promptPreview' | 'outputPreview'> {
+  system: string; prompt: string; output: string; params: Record<string, unknown> | null;
+  run: Array<{ id: string; attempt: number; provider: string; model: string | null; outcome: string; latencyMs: number | null; error: string | null; at: string }>;
+}
+export const adminAiCallsApi = (params: Record<string, string>) =>
+  apiFetch<AiCallsView>(`/api/admin/ai-calls?${new URLSearchParams(params)}`);
+export const adminAiCallApi = (id: string) => apiFetch<AiCallDetail>(`/api/admin/ai-calls/${encodeURIComponent(id)}`);

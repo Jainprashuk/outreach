@@ -53,6 +53,7 @@ router.post('/:id/draft', async (req, res) => {
       profile: settings?.replyProfile || '',
       note: String(req.body?.note || '').slice(0, MAX_NOTE),
       attachResume,
+      userId: req.userId,
     });
     if (!out.ok) return res.status(502).json({ error: out.error });
 

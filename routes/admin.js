@@ -20,6 +20,11 @@
  * replies, stack traces, request bodies — because a failure cannot be
  * diagnosed from a count. Invariant 2 above applies to everything else.
  * Credential-shaped keys are still redacted at write time (lib/issues.js).
+ *
+ * SECOND EXCEPTION, SAME CHOICE, SAME DAY: the /ai-calls endpoints (the Gemini
+ * logs tab) return every AI provider request in full — prompts carry reply
+ * bodies, conversation transcripts and reply profiles; outputs carry the
+ * model's verdicts and drafts. Written by lib/aiCallLog.js, kept 30 days.
  */
 const express = require('express');
 const mongoose = require('mongoose');
@@ -38,6 +43,7 @@ const ActivityLog = require('../models/ActivityLog');
 const LoginCode = require('../models/LoginCode');
 const AccessRequest = require('../models/AccessRequest');
 const Issue = require('../models/Issue');
+const AiCall = require('../models/AiCall');
 const CronBeat = require('../models/CronBeat');
 const { buildTimeline, istDateKey, DAILY_SEND_CAP } = require('../lib/campaignRunner');
 const { destroyAllForUser } = require('../lib/session');
@@ -1239,6 +1245,151 @@ router.get('/sending/timeline', async (req, res) => {
     const range = ['24h', '7d', '30d'].includes(req.query.range) ? req.query.range : '7d';
     const scope = req.query.scope === 'campaigns' ? 'campaigns' : 'all';
     res.json(await buildTimeline({ range, scope, fleet: true }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Gemini logs ───────────────────────────────────────────────────────────────
+// Every request to an AI provider, for anybody, in full. Written by lib/aiCallLog.js.
+
+const AI_RANGES = { '1h': HOUR, '24h': DAY, '7d': 7 * DAY, '30d': 30 * DAY };
+const AI_FEATURES = ['classify', 'draft', 'discover', 'other'];
+const AI_FAILED = ['rate-limited', 'auth', 'transient', 'bad-output', 'aborted'];
+const preview = (v, n) => { const t = String(v || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n)}…` : t; };
+
+/** Midnight in California — when Gemini's free daily quota resets. */
+function pacificMidnight(now) {
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles', hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(now).map(p => [p.type, p.value]));
+  const asUtc = Date.UTC(+parts.year, +parts.month - 1, +parts.day, +parts.hour, +parts.minute, +parts.second);
+  const offset = asUtc - Math.floor(now.getTime() / 1000) * 1000;
+  return new Date(Date.UTC(+parts.year, +parts.month - 1, +parts.day) - offset);
+}
+
+/**
+ * GET /api/admin/ai-calls?range=1h|24h|7d|30d&provider=&feature=&outcome=ok|failed|<kind>
+ *   &userId=|none&model=&source=live|history&runId=&q=&slowMs=&before=<iso>&limit=
+ * Rows are previews; GET /ai-calls/:id has the full prompt and output.
+ */
+router.get('/ai-calls', async (req, res) => {
+  try {
+    const range = AI_RANGES[req.query.range] ? req.query.range : '24h';
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 50));
+    const since = new Date(Date.now() - AI_RANGES[range]);
+
+    // Filters the cards respect too: who and what for. Provider and outcome only
+    // narrow the table, so the cards keep comparing the providers side by side.
+    const base = { createdAt: { $gte: since } };
+    if (req.query.userId === 'none') base.userId = null;
+    else if (req.query.userId) {
+      if (!mongoose.isValidObjectId(req.query.userId)) return res.status(400).json({ error: 'Not a valid account id' });
+      base.userId = new mongoose.Types.ObjectId(String(req.query.userId));
+    }
+    if (AI_FEATURES.includes(req.query.feature)) base.feature = req.query.feature;
+
+    const filter = { ...base };
+    if (req.query.runId) { delete filter.createdAt; filter.runId = String(req.query.runId).slice(0, 40); }
+    if (req.query.provider) filter.provider = String(req.query.provider).slice(0, 40);
+    if (req.query.model) filter.model = String(req.query.model).slice(0, 120);
+    if (['live', 'history'].includes(req.query.source)) filter.source = req.query.source === 'live' ? { $ne: 'history' } : 'history';
+    if (req.query.outcome === 'failed') filter.outcome = { $ne: 'ok' };
+    else if (req.query.outcome === 'ok' || AI_FAILED.includes(req.query.outcome)) filter.outcome = req.query.outcome;
+    const slowMs = Number(req.query.slowMs);
+    if (slowMs > 0) filter.latencyMs = { $gte: slowMs };
+    const q = String(req.query.q || '').trim().slice(0, 100);
+    if (q) {
+      const re = new RegExp(escapeRe(q), 'i');
+      filter.$or = [{ prompt: re }, { output: re }, { error: re }, { 'context.contactEmail': re }, { 'context.contactName': re }, { 'context.company': re }];
+    }
+    const page = { ...filter };
+    if (req.query.before) {
+      const b = new Date(String(req.query.before));
+      if (!Number.isNaN(b.getTime())) page.createdAt = { ...(page.createdAt || {}), $lt: b };
+    }
+
+    const sum = (cond) => ({ $sum: { $cond: [cond, 1, 0] } });
+    const [rows, total, byProvider, byFeature, geminiToday, models, users] = await Promise.all([
+      AiCall.find(page, { system: 0, params: 0 }).sort({ createdAt: -1 }).limit(limit).lean(),
+      AiCall.countDocuments(filter),
+      AiCall.aggregate([
+        { $match: base },
+        { $group: {
+          _id: '$provider',
+          calls: { $sum: 1 },
+          ok: sum({ $eq: ['$outcome', 'ok'] }),
+          rateLimited: sum({ $eq: ['$outcome', 'rate-limited'] }),
+          failed: sum({ $and: [{ $ne: ['$outcome', 'ok'] }, { $ne: ['$outcome', 'rate-limited'] }] }),
+          avgLatencyMs: { $avg: { $cond: [{ $eq: ['$outcome', 'ok'] }, '$latencyMs', null] } },
+          maxLatencyMs: { $max: '$latencyMs' },
+          tokensIn: { $sum: { $ifNull: ['$tokens.input', 0] } },
+          tokensOut: { $sum: { $ifNull: ['$tokens.output', 0] } },
+          tokensThinking: { $sum: { $ifNull: ['$tokens.thinking', 0] } },
+          lastAt: { $max: '$createdAt' },
+          // {at, error} objects compare by `at` first, so $max is the latest failure.
+          lastFailure: { $max: { $cond: [{ $eq: ['$outcome', 'ok'] }, null, { at: '$createdAt', error: '$error', outcome: '$outcome' }] } },
+        } },
+        { $sort: { calls: -1 } },
+      ]),
+      AiCall.aggregate([
+        { $match: base },
+        { $group: { _id: '$feature', calls: { $sum: 1 }, ok: sum({ $eq: ['$outcome', 'ok'] }) } },
+      ]),
+      AiCall.countDocuments({ provider: 'gemini', createdAt: { $gte: pacificMidnight(new Date()) } }),
+      AiCall.distinct('model', { createdAt: { $gte: since } }),
+      User.find({}, { email: 1 }).lean(),
+    ]);
+    const emailOf = new Map(users.map(u => [id(u._id), u.email]));
+
+    res.json({
+      range,
+      calls: rows.map(r => ({
+        id: id(r._id), at: r.createdAt,
+        userId: id(r.userId), userEmail: r.userId ? (emailOf.get(id(r.userId)) || '(deleted account)') : null,
+        feature: r.feature, runId: r.runId, attempt: r.attempt, provider: r.provider, model: r.model, method: r.method,
+        outcome: r.outcome, status: r.status, latencyMs: r.latencyMs, error: r.error,
+        finishReason: r.finishReason, tokens: r.tokens || {}, result: r.result || null, context: r.context || {},
+        promptPreview: preview(r.prompt, 160), outputPreview: preview(r.output, 200),
+        source: r.source || 'live', note: r.note || null,
+      })),
+      total,
+      nextBefore: rows.length === limit ? rows[rows.length - 1].createdAt : null,
+      providers: byProvider.map(p => ({ provider: p._id, ...p, _id: undefined })),
+      features: Object.fromEntries(byFeature.map(f => [f._id, { calls: f.calls, ok: f.ok }])),
+      geminiToday,
+      geminiModel: process.env.GEMINI_MODEL || 'gemini-3-flash-preview',
+      providerOrder: require('../lib/classify/providers').order(),
+      configured: require('../lib/classify/providers').configuredChain().map(p => p.name),
+      models: models.filter(Boolean).sort(),
+      users: users.map(u => ({ id: id(u._id), email: u.email })),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** GET /api/admin/ai-calls/:id — one request in full, plus the other attempts of its run. */
+router.get('/ai-calls/:id', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Not a valid id' });
+    const r = await AiCall.findById(req.params.id).lean();
+    if (!r) return res.status(404).json({ error: 'That call is gone (logs are kept 30 days)' });
+    const [user, siblings] = await Promise.all([
+      r.userId ? User.findById(r.userId, { email: 1 }).lean() : null,
+      r.runId ? AiCall.find({ runId: r.runId }, { provider: 1, model: 1, outcome: 1, latencyMs: 1, attempt: 1, error: 1, createdAt: 1 }).sort({ attempt: 1 }).lean() : [],
+    ]);
+    res.json({
+      id: id(r._id), at: r.createdAt,
+      userId: id(r.userId), userEmail: r.userId ? (user ? user.email : '(deleted account)') : null,
+      feature: r.feature, runId: r.runId, attempt: r.attempt, provider: r.provider, model: r.model, method: r.method,
+      outcome: r.outcome, status: r.status, latencyMs: r.latencyMs, error: r.error, finishReason: r.finishReason,
+      tokens: r.tokens || {}, params: r.params || null, result: r.result || null, context: r.context || {},
+      system: r.system, prompt: r.prompt, output: r.output,
+      source: r.source || 'live', note: r.note || null,
+      run: siblings.map(s => ({ id: id(s._id), attempt: s.attempt, provider: s.provider, model: s.model, outcome: s.outcome, latencyMs: s.latencyMs, error: s.error, at: s.createdAt })),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

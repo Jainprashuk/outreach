@@ -8,6 +8,7 @@ import AdminEmailsCard from '../components/AdminEmailsCard';
 import AdminEmailSchedule from '../components/AdminEmailSchedule';
 import AdminIssues from '../components/AdminIssues';
 import AdminSending from '../components/AdminSending';
+import AdminAiLogs from '../components/AdminAiLogs';
 import UserEmailsModal from '../components/UserEmailsModal';
 import InfoTip from '../components/InfoTip';
 import { EMAIL_TYPES, effectiveState, TONE_COLOR } from '../lib/lifecycleTypes';
@@ -56,11 +57,11 @@ export default function Admin() {
   const [reqFilter, setReqFilter] = useState<'pending' | 'all'>('pending');
   const [emailsOpen, setEmailsOpen] = useState<string | null>(null);
   // The lifecycle email switches, schedule and history live on their own tab,
-  // and so does the Issues log.
-  type Tab = 'overview' | 'sending' | 'emails' | 'issues';
+  // and so do the Issues log and the Gemini logs.
+  type Tab = 'overview' | 'sending' | 'emails' | 'issues' | 'ai';
   const [tab, setTab] = useState<Tab>(() => {
     const h = window.location.hash.slice(1);
-    return h === 'sending' || h === 'emails' || h === 'issues' ? h : 'overview';
+    return h === 'sending' || h === 'emails' || h === 'issues' || h === 'ai' ? h : 'overview';
   });
   const pickTab = (t: Tab) => {
     setTab(t);
@@ -178,7 +179,9 @@ export default function Admin() {
       title="Admin"
       subtitle={tab === 'issues'
         ? 'Everything that failed for anyone, with the raw error — including recipient addresses.'
-        : tab === 'sending'
+        : tab === 'ai'
+          ? 'Every AI request for anyone, in full — the prompt (reply text, conversations, profiles) and the raw answer.'
+          : tab === 'sending'
           ? 'How email is moving across every account: live batches, what is scheduled, what ran, and whether the scheduler is firing.'
           : "Every account, in aggregate. No one else's contacts or emails are shown here."}
       wide
@@ -197,7 +200,7 @@ export default function Admin() {
       <div className="section" style={{ flex: 1 }}>
         <div className="section-head" style={{ marginBottom: 14 }}>
           <div className="nav-tabs" role="tablist">
-            {([['overview', 'Overview'], ['sending', 'Sending'], ['emails', 'Lifecycle emails'], ['issues', 'Issues']] as const).map(([key, label]) => (
+            {([['overview', 'Overview'], ['sending', 'Sending'], ['emails', 'Lifecycle emails'], ['issues', 'Issues'], ['ai', 'Gemini logs']] as const).map(([key, label]) => (
               <button type="button" role="tab" aria-selected={tab === key} key={key}
                 className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => pickTab(key)}>
                 {label}
@@ -210,6 +213,7 @@ export default function Admin() {
 
         {tab === 'sending' && <AdminSending onAlertCount={setSendingCritical} />}
         {tab === 'issues' && <AdminIssues onOpenCount={setOpenIssues} />}
+        {tab === 'ai' && <AdminAiLogs />}
 
         {tab === 'emails' && (
           <>
