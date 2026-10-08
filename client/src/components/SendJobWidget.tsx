@@ -187,6 +187,12 @@ export default function SendJobWidget() {
         let pauseIcon = 'ti-player-pause';
         if (isEffectivelyDone(job)) {
           title = <><i className="ti ti-circle-check" /> {sent} sent{failed ? `, ${failed} failed` : ''}{skipped ? `, ${skipped} skipped` : ''}</>;
+        } else if (job.status === 'paused' && job.pauseReason === 'gmail_daily_limit') {
+          const resumesAt = job.pausedUntil ? new Date(job.pausedUntil).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) : 'tomorrow';
+          title = <span title="Gmail refused further sends today. Nothing was marked failed; the remaining emails go out automatically when the limit resets.">
+            <i className="ti ti-clock-pause" /> Gmail daily limit · resumes {resumesAt}
+          </span>;
+          showPause = true; pauseIcon = 'ti-player-play';
         } else if (job.sendMode === 'drip') {
           title = <><i className="ti ti-circle-filled sjw-live-dot" /> {job.campaignName || 'Drip mailer'} · Sending {done}/{total}</>;
         } else if (job.status === 'paused') {
