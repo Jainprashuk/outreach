@@ -130,6 +130,9 @@ export interface SendJob {
   ratePerHour?: number;
   campaignId?: string | null;
   campaignName?: string | null;
+  // Set when Gmail's daily sending limit paused the job; it resumes itself at pausedUntil.
+  pauseReason?: 'gmail_daily_limit' | null;
+  pausedUntil?: string | null;
   createdAt: string;
   items: JobItem[];
 }

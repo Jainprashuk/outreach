@@ -552,12 +552,12 @@ app.get('/api/share-link', requireDb, attachUser, async (req, res) => {
 // owner from the SendJob it was handed, never from the request.
 const { serve } = require('inngest/express');
 const { inngest } = require('./inngest');
-const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, reportFailedFunctions } = require('./inngest-fns');
+const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, reportFailedFunctions } = require('./inngest-fns');
 const { lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver } = require('./lib/lifecycle/inngest');
 const { prospectsSearch } = require('./lib/prospectSearch');
 app.use('/api/inngest', serve({
   client: inngest,
-  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch, reportFailedFunctions],
+  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch, reportFailedFunctions],
 }));
 
 // Sign-in is an emailed one-time code; see routes/auth.js and lib/loginCode.js.

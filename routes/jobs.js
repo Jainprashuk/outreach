@@ -5,6 +5,7 @@ const Contact = require('../models/Contact');
 const Campaign = require('../models/Campaign');
 const { inngest } = require('../inngest');
 const mailer = require('../lib/mailer');
+const { dispatchPending } = require('../lib/sendQuota');
 const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
 
 const serialize = (doc) => {
@@ -230,7 +231,9 @@ router.get('/:id', async (req, res) => {
 
 router.post('/:id/pause', async (req, res) => {
   try {
-    const job = await SendJob.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, { status: 'paused' }, { new: true, lean: true });
+    const job = await SendJob.findOneAndUpdate({ _id: req.params.id, userId: req.userId },
+      // A hand pause outranks a Gmail-limit pause: clearing pauseReason stops the scheduled auto-resume.
+      { status: 'paused', pauseReason: null, pausedUntil: null }, { new: true, lean: true });
     if (!job) return res.status(404).json({ error: 'Job not found' });
     res.json(serialize(job));
   } catch (err) {
@@ -252,24 +255,13 @@ router.post('/:id/resume', async (req, res) => {
 
     const job = await SendJob.findOneAndUpdate(
       { _id: req.params.id, userId: req.userId },
-      { status: 'processing' },
+      { status: 'processing', pauseReason: null, pausedUntil: null },
       { new: true, lean: true }
     );
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
-    const pendingItems = job.items.filter(i => i.status === 'pending');
-    if (pendingItems.length > 0) {
-      if (job.sendMode === 'bulk') {
-        await inngest.send({ name: 'email/bulk.start', data: { jobId: job._id.toString() } });
-      } else if (job.sendMode === 'drip') {
-        await inngest.send({ name: 'email/drip.start', data: { jobId: job._id.toString() } });
-      } else {
-        await inngest.send(pendingItems.map((item, i) => ({
-          name: 'email/single.send',
-          data: { jobId: job._id.toString(), contactId: item.contactId },
-          ts: Date.now() + i * 1500,
-        })));
-      }
+    if (job.items.some(i => i.status === 'pending')) {
+      await dispatchPending(job);
     } else {
       await SendJob.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, { status: 'done' });
       job.status = 'done';
