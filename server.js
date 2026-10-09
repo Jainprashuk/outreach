@@ -410,6 +410,8 @@ app.get('/api/share/session', requireDb, async (req, res) => {
   if (!share && req.query.s) {
     try { share = !!(await resolveShareUser(req.query.s)); } catch (_) { /* not a valid link */ }
   }
+  // Per-cookie answer: never let a cache (or a 304) stand in for a fresh check.
+  res.set('Cache-Control', 'no-store');
   res.json({ owner, share, user });
 });
 

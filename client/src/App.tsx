@@ -31,10 +31,16 @@ function DiscoverRedirect() {
   return <Navigate to={`/discover${search}`} replace />;
 }
 
-// Owner-only pages render "Not authorised" for share/unauthenticated visitors.
+// Signed-out visitors (expired or missing session) go to the login page; only a
+// real share-link visitor gets the "Not authorised" screen, whose copy is about
+// share links and is wrong for anyone else.
 function OwnerOnly({ children }: { children: ReactNode }) {
-  const { owner } = useSession();
-  return owner ? <>{children}</> : <NotAuthorised />;
+  const { owner, share } = useSession();
+  if (owner) return <>{children}</>;
+  if (share) return <NotAuthorised />;
+  // /login is served outside the SPA, so a router <Navigate> cannot reach it.
+  window.location.replace('/login');
+  return null;
 }
 
 // Until first-run setup is done there is nothing useful on any other page, and
