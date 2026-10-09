@@ -4,7 +4,7 @@
 import {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode,
 } from 'react';
-import { loadNotificationsApi, markNotificationsReadApi, type AppNotification } from '../lib/api';
+import { clearNotificationsApi, loadNotificationsApi, markNotificationsReadApi, type AppNotification } from '../lib/api';
 import { useSession } from './SessionContext';
 
 const REFRESH_MS = 3 * 60 * 1000;
@@ -18,6 +18,9 @@ interface NotificationStore {
   reload: () => Promise<void>;
   markRead: (ids: string[]) => Promise<void>;
   markAllRead: () => Promise<void>;
+  /** Remove from the bell (one, or every one). */
+  clear: (id: string) => Promise<void>;
+  clearAll: () => Promise<void>;
 }
 
 const NotificationContext = createContext<NotificationStore | null>(null);
@@ -70,9 +73,27 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     try { await markNotificationsReadApi({ all: true }); } catch { reload().catch(() => {}); }
   }, [reload]);
 
+  const clear = useCallback(async (id: string) => {
+    const gone = items.find(n => n.id === id);
+    if (!gone) return;
+    setItems(prev => prev.filter(n => n.id !== id));
+    if (!gone.read) {
+      setUnread(u => Math.max(0, u - 1));
+      if (gone.severity === 'error') setUnreadErrors(u => Math.max(0, u - 1));
+    }
+    try { await clearNotificationsApi({ ids: [id] }); } catch { reload().catch(() => {}); }
+  }, [items, reload]);
+
+  const clearAll = useCallback(async () => {
+    setItems([]);
+    setUnread(0);
+    setUnreadErrors(0);
+    try { await clearNotificationsApi({ all: true }); } catch { reload().catch(() => {}); }
+  }, [reload]);
+
   const store = useMemo<NotificationStore>(() => ({
-    items, unread, hasUnreadError: unreadErrors > 0, loaded, reload, markRead, markAllRead,
-  }), [items, unread, unreadErrors, loaded, reload, markRead, markAllRead]);
+    items, unread, hasUnreadError: unreadErrors > 0, loaded, reload, markRead, markAllRead, clear, clearAll,
+  }), [items, unread, unreadErrors, loaded, reload, markRead, markAllRead, clear, clearAll]);
 
   return <NotificationContext.Provider value={store}>{children}</NotificationContext.Provider>;
 }

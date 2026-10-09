@@ -24,6 +24,9 @@ const notificationSchema = new mongoose.Schema({
   dedupeKey: { type: String },
   meta:      { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
   readAt:    { type: Date, default: null },
+  // Cleared from the bell by the user. Hidden, not deleted: the row still carries its
+  // dedupeKey, so the same event cannot come back. The TTL below removes it in time.
+  clearedAt: { type: Date, default: null },
   createdAt: { type: Date, default: Date.now },
 });
 

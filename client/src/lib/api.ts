@@ -282,6 +282,8 @@ export interface NotificationFeed { unread: number; unreadErrors: number; items:
 export const loadNotificationsApi = () => apiFetch<NotificationFeed>('/api/notifications');
 export const markNotificationsReadApi = (opts: { ids?: string[]; all?: boolean }) =>
   apiFetch<{ ok: boolean; updated: number }>('/api/notifications/read', { method: 'POST', body: JSON.stringify(opts) });
+export const clearNotificationsApi = (opts: { ids?: string[]; all?: boolean }) =>
+  apiFetch<{ ok: boolean; updated: number }>('/api/notifications/clear', { method: 'POST', body: JSON.stringify(opts) });
 
 // AI reply drafts, sent from your Gmail as a threaded reply (routes/replies.js).
 export interface ReplyDraft { body: string; provider: string; attachResume: boolean; hasResume: boolean; }

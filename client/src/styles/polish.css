@@ -490,6 +490,22 @@ td.cell-actions > * + * { margin-left: 4px; }
 .notif-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
 .notif-markall { background: none; border: 0; color: var(--accent); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; padding: 2px 4px; }
 .notif-markall:disabled { color: var(--text3); cursor: default; }
+.notif-head-actions { display: flex; gap: 10px; }
+.notif-row { position: relative; }
+.notif-row .notif-item { padding-right: 34px; }
+.notif-row .notif-dot { position: absolute; right: 14px; top: 16px; margin: 0; }
+/* The ✕ takes the dot's place on hover / keyboard focus. */
+.notif-clear {
+  position: absolute; top: 8px; right: 6px; width: 26px; height: 26px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 14px;
+  background: var(--bg2); border: 1px solid var(--border); color: var(--text2); cursor: pointer;
+  opacity: 0; transition: opacity .12s var(--ease);
+}
+.notif-row:hover .notif-clear, .notif-clear:focus-visible { opacity: 1; }
+.notif-row:hover .notif-dot { opacity: 0; }
+.notif-clear:hover { color: var(--text); border-color: var(--border-md); }
+/* No hover on touch screens: keep the ✕ visible there. */
+@media (hover: none) { .notif-clear { opacity: 1; } .notif-row .notif-dot { right: 40px; } }
 .notif-list { list-style: none; margin: 0; padding: 4px; overflow-y: auto; }
 .notif-item {
   display: flex; align-items: flex-start; gap: 11px; width: 100%; text-align: left;

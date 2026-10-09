@@ -13,7 +13,7 @@ const ICON: Record<NotificationSeverity, string> = {
 
 /** The bell next to "New entry": unread badge, and a feed of what the app did for you. */
 export default function NotificationBell() {
-  const { items, unread, hasUnreadError, markRead, markAllRead } = useNotifications();
+  const { items, unread, hasUnreadError, markRead, markAllRead, clear, clearAll } = useNotifications();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -53,9 +53,14 @@ export default function NotificationBell() {
         <div className="notif-panel" role="dialog" aria-label="Notifications">
           <div className="notif-head">
             <strong>Notifications</strong>
-            <button type="button" className="notif-markall" disabled={unread === 0} onClick={() => markAllRead()}>
-              Mark all read
-            </button>
+            <span className="notif-head-actions">
+              <button type="button" className="notif-markall" disabled={unread === 0} onClick={() => markAllRead()}>
+                Mark all read
+              </button>
+              <button type="button" className="notif-markall" disabled={items.length === 0} onClick={() => clearAll()}>
+                Clear all
+              </button>
+            </span>
           </div>
           {items.length === 0 ? (
             <div className="notif-empty">
@@ -66,7 +71,7 @@ export default function NotificationBell() {
           ) : (
             <ul className="notif-list">
               {items.map(n => (
-                <li key={n.id}>
+                <li key={n.id} className="notif-row">
                   <button type="button" className={`notif-item${n.read ? '' : ' unread'}`}
                     onClick={() => openItem(n.id, n.link, n.read)}>
                     <span className={`notif-icon ${n.severity}`}><i className={`ti ${ICON[n.severity]}`} /></span>
@@ -76,6 +81,10 @@ export default function NotificationBell() {
                       <span className="notif-time">{relativeTime(n.createdAt)}</span>
                     </span>
                     {!n.read && <span className="notif-dot" aria-label="Unread" />}
+                  </button>
+                  <button type="button" className="notif-clear" aria-label={`Clear: ${n.title}`} title="Clear"
+                    onClick={() => clear(n.id)}>
+                    <i className="ti ti-x" />
                   </button>
                 </li>
               ))}
