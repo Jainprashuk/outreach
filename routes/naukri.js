@@ -8,6 +8,8 @@ const { dueOccurrence, nextOccurrence, kindsFor, parseTime } = require('../lib/n
 const { resolveAnswer } = require('../lib/naukriAnswers');
 const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = require('../lib/naukriFilters');
 const { reportIssue } = require('../lib/issues');
+const { notify } = require('../lib/notify');
+const { WORKER_OFFLINE_MS, workerBack } = require('../lib/workerWatch');
 
 const router = express.Router();
 
@@ -843,6 +845,7 @@ router.post('/claim', async (req, res) => {
     const { host, chromeUp, naukriLoggedIn, nextWakeAt, probeOnly } = req.body || {};
 
     const worker = await NaukriWorker.getForUser(req.userId);
+    const prevSeenAt = worker.lastSeenAt;
     worker.lastSeenAt = new Date();
     if (host !== undefined) worker.host = str(host, 200);
     if (chromeUp !== undefined) worker.chromeUp = !!chromeUp;
@@ -852,6 +855,8 @@ router.post('/claim', async (req, res) => {
       worker.nextWakeAt = d && !isNaN(d.getTime()) ? d : null;
     }
     await worker.save();
+    // Back after an outage long enough to have been reported: say so once.
+    if (prevSeenAt && Date.now() - new Date(prevSeenAt).getTime() > WORKER_OFFLINE_MS) await workerBack(req.userId, 'naukri', prevSeenAt);
 
     const config = await NaukriConfig.getForUser(req.userId);
     if (config.safety.pauseAll) return res.json({ run: null, paused: true });
@@ -1165,6 +1170,30 @@ router.post('/finish', async (req, res) => {
         detail: error ? String(error) : '',
         key: `naukri ${status} ${exitCode == null ? '' : exitCode}`,
         meta: { runId: String(runId), exitCode: exitCode ?? null, stats: stats || null },
+      });
+    }
+
+    if (status === 'done') {
+      const applied = run.stats?.applied || 0;
+      if (applied > 0) {
+        await notify(req.userId, {
+          type: 'naukri.applied',
+          title: `Applied to ${applied} job${applied === 1 ? '' : 's'}`,
+          body: run.stats?.failed ? `${run.stats.failed} could not be applied to.` : '',
+          link: '/naukri',
+          dedupeKey: `naukri.applied:${run._id}`,
+        });
+      }
+    } else {
+      // A captcha or a failed run is something only the user can clear (sign in,
+      // solve it on the Mac), so it is raised as "needs you".
+      const reason = error ? str(error, 200).split('\n')[0] : '';
+      await notify(req.userId, {
+        type: 'naukri.attention',
+        title: status === 'blocked' ? 'Naukri showed a captcha — runs paused' : 'Naukri run failed',
+        body: reason || (status === 'blocked' ? 'Naukri runs are paused for a week.' : 'Check that you are signed in to Naukri on your Mac.'),
+        link: '/naukri',
+        dedupeKey: `naukri.attention:${run._id}`,
       });
     }
 

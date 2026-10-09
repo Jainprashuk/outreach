@@ -16,6 +16,7 @@ const User = require('../models/User');
 const Settings = require('../models/Settings');
 const Template = require('../models/Template');
 const credentials = require('../lib/credentials');
+const { notify } = require('../lib/notify');
 const { seedStarterTemplates, STARTER_TEMPLATES } = require('../lib/starterTemplates');
 const {
   ONBOARDING_VERSION, STEPS, REQUIRED_STEPS, checkReadiness, isOnboarded,
@@ -145,6 +146,11 @@ router.post('/complete', async (req, res) => {
         'onboarding.step': STEPS.length,
       },
       $min: { 'onboarding.startedAt': new Date() },
+    });
+    // Keyed per user, so finishing twice (or a wizard re-run) says it once.
+    await notify(req.userId, {
+      type: 'setup.complete', title: "You're all set", body: 'Gmail is connected and your first template is ready',
+      link: '/', dedupeKey: 'setup.complete',
     });
     // The welcome email. Queued rather than sent inline: a mail hiccup must
     // never fail the click that finishes setup, and Vercel may freeze work left

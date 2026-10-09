@@ -71,6 +71,16 @@ export const relativeDay = (d: string | Date, now = new Date()) => {
   return days < 0 ? `${-days} days ago` : `in ${days} days`;
 };
 
+/** "just now" / "5 min ago" / "3 h ago" / "2 d ago" — for the notification feed. */
+export const relativeTime = (d: string | Date, now = new Date()) => {
+  const mins = Math.round((now.getTime() - new Date(d).getTime()) / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours} h ago`;
+  return `${Math.round(hours / 24)} d ago`;
+};
+
 export const CATEGORY_OPTIONS = [
   { value: 'reviewing', label: 'Reviewing' },
   { value: 'stay-in-touch', label: 'Stay in touch' },

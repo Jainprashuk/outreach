@@ -32,6 +32,7 @@ const { touchActivity } = require('./lib/lifecycle/activity');
 const { classifyReply } = require('./lib/replyClassifier');
 const actionQueue = require('./lib/actionQueue');
 const { runBackfillBatch } = require('./routes/contacts');
+const { notifyMailboxScan, notifyInterviewsDue } = require('./lib/mailboxNotifications');
 const Lead = require('./models/Lead');
 const { serialize: serializeLead, leadOutcomes } = require('./routes/leads');
 
@@ -577,6 +578,7 @@ app.use('/api/reports', requireDb, require('./routes/reports'));
 app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/actions', requireDb, require('./routes/actions'));
+app.use('/api/notifications', requireDb, require('./routes/notifications'));
 app.use('/api/replies', requireDb, require('./routes/replies'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));
@@ -797,7 +799,12 @@ const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
       thread: threadEntry,
     },
   });
-  replied.push({ email: contact.email, name: contact.name, repliedAt, snippet: replySnippet, category: success ? category : null });
+  replied.push({
+    email: contact.email, name: contact.name, repliedAt, snippet: replySnippet, category: success ? category : null,
+    // Read by notifyMailboxScan only.
+    contactId: String(contact._id), company: contact.company, messageId: inboundMessageId,
+    needsYou: action?.state === 'needs-you', unsubscribed: verdict.rule === 'OTHER-2',
+  });
 };
 
 // Statuses you set by hand after reading a reply. A later message from the same person must
@@ -907,7 +914,7 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
   // `thread.messageId` only (not full text/html) keeps this payload small even as threads grow.
   const allContacts = await Contact.find(
     { userId: userId, deleted: { $ne: true } },
-    'email name status bounceReason messageId updatedAt thread.messageId lastSentAt repliedAt action replyCategory lastInboundAt lastOutboundAt'
+    'email name company status bounceReason messageId updatedAt thread.messageId lastSentAt repliedAt action replyCategory lastInboundAt lastOutboundAt'
   ).lean();
 
   // byEmailAll: for bounce matching (any status)
@@ -1060,6 +1067,12 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
   }
 
   await Settings.findOneAndUpdate({ userId: userId }, { lastMailboxCheckAt: new Date() });
+
+  // In-app notifications for what this scan found. Awaited, not fired and forgotten: on
+  // Vercel the function can be frozen once it returns, which would drop the writes.
+  // Neither call throws.
+  await notifyMailboxScan(userId, { replied, bounced, contacts: allContacts });
+  await notifyInterviewsDue(userId);
 
   // Drains the legacy thread/classification backfill in the background, piggybacking on this
   // cron so the "Backfill now" button on Mailbox is a manual override, not the only way it

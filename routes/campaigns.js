@@ -16,6 +16,7 @@ const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
 const mailer = require('../lib/mailer');
 
 const { requireOnboarded } = require('../lib/onboardingGuard');
+const { checkWorkersOffline } = require('../lib/workerWatch');
 
 const router = express.Router();
 
@@ -120,6 +121,8 @@ async function restoreReservedContacts(rows, note, userId) {
 router.post('/run-due', requireOnboarded, async (req, res) => {
   try {
     const report = await runDueCampaigns({ trigger: req.body && req.body.trigger === 'manual' ? 'manual' : 'cron' });
+    // The one hourly fleet-wide tick: also the place to notice a quiet worker.
+    if (req.isCron) await checkWorkersOffline().catch(err => console.error('workerWatch failed:', err.message));
     res.json(report);
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
