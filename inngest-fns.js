@@ -12,6 +12,7 @@ const { notifyCampaignJobFinished } = require('./lib/campaignNotifications');
 const { logEvent } = require('./lib/activityLog');
 const { reportIssue } = require('./lib/issues');
 const { QUOTA_REASON, isQuotaError, dispatchPending, pauseForQuota } = require('./lib/sendQuota');
+const { DEAD_ADDRESS_ERROR, isDeadAddress, lastRealStatus } = require('./lib/deadAddress');
 const db = require('./db');
 
 // A send was skipped (cooldown, blocklist or interview): make sure the contact isn't left
@@ -22,6 +23,17 @@ async function restoreAfterSkip(contactDoc, note, userId) {
   await Contact.findOneAndUpdate({ _id: contactDoc._id, userId }, {
     $set: { status, approvalStatus: 'approved' },
     $push: { statusHistory: { status, changedAt: new Date(), note } },
+  });
+}
+
+// A send was skipped because the address bounced before: put the contact back on
+// that real status, rather than leaving it parked at `queued` or `in-campaign`.
+async function restoreDeadAddress(contactDoc, userId) {
+  if (!contactDoc || !['queued', 'in-campaign'].includes(contactDoc.status)) return;
+  const status = lastRealStatus(contactDoc);
+  await Contact.findOneAndUpdate({ _id: contactDoc._id, userId, status: contactDoc.status }, {
+    $set: { status },
+    $push: { statusHistory: { status, changedAt: new Date(), note: 'Send skipped — this address bounced before; status restored' } },
   });
 }
 
@@ -146,6 +158,17 @@ const sendSingleEmail = inngest.createFunction(
           'items.$.processedAt': new Date(),
         }, job.userId);
         await restoreAfterSkip(contactDoc, `Send skipped — already emailed within the last ${COOLDOWN_LABEL}; status restored`, job.userId);
+        return;
+      }
+
+      // Dead-address check — never send again to an address that already bounced.
+      if (isDeadAddress(contactDoc)) {
+        await _atomicItemUpdate(jobId, contactId, {
+          'items.$.status': 'skipped',
+          'items.$.error': DEAD_ADDRESS_ERROR,
+          'items.$.processedAt': new Date(),
+        }, job.userId);
+        await restoreDeadAddress(contactDoc, job.userId);
         return;
       }
 
@@ -364,6 +387,23 @@ const sendEmailBulk = inngest.createFunction(
                 }
               );
               await restoreAfterSkip(contactDoc, `Send skipped — already emailed within the last ${COOLDOWN_LABEL}; status restored`, job.userId);
+              continue;
+            }
+
+            // Dead-address check — see the single-send path above.
+            if (isDeadAddress(contactDoc)) {
+              await SendJob.findOneAndUpdate(
+                { _id: jobId, userId: job.userId, 'items.contactId': item.contactId },
+                {
+                  $set: {
+                    'items.$.status': 'skipped',
+                    'items.$.error': DEAD_ADDRESS_ERROR,
+                    'items.$.processedAt': new Date(),
+                  },
+                  $inc: { processedCount: 1 },
+                }
+              );
+              await restoreDeadAddress(contactDoc, job.userId);
               continue;
             }
 
