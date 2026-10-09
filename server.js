@@ -396,10 +396,18 @@ app.get('/api/share/session', requireDb, async (req, res) => {
         // defaults, so a row written before isAdmin existed reads as undefined.
         if (doc && doc.status !== 'disabled') {
           owner = true;
+          // Accounts made before names were collected have none; the sender name from
+          // Settings is the next best thing for the top-bar greeting. Only queried then.
+          let name = (doc.name || '').trim();
+          if (!name) {
+            const s = await Settings.findOne({ userId: doc._id }, { senderName: 1 }).lean();
+            const sender = (s?.senderName || '').trim();
+            if (sender && sender !== 'Your Name') name = sender;
+          }
           user = {
             id: doc._id.toString(),
             email: doc.email,
-            name: doc.name,
+            name,
             isAdmin: doc.isAdmin === true,
             onboarded: isOnboarded(doc),
           };

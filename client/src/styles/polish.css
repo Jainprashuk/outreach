@@ -577,5 +577,8 @@ td.cell-actions > * + * { margin-left: 4px; }
   .topbar-tools { order: 2; }
   .topbar-actions { order: 3; }
   .usermenu-name, .usermenu-caret { display: none; }
+  /* The bell is not at the screen edge on a phone (the avatar is), so a panel anchored
+     to it ran off the left side. Pin it to the viewport instead. */
+  .notif-panel { position: fixed; top: 64px; left: 12px; right: 12px; width: auto; }
   .usermenu-btn { padding: 3px; }
 }
