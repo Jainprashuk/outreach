@@ -11,6 +11,7 @@ const {
 } = require('../lib/campaignRunner');
 const { deadline } = require('../lib/http');
 const { inCooldown } = require('../lib/cooldown');
+const { isDeadAddress } = require('../lib/deadAddress');
 const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
 const mailer = require('../lib/mailer');
 
@@ -312,13 +313,15 @@ router.post('/from-contacts', async (req, res) => {
     const ids = [...new Set(Array.isArray(b.contactIds) ? b.contactIds.filter(mongoose.isValidObjectId) : [])];
     if (!ids.length) return res.status(400).json({ error: 'Select at least one contact.' });
     const candidates = await Contact.find({ _id: { $in: ids }, userId: req.userId, ...BASE_FILTER, status: { $ne: 'in-campaign' } })
-      .select('name email company role status lastSentAt').lean();
+      .select('name email company role status lastSentAt bounceReason statusHistory.status').lean();
     // Contacts already in the interview pipeline never enter a campaign at all.
     const interviewSets = await loadInterviewSets(req.userId);
     // A contact whose email is not an address would be reserved here and then
     // fail at send time with "No recipients defined" — leave it out instead.
+    // An address that already bounced would only bounce again — and each bounce
+    // costs the sending account reputation.
     const contacts = candidates.filter(c => EMAIL_RE.test(normEmail(c.email))
-      && !inCooldown(c) && !isInInterview({ id: c._id, email: c.email }, interviewSets));
+      && !inCooldown(c) && !isDeadAddress(c) && !isInInterview({ id: c._id, email: c.email }, interviewSets));
     if (!contacts.length) return res.status(400).json({ error: 'None of the selected contacts are available.' });
 
     const runHourIst = Number.isInteger(Number(b.runHourIst))

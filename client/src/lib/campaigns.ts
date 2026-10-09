@@ -38,6 +38,7 @@ export const SKIP_REASON_LABEL: Record<CampaignSkipReason, string> = {
   cooldown: 'Emailed within the last 24 hours',
   source_contact_missing: 'Contact is no longer available',
   in_interview: 'Moved to Interviews',
+  bounced: 'Bounced before',
 };
 
 export const SKIP_REASON_BADGE: Record<CampaignSkipReason, string> = {
@@ -51,6 +52,7 @@ export const SKIP_REASON_BADGE: Record<CampaignSkipReason, string> = {
   cooldown: 'badge-pending',
   in_interview: 'badge-sent',
   source_contact_missing: 'badge-closed',
+  bounced: 'badge-rejected',
 };
 
 export const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 100) : 0);

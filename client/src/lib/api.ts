@@ -897,7 +897,7 @@ export type CampaignRowStatus = 'pending' | 'queued' | 'released' | 'skipped' | 
 export type CampaignSkipReason =
   | 'blank_email' | 'invalid_email' | 'duplicate_in_file' | 'duplicate_contact'
   | 'removed_by_user' | 'queue_failed' | 'render_empty' | 'cooldown' | 'source_contact_missing'
-  | 'in_interview';
+  | 'in_interview' | 'bounced';
 
 export interface CampaignStats {
   total: number; pending: number; released: number; skipped: number; removed: number;
