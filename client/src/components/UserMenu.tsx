@@ -4,6 +4,18 @@ import { useSession } from '../context/SessionContext';
 import Avatar from './Avatar';
 
 /** Who is signed in, top right. Name on the button; email, Settings and Sign out inside. */
+/**
+ * A readable name. Accounts created before names were collected have none, so it is
+ * built from the email: "29jainprashuk@gmail.com" → "Jainprashuk" — digits and
+ * separators dropped, so the avatar gets a letter rather than "2".
+ */
+function displayName(name: string | undefined, email: string) {
+  const clean = (s: string) => s.replace(/\b\w/g, c => c.toUpperCase());
+  if (name?.trim()) return clean(name.trim());
+  const words = email.split('@')[0].replace(/[^a-zA-Z]+/g, ' ').trim();
+  return words ? clean(words) : email;
+}
+
 export default function UserMenu() {
   const { user, logout } = useSession();
   const navigate = useNavigate();
@@ -25,15 +37,15 @@ export default function UserMenu() {
   }, [open]);
 
   if (!user) return null;
-  // Accounts created before names were collected have none; the email's local part is the fallback.
-  const display = user.name?.trim() || user.email.split('@')[0];
+  const display = displayName(user.name, user.email);
+  const first = display.split(' ')[0];
 
   return (
     <div className="usermenu-wrap" ref={wrapRef}>
       <button ref={btnRef} type="button" className="usermenu-btn" aria-expanded={open} aria-haspopup="menu"
         onClick={() => setOpen(o => !o)}>
         <Avatar name={display} />
-        <span className="usermenu-name">{display}</span>
+        <span className="usermenu-name">Hey, {first}</span>
         <i className="ti ti-chevron-down usermenu-caret" />
       </button>
       {open && (

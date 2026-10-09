@@ -37,7 +37,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
   minimal?: boolean;
 }) {
   const { theme, toggleTheme } = useTheme(); // applies data-theme + provides the toggle
-  const { owner, isAdmin, logout } = useSession();
+  const { owner, isAdmin } = useSession();
   const { reminders } = useInterviews();
   const actionQueue = useActionQueue();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -125,10 +125,10 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
         {item('/export-contacts', 'ti-file-export', 'Export Contacts', 'Download your contacts as a spreadsheet, or share a read-only link to them.')}
       </div>
 
-      <div className="nav-section-label">Account</div>
-      {item('/settings', 'ti-settings', 'Settings', 'Your sender name, Gmail connection, resume, and the keys and tokens the app uses.')}
-      {/* Display only. routes/admin.js re-checks isAdmin on every request and is
+      {/* Settings and Sign out live in the top-bar user menu (UserMenu.tsx).
+          Display only. routes/admin.js re-checks isAdmin on every request and is
           the actual boundary; hiding the link just keeps it out of the way. */}
+      {isAdmin && <div className="nav-section-label">Account</div>}
       {isAdmin && item('/admin', 'ti-shield-lock', 'Admin', 'Manage who can use the app and see app-wide numbers. Admins only.')}
       </>)}
       <div className="sidebar-bottom">
@@ -137,18 +137,6 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
           <span className="tt-icon"><i className="ti ti-sun" /><i className="ti ti-moon" /><span className="nav-label">Appearance</span></span>
           <span className="tt-state">{theme === 'dark' ? 'Dark' : 'Light'}</span>
         </button>
-        {owner && (
-          // Who you are lives in the top-bar menu now; the rail keeps only Sign out.
-          <button
-            type="button"
-            onClick={logout}
-            title={collapsed ? 'Sign out' : undefined}
-            aria-label={collapsed ? 'Sign out' : undefined}
-            className="sidebar-signout"
-          >
-            <i className="ti ti-logout" style={{ fontSize: 14 }} /><span className="nav-label">Sign out</span>
-          </button>
-        )}
       </div>
     </>
   );
