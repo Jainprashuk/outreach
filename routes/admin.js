@@ -45,6 +45,7 @@ const AccessRequest = require('../models/AccessRequest');
 const Issue = require('../models/Issue');
 const AiCall = require('../models/AiCall');
 const CronBeat = require('../models/CronBeat');
+const { notifyStalledCrons } = require('../lib/cronBeat');
 const { buildTimeline, istDateKey, DAILY_SEND_CAP } = require('../lib/campaignRunner');
 const { destroyAllForUser } = require('../lib/session');
 const { logEvent } = require('../lib/activityLog');
@@ -1185,6 +1186,8 @@ router.get('/sending', async (req, res) => {
         medianGapMin: gaps.length ? Math.round(gaps.sort((x, y) => x - y)[Math.floor(gaps.length / 2)] / MIN) : null,
       };
     });
+
+    await notifyStalledCrons();
 
     // ── Things worth a look, worst first ──
     const alerts = [];

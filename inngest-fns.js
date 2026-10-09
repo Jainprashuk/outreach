@@ -9,6 +9,7 @@ const { BLOCKLIST_ERROR, isBlocked, loadBlocklistSets } = require('./lib/blockli
 const { INTERVIEW_ERROR, isInInterview, loadInterviewSets } = require('./lib/interviewGuard');
 const { REPLIED_ERROR, hasUnansweredReply } = require('./lib/actionQueue');
 const { notifyCampaignJobFinished } = require('./lib/campaignNotifications');
+const { notifySendJobFinished, notifySendResumed, notifyGmailAuthFailed, isGmailAuthError } = require('./lib/sendNotifications');
 const { logEvent } = require('./lib/activityLog');
 const { reportIssue } = require('./lib/issues');
 const { QUOTA_REASON, isQuotaError, dispatchPending, pauseForQuota } = require('./lib/sendQuota');
@@ -121,6 +122,7 @@ const _atomicItemUpdate = async (jobId, contactId, fields, userId) => {
       status: 'done',
       processedCount: latest.items.length,
     }, { new: true }).lean();
+    if (completed) await notifySendJobFinished(jobId);
     if (completed?.campaignId) await notifyCampaignJobFinished(jobId);
   }
 };
@@ -281,6 +283,7 @@ const sendSingleEmail = inngest.createFunction(
           await pauseForQuota({ jobId, userId: job.userId, senderEmail: job.senderEmail, err });
           return;
         }
+        if (isGmailAuthError(err)) await notifyGmailAuthFailed(job.userId);
         await _atomicItemUpdate(jobId, contactId, {
           'items.$.status': 'failed',
           'items.$.error': err.message,
@@ -511,6 +514,7 @@ const sendEmailBulk = inngest.createFunction(
                 quotaHit = true;
                 break;
               }
+              if (isGmailAuthError(err)) await notifyGmailAuthFailed(job.userId);
               await SendJob.findOneAndUpdate(
                 { _id: jobId, userId: job.userId, 'items.contactId': item.contactId },
                 {
@@ -548,6 +552,7 @@ const sendEmailBulk = inngest.createFunction(
       if (final && final.status === 'processing') {
         final.status = 'done';
         await final.save();
+        await notifySendJobFinished(jobId);
       }
     });
   }
@@ -609,9 +614,11 @@ const resumeAfterQuota = inngest.createFunction(
       if (!job) return;
       if (!job.items.some(i => i.status === 'pending')) {
         await SendJob.updateOne({ _id: jobId, userId: job.userId, status: 'processing' }, { status: 'done' });
+        await notifySendJobFinished(jobId);
         return;
       }
       await dispatchPending(job);
+      await notifySendResumed(job.userId, jobId);
       logEvent({ userId: job.userId, category: 'email', action: 'quota_resumed', message: 'Batch resumed after the Gmail daily limit pause', meta: { jobId } })
         .catch(err => console.error('Activity log write failed:', err.message));
     });

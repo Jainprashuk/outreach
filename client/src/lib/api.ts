@@ -269,6 +269,20 @@ export const bulkActionApi = (ids: string[], op: ActionOp, until?: string) =>
     method: 'POST', body: JSON.stringify({ ids, op, until }),
   });
 
+// The bell at the top right (routes/notifications.js).
+export type NotificationSeverity = 'success' | 'info' | 'warning' | 'error';
+export interface AppNotification {
+  id: string; type: string; severity: NotificationSeverity;
+  title: string; body: string;
+  /** In-app router path, e.g. /mailbox. Empty when there is nowhere to go. */
+  link: string;
+  read: boolean; createdAt: string;
+}
+export interface NotificationFeed { unread: number; unreadErrors: number; items: AppNotification[]; }
+export const loadNotificationsApi = () => apiFetch<NotificationFeed>('/api/notifications');
+export const markNotificationsReadApi = (opts: { ids?: string[]; all?: boolean }) =>
+  apiFetch<{ ok: boolean; updated: number }>('/api/notifications/read', { method: 'POST', body: JSON.stringify(opts) });
+
 // AI reply drafts, sent from your Gmail as a threaded reply (routes/replies.js).
 export interface ReplyDraft { body: string; provider: string; attachResume: boolean; hasResume: boolean; }
 export const draftReplyApi = (id: string, opts: { note?: string; attachResume?: boolean }) =>

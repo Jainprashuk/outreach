@@ -6,6 +6,24 @@ import { useInterviews } from '../context/InterviewContext';
 import { useActionQueue } from '../context/ActionQueueContext';
 import SendJobWidget from './SendJobWidget';
 import NavTip from './NavTip';
+import NotificationBell from './NotificationBell';
+import UserMenu from './UserMenu';
+
+/** One sidebar link. The label sits in its own span so the collapsed rail can hide it
+ *  with CSS, and carries a native tooltip while collapsed since the text is gone. */
+function NavItem({ to, end, icon, label, tip, badge, badgeTitle, collapsed, onNavigate }: {
+  to: string; end?: boolean; icon: string; label: string; tip: string;
+  badge?: number; badgeTitle?: string; collapsed: boolean; onNavigate: () => void;
+}) {
+  return (
+    <NavLink to={to} end={end} title={collapsed ? label : undefined} aria-label={collapsed ? label : undefined}
+      className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={onNavigate}>
+      <i className={`ti ${icon}`} /> <span className="nav-label">{label}</span>
+      {badge ? <span className="tab-badge" title={badgeTitle}>{badge}</span> : null}
+      <NavTip text={tip} />
+    </NavLink>
+  );
+}
 
 export default function Layout({ title, subtitle, actions, children, wide, minimal }: {
   title: string;
@@ -19,10 +37,17 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
   minimal?: boolean;
 }) {
   const { theme, toggleTheme } = useTheme(); // applies data-theme + provides the toggle
-  const { owner, user, isAdmin, logout } = useSession();
+  const { owner, isAdmin, logout } = useSession();
   const { reminders } = useInterviews();
   const actionQueue = useActionQueue();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Desktop only: a 64px icon rail. The phone drawer is always full width (see theme.css).
+  const [collapsed, setCollapsed] = useState(() => {
+    try { return localStorage.getItem('outreach-sidebar') === 'collapsed'; } catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('outreach-sidebar', collapsed ? 'collapsed' : 'open'); } catch { /* private mode */ }
+  }, [collapsed]);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const { pathname } = useLocation();
 
@@ -54,133 +79,82 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
   const needsAttention = reminders.soon.length + reminders.stale.length;
   const needsYou = actionQueue.counts['needs-you'];
 
+  const close = () => setMenuOpen(false);
+  const item = (to: string, icon: string, label: string, tip: string, extra: { end?: boolean; badge?: number; badgeTitle?: string } = {}) => (
+    <NavItem to={to} icon={icon} label={label} tip={tip} collapsed={collapsed} onNavigate={close} {...extra} />
+  );
+
   const nav = (
     <>
       <div className="sidebar-logo">
         <div className="sidebar-logo-icon"><i className="ti ti-send" /></div>
         <span className="sidebar-logo-text">Outreach</span>
+        <button type="button" className="sidebar-collapse-btn" onClick={() => setCollapsed(c => !c)}
+          aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'} aria-pressed={collapsed}
+          title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}>
+          <i className={`ti ${collapsed ? 'ti-layout-sidebar-left-expand' : 'ti-layout-sidebar-left-collapse'}`} />
+        </button>
       </div>
       {!minimal && (<>
-      <NavLink to="/" end className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-layout-dashboard" /> Dashboard
-        <NavTip text="Your outreach at a glance — replies waiting on you, sent, bounced and follow-ups due — with every contact below it." />
-      </NavLink>
-      <NavLink to="/analytics" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-chart-histogram" /> Analytics
-        <NavTip text="How your outreach is doing: the reply funnel, which templates and companies work, response speed — plus reports as a PDF or by email." />
-      </NavLink>
+      {item('/', 'ti-layout-dashboard', 'Dashboard', 'Your outreach at a glance — replies waiting on you, sent, bounced and follow-ups due — with every contact below it.', { end: true })}
+      {item('/analytics', 'ti-chart-histogram', 'Analytics', 'How your outreach is doing: the reply funnel, which templates and companies work, response speed — plus reports as a PDF or by email.')}
       {/* High up on purpose: the people who actually got back to you are the
           ones worth checking first. Both Contacts and Leads feed this. */}
-      <NavLink to="/interviews" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-user-check" /> Interviews
-        {needsAttention > 0 && (
-          <span className="tab-badge" title="Upcoming interviews or follow-ups due">{needsAttention}</span>
-        )}
-        <NavTip text="People who got back to you, and the interviews in progress — stages, dates and reminders." />
-      </NavLink>
-      <NavLink to="/contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-users" /> Contacts
-        <NavTip text="Everyone in your outreach. Search and filter by status, edit details, or pick people to email." />
-      </NavLink>
-      <NavLink to="/mailbox" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-mail-opened" /> Mailbox
-        {needsYou > 0 && (
-          <span className="tab-badge" title="Replies waiting on you">{needsYou}</span>
-        )}
-        <NavTip text="Replies to your emails. “Needs you” lists the ones waiting for your answer — reply right from here." />
-      </NavLink>
-      <NavLink to="/leads" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-target-arrow" /> Leads
-        <NavTip text="Hiring posts collected from LinkedIn, with recruiters’ emails and apply links. Move the good ones to outreach." />
-      </NavLink>
-      <NavLink to="/discover" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-compass" /> Discover
-        <NavTip text="Type a company: find people who work there and guess their work email. You choose who moves to outreach." />
-      </NavLink>
-      <NavLink to="/naukri" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-briefcase-2" /> Naukri
-        <NavTip text="Keeps your Naukri profile fresh and applies to the jobs you approve, using a worker on your computer." />
-      </NavLink>
-      <NavLink to="/campaigns" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-calendar-repeat" /> Campaigns
-        <NavTip text="Hands-off sending: give it a list and it emails a set number of people a day for you." />
-      </NavLink>
-      <NavLink to="/logs" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-list-details" /> Logs
-        <NavTip text="A record of everything the app did — sends, imports, scrapes, errors — for checking what happened and when." />
-      </NavLink>
+      {item('/interviews', 'ti-user-check', 'Interviews', 'People who got back to you, and the interviews in progress — stages, dates and reminders.',
+        { badge: needsAttention, badgeTitle: 'Upcoming interviews or follow-ups due' })}
+      {item('/contacts', 'ti-users', 'Contacts', 'Everyone in your outreach. Search and filter by status, edit details, or pick people to email.')}
+      {item('/mailbox', 'ti-mail-opened', 'Mailbox', 'Replies to your emails. “Needs you” lists the ones waiting for your answer — reply right from here.',
+        { badge: needsYou, badgeTitle: 'Replies waiting on you' })}
+      {item('/leads', 'ti-target-arrow', 'Leads', 'Hiring posts collected from LinkedIn, with recruiters’ emails and apply links. Move the good ones to outreach.')}
+      {item('/discover', 'ti-compass', 'Discover', 'Type a company: find people who work there and guess their work email. You choose who moves to outreach.')}
+      {item('/naukri', 'ti-briefcase-2', 'Naukri', 'Keeps your Naukri profile fresh and applies to the jobs you approve, using a worker on your computer.')}
+      {item('/campaigns', 'ti-calendar-repeat', 'Campaigns', 'Hands-off sending: give it a list and it emails a set number of people a day for you.')}
+      {item('/logs', 'ti-list-details', 'Logs', 'A record of everything the app did — sends, imports, scrapes, errors — for checking what happened and when.')}
 
       <button type="button" className={`nav-item nav-group${inOthers && !othersOpen ? ' has-active' : ''}`}
-        aria-expanded={showOthers} aria-controls="nav-others"
+        aria-expanded={showOthers} aria-controls="nav-others" title={collapsed ? 'Others' : undefined}
         onClick={() => setOthersOpen(o => !o)}>
-        <i className="ti ti-dots" /> Others
+        <i className="ti ti-dots" /> <span className="nav-label">Others</span>
         <i className={`ti ti-chevron-down nav-caret${showOthers ? ' open' : ''}`} />
       </button>
       <div id="nav-others" className="nav-children" hidden={!showOthers}>
-        <NavLink to="/add-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-          <i className="ti ti-user-plus" /> Add Contacts
-          <NavTip text="Add people to your outreach — upload a CSV or type them in." />
-        </NavLink>
-        <NavLink to="/jobs" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-          <i className="ti ti-briefcase" /> Jobs
-          <NavTip text="Open roles pulled from company job boards (Greenhouse, Lever and others) that match what you’re looking for." />
-        </NavLink>
-        <NavLink to="/templates" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-          <i className="ti ti-file-text" /> Templates
-          <NavTip text="The emails you send, written once with {{name}}-style blanks that fill in for each person." />
-        </NavLink>
-        <NavLink to="/blocklist" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-          <i className="ti ti-ban" /> Blocklist
-          <NavTip text="Addresses and whole companies that must never be emailed." />
-        </NavLink>
-        <NavLink to="/export-contacts" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-          <i className="ti ti-file-export" /> Export Contacts
-          <NavTip text="Download your contacts as a spreadsheet, or share a read-only link to them." />
-        </NavLink>
+        {item('/add-contacts', 'ti-user-plus', 'Add Contacts', 'Add people to your outreach — upload a CSV or type them in.')}
+        {item('/jobs', 'ti-briefcase', 'Jobs', 'Open roles pulled from company job boards (Greenhouse, Lever and others) that match what you’re looking for.')}
+        {item('/templates', 'ti-file-text', 'Templates', 'The emails you send, written once with {{name}}-style blanks that fill in for each person.')}
+        {item('/blocklist', 'ti-ban', 'Blocklist', 'Addresses and whole companies that must never be emailed.')}
+        {item('/export-contacts', 'ti-file-export', 'Export Contacts', 'Download your contacts as a spreadsheet, or share a read-only link to them.')}
       </div>
 
       <div className="nav-section-label">Account</div>
-      <NavLink to="/settings" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-        <i className="ti ti-settings" /> Settings
-        <NavTip text="Your sender name, Gmail connection, resume, and the keys and tokens the app uses." />
-      </NavLink>
+      {item('/settings', 'ti-settings', 'Settings', 'Your sender name, Gmail connection, resume, and the keys and tokens the app uses.')}
       {/* Display only. routes/admin.js re-checks isAdmin on every request and is
           the actual boundary; hiding the link just keeps it out of the way. */}
-      {isAdmin && (
-        <NavLink to="/admin" className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`} onClick={() => setMenuOpen(false)}>
-          <i className="ti ti-shield-lock" /> Admin
-          <NavTip text="Manage who can use the app and see app-wide numbers. Admins only." />
-        </NavLink>
-      )}
+      {isAdmin && item('/admin', 'ti-shield-lock', 'Admin', 'Manage who can use the app and see app-wide numbers. Admins only.')}
       </>)}
       <div className="sidebar-bottom">
         <button className="theme-toggle" type="button" onClick={toggleTheme}
           aria-label={`Appearance: ${theme === 'dark' ? 'dark' : 'light'}. Switch to ${theme === 'dark' ? 'light' : 'dark'}.`}>
-          <span className="tt-icon"><i className="ti ti-sun" /><i className="ti ti-moon" />Appearance</span>
+          <span className="tt-icon"><i className="ti ti-sun" /><i className="ti ti-moon" /><span className="nav-label">Appearance</span></span>
           <span className="tt-state">{theme === 'dark' ? 'Dark' : 'Light'}</span>
         </button>
         {owner && (
-          <>
-            {user && (
-              <div style={{ fontSize: 11, color: 'var(--text3)', padding: '6px 0 0', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {user.email}
-              </div>
-            )}
-            <button
-              type="button"
-              onClick={logout}
-              style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontFamily: 'inherit', color: 'var(--text2)', background: 'none', border: 'none', cursor: 'pointer', padding: '6px 0', marginTop: 4 }}
-            >
-              <i className="ti ti-logout" style={{ fontSize: 14 }} />Sign out
-            </button>
-          </>
+          // Who you are lives in the top-bar menu now; the rail keeps only Sign out.
+          <button
+            type="button"
+            onClick={logout}
+            title={collapsed ? 'Sign out' : undefined}
+            aria-label={collapsed ? 'Sign out' : undefined}
+            className="sidebar-signout"
+          >
+            <i className="ti ti-logout" style={{ fontSize: 14 }} /><span className="nav-label">Sign out</span>
+          </button>
         )}
       </div>
     </>
   );
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell${collapsed ? ' sidebar-collapsed' : ''}`}>
       <aside id="sidebar-nav" className={`sidebar${menuOpen ? ' open' : ''}`} aria-label="Main">{nav}</aside>
       {/* Always mounted: a backdrop that only appears with .open already applied
           has nothing to transition from, so the fade never ran. */}
@@ -199,6 +173,12 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
             </div>
           </div>
           {actions ? <div className="topbar-actions">{actions}</div> : null}
+          {owner && (
+            <div className="topbar-tools">
+              {!minimal && <NotificationBell />}
+              <UserMenu />
+            </div>
+          )}
         </div>
         <main id="main">{wide ? children : <div className="section" style={{ flex: 1 }}>{children}</div>}</main>
       </div>

@@ -15,6 +15,7 @@ const { claim, buildMessage } = require('../lib/lifecycle/deliver');
 const { MANUAL_EMAILS_PER_DAY } = require('../lib/lifecycle/types');
 const { USER_FIELDS } = require('../lib/lifecycle/candidates');
 const { sendSystemEmail } = require('../lib/systemMail');
+const { notify } = require('../lib/notify');
 
 const router = express.Router();
 
@@ -94,6 +95,12 @@ router.post('/email', async (req, res) => {
       const msg = await buildMessage('manual-report', user, { period: p, manual: true });
       const { id } = await sendSystemEmail({ ...msg, to: decision.to });
       await LifecycleEmail.updateOne({ _id: row._id }, { $set: { status: 'sent', providerId: id, sentAt: new Date() } });
+      if (!decision.testMode) {
+        await notify(user._id, {
+          type: 'report.sent', title: 'Your report was emailed', body: `Sent to ${decision.to}`,
+          link: '/analytics', dedupeKey: `report.sent:${row.key}`,
+        });
+      }
       res.json({ ok: true, to: decision.to });
     } catch (err) {
       await LifecycleEmail.updateOne({ _id: row._id }, { $set: { status: 'failed', error: String(err.message).slice(0, 300) } });

@@ -7,6 +7,8 @@ const { dueOccurrence, nextOccurrence, parseTime } = require('../lib/scrapeSched
 const { issueWorkerToken, revokeWorkerToken } = require('../lib/workerAuth');
 const User = require('../models/User');
 const { reportIssue } = require('../lib/issues');
+const { notify } = require('../lib/notify');
+const { WORKER_OFFLINE_MS, workerBack } = require('../lib/workerWatch');
 
 const router = express.Router();
 
@@ -247,6 +249,7 @@ router.post('/claim', async (req, res) => {
     const { host, chromeUp, linkedinLoggedIn, nextWakeAt, defaultQueries, probeOnly } = req.body || {};
 
     const worker = await ScrapeWorker.getForUser(req.userId);
+    const prevSeenAt = worker.lastSeenAt;
     worker.lastSeenAt = new Date();
     if (host !== undefined) worker.host = String(host).slice(0, 200);
     if (chromeUp !== undefined) worker.chromeUp = !!chromeUp;
@@ -257,6 +260,8 @@ router.post('/claim', async (req, res) => {
     }
     if (Array.isArray(defaultQueries)) worker.defaultQueries = cleanQueries(defaultQueries, 100);
     await worker.save();
+    // Back after an outage long enough to have been reported: say so once.
+    if (prevSeenAt && Date.now() - new Date(prevSeenAt).getTime() > WORKER_OFFLINE_MS) await workerBack(req.userId, 'scrape', prevSeenAt);
 
     if (blockedUntilOf(worker)) {
       return res.json({ run: null, blockedUntil: worker.blockedUntil });
@@ -422,6 +427,26 @@ router.post('/finish', async (req, res) => {
     // explicit that the answer is to stop for a week, so the block lives here
     // rather than in the worker — a restarted worker must not be able to
     // shrug it off, and neither must the schedule.
+    if (status === 'done') {
+      const fresh = run.stats?.new || 0;
+      await notify(req.userId, {
+        type: 'scrape.finished',
+        title: fresh ? `${fresh} new lead${fresh === 1 ? '' : 's'} from LinkedIn` : 'Scrape finished — no new leads',
+        body: `${run.stats?.hiring || 0} hiring posts found across ${run.stats?.searches || 0} searches.`,
+        severity: fresh ? undefined : 'info',
+        link: '/leads',
+        dedupeKey: `scrape.finished:${run._id}`,
+      });
+    } else {
+      await notify(req.userId, {
+        type: 'scrape.failed',
+        title: 'LinkedIn scrape failed',
+        body: status === 'blocked' ? 'LinkedIn showed a checkpoint — scraping is paused for a week.' : (error ? String(error).split('\n')[0] : 'The run did not complete.'),
+        link: '/leads',
+        dedupeKey: `scrape.failed:${run._id}`,
+      });
+    }
+
     if (status === 'blocked') {
       const worker = await ScrapeWorker.getForUser(req.userId);
       worker.blockedUntil = new Date(Date.now() + 7 * 24 * 3600 * 1000);

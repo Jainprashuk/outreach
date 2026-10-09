@@ -12,6 +12,7 @@ const { requestCode, requestAccess, verifyCode, CODE_TTL_MS, RESEND_COOLDOWN_MS 
 const { createSession, resolveSession, destroySession, setCookieHeader, clearCookieHeader } = require('../lib/session');
 const { logEvent } = require('../lib/activityLog');
 const { isOnboarded } = require('../lib/onboarding');
+const { notifyAdmins } = require('../lib/notify');
 
 const router = express.Router();
 
@@ -132,11 +133,21 @@ router.post('/verify-code', async (req, res) => {
     res.setHeader('Set-Cookie', setCookieHeader(token));
 
     // First successful sign-in is what activates an invited account.
+    const firstSignIn = !user.firstLoginAt && !user.lastLoginAt;
     await User.updateOne({ _id: user._id }, {
       $set: { lastLoginAt: new Date(), status: 'active' },
       // Written once: the setup reminder counts its days from the FIRST sign-in.
       $min: { firstLoginAt: new Date() },
     });
+
+    // Admins hear about each new person once; the key is the user, so a second
+    // sign-in racing the first cannot raise it twice.
+    if (firstSignIn) {
+      await notifyAdmins({
+        type: 'admin.user_joined', title: `${user.name || user.email} joined`, body: user.name ? user.email : '',
+        link: '/admin', dedupeKey: `admin.user_joined:${user._id}`,
+      });
+    }
 
     res.json({ ok: true, user: publicUser(user) });
   } catch (err) {
