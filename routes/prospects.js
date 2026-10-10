@@ -20,6 +20,10 @@ const { applyEmails, present, isActive } = require('../lib/prospectSearch');
 const { lookupCompany } = require('../lib/discovery/companyLookup');
 const { discoverAnalytics } = require('../lib/prospectAnalytics');
 const { hiringCompanies } = require('../lib/discovery/hiringCompanies');
+const worth = require('../lib/discovery/companyWorth');
+const { rolesForJob } = require('../lib/discovery/jobRoles');
+const SuggestionDismissal = require('../models/SuggestionDismissal');
+const NaukriJob = require('../models/NaukriJob');
 
 const router = express.Router();
 
@@ -64,8 +68,11 @@ async function configView(userId) {
     caps,
     canStoreKeys: credentials.isConfigured(),
     defaultRoles: (doc && doc.defaultRoles) || [],
+    enrichOff: (doc && doc.enrichOff) || [],
   };
 }
+
+const ENRICH_SOURCES = ['news', 'hn', 'careers', 'github', 'fit'];
 
 router.get('/config', async (req, res) => {
   try { res.json(await configView(req.userId)); } catch (err) { err500(res, err); }
@@ -78,6 +85,7 @@ router.put('/config', async (req, res) => {
   try {
     const set = {};
     if (req.body && req.body.defaultRoles !== undefined) set.defaultRoles = cleanRoles(req.body.defaultRoles);
+    if (req.body && Array.isArray(req.body.enrichOff)) set.enrichOff = [...new Set(req.body.enrichOff.map(String))].filter(x => ENRICH_SOURCES.includes(x));
     const givesKey = DiscoveryConfig.PROVIDERS.some(p => typeof (req.body || {})[p] === 'string' && req.body[p].trim());
     if (givesKey && !credentials.isConfigured()) {
       return res.status(503).json({ error: 'CREDENTIAL_KEY is not set, so a key cannot be stored safely.' });
@@ -105,7 +113,12 @@ router.delete('/config/:provider', async (req, res) => {
 
 // ── Searches ───────────────────────────────────────────────────────────────
 
-// POST /api/prospects/search — { domain, companyName?, roles?, force? }
+// POST /api/prospects/search — { domain, companyName?, roles?, force?, naukriJobId? }
+//
+// naukriJobId: the search is for a Naukri job you applied to. The job's title is kept
+// on the search so people moved from it carry {{jobTitle}} into outreach. If the same
+// company was already searched in the last 30 days, that search is linked to the job
+// and returned instead of spending credits on a second one (force: true re-runs).
 router.post('/search', async (req, res) => {
   try {
     const body = req.body || {};
@@ -117,18 +130,33 @@ router.post('/search', async (req, res) => {
     const block = await loadBlocklistSets(req.userId);
     if (block.domains.has(domain)) return res.status(400).json({ error: `${domain} is on your blocklist` });
 
+    let job = null;
+    if (body.naukriJobId !== undefined && body.naukriJobId !== null && body.naukriJobId !== '') {
+      if (!isId(body.naukriJobId)) return res.status(400).json({ error: 'Bad naukriJobId' });
+      job = await NaukriJob.findOne({ _id: body.naukriJobId, userId: req.userId, deleted: { $ne: true } }, { title: 1 }).lean();
+      if (!job) return res.status(404).json({ error: 'That Naukri job wasn’t found' });
+    }
+    const jobFields = job ? { naukriJobId: String(job._id), jobTitle: String(job.title || '').slice(0, 160) } : {};
+
     const last = await ProspectSearch.findOne({ userId: req.userId, domain }).sort({ createdAt: -1 }).lean();
     if (isActive(last)) {
       return res.status(409).json({ error: 'A search for this company is already running', search: serialize(present(last)) });
+    }
+    if (job && !body.force && last && last.status === 'done' && Date.now() - new Date(last.createdAt).getTime() < 30 * 24 * 3600 * 1000) {
+      if (!last.naukriJobId) await ProspectSearch.updateOne({ _id: last._id, userId: req.userId }, { $set: jobFields });
+      const linked = await ProspectSearch.findOne({ _id: last._id }).lean();
+      return res.json({ search: serialize(present(linked)), reused: true });
     }
 
     const search = await ProspectSearch.create({
       userId: req.userId,
       domain,
       companyName: String(body.companyName || '').trim().slice(0, 120),
-      roles: cleanRoles(body.roles),
+      // From a Naukri job with no roles given: the job's recruiters and hiring manager.
+      roles: cleanRoles(body.roles).length || !job ? cleanRoles(body.roles) : cleanRoles(rolesForJob(job.title)),
       force: !!body.force,
       steps: ProspectSearch.STEP_KEYS.map(key => ({ key })),
+      ...jobFields,
     });
 
     try {
@@ -257,6 +285,77 @@ router.get('/hiring', async (req, res) => {
       page: parseInt(req.query.page, 10) || 1,
       limit: Math.min(Math.max(parseInt(req.query.limit, 10) || 50, 10), 100),
     }));
+  } catch (err) { err500(res, err); }
+});
+
+// GET /api/prospects/suggested?limit=10 — "Worth searching": the few companies from
+// Hiring now worth a people search, each with its score and the reasons for it. See
+// lib/discovery/companyWorth.js. Reads only; outside signals come from their cache.
+//
+// A search costs one credit per role, so the list is cut to what your remaining free
+// credits can pay for — suggesting ten companies you can only afford to search three
+// of would just be noise.
+router.get('/suggested', async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || worth.RULES.maxShown, 1), worth.RULES.maxShown);
+    const [scored, cfg, used, keys] = await Promise.all([
+      worth.scoredCompanies(req.userId),
+      DiscoveryConfig.findOne({ userId: req.userId }, { defaultRoles: 1 }).lean(),
+      usage.getUsage(req.userId),
+      configView(req.userId).then(v => v.keys),
+    ]);
+    const defaultRoles = (cfg && cfg.defaultRoles) || [];
+    const paid = ['tavily', 'serpapi'].filter(p => keys[p]);
+    const creditsLeft = paid.length
+      ? paid.reduce((n, p) => n + Math.max(0, DiscoveryConfig.MONTHLY_CAPS[p] - (used[p] || 0)), 0)
+      : null;
+
+    let budget = creditsLeft;
+    const suggestions = [];
+    let cutForCredits = 0;
+    for (const r of worth.pickSuggestions(scored, { limit })) {
+      const roles = r.roles || defaultRoles;
+      const cost = roles.length || 2; // no roles = two broad queries (lib/discovery/search.js)
+      if (budget != null && cost > budget) { cutForCredits++; continue; }
+      if (budget != null) budget -= cost;
+      suggestions.push({ ...r, roles, cost });
+    }
+    const done = scored.filter(r => r.excluded === 'searched').slice(0, 20)
+      .map(r => ({ key: r.key, company: r.company, domain: r.domain, score: r.score, searchedAt: r.searchedAt }));
+    res.json({ suggestions, done, creditsLeft, cutForCredits, minScore: worth.RULES.minScore });
+  } catch (err) { err500(res, err); }
+});
+
+// POST /api/prospects/suggested/refresh — look the shortlist up in the free outside
+// sources now instead of waiting for the daily run. Answers still fresh in the cache
+// are reused, so pressing it twice costs nothing.
+router.post('/suggested/refresh', async (req, res) => {
+  try {
+    await inngest.send({ name: 'companies/enrich.start', data: { userId: String(req.userId) } });
+    res.status(202).json({ ok: true });
+  } catch (e) {
+    res.status(503).json({ error: `Couldn't start the refresh: ${e.message}` });
+  }
+});
+
+// POST /api/prospects/suggested/dismiss — { key, days? }: "Not worth it". Hides the
+// suggestion for `days` (default 60). The company stays in Hiring now.
+router.post('/suggested/dismiss', async (req, res) => {
+  try {
+    const key = String((req.body && req.body.key) || '').trim();
+    if (!/^[dn]:[a-z0-9.-]{1,120}$/.test(key)) return res.status(400).json({ error: 'Bad key' });
+    const days = Math.min(Math.max(parseInt(req.body.days, 10) || 60, 1), 365);
+    const until = new Date(Date.now() + days * 24 * 3600 * 1000);
+    await SuggestionDismissal.updateOne({ userId: req.userId, key }, { $set: { until }, $setOnInsert: { userId: req.userId, key } }, { upsert: true });
+    res.json({ ok: true, key, until });
+  } catch (err) { err500(res, err); }
+});
+
+// DELETE /api/prospects/suggested/dismiss/:key — undo "Not worth it".
+router.delete('/suggested/dismiss/:key', async (req, res) => {
+  try {
+    await SuggestionDismissal.deleteOne({ userId: req.userId, key: String(req.params.key) });
+    res.json({ ok: true });
   } catch (err) { err500(res, err); }
 });
 
@@ -436,6 +535,12 @@ router.post('/move', async (req, res) => {
 
     const docs = await Prospect.find({ _id: { $in: ids }, userId: req.userId, ...BASE_FILTER }).lean();
     const block = await loadBlocklistSets(req.userId);
+    // The Naukri job behind each prospect's search, read now rather than copied onto
+    // every prospect, so it is whatever the search says at move time.
+    const searchIds = [...new Set(docs.map(d => d.searchId && String(d.searchId)).filter(Boolean))];
+    const jobBySearch = new Map((searchIds.length
+      ? await ProspectSearch.find({ _id: { $in: searchIds }, userId: req.userId, naukriJobId: { $exists: true } }, { naukriJobId: 1, jobTitle: 1 }).lean()
+      : []).map(s => [String(s._id), s]));
 
     const out = { moved: 0, alreadyMoved: 0, notReady: 0, blocked: 0, duplicates: 0 };
     const rows = [];
@@ -454,10 +559,15 @@ router.post('/move', async (req, res) => {
         prospectId: String(d._id),
         emailConfidence: d.emailConfidence || null,
         emailPattern: d.emailPattern || null,
+        linkedin: d.linkedin || null,
+        ...(() => {
+          const s = d.searchId && jobBySearch.get(String(d.searchId));
+          return s ? { jobTitle: s.jobTitle || '', naukriJobId: s.naukriJobId } : {};
+        })(),
       });
     }
 
-    const { created } = rows.length ? await importContacts(rows, req.userId) : { created: [] };
+    const { created } = rows.length ? await importContacts(rows, req.userId, { fillBlanks: true }) : { created: [] };
     const createdByEmail = new Map(created.map(c => [c.email, String(c._id)]));
 
     // Rows importContacts skipped already existed as contacts (created since the

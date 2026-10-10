@@ -5,6 +5,7 @@ import Contacts from './pages/Contacts';
 import Mailbox from './pages/Mailbox';
 import Leads from './pages/Leads';
 import Discover from './pages/Discover';
+import Companies from './pages/Companies';
 import Naukri from './pages/Naukri';
 import Jobs from './pages/Jobs';
 import CampaignsRouter from './pages/campaigns/CampaignsRouter';
@@ -89,6 +90,8 @@ export default function App() {
       <Route path="/leads" element={owner(<Leads />)} />
       <Route path="/discover" element={owner(<Discover />)} />
       <Route path="/target-company" element={<DiscoverRedirect />} />
+      <Route path="/companies" element={owner(<Companies />)} />
+      <Route path="/companies/:key" element={owner(<Companies />)} />
       <Route path="/jobs" element={owner(<Jobs />)} />
       <Route path="/naukri" element={owner(<Naukri />)} />
       {/* Splat route: the list, wizard and detail screens live in CampaignsRouter. */}

@@ -1,9 +1,13 @@
+const mongoose = require('mongoose');
 const express = require('express');
 const multer = require('multer');
 const NaukriRun = require('../models/NaukriRun');
 const NaukriJob = require('../models/NaukriJob');
 const NaukriConfig = require('../models/NaukriConfig');
 const NaukriWorker = require('../models/NaukriWorker');
+const ProspectSearch = require('../models/ProspectSearch');
+const Prospect = require('../models/Prospect');
+const Contact = require('../models/Contact');
 const { dueOccurrence, nextOccurrence, kindsFor, parseTime } = require('../lib/naukriSchedule');
 const { resolveAnswer } = require('../lib/naukriAnswers');
 const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = require('../lib/naukriFilters');
@@ -701,6 +705,48 @@ router.get('/jobs', async (req, res) => {
       truncated: rows.length >= REFINE_CAP,
       typeCounts: await typeCounts(),
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/naukri/jobs/outreach?ids=a,b — for applied jobs: has a Discover search
+// been run for the company from this job, how many people it found, and how many
+// went to outreach / replied. Computed on read from the searches and contacts that
+// carry the job's id; a separate endpoint so GET /jobs stays exactly as it was.
+router.get('/jobs/outreach', async (req, res) => {
+  try {
+    const ids = [...new Set(String(req.query.ids || '').split(','))].filter(id => mongoose.isValidObjectId(id)).slice(0, 200);
+    if (!ids.length) return res.json({ jobs: {} });
+
+    const searches = await ProspectSearch.find({ userId: req.userId, naukriJobId: { $in: ids } }, { naukriJobId: 1, domain: 1, status: 1, createdAt: 1 })
+      .sort({ createdAt: -1 }).lean();
+    const [people, contacts] = await Promise.all([
+      searches.length
+        ? Prospect.aggregate([
+          { $match: { userId: new mongoose.Types.ObjectId(String(req.userId)), searchId: { $in: searches.map(s => s._id) }, deleted: { $ne: true } } },
+          { $group: { _id: '$searchId', n: { $sum: 1 } } },
+        ])
+        : [],
+      Contact.find({ userId: req.userId, naukriJobId: { $in: ids }, deleted: { $ne: true } }, { naukriJobId: 1, status: 1, repliedAt: 1 }).lean(),
+    ]);
+    const peopleBySearch = new Map(people.map(p => [String(p._id), p.n]));
+
+    const out = {};
+    for (const id of ids) out[id] = { searched: false, domain: null, searchId: null, searchStatus: null, people: 0, contacts: 0, replied: 0 };
+    for (const s of searches) {
+      const o = out[s.naukriJobId];
+      if (!o) continue;
+      if (!o.searched) Object.assign(o, { searched: true, domain: s.domain, searchId: String(s._id), searchStatus: s.status });
+      o.people += peopleBySearch.get(String(s._id)) || 0;
+    }
+    for (const c of contacts) {
+      const o = out[c.naukriJobId];
+      if (!o) continue;
+      o.contacts++;
+      if (c.repliedAt || ['replied', 'follow-up-replied'].includes(c.status)) o.replied++;
+    }
+    res.json({ jobs: out });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

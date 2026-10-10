@@ -104,7 +104,7 @@ export default function HiringView({ onFind, busy, defaults, onDefaultsSaved }: 
             ) : data.companies.map(c => (
               <tr key={c.key} style={loading ? { opacity: 0.6 } : undefined}>
                 <td>
-                  <div style={{ fontWeight: 500 }}>{c.company}</div>
+                  <Link to={`/companies/${encodeURIComponent(c.key)}`} style={{ fontWeight: 500, color: 'inherit' }} title="Everything about this company">{c.company}</Link>
                   <div style={{ fontSize: 11, color: 'var(--text3)' }}>
                     {c.domain || 'website found when you search'}
                   </div>

@@ -19,6 +19,12 @@ const contactSchema = new mongoose.Schema({
   prospectId:      { type: String },
   emailConfidence: { type: String, enum: ['high', 'medium', 'low', 'generic'] },
   emailPattern:    { type: String },
+  // Set only when the contact came from a Naukri job you applied to (Discover search
+  // started from that job) or when a source knew the person's LinkedIn profile. No
+  // defaults, for the same reason as above. jobTitle feeds the {{jobTitle}} variable.
+  jobTitle:    { type: String },
+  naukriJobId: { type: String },
+  linkedin:    { type: String },
   status: { type: String, enum: ['queued', 'in-campaign', 'sent', 'follow-up-sent', 'failed', 'bounced', 'replied', 'follow-up-replied', 'closed', 'no-openings', 'in-review', 'blocked'], default: 'queued' },
   approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   editedSubject: { type: String, default: null },

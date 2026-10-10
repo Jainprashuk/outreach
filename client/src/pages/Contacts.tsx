@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import StatusBadge from '../components/StatusBadge';
@@ -397,7 +397,12 @@ export default function Contacts() {
                     </div>
                   </div>
                 </td>
-                <td style={{ color: 'var(--text2)' }}>{c.company}</td>
+                <td style={{ color: 'var(--text2)' }}>
+                  {c.company
+                    ? <Link to={`/companies?q=${encodeURIComponent(c.company)}`} onClick={e => e.stopPropagation()} style={{ color: 'inherit' }}
+                        title="Everything about this company">{c.company}</Link>
+                    : null}
+                </td>
                 <td style={{ color: 'var(--text2)' }}>{c.role}</td>
                 <td style={{ color: 'var(--text2)' }}>{tplName(c.template)}</td>
                 <td>

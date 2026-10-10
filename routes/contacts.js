@@ -297,7 +297,9 @@ router.post('/', async (req, res) => {
 
     // Dedupe + insert live in lib/contactImport.js so /api/leads/move-to-outreach
     // applies exactly the same rules.
-    const { created, invalidEmails } = await importContacts(rows, req.userId);
+    // fillBlanks: a row whose address is already a contact fills only that contact's
+    // EMPTY company/role — an existing value is never overwritten.
+    const { created, invalidEmails, filled } = await importContacts(rows, req.userId, { fillBlanks: true });
     if (created.length === 0 && invalidEmails.length === rows.length) {
       return res.status(400).json({
         error: `None of these are valid email addresses (e.g. "${invalidEmails[0]}"). Check which column is mapped to Email.`,
@@ -311,6 +313,7 @@ router.post('/', async (req, res) => {
       skipped: rows.length - created.length - invalidEmails.length,
       invalid: invalidEmails.length,
       invalidEmails: invalidEmails.slice(0, 20),
+      filled,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

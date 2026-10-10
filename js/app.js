@@ -216,6 +216,7 @@ const App = (() => {
         .replace(/{{name}}/g, contact.name.split(' ')[0])
         .replace(/{{company}}/g, contact.company)
         .replace(/{{role}}/g, contact.role)
+        .replace(/{{jobTitle}}/g, contact.jobTitle || '')
         .replace(/{{sender}}/g, state.sender.name)
         .replace(/{{senderCompany}}/g, state.sender.company)
         .replace(/{{sentSubject}}/g, contact.sentSubject || '');

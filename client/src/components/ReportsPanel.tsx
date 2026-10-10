@@ -217,6 +217,22 @@ export default function ReportsPanel() {
             </div>
           </div>
 
+          {(report.bySource || []).length > 0 && (
+            <div className="an-card" style={{ marginTop: 16 }}>
+              <div className="an-card-head"><div className="an-card-title"><i className="ti ti-arrows-split" /> Results by source</div></div>
+              <div className="an-card-body">
+                <table className="an-table">
+                  <thead><tr><th>Where contacts came from</th><th style={{ textAlign: 'right' }}>First sends</th><th style={{ textAlign: 'right' }}>Replies</th><th style={{ textAlign: 'right' }}>Reply rate</th><th style={{ textAlign: 'right' }}>Bounced</th></tr></thead>
+                  <tbody>{report.bySource!.map(r => (
+                    <tr key={r.key}><td>{r.label}</td>
+                      <td style={{ textAlign: 'right' }}>{n(r.sent)}</td><td style={{ textAlign: 'right' }}>{n(r.replies)}</td>
+                      <td style={{ textAlign: 'right' }}>{r.replyRate}%</td><td style={{ textAlign: 'right' }}>{n(r.bounced)}</td></tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
           <div className="an-card" style={{ marginTop: 16 }}>
             <div className="an-card-head"><div className="an-card-title"><i className="ti ti-send" /> Campaigns</div></div>
             <div className="an-card-body">

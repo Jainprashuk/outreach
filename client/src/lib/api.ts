@@ -60,6 +60,10 @@ export interface Contact {
   prospectId?: string;
   emailConfidence?: EmailConfidence;
   emailPattern?: string;
+  /** Only on contacts from a Naukri job (Naukri → Find people); fills {{jobTitle}}. */
+  jobTitle?: string;
+  naukriJobId?: string;
+  linkedin?: string;
   status: ContactStatus;
   approvalStatus: ApprovalStatus;
   editedSubject: string | null;
@@ -1822,6 +1826,8 @@ export interface ReportStats {
   topReplies: Array<{ name: string; company: string; category: string; categoryLabel: string; repliedAt: string }>;
   waiting: { count: number; items: Array<{ name: string; company: string; categoryLabel: string; repliedAt: string }> };
   upcomingInterviews: Array<{ name: string; company: string; role: string; round: string; interviewAt: string }>;
+  /** First sends / replies / bounces by where the contact came from. Absent on older servers. */
+  bySource?: Array<{ key: 'outreach' | 'lead' | 'discover' | 'naukri'; label: string; sent: number; replies: number; bounced: number; replyRate: number }>;
 }
 
 export const reportQueryString = (q: ReportPeriodQuery) => new URLSearchParams(q as Record<string, string>).toString();
@@ -1932,6 +1938,8 @@ export interface DiscoveryConfigView {
   canStoreKeys: boolean;
   /** Roles the Discover search box starts filled with. */
   defaultRoles: string[];
+  /** Outside-signal sources switched off for "Worth searching". */
+  enrichOff: EnrichSource[];
 }
 
 export interface MoveProspectsResult {
@@ -1953,8 +1961,96 @@ export const saveDefaultRolesApi = (defaultRoles: string[]) =>
 export const removeDiscoveryKeyApi = (provider: DiscoveryProvider) =>
   apiFetch<DiscoveryConfigView>(`/api/prospects/config/${provider}`, { method: 'DELETE' });
 
-export const startProspectSearchApi = (body: { domain: string; companyName?: string; roles?: string[]; force?: boolean }) =>
-  apiFetch<{ search: ProspectSearch }>('/api/prospects/search', { method: 'POST', ...json(body) });
+export const startProspectSearchApi = (body: { domain: string; companyName?: string; roles?: string[]; force?: boolean; naukriJobId?: string }) =>
+  apiFetch<{ search: ProspectSearch; reused?: boolean }>('/api/prospects/search', { method: 'POST', ...json(body) });
+
+// ── Discover: "Worth searching" ──────────────────────────────────────────────
+export interface WorthReason {
+  points: number;
+  text: string;
+  /** 'app' for the app's own signals, else the outside source (news, hn, careers, github, fit). */
+  kind: string;
+  url?: string | null;
+}
+export interface SuggestedCompany {
+  key: string;
+  company: string;
+  domain: string | null;
+  needsDomain: boolean;
+  /** The app's own signals only. */
+  base: number;
+  /** base + outside signals. */
+  score: number;
+  reasons: WorthReason[];
+  /** Outside checks that failed or were skipped. They add 0. */
+  notes: string[];
+  roles: string[];
+  /** Credits a search with these roles costs. */
+  cost: number;
+  naukriJobId: string | null;
+  jobTitle: string | null;
+  linkedin: number;
+  naukri: number;
+  lastSeenAt: string | null;
+}
+export interface SuggestedPage {
+  suggestions: SuggestedCompany[];
+  done: { key: string; company: string; domain: string | null; score: number; searchedAt: string | null }[];
+  /** Search credits left this month; null when no search key is set. */
+  creditsLeft: number | null;
+  /** Suggestions left out because the credits wouldn't cover them. */
+  cutForCredits: number;
+  minScore: number;
+}
+export const suggestedCompaniesApi = () => apiFetch<SuggestedPage>('/api/prospects/suggested');
+export const dismissSuggestionApi = (key: string, days = 60) =>
+  apiFetch<{ ok: boolean }>('/api/prospects/suggested/dismiss', { method: 'POST', ...json({ key, days }) });
+export const undoDismissSuggestionApi = (key: string) =>
+  apiFetch<{ ok: boolean }>(`/api/prospects/suggested/dismiss/${encodeURIComponent(key)}`, { method: 'DELETE' });
+export const refreshSuggestionsApi = () => apiFetch<{ ok: boolean }>('/api/prospects/suggested/refresh', { method: 'POST' });
+export type EnrichSource = 'news' | 'hn' | 'careers' | 'github' | 'fit';
+export const saveEnrichOffApi = (enrichOff: EnrichSource[]) =>
+  apiFetch<DiscoveryConfigView>('/api/prospects/config', { method: 'PUT', ...json({ enrichOff }) });
+
+// ── Company pages ────────────────────────────────────────────────────────────
+export interface CompanyListRow {
+  key: string; company: string; domain: string | null; score: number | null; excluded: string | null;
+  leads: number; naukri: number; contacts: number; sent: number; replied: number; bounced: number; lastAt: string | null;
+}
+export interface CompanyPerson {
+  id: string; name: string; email: string; role: string; status: ContactStatus;
+  replyCategory: ReplyCategory | null; repliedAt: string | null; lastSentAt: string | null;
+  jobTitle: string | null; linkedin: string | null;
+}
+export interface CompanyTally { contacts: number; sent: number; replied: number; bounced: number }
+export interface CompanyDetail {
+  key: string | null;
+  company: string;
+  domain: string | null;
+  worth: { score: number; base: number; reasons: WorthReason[]; notes: string[]; excluded: string | null; roles: string[] | null; naukriJobId: string | null; jobTitle: string | null } | null;
+  totals: CompanyTally;
+  contacts: Partial<Record<'outreach' | 'lead' | 'discover' | 'naukri', CompanyTally & { people: CompanyPerson[] }>>;
+  leads: { id: string; authorName: string; authorUrl: string; email: string | null; postUrl: string; fitScore: number; status: string; createdAt: string }[];
+  naukriJobs: { id: string; title: string; location: string; url: string; approval: string; applyStatus: string; appliedAt: string | null; postedAt: string | null }[];
+  interviews: { id: string; name: string; role: string; status: string; interviewAt: string | null }[];
+  prospects: { total: number; byStatus: Record<string, number> };
+  searches: { id: string; at: string; status: string; roles: string[]; people: number; jobTitle: string | null }[];
+  format: { pattern: string | null; confidence: string | null; source: string | null } | null;
+  timeline: { at: string; what: string; kind: string }[];
+}
+export const companiesApi = (p: { q?: string; sort?: string } = {}) => {
+  const qs = new URLSearchParams(Object.entries(p).filter(([, v]) => v) as [string, string][]).toString();
+  return apiFetch<{ companies: CompanyListRow[]; total: number }>(`/api/companies${qs ? `?${qs}` : ''}`);
+};
+export const companyApi = (key: string) => apiFetch<CompanyDetail>(`/api/companies/${encodeURIComponent(key)}`);
+
+// ── Naukri → Find people ─────────────────────────────────────────────────────
+export interface NaukriJobOutreach {
+  searched: boolean; domain: string | null; searchId: string | null; searchStatus: string | null;
+  people: number; contacts: number; replied: number;
+}
+export const naukriJobsOutreachApi = (ids: string[]) =>
+  apiFetch<{ jobs: Record<string, NaukriJobOutreach> }>(`/api/naukri/jobs/outreach?ids=${ids.join(',')}`);
 export const prospectSearchApi = (id: string) => apiFetch<{ search: ProspectSearch }>(`/api/prospects/search/${id}`);
 export const cancelSearchApi = (id: string) =>
   apiFetch<{ ok: boolean; cancelled: boolean; search: ProspectSearch }>(`/api/prospects/search/${id}/cancel`, { method: 'POST' });

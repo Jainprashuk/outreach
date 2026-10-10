@@ -133,10 +133,14 @@ router.post('/move-to-outreach', async (req, res) => {
         company: normText(e.company != null ? e.company : d.company),
         role:    normText(e.role != null ? e.role : d.role),
         template,
+        // The poster's profile, when the post was by a person (not a company page).
+        ...(/linkedin\.com\/in\//i.test(d.authorUrl || '') ? { linkedin: d.authorUrl } : {}),
       };
     });
 
-    const { created } = await importContacts(rows, req.userId);
+    // fillBlanks: an address that's already a contact gets this lead's company/role
+    // only where the contact has none — never overwritten.
+    const { created, filled } = await importContacts(rows, req.userId, { fillBlanks: true });
 
     const contactIdByEmail = new Map(created.map(c => [c.email, String(c._id)]));
     const now = new Date();
@@ -164,6 +168,7 @@ router.post('/move-to-outreach', async (req, res) => {
       ok: true,
       created,
       alreadyExisted: rows.length - created.length,
+      filled,
       skippedNoEmail,
       movedIds: rows.map(r => r._leadId),
       ...(statusUpdateFailed ? { statusUpdateFailed: true } : {}),
