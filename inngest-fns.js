@@ -9,10 +9,10 @@ const { BLOCKLIST_ERROR, isBlocked, loadBlocklistSets } = require('./lib/blockli
 const { INTERVIEW_ERROR, isInInterview, loadInterviewSets } = require('./lib/interviewGuard');
 const { REPLIED_ERROR, hasUnansweredReply } = require('./lib/actionQueue');
 const { notifyCampaignJobFinished } = require('./lib/campaignNotifications');
-const { notifySendJobFinished, notifySendResumed, notifyGmailAuthFailed, isGmailAuthError } = require('./lib/sendNotifications');
+const { notifySendJobFinished, notifyGmailAuthFailed, isGmailAuthError } = require('./lib/sendNotifications');
 const { logEvent } = require('./lib/activityLog');
 const { reportIssue } = require('./lib/issues');
-const { QUOTA_REASON, isQuotaError, dispatchPending, pauseForQuota } = require('./lib/sendQuota');
+const { QUOTA_REASON, isQuotaError, pauseForQuota, resumeNextForAccount, markQuotaRecovered } = require('./lib/sendQuota');
 const { DEAD_ADDRESS_ERROR, isDeadAddress, lastRealStatus } = require('./lib/deadAddress');
 const db = require('./db');
 
@@ -139,7 +139,7 @@ const sendSingleEmail = inngest.createFunction(
       // whole job (100 rendered emails) once per email. $elemMatch returns the first item
       // matching both conditions — exactly what items.find() below used to pick.
       const job = await SendJob.findById(jobId, {
-        status: 1, pauseReason: 1, userId: 1, attachResume: 1, senderEmail: 1, senderName: 1, senderAppPassword: 1,
+        status: 1, pauseReason: 1, quotaProbe: 1, userId: 1, attachResume: 1, senderEmail: 1, senderName: 1, senderAppPassword: 1,
         items: { $elemMatch: { contactId, status: 'pending' } },
       }).lean();
       if (!job || job.status === 'cancelled') return;
@@ -277,6 +277,7 @@ const sendSingleEmail = inngest.createFunction(
         });
         logEvent({ userId: job.userId, category: 'email', action: 'sent', message: `Email sent to ${item.to}`, meta: { jobId, contactId } })
           .catch(err => console.error('Activity log write failed:', err.message));
+        if (job.quotaProbe) await markQuotaRecovered(jobId, job.userId);
       } catch (err) {
         // Gmail's daily limit: the item stays pending and the job waits it out.
         if (isQuotaError(err)) {
@@ -354,6 +355,7 @@ const sendEmailBulk = inngest.createFunction(
       const interviewSets = await loadInterviewSets(job.userId);
 
       let quotaHit = false;
+      let quotaRecovered = false;
       for (let ci = 0; ci < chunks.length && !quotaHit; ci++) {
         const chunk = chunks[ci];
 
@@ -507,6 +509,7 @@ const sendEmailBulk = inngest.createFunction(
                   },
                 },
               });
+              if (job.quotaProbe && !quotaRecovered) { quotaRecovered = true; await markQuotaRecovered(jobId, job.userId); }
             } catch (err) {
               // Gmail's daily limit: leave this and every later item pending and stop.
               if (isQuotaError(err)) {
@@ -595,32 +598,38 @@ const sendEmailDrip = inngest.createFunction(
   }
 );
 
-// Fired by lib/sendQuota.js at pausedUntil, 24h after Gmail's daily limit paused
-// a job. It acts only if the job is STILL in that exact pause: a manual resume
-// clears pauseReason and a fresh limit hit moves pausedUntil, so a stale event
-// can never dispatch the same items twice.
+// Retired: the first quota design booked one of these per paused batch for +24h.
+// Kept registered only so bookings already made fall here and do nothing — the
+// quota watcher below decides when, and which ONE batch per account, resumes.
 const resumeAfterQuota = inngest.createFunction(
   { id: 'resume-after-quota', triggers: { event: 'email/quota.resume' } },
-  async ({ event, step }) => {
-    const { jobId, pausedUntil } = event.data;
+  async () => {}
+);
 
-    await step.run('resume', async () => {
+// Hourly: for every Gmail account with batches paused on its daily limit, resume
+// the oldest one if nothing on that account is sending. If Gmail still refuses,
+// that batch's first email re-pauses it (lib/sendQuota.js) and nothing is lost;
+// if Gmail accepts, it sends on and the next batch waits for it to finish.
+const quotaWatcher = inngest.createFunction(
+  { id: 'quota-watcher', concurrency: { limit: 1 }, triggers: [{ cron: 'TZ=Asia/Kolkata 5 * * * *' }] },
+  async ({ step }) => {
+    return step.run('resume-next', async () => {
       await ensureDb();
-      const job = await SendJob.findOneAndUpdate(
-        { _id: jobId, status: 'paused', pauseReason: QUOTA_REASON, pausedUntil: new Date(pausedUntil) },
-        { $set: { status: 'processing', pauseReason: null, pausedUntil: null } },
-        { returnDocument: 'after', projection: { userId: 1, sendMode: 1, 'items.contactId': 1, 'items.status': 1 } }
-      ).lean();
-      if (!job) return;
-      if (!job.items.some(i => i.status === 'pending')) {
-        await SendJob.updateOne({ _id: jobId, userId: job.userId, status: 'processing' }, { status: 'done' });
-        await notifySendJobFinished(jobId);
-        return;
+      const accounts = await SendJob.aggregate([
+        { $match: { status: 'paused', pauseReason: QUOTA_REASON } },
+        { $group: { _id: { userId: '$userId', senderEmail: '$senderEmail' } } },
+      ]);
+      const resumed = [];
+      for (const { _id } of accounts) {
+        try {
+          const jobId = await resumeNextForAccount({ userId: _id.userId, senderEmail: _id.senderEmail });
+          if (jobId) resumed.push(jobId);
+        } catch (err) {
+          // One account's trouble must not stop the others.
+          console.error(`quota-watcher: ${_id.senderEmail || _id.userId}:`, err.message);
+        }
       }
-      await dispatchPending(job);
-      await notifySendResumed(job.userId, jobId);
-      logEvent({ userId: job.userId, category: 'email', action: 'quota_resumed', message: 'Batch resumed after the Gmail daily limit pause', meta: { jobId } })
-        .catch(err => console.error('Activity log write failed:', err.message));
+      return { accounts: accounts.length, resumed };
     });
   }
 );
@@ -653,4 +662,4 @@ const reportFailedFunctions = inngest.createFunction(
   }
 );
 
-module.exports = { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, reportFailedFunctions };
+module.exports = { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, reportFailedFunctions };

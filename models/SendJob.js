@@ -27,10 +27,13 @@ const sendJobSchema = new mongoose.Schema({
   sendMode:          { type: String, enum: ['sequential', 'bulk', 'drip'], default: 'sequential' },
   chunkSize:         { type: Number, default: 20 },
   ratePerHour:       { type: Number, default: 5 },
-  // Set only by lib/sendQuota.js when Gmail's daily limit paused the job; the
-  // scheduled email/quota.resume restarts it at pausedUntil. Cleared on resume.
+  // Set only by lib/sendQuota.js when Gmail's daily limit paused the job. The
+  // hourly quota watcher resumes one such job per account at a time; pausedUntil
+  // is the earliest it may retry. quotaProbe marks a job the watcher resumed,
+  // until its first successful send proves the limit has passed.
   pauseReason:       { type: String, default: null },
   pausedUntil:       { type: Date, default: null },
+  quotaProbe:        { type: Boolean, default: false },
 }, { timestamps: true });
 
 // Per-user list index — built on prod by scripts/build-perf-indexes.js.
