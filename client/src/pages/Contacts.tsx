@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { companyHref } from '../lib/companyLink';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import StatusBadge from '../components/StatusBadge';
@@ -35,7 +36,8 @@ export default function Contacts() {
   const [params] = useSearchParams();
 
   const [tab, setTab] = useState(params.get('tab') || 'all');
-  const [search, setSearch] = useState('');
+  // ?q= — a search opened from elsewhere (a Company page's contact row).
+  const [search, setSearch] = useState(params.get('q') || '');
   const [statusFilter, setStatusFilter] = useState(params.get('status') || '');
   const [approvalFilter, setApprovalFilter] = useState('');
   const [templateFilter, setTemplateFilter] = useState('');
@@ -399,7 +401,7 @@ export default function Contacts() {
                 </td>
                 <td style={{ color: 'var(--text2)' }}>
                   {c.company
-                    ? <Link to={`/companies?q=${encodeURIComponent(c.company)}`} onClick={e => e.stopPropagation()} style={{ color: 'inherit' }}
+                    ? <Link to={companyHref(c) || '/companies'} onClick={e => e.stopPropagation()} style={{ color: 'inherit' }}
                         title="Everything about this company">{c.company}</Link>
                     : null}
                 </td>

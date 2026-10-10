@@ -8,7 +8,8 @@
 // Renders each message's plain-text body only (never `html`) — no sanitizer needed since
 // nothing is ever injected into the DOM as markup.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { companyHref } from '../lib/companyLink';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import ClassifierStatus from '../components/ClassifierStatus';
@@ -97,7 +98,8 @@ export default function Mailbox() {
 
   const [loading, setLoading] = useState(!app.loaded);
   const [error, setError] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // ?contact=<id> opens that conversation (linked from a Company page).
+  const [selectedId, setSelectedId] = useState<string | null>(params.get('contact'));
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [busyAction, setBusyAction] = useState(false);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
@@ -429,7 +431,9 @@ export default function Mailbox() {
                   <div style={{ minWidth: 0 }}>
                     <div style={{ fontWeight: 650, fontSize: 15 }}>{selected.name}</div>
                     <div style={{ fontSize: 12, color: 'var(--text2)', overflowWrap: 'anywhere' }}>
-                      {selected.email}{selected.company ? ` · ${selected.company}` : ''}
+                      {selected.email}{selected.company ? <> · {companyHref(selected)
+                        ? <Link to={companyHref(selected)!} title="Everything about this company">{selected.company}</Link>
+                        : selected.company}</> : ''}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>

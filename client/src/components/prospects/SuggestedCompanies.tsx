@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { SkeletonRows } from '../Skeleton';
+import ScoreBadge from '../ScoreBadge';
 import { useToast } from '../../context/ToastContext';
 import {
   dismissSuggestionApi, refreshSuggestionsApi, saveEnrichOffApi, suggestedCompaniesApi,
@@ -139,8 +140,7 @@ export default function SuggestedCompanies({ onRun, busy, config, onConfig }: {
                       {s.domain || 'website found when you run it'} · seen {ago(s.lastSeenAt)}
                     </div>
                   </div>
-                  <span className="badge badge-approved" title={s.score !== s.base ? `${s.base} from your own data, ${s.score - s.base} from outside signals` : 'From your own data'}
-                    style={{ fontSize: 13, fontWeight: 600 }}>{s.score}</span>
+                  <ScoreBadge score={s.score} base={s.base} reasons={s.reasons} notes={s.notes} minScore={data?.minScore} />
                 </div>
 
                 <ul style={{ listStyle: 'none', padding: 0, margin: '10px 0 0', fontSize: 12.5 }}>

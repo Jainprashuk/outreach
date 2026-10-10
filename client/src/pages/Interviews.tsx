@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
+import { companyHref } from '../lib/companyLink';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import InterviewDetailModal from '../components/InterviewDetailModal';
@@ -170,7 +171,9 @@ export default function Interviews() {
                     </div>
                   </td>
                   <td style={{ color: 'var(--text2)' }}>
-                    {iv.company || '—'}
+                    {iv.company && companyHref(iv)
+                      ? <Link to={companyHref(iv)!} onClick={e => e.stopPropagation()} style={{ color: 'inherit' }} title="Everything about this company">{iv.company}</Link>
+                      : (iv.company || '—')}
                     {iv.role ? <div style={{ fontSize: 11, color: 'var(--text3)' }}>{iv.role}</div> : null}
                   </td>
                   <td>

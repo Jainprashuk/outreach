@@ -16,7 +16,7 @@ export const CONFIDENCE_CLASS: Record<EmailConfidence, string> = {
 };
 
 export const CONFIDENCE_HELP: Record<EmailConfidence, string> = {
-  high: 'Proven: a reply from this company, or two real addresses in this format',
+  high: 'Proven: a reply from this company, two real addresses in this format, or many delivered with almost no bounces at a company that rejects unknown addresses',
   medium: 'One sign this format is right — check before sending',
   low: 'A best guess with no proof — right about a third of the time',
   generic: 'A shared mailbox (careers@, hr@) found on the company’s website',

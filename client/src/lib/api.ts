@@ -2015,12 +2015,15 @@ export const saveEnrichOffApi = (enrichOff: EnrichSource[]) =>
 // ── Company pages ────────────────────────────────────────────────────────────
 export interface CompanyListRow {
   key: string; company: string; domain: string | null; score: number | null; excluded: string | null;
+  base: number | null; reasons: WorthReason[]; notes: string[];
   leads: number; naukri: number; contacts: number; sent: number; replied: number; bounced: number; lastAt: string | null;
 }
 export interface CompanyPerson {
   id: string; name: string; email: string; role: string; status: ContactStatus;
   replyCategory: ReplyCategory | null; repliedAt: string | null; lastSentAt: string | null;
   jobTitle: string | null; linkedin: string | null;
+  /** Shows up in the Mailbox (wrote back, or in a to-do bucket). */
+  hasConversation: boolean;
 }
 export interface CompanyTally { contacts: number; sent: number; replied: number; bounced: number }
 export interface CompanyDetail {
@@ -2035,7 +2038,10 @@ export interface CompanyDetail {
   interviews: { id: string; name: string; role: string; status: string; interviewAt: string | null }[];
   prospects: { total: number; byStatus: Record<string, number> };
   searches: { id: string; at: string; status: string; roles: string[]; people: number; jobTitle: string | null }[];
-  format: { pattern: string | null; confidence: string | null; source: string | null } | null;
+  format: {
+    pattern: string | null; confidence: string | null; source: string | null; verified: boolean;
+    replies: number; delivered: number; hardBounces: number; real: number; domainBounces: number; runnerUp: string | null;
+  } | null;
   timeline: { at: string; what: string; kind: string }[];
 }
 export const companiesApi = (p: { q?: string; sort?: string } = {}) => {

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { companyHref } from '../lib/companyLink';
 import Layout from '../components/Layout';
 import Avatar from '../components/Avatar';
 import MoveToOutreachModal from '../components/MoveToOutreachModal';
@@ -554,7 +555,10 @@ export default function Leads() {
                 </td>
                 <td style={{ color: isCompanyDerived(l) ? 'var(--text3)' : 'var(--text2)' }}
                   title={isCompanyDerived(l) ? 'Guessed from the email domain — confirm when you move it to outreach' : undefined}>
-                  {deriveCompany(l) || '—'}
+                  {deriveCompany(l) && companyHref({ email: l.email, company: deriveCompany(l) })
+                    ? <Link to={companyHref({ email: l.email, company: deriveCompany(l) })!} onClick={e => e.stopPropagation()} style={{ color: 'inherit' }}
+                        title="Everything about this company">{deriveCompany(l)}</Link>
+                    : (deriveCompany(l) || '—')}
                   {isCompanyDerived(l) ? <span style={{ fontStyle: 'italic' }}> ?</span> : null}
                 </td>
                 <td style={{ color: 'var(--text2)', maxWidth: 190 }}

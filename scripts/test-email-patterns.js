@@ -167,6 +167,32 @@ console.log('\ndecide');
   ], now), prior);
   eq('one bounce does not flip a confirmed format', [d.pattern, d.confidence], ['first.last', 'high']);
 
+  // Verified by delivery: a domain that hard-bounces SOME address isn't catch-all, so
+  // many delivered sends in one format prove it.
+  {
+    const names = ['Priya Verma', 'Anil Mehta', 'Neha Gupta', 'Ravi Rao', 'Kiran Shah', 'Asha Nair', 'Rohit Jain'];
+    const delivered = (n) => names.slice(0, n).map(x => own(x, x.toLowerCase().replace(' ', '.') + '@acme.in', { status: 'sent', lastSentAt: daysAgo(10) }));
+    const bounce = own('Sunil Das', 'sunil.das@acme.in', { status: 'bounced', bounceReason: '550 5.1.1 user unknown' });
+    const otherBounce = own('Sunil Das', 'sdas@acme.in', { status: 'bounced', bounceReason: '550 5.1.1 user unknown' });
+
+    d = ps.decide(ps.contactEvidence([...delivered(6)], now), prior);
+    eq('delivered only, nothing ever bounced → still medium (could be catch-all)', [d.pattern, d.confidence, !!d.verified], ['first.last', 'medium', false]);
+
+    d = ps.decide(ps.contactEvidence([...delivered(6), otherBounce], now), prior);
+    eq('6 delivered + a bounce on another format → high, verified', [d.pattern, d.confidence, d.verified], ['first.last', 'high', true]);
+
+    d = ps.decide(ps.contactEvidence([...delivered(4), otherBounce], now), prior);
+    eq('too few delivered → medium', [d.confidence, d.verified], ['medium', false]);
+
+    d = ps.decide(ps.contactEvidence([...delivered(7), bounce], now), prior);
+    eq('one of 8 bounced on the same format (12%) → medium', [d.confidence, d.verified], ['medium', false]);
+
+    const many = Array.from({ length: 20 }, (_, i) => own(`Person${String.fromCharCode(97 + i)} Kumar${String.fromCharCode(97 + i)}`,
+      `person${String.fromCharCode(97 + i)}.kumar${String.fromCharCode(97 + i)}@acme.in`, { status: 'follow-up-sent', lastSentAt: daysAgo(10) }));
+    d = ps.decide(ps.contactEvidence([...many, bounce, otherBounce], now), prior);
+    eq('20 delivered, 1 own-format bounce (5%) → high', [d.pattern, d.confidence, d.verified], ['first.last', 'high', true]);
+  }
+
   // Ten commits from one source cap at +6; two replies elsewhere (+4) don't lose to
   // them on volume alone, but here they are different formats, so the cap decides.
   const many = Array.from({ length: 10 }, () => ({ name: 'Priya Verma', email: 'pverma@acme.in' }));
