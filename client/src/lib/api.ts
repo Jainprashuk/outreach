@@ -130,7 +130,8 @@ export interface SendJob {
   ratePerHour?: number;
   campaignId?: string | null;
   campaignName?: string | null;
-  // Set when Gmail's daily sending limit paused the job; it resumes itself at pausedUntil.
+  // Set when Gmail's daily sending limit paused the job; the hourly quota watcher resumes
+  // one such job per account at a time (pausedUntil = earliest retry).
   pauseReason?: 'gmail_daily_limit' | null;
   pausedUntil?: string | null;
   createdAt: string;
