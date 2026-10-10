@@ -1,5 +1,5 @@
 // Labels for the Discover tab, shared with Step 2's confidence badge.
-import type { EmailConfidence } from './api';
+import type { CompanyCandidate, EmailConfidence } from './api';
 
 export const CONFIDENCE_LABEL: Record<EmailConfidence, string> = {
   high: 'High',
@@ -50,4 +50,11 @@ export const STEP_LABEL: Record<string, string> = {
   website: 'Reading the company website',
   pattern: 'Working out the email format',
   emails: 'Guessing each address',
+};
+
+/** Pick the top company match without asking only when it can't be the wrong company. */
+export const autoPick = (list: CompanyCandidate[]) => {
+  const top = list[0];
+  if (!top || !top.exact) return null;
+  return top.source === 'contacts' || top.source === 'typed' || !list.slice(1).some(c => c.exact) ? top : null;
 };

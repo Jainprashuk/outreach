@@ -11,6 +11,11 @@ const prospectSearchSchema = new mongoose.Schema({
   roles:       { type: [String], default: [] },
   // Re-read GitHub and the website even if they were checked within the month.
   force:       { type: Boolean, default: false },
+  // Set only when the search was started from a Naukri job (Naukri → Find people, or a
+  // suggestion that came from one). People moved from this search carry the job title
+  // into outreach for {{jobTitle}}. No defaults, so other searches gain no keys.
+  naukriJobId: { type: String },
+  jobTitle:    { type: String },
   status:      { type: String, enum: ['queued', 'running', 'done', 'error'], default: 'queued' },
   steps: [{
     _id: false,

@@ -9,6 +9,7 @@ import ConfidenceBadge from '../components/ConfidenceBadge';
 import { SkeletonRows } from '../components/Skeleton';
 import SearchReport, { ago } from '../components/prospects/SearchReport';
 import HiringView from '../components/prospects/HiringView';
+import SuggestedCompanies from '../components/prospects/SuggestedCompanies';
 import RolesInput, { MAX_ROLES, parseRoles } from '../components/prospects/RolesInput';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
@@ -17,10 +18,10 @@ import {
   addGenericProspectApi, cancelSearchApi, clearHistoryApi, companyFormatApi, prospectHistoryApi, removeSearchApi, discardProspectsApi, discoveryConfigApi, loadProspectsApi,
   moveProspectsApi, prospectCompaniesApi, prospectSearchApi, recheckCompanyApi, restoreProspectsApi,
   setGithubOrgApi, startProspectSearchApi, lookupCompanyApi, updateProspectApi,
-  type CompanyCandidate, type CompanyFormat, type HiringCompany, type DiscoveryConfigView, type EmailConfidence, type MoveProspectsResult,
+  type CompanyCandidate, type CompanyFormat, type HiringCompany, type SuggestedCompany, type DiscoveryConfigView, type EmailConfidence, type MoveProspectsResult,
   type Prospect, type ProspectCompany, type ProspectSearch,
 } from '../lib/api';
-import { CONFIDENCE_LABEL, PATTERN_EXAMPLE, SOURCE_LABEL } from '../lib/prospects';
+import { CONFIDENCE_LABEL, PATTERN_EXAMPLE, SOURCE_LABEL, autoPick } from '../lib/prospects';
 
 type Tab = 'open' | 'moved' | 'discarded' | 'all';
 const TAB_LABEL: Record<Tab, string> = { open: 'To review', moved: 'In outreach', discarded: 'Discarded', all: 'All' };
@@ -39,12 +40,6 @@ const SOURCE_NOTE: Record<CompanyCandidate['source'], string> = {
   typed: 'as typed',
 };
 
-/** Pick the top candidate without asking only when it can't be the wrong company. */
-const autoPick = (list: CompanyCandidate[]) => {
-  const top = list[0];
-  if (!top || !top.exact) return null;
-  return top.source === 'contacts' || top.source === 'typed' || !list.slice(1).some(c => c.exact) ? top : null;
-};
 
 function SearchCard({ config, busy, onSearch, prefill, onDefaultsSaved }: {
   config: DiscoveryConfigView | null;
@@ -208,7 +203,13 @@ function CompanyCard({ format, prospects, onRecheck, onSearchAgain, onAddGeneric
           <div style={{ display: 'flex', gap: 12, minWidth: 0 }}>
             <div className="tc-report-ico" style={{ width: 40, height: 40, color: 'var(--accent)' }}><i className="ti ti-building" /></div>
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 16 }}>{format.companyName || format.domain}</div>
+              <div style={{ fontWeight: 600, fontSize: 16 }}>
+                {format.companyName || format.domain}
+                <Link to={`/companies/${encodeURIComponent(`d:${format.domain}`)}`} className="btn btn-xs" style={{ marginLeft: 8, verticalAlign: 'middle' }}
+                  title="Everything about this company: contacts from every source, Naukri jobs, LinkedIn posts">
+                  <i className="ti ti-building" /> Company page
+                </Link>
+              </div>
               <div style={{ fontSize: 12, color: 'var(--text2)' }}>
                 {format.domain}
                 {format.githubOrg && <> · <a href={`https://github.com/${format.githubOrg}`} target="_blank" rel="noreferrer">github.com/{format.githubOrg}</a></>}
@@ -481,8 +482,12 @@ export default function Discover() {
   const toast = useToast();
   const [params, setParams] = useSearchParams();
   const domain = params.get('domain') || '';
-  const view = params.get('view') === 'history' ? 'history' : params.get('view') === 'hiring' ? 'hiring' : 'find';
+  const view = params.get('view') === 'history' ? 'history' : params.get('view') === 'hiring' ? 'hiring' : params.get('view') === 'worth' ? 'worth' : 'find';
   const runId = params.get('run') || '';
+  // From Naukri → Find people when the company couldn't be matched for sure: the
+  // box opens with its name, and the search you pick is linked to that job.
+  const findParam = params.get('find') || '';
+  const jobParam = params.get('job') || '';
   // Everyone found, across every company, in one table.
   const allMode = view === 'find' && params.get('all') === '1';
 
@@ -533,10 +538,13 @@ export default function Discover() {
     loadHistory();
     loadCompanies().then(list => {
       // Open on your latest company — only on Find people; History and Hiring now keep their view.
-      if (!params.get('domain') && list[0] && !params.get('view') && !params.get('all')) setParams({ domain: list[0].domain }, { replace: true });
+      if (!params.get('domain') && list[0] && !params.get('view') && !params.get('all') && !params.get('find')) setParams({ domain: list[0].domain }, { replace: true });
     }).catch(err => setError(err.message));
   }, []);
   useEffect(() => { if (view === 'history') loadHistory(); }, [view]);
+  useEffect(() => {
+    if (findParam) setPrefill({ text: findParam, roles: [], n: Date.now() });
+  }, [findParam]);
 
   // A company was picked (or searched): load its people, its format and its last run.
   useEffect(() => {
@@ -585,10 +593,11 @@ export default function Discover() {
     wasRunning.current = running;
   }, [running, search?.status]);
 
-  const startSearch = async (d: string, roles: string[], companyName: string, force = false) => {
+  const startSearch = async (d: string, roles: string[], companyName: string, force = false, naukriJobId?: string) => {
     setStarting(true);
     try {
-      const r = await startProspectSearchApi({ domain: d, roles, companyName, force });
+      const r = await startProspectSearchApi({ domain: d, roles, companyName, force, ...(naukriJobId ? { naukriJobId } : {}) });
+      if (r.reused) toast(`${companyName || d} was searched recently — showing those people, now linked to your application`, 'info');
       await loadCompanies();
       go({ domain: r.search.domain });
       setSearch(r.search);
@@ -614,6 +623,21 @@ export default function Discover() {
     go({});
     setPrefill({ text: c.company, roles, n: Date.now() });
     toast(`Pick which ${c.company} you mean`, 'info');
+  };
+
+  // From Worth searching: same as Hiring now, plus the Naukri job it came from (so
+  // the people found carry {{jobTitle}} into outreach).
+  const runSuggestion = async (s: SuggestedCompany) => {
+    const job = s.naukriJobId || undefined;
+    if (s.domain) return startSearch(s.domain, s.roles, s.company, false, job);
+    try {
+      const r = await lookupCompanyApi(s.company);
+      const sure = autoPick(r.candidates);
+      if (sure) return startSearch(sure.domain, s.roles, sure.name || s.company, false, job);
+    } catch { /* fall through to choosing by hand */ }
+    go({});
+    setPrefill({ text: s.company, roles: s.roles, n: Date.now() });
+    toast(`Pick which ${s.company} you mean`, 'info');
   };
 
   // ── Derived ────────────────────────────────────────────────────────────────
@@ -716,6 +740,9 @@ export default function Discover() {
         <button type="button" className={`nav-tab${view === 'find' ? ' active' : ''}`} onClick={() => go({ domain })}>
           <i className="ti ti-search" style={{ marginRight: 4 }} />Find people
         </button>
+        <button type="button" className={`nav-tab${view === 'worth' ? ' active' : ''}`} onClick={() => go({ view: 'worth', domain })}>
+          <i className="ti ti-target" style={{ marginRight: 4 }} />Worth searching
+        </button>
         <button type="button" className={`nav-tab${view === 'hiring' ? ' active' : ''}`} onClick={() => go({ view: 'hiring', domain })}>
           <i className="ti ti-briefcase" style={{ marginRight: 4 }} />Hiring now
         </button>
@@ -724,6 +751,10 @@ export default function Discover() {
           <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{history.length}</span>
         </button>
       </div>
+
+      {view === 'worth' && (
+        <SuggestedCompanies busy={starting || running} onRun={runSuggestion} config={config} onConfig={setConfig} />
+      )}
 
       {view === 'hiring' && (
         <HiringView busy={starting || running} onFind={findHiring}
@@ -747,7 +778,7 @@ export default function Discover() {
 
       {view === 'find' && (<>
       <SearchCard config={config} busy={starting || running} prefill={prefill} onDefaultsSaved={saveDefaults}
-        onSearch={(d, roles, name) => startSearch(d, roles, name)} />
+        onSearch={(d, roles, name) => startSearch(d, roles, name, false, jobParam || undefined)} />
 
       {companies.length > 0 && (
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>

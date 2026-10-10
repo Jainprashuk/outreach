@@ -130,6 +130,7 @@ export const BUILTIN_VARIABLES = [
   { key: 'name', desc: "Contact's first name" },
   { key: 'company', desc: "Contact's company" },
   { key: 'role', desc: "Contact's role" },
+  { key: 'jobTitle', desc: 'The Naukri job you applied to (contacts from Naukri → Find people)' },
   { key: 'sender', desc: 'Your name' },
   { key: 'senderCompany', desc: 'Your company' },
 ];
@@ -143,7 +144,7 @@ export const renderTemplate = (
   templates: Record<string, Template>,
   sender: Sender,
   tplKey: string,
-  contact: Pick<Contact, 'name' | 'company' | 'role' | 'sentSubject'>,
+  contact: Pick<Contact, 'name' | 'company' | 'role' | 'sentSubject' | 'jobTitle'>,
 ): { subject: string; body: string } => {
   const tpl = templates[tplKey];
   if (!tpl) return { subject: '', body: '' };
@@ -152,6 +153,7 @@ export const renderTemplate = (
       .replace(/{{name}}/g, contact.name.split(' ')[0])
       .replace(/{{company}}/g, contact.company)
       .replace(/{{role}}/g, contact.role)
+      .replace(/{{jobTitle}}/g, contact.jobTitle || '')
       .replace(/{{sender}}/g, sender.name)
       .replace(/{{senderCompany}}/g, sender.company)
       .replace(/{{sentSubject}}/g, contact.sentSubject || '');

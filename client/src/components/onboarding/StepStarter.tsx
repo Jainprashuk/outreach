@@ -90,7 +90,7 @@ export default function StepStarter({ status, onDone, onSkip }: {
             ))}
           </div>
           <button className="btn" type="button" onClick={addTemplates} disabled={seeding}>
-            {seeding ? <><i className="ti ti-loader" /> Adding…</> : <><i className="ti ti-plus" /> Add these three</>}
+            {seeding ? <><i className="ti ti-loader" /> Adding…</> : <><i className="ti ti-plus" /> Add these four</>}
           </button>
         </>
       )}

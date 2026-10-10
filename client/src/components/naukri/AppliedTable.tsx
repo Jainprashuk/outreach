@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import { RefreshBar, Refreshing } from '../RefreshBar';
-import type { NaukriJob, NaukriApplyStatus } from '../../lib/api';
-import { listNaukriJobsApi, updateNaukriJobApi } from '../../lib/api';
+import type { NaukriJob, NaukriApplyStatus, NaukriJobOutreach } from '../../lib/api';
+import { listNaukriJobsApi, updateNaukriJobApi, lookupCompanyApi, startProspectSearchApi, naukriJobsOutreachApi } from '../../lib/api';
+import { autoPick } from '../../lib/prospects';
 import { Card, Muted, Empty } from './ui';
 import { fmtRunTime } from './format';
 import { useToast } from '../../context/ToastContext';
@@ -30,15 +32,43 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [msg, setMsg] = useState('');
   const toast = useToast();
+  const navigate = useNavigate();
+  // Per job: whether people at the company were found from it, and how that went.
+  const [outreach, setOutreach] = useState<Record<string, NaukriJobOutreach>>({});
+  const [finding, setFinding] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     // 'sent', not 'any': a board called Applied must not list jobs the worker
     // skipped or failed on. Those have their own tab.
-    try { setJobs((await listNaukriJobsApi({ applyStatus: 'sent', limit: 200 })).jobs); }
+    try {
+      const list = (await listNaukriJobsApi({ applyStatus: 'sent', limit: 200 })).jobs;
+      setJobs(list);
+      if (list.length) naukriJobsOutreachApi(list.map(j => j.id)).then(r => setOutreach(r.jobs)).catch(() => { /* badges stay hidden */ });
+    }
     catch (e: any) { setMsg(e?.message || 'Could not load'); }
     finally { setLoading(false); setLoadedOnce(true); }
   }, []);
+
+  // Find the recruiters and hiring manager at the company you applied to. Starts the
+  // Discover search straight away when the company's website is certain; otherwise
+  // Discover opens with the name filled in so you pick which company it is.
+  const findPeople = async (job: NaukriJob) => {
+    setFinding(job.id);
+    try {
+      const r = await lookupCompanyApi(job.company);
+      const sure = autoPick(r.candidates);
+      if (!sure) {
+        navigate(`/discover?find=${encodeURIComponent(job.company)}&job=${job.id}`);
+        return;
+      }
+      const s = await startProspectSearchApi({ domain: sure.domain, companyName: sure.name || job.company, naukriJobId: job.id });
+      toast(s.reused ? 'Searched recently — opening those people' : `Finding people at ${sure.name || job.company}…`, 'info');
+      navigate(`/discover?domain=${encodeURIComponent(s.search.domain)}`);
+    } catch (e: any) {
+      toast(e?.message || 'Could not start the search', 'error');
+    } finally { setFinding(null); }
+  };
 
   useEffect(() => { load(); }, [load]);
 
@@ -75,13 +105,30 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
           <div style={{ flex: 1, minWidth: 190 }}>
             <a href={job.url} target="_blank" rel="noreferrer"
                style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{job.title}</a>
-            <div><Muted>{job.company}{job.appliedAt ? ` · ${fmtRunTime(job.appliedAt)}` : ''}</Muted></div>
+            <div><Muted><Link to={`/companies?q=${encodeURIComponent(job.company)}`} style={{ color: 'inherit' }}>{job.company}</Link>{job.appliedAt ? ` · ${fmtRunTime(job.appliedAt)}` : ''}</Muted></div>
             {/* How it went out — "Applied after 2 question(s)" is worth knowing
                 when you are wondering whether a screening form was involved.
                 The skip/retry notes that used to live here belong to Waiting;
                 nothing on this board was skipped. */}
             {job.applyNote && <Muted style={{ display: 'block' }}>{job.applyNote}</Muted>}
           </div>
+          {(() => {
+            const o = outreach[job.id];
+            if (o && o.searched) {
+              return (
+                <Link to={`/discover?domain=${encodeURIComponent(o.domain || '')}`} className="badge badge-sent"
+                  title="People found at this company from this application">
+                  <i className="ti ti-users" /> {o.people} found{o.contacts ? ` · ${o.contacts} emailed` : ''}{o.replied ? ` · ${o.replied} replied` : ''}
+                </Link>
+              );
+            }
+            return (
+              <button type="button" className="btn btn-xs" disabled={finding !== null} onClick={() => findPeople(job)}
+                title="Find the recruiters and hiring manager there, and email them about this application">
+                {finding === job.id ? <><i className="ti ti-loader-2 tc-spin" /> Finding…</> : <><i className="ti ti-user-search" /> Find people</>}
+              </button>
+            );
+          })()}
           <select value={job.applyStatus} onChange={e => move(job.id, e.target.value as NaukriApplyStatus)}
                   style={{ width: 132 }}>
             {STAGES.map(s => <option key={s} value={s}>{s}</option>)}

@@ -22,6 +22,9 @@ const discoveryConfigSchema = new mongoose.Schema({
   githubEnc:  { type: String, default: '' },
   // Roles the Discover search box starts filled with. Optional: empty finds anyone.
   defaultRoles: { type: [String], default: [] },
+  // Outside-signal sources you switched off for "Worth searching" (news, hn,
+  // careers, github, fit). Empty = all on.
+  enrichOff: { type: [String], default: [] },
   usage: {
     month:   { type: String, default: '' }, // YYYY-MM (Asia/Kolkata)
     tavily:  { type: Number, default: 0 },
@@ -34,7 +37,7 @@ discoveryConfigSchema.index({ userId: 1 }, { unique: true });
 
 discoveryConfigSchema.set('toJSON', {
   transform: (doc, ret) => {
-    const out = { usage: ret.usage || {}, defaultRoles: ret.defaultRoles || [] };
+    const out = { usage: ret.usage || {}, defaultRoles: ret.defaultRoles || [], enrichOff: ret.enrichOff || [] };
     for (const p of PROVIDERS) out[p] = !!ret[`${p}Enc`];
     return out;
   },

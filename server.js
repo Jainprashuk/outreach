@@ -566,9 +566,10 @@ const { inngest } = require('./inngest');
 const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, reportFailedFunctions } = require('./inngest-fns');
 const { lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver } = require('./lib/lifecycle/inngest');
 const { prospectsSearch } = require('./lib/prospectSearch');
+const { companiesEnrich, companiesEnrichDaily } = require('./lib/discovery/enrich');
 app.use('/api/inngest', serve({
   client: inngest,
-  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch, reportFailedFunctions],
+  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch, companiesEnrich, companiesEnrichDaily, reportFailedFunctions],
 }));
 
 // Sign-in is an emailed one-time code; see routes/auth.js and lib/loginCode.js.
@@ -595,6 +596,8 @@ app.use('/api/leads', requireDb, require('./routes/leads'));
 // Discover tab: people found at a company, with guessed work emails. A
 // separate store from Lead (the LinkedIn posts board) — see models/Prospect.js.
 app.use('/api/prospects', requireDb, require('./routes/prospects'));
+// Company pages: one company across every module (read-only, lib/companyView.js).
+app.use('/api/companies', requireDb, require('./routes/companies'));
 app.use('/api/scrapes', requireDb, require('./routes/scrapes'));
 app.use('/api/naukri', requireDb, require('./routes/naukri'));
 // People who actually got back to you. A separate store from Contact/Lead so the

@@ -107,6 +107,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
         { badge: needsYou, badgeTitle: 'Replies waiting on you' })}
       {item('/leads', 'ti-target-arrow', 'Leads', 'Hiring posts collected from LinkedIn, with recruiters’ emails and apply links. Move the good ones to outreach.')}
       {item('/discover', 'ti-compass', 'Discover', 'Type a company: find people who work there and guess their work email. You choose who moves to outreach.')}
+      {item('/companies', 'ti-building', 'Companies', 'One page per company: your contacts there from every source, LinkedIn posts, Naukri jobs, interviews, the email format and whether it’s worth searching.')}
       {item('/naukri', 'ti-briefcase-2', 'Naukri', 'Keeps your Naukri profile fresh and applies to the jobs you approve, using a worker on your computer.')}
       {item('/campaigns', 'ti-calendar-repeat', 'Campaigns', 'Hands-off sending: give it a list and it emails a set number of people a day for you.')}
       {item('/logs', 'ti-list-details', 'Logs', 'A record of everything the app did — sends, imports, scrapes, errors — for checking what happened and when.')}
