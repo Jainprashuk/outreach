@@ -23,6 +23,14 @@ const { hiringCompanies } = require('../lib/discovery/hiringCompanies');
 const worth = require('../lib/discovery/companyWorth');
 const { rolesForJob } = require('../lib/discovery/jobRoles');
 const SuggestionDismissal = require('../models/SuggestionDismissal');
+const FormatTest = require('../models/FormatTest');
+const SendJob = require('../models/SendJob');
+const Settings = require('../models/Settings');
+const mailer = require('../lib/mailer');
+const { holdBehindQuota } = require('../lib/sendQuota');
+const { loadRenderContext, renderTemplate } = require('../lib/renderTemplate');
+const { requireOnboarded } = require('../lib/onboardingGuard');
+const { testStatus } = require('../lib/formatTest');
 const NaukriJob = require('../models/NaukriJob');
 
 const router = express.Router();
@@ -399,6 +407,12 @@ router.get('/patterns/:domain', async (req, res) => {
       githubCheckedAt: (cp && cp.githubCheckedAt) || null,
       websiteCheckedAt: (cp && cp.websiteCheckedAt) || null,
       hunterAskedAt: (cp && cp.hunterAskedAt) || null,
+      webAskedAt: (cp && cp.webAskedAt) || null,
+      gravatarCheckedAt: (cp && cp.gravatarCheckedAt) || null,
+      directory: (cp && cp.directory) || [],
+      manual: cp && cp.manualPattern
+        ? { pattern: cp.manualPattern, from: cp.manualFrom, example: cp.manualExample || null, at: cp.manualAt || null }
+        : null,
       genericEmails: (cp && cp.genericEmails) || [],
       samples: bySource,
       contactsAtDomain: contacts.length,
@@ -408,17 +422,54 @@ router.get('/patterns/:domain', async (req, res) => {
         source: decision.source,
         runnerUp: decision.runnerUp,
         patterns: decision.patterns,
+        auto: decision.auto || null,
+        conflict: decision.conflict || null,
+        conflictWith: decision.conflictWith || null,
+        nameOnly: !!decision.nameOnly,
+        catchAllRisk: !!decision.catchAllRisk,
       },
       defaultGuess: prior[0],
+      ...(await formatTests(req.userId, domain)),
     });
   } catch (err) { err500(res, err); }
 });
 
-// PATCH /api/prospects/patterns/:domain — { githubOrg } sets the org by hand ('' clears).
+// PATCH /api/prospects/patterns/:domain
+//   { githubOrg }                   sets the org by hand ('' clears)
+//   { pattern }                     sets the company's email format yourself (null clears)
+//   { exampleName, exampleEmail }   works the format out from a real address you found
+// A format change re-labels every open prospect at once.
 router.patch('/patterns/:domain', async (req, res) => {
   try {
     const domain = ep.normalizeDomain(req.params.domain);
     if (!domain) return res.status(400).json({ error: 'Bad domain' });
+    const body = req.body || {};
+    if ('pattern' in body || 'exampleEmail' in body) {
+      let set;
+      if ('exampleEmail' in body) {
+        const email = String(body.exampleEmail || '').trim().toLowerCase();
+        const name = String(body.exampleName || '').trim().slice(0, 120);
+        if (!/^[^\s@]+@[^\s@]+$/.test(email)) return res.status(400).json({ error: 'That doesn’t look like an email address' });
+        if (ep.domainOfEmail(email) !== domain) return res.status(400).json({ error: `Use an address ending in @${domain}` });
+        if (ep.isRoleAddress(email)) return res.status(400).json({ error: 'That’s a shared inbox, not a person — it doesn’t show the format' });
+        if (!name) return res.status(400).json({ error: 'Type the person’s name too — the format is read from name + address' });
+        const pattern = ep.inferPattern(name, email);
+        if (!pattern) return res.status(400).json({ error: 'Can’t tell the format from that name and address — check the spelling, or pick the format from the list' });
+        set = { manualPattern: pattern, manualFrom: 'example', manualExample: `${name} <${email}>`, manualAt: new Date() };
+      } else if (body.pattern === null || body.pattern === '') {
+        set = { manualPattern: null, manualFrom: null, manualExample: null, manualAt: null };
+      } else {
+        if (!ep.PATTERN_KEYS.includes(body.pattern)) return res.status(400).json({ error: 'Unknown format' });
+        set = { manualPattern: body.pattern, manualFrom: 'list', manualExample: null, manualAt: new Date() };
+      }
+      await CompanyPattern.updateOne(
+        { userId: req.userId, domain },
+        { $set: set, $setOnInsert: { userId: req.userId, domain } },
+        { upsert: true },
+      );
+      const r = await applyEmails(req.userId, domain);
+      return res.json({ ok: true, pattern: set.manualPattern, from: set.manualFrom, people: r.people, withEmail: r.withEmail });
+    }
     const raw = String((req.body && req.body.githubOrg) || '').trim().replace(/^https?:\/\/github\.com\//i, '').replace(/\/.*$/, '');
     if (raw && !/^[A-Za-z0-9-]{1,39}$/.test(raw)) return res.status(400).json({ error: 'That doesn’t look like a GitHub organisation name' });
     await CompanyPattern.updateOne(
@@ -427,6 +478,170 @@ router.patch('/patterns/:domain', async (req, res) => {
       { upsert: true },
     );
     res.json({ ok: true, githubOrg: raw || null });
+  } catch (err) { err500(res, err); }
+});
+
+// ── Test format: one real email to one person ──────────────────────────────
+
+/** The latest test emails at a company, each with what happened to it. */
+async function formatTests(userId, domain, limit = 10) {
+  const [tests, settings] = await Promise.all([
+    FormatTest.find({ userId, domain }).sort({ createdAt: -1 }).limit(limit).lean(),
+    Settings.findOne({ userId }, { lastMailboxCheckAt: 1 }).lean(),
+  ]);
+  const lastMailboxCheckAt = (settings && settings.lastMailboxCheckAt) || null;
+  if (!tests.length) return { tests: [], lastMailboxCheckAt };
+  const ids = (list) => [...new Set(list.filter(isId))];
+  const [contacts, jobs] = await Promise.all([
+    Contact.find({ _id: { $in: ids(tests.map(t => t.contactId)) }, userId, deleted: { $ne: true } },
+      { status: 1, bounceReason: 1, repliedAt: 1, lastSentAt: 1, failReason: 1, 'thread.direction': 1 }).lean(),
+    SendJob.find({ _id: { $in: ids(tests.map(t => t.jobId).filter(Boolean)) }, userId }, { status: 1, items: 1 }).lean(),
+  ]);
+  const contactById = new Map(contacts.map(c => [String(c._id), c]));
+  const jobById = new Map(jobs.map(j => [String(j._id), j]));
+  const now = new Date();
+  return {
+    lastMailboxCheckAt,
+    tests: tests.map(t => ({
+      id: String(t._id), prospectId: t.prospectId, contactId: t.contactId, name: t.name, email: t.email,
+      pattern: t.pattern, templateKey: t.templateKey, createdAt: t.createdAt, confirmedAt: t.confirmedAt,
+      ...testStatus(t, contactById.get(t.contactId) || null, t.jobId ? jobById.get(t.jobId) || null : null, lastMailboxCheckAt, now),
+    })),
+  };
+}
+
+// POST /api/prospects/format-tests — { prospectId, pattern | email, template, attachResume? }
+// Moves that one prospect to outreach with the address in that format and sends it a
+// normal outreach email right away (same SendJob + Inngest path as Step 3, with every
+// send-time guard). Whatever comes back is read off the contact (formatTests above).
+router.post('/format-tests', requireOnboarded, async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!isId(b.prospectId)) return res.status(400).json({ error: 'Pick a person' });
+    const template = String(b.template || '').trim();
+    if (!template) return res.status(400).json({ error: 'Pick a template' });
+
+    const p = await Prospect.findOne({ _id: b.prospectId, userId: req.userId, ...BASE_FILTER }).lean();
+    if (!p) return res.status(404).json({ error: 'Person not found' });
+    const domain = p.domain;
+    if (!OPEN.includes(p.status)) {
+      // Someone whose earlier test hard-bounced can be tried again in another format —
+      // the bounced contact stays in outreach as the record of that attempt.
+      const view = p.status === 'moved' ? await formatTests(req.userId, domain, 50) : { tests: [] };
+      const retry = view.tests.some(t => t.prospectId === String(p._id) && t.status === 'bounced');
+      if (!retry) return res.status(409).json({ error: `${p.name} was already moved or discarded` });
+    }
+    const cp = await CompanyPattern.findOne({ userId: req.userId, domain }, { hasMx: 1 }).lean();
+    if (cp && cp.hasMx === false) return res.status(400).json({ error: `${domain} can't receive email` });
+
+    let email;
+    let pattern;
+    if (b.email) {
+      email = String(b.email).trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+$/.test(email) || ep.domainOfEmail(email) !== domain) {
+        return res.status(400).json({ error: `Use an address ending in @${domain}` });
+      }
+      if (ep.isRoleAddress(email)) return res.status(400).json({ error: 'That’s a shared inbox — it can’t test a person’s format' });
+      pattern = ep.inferPattern(p.name, email);
+    } else {
+      if (!ep.PATTERN_KEYS.includes(b.pattern)) return res.status(400).json({ error: 'Pick a format' });
+      email = ep.generateEmail(p.name, b.pattern, domain);
+      if (!email) return res.status(400).json({ error: `Can’t build ${b.pattern} from “${p.name}” — pick another person or format` });
+      pattern = b.pattern;
+    }
+
+    const ctx = await loadRenderContext({ templateKey: template, userId: req.userId });
+    if (!ctx.template) return res.status(400).json({ error: 'That template no longer exists' });
+    const already = await Contact.findOne({ userId: req.userId, email, deleted: { $ne: true } }, { _id: 1 })
+      .collation({ locale: 'en', strength: 2 }).lean();
+    if (already) return res.status(409).json({ error: `${email} is already in your contacts — its result is there, so testing it again proves nothing new` });
+
+    await Prospect.updateOne({ _id: p._id, userId: req.userId }, { $set: {
+      email, emailPattern: pattern, emailSource: 'test', emailConfidence: null,
+      status: 'ready', existingContactId: null, contactedAs: null, contactId: null, movedAt: null, note: '',
+    } });
+    const moved = await moveProspects(req.userId, [String(p._id)], template);
+    const contactId = moved.contactIds.get(String(p._id));
+    if (!contactId) {
+      const why = moved.blocked ? 'that address is on your blocklist' : 'that address is already in your contacts';
+      return res.status(409).json({ error: `Not sent — ${why}` });
+    }
+
+    // Approved, rendered and queued here rather than in Step 2/3: the test IS the review.
+    const contact = await Contact.findOneAndUpdate(
+      { _id: contactId, userId: req.userId },
+      { $set: { approvalStatus: 'approved' } },
+      { new: true },
+    ).lean();
+    const { subject, body } = renderTemplate(ctx.template, contact, ctx.sender);
+    if (!subject || !body) {
+      return res.status(400).json({ error: `The template rendered empty — ${p.name} was moved to outreach and can be sent from Step 2` });
+    }
+    const creds = await mailer.getSenderFor(req.userId);
+    const job = await SendJob.create({
+      userId: req.userId,
+      items: [{ contactId, to: contact.email, name: contact.name, subject, body }],
+      attachResume: !!b.attachResume,
+      senderEmail: creds.email || '',
+      senderName: ctx.sender.name || creds.name || '',
+      senderAppPassword: creds.appPassword || '',
+      sendMode: 'sequential',
+    });
+    let queueError = null;
+    try {
+      // Behind the Gmail limit like any other batch; the quota watcher starts it later.
+      if (!await holdBehindQuota(job)) await inngest.send({ name: 'email/batch.start', data: { jobId: job.id.toString() } });
+    } catch (err) {
+      await SendJob.updateOne({ _id: job.id, userId: req.userId }, { status: 'cancelled' });
+      queueError = `Could not queue the send: ${err.message}. ${p.name} is in outreach and can be sent from Step 2.`;
+    }
+
+    await FormatTest.create({
+      userId: req.userId, domain, prospectId: String(p._id), contactId, jobId: job.id.toString(),
+      name: p.name, email, pattern, templateKey: template,
+    });
+    const view = await formatTests(req.userId, domain);
+    res.json({ ok: !queueError, error: queueError, ...view });
+  } catch (err) { err500(res, err); }
+});
+
+// GET /api/prospects/:id/addresses — the address each format gives this person, for
+// the Test format picker. Built by lib/emailPatterns.js so the browser never needs its
+// own copy of the name rules.
+router.get('/:id/addresses', async (req, res) => {
+  try {
+    if (!isId(req.params.id)) return res.status(400).json({ error: 'Bad id' });
+    const p = await Prospect.findOne({ _id: req.params.id, userId: req.userId, ...BASE_FILTER }, { name: 1, domain: 1, knownEmail: 1 }).lean();
+    if (!p) return res.status(404).json({ error: 'Person not found' });
+    const addresses = {};
+    for (const k of ep.PATTERN_KEYS) addresses[k] = ep.generateEmail(p.name, k, p.domain);
+    res.json({ addresses, knownEmail: p.knownEmail && !ep.isRoleAddress(p.knownEmail) ? p.knownEmail : null });
+  } catch (err) { err500(res, err); }
+});
+
+// POST /api/prospects/format-tests/:id/confirm — the test email didn't bounce (or got a
+// reply): use its format for the whole company, as if set by hand.
+router.post('/format-tests/:id/confirm', async (req, res) => {
+  try {
+    if (!isId(req.params.id)) return res.status(400).json({ error: 'Bad id' });
+    const test = await FormatTest.findOne({ _id: req.params.id, userId: req.userId }).lean();
+    if (!test) return res.status(404).json({ error: 'Test not found' });
+    const view = await formatTests(req.userId, test.domain, 50);
+    const t = view.tests.find(x => x.id === String(test._id));
+    if (!t || !['no-bounce', 'replied'].includes(t.status)) {
+      return res.status(409).json({ error: 'Wait until the email was sent and a mailbox check found no bounce' });
+    }
+    if (!test.pattern) return res.status(400).json({ error: 'That address fits none of the formats — set the format by hand instead' });
+    const now = new Date();
+    await CompanyPattern.updateOne(
+      { userId: req.userId, domain: test.domain },
+      { $set: { manualPattern: test.pattern, manualFrom: 'test', manualExample: `${test.name} <${test.email}>`, manualAt: now },
+        $setOnInsert: { userId: req.userId, domain: test.domain } },
+      { upsert: true },
+    );
+    await FormatTest.updateOne({ _id: test._id, userId: req.userId }, { $set: { confirmedAt: now } });
+    const r = await applyEmails(req.userId, test.domain);
+    res.json({ ok: true, pattern: test.pattern, confidence: r.decision.confidence, people: r.people, withEmail: r.withEmail });
   } catch (err) { err500(res, err); }
 });
 
@@ -525,6 +740,79 @@ router.patch('/:id', async (req, res) => {
   } catch (err) { err500(res, err); }
 });
 
+/**
+ * Move prospects into outreach as ordinary pending Contacts. Shared by POST /move and
+ * the Test-format send (lib/formatTest.js).
+ *
+ * @returns {Promise<{moved: number, alreadyMoved: number, notReady: number, blocked: number,
+ *                    duplicates: number, contactIds: Map<string, string>}>}
+ *          contactIds: prospect id → new contact id, for the ones moved
+ */
+async function moveProspects(userId, ids, template) {
+  const docs = await Prospect.find({ _id: { $in: ids }, userId, ...BASE_FILTER }).lean();
+  const block = await loadBlocklistSets(userId);
+  // The Naukri job behind each prospect's search, read now rather than copied onto
+  // every prospect, so it is whatever the search says at move time.
+  const searchIds = [...new Set(docs.map(d => d.searchId && String(d.searchId)).filter(Boolean))];
+  const jobBySearch = new Map((searchIds.length
+    ? await ProspectSearch.find({ _id: { $in: searchIds }, userId, naukriJobId: { $exists: true } }, { naukriJobId: 1, jobTitle: 1 }).lean()
+    : []).map(s => [String(s._id), s]));
+
+  const out = { moved: 0, alreadyMoved: 0, notReady: 0, blocked: 0, duplicates: 0 };
+  const contactIds = new Map();
+  const rows = [];
+  for (const d of docs) {
+    if (d.status === 'moved') { out.alreadyMoved++; continue; }
+    if (d.status !== 'ready' || !d.email) { out.notReady++; continue; }
+    if (isBlocked(d.email, block)) { out.blocked++; continue; }
+    if (d.existingContactId) { out.duplicates++; continue; }
+    rows.push({
+      _prospectId: String(d._id),
+      name: d.name,
+      email: d.email,
+      company: d.company || '',
+      role: d.title || '',
+      template,
+      prospectId: String(d._id),
+      emailConfidence: d.emailConfidence || null,
+      emailPattern: d.emailPattern || null,
+      linkedin: d.linkedin || null,
+      ...(() => {
+        const s = d.searchId && jobBySearch.get(String(d.searchId));
+        return s ? { jobTitle: s.jobTitle || '', naukriJobId: s.naukriJobId } : {};
+      })(),
+    });
+  }
+
+  const { created } = rows.length ? await importContacts(rows, userId, { fillBlanks: true }) : { created: [] };
+  const createdByEmail = new Map(created.map(c => [c.email, String(c._id)]));
+
+  // Rows importContacts skipped already existed as contacts (created since the
+  // last label refresh) — record which, rather than moving them.
+  const skippedEmails = rows.filter(r => !createdByEmail.has(r.email.trim().toLowerCase())).map(r => r.email.trim().toLowerCase());
+  const existing = skippedEmails.length
+    ? await Contact.find({ userId, email: { $in: skippedEmails }, deleted: { $ne: true } }, { email: 1 })
+      .collation({ locale: 'en', strength: 2 }).lean()
+    : [];
+  const existingByEmail = new Map(existing.map(c => [c.email.toLowerCase(), String(c._id)]));
+
+  const now = new Date();
+  const ops = rows.map(r => {
+    const email = r.email.trim().toLowerCase();
+    const contactId = createdByEmail.get(email);
+    if (contactId) {
+      out.moved++;
+      contactIds.set(r._prospectId, contactId);
+      return { updateOne: { filter: { _id: r._prospectId, userId }, update: { $set: { status: 'moved', movedAt: now, contactId } } } };
+    }
+    out.duplicates++;
+    return { updateOne: { filter: { _id: r._prospectId, userId }, update: { $set: { existingContactId: existingByEmail.get(email) || null } } } };
+  });
+  if (ops.length) await Prospect.bulkWrite(ops, { ordered: false });
+
+  return { ...out, contactIds };
+}
+
 // POST /api/prospects/move — { ids, template }. Creates pending contacts (Step 2
 // still approves them). Skips, and reports, anything not safe to move.
 router.post('/move', async (req, res) => {
@@ -532,66 +820,7 @@ router.post('/move', async (req, res) => {
     const ids = idList(req.body && req.body.ids);
     if (!ids) return res.status(400).json({ error: `Expected 1–${MAX_IDS} prospect ids` });
     const template = String((req.body && req.body.template) || '');
-
-    const docs = await Prospect.find({ _id: { $in: ids }, userId: req.userId, ...BASE_FILTER }).lean();
-    const block = await loadBlocklistSets(req.userId);
-    // The Naukri job behind each prospect's search, read now rather than copied onto
-    // every prospect, so it is whatever the search says at move time.
-    const searchIds = [...new Set(docs.map(d => d.searchId && String(d.searchId)).filter(Boolean))];
-    const jobBySearch = new Map((searchIds.length
-      ? await ProspectSearch.find({ _id: { $in: searchIds }, userId: req.userId, naukriJobId: { $exists: true } }, { naukriJobId: 1, jobTitle: 1 }).lean()
-      : []).map(s => [String(s._id), s]));
-
-    const out = { moved: 0, alreadyMoved: 0, notReady: 0, blocked: 0, duplicates: 0 };
-    const rows = [];
-    for (const d of docs) {
-      if (d.status === 'moved') { out.alreadyMoved++; continue; }
-      if (d.status !== 'ready' || !d.email) { out.notReady++; continue; }
-      if (isBlocked(d.email, block)) { out.blocked++; continue; }
-      if (d.existingContactId) { out.duplicates++; continue; }
-      rows.push({
-        _prospectId: String(d._id),
-        name: d.name,
-        email: d.email,
-        company: d.company || '',
-        role: d.title || '',
-        template,
-        prospectId: String(d._id),
-        emailConfidence: d.emailConfidence || null,
-        emailPattern: d.emailPattern || null,
-        linkedin: d.linkedin || null,
-        ...(() => {
-          const s = d.searchId && jobBySearch.get(String(d.searchId));
-          return s ? { jobTitle: s.jobTitle || '', naukriJobId: s.naukriJobId } : {};
-        })(),
-      });
-    }
-
-    const { created } = rows.length ? await importContacts(rows, req.userId, { fillBlanks: true }) : { created: [] };
-    const createdByEmail = new Map(created.map(c => [c.email, String(c._id)]));
-
-    // Rows importContacts skipped already existed as contacts (created since the
-    // last label refresh) — record which, rather than moving them.
-    const skippedEmails = rows.filter(r => !createdByEmail.has(r.email.trim().toLowerCase())).map(r => r.email.trim().toLowerCase());
-    const existing = skippedEmails.length
-      ? await Contact.find({ userId: req.userId, email: { $in: skippedEmails }, deleted: { $ne: true } }, { email: 1 })
-        .collation({ locale: 'en', strength: 2 }).lean()
-      : [];
-    const existingByEmail = new Map(existing.map(c => [c.email.toLowerCase(), String(c._id)]));
-
-    const now = new Date();
-    const ops = rows.map(r => {
-      const email = r.email.trim().toLowerCase();
-      const contactId = createdByEmail.get(email);
-      if (contactId) {
-        out.moved++;
-        return { updateOne: { filter: { _id: r._prospectId, userId: req.userId }, update: { $set: { status: 'moved', movedAt: now, contactId } } } };
-      }
-      out.duplicates++;
-      return { updateOne: { filter: { _id: r._prospectId, userId: req.userId }, update: { $set: { existingContactId: existingByEmail.get(email) || null } } } };
-    });
-    if (ops.length) await Prospect.bulkWrite(ops, { ordered: false });
-
+    const { contactIds, ...out } = await moveProspects(req.userId, ids, template);
     res.json({ ok: true, ...out });
   } catch (err) { err500(res, err); }
 });

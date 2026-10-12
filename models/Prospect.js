@@ -30,7 +30,7 @@ const prospectSchema = new mongoose.Schema({
   email:           { type: String, default: null },
   emailPattern:    { type: String, default: null },
   emailConfidence: { type: String, enum: ['high', 'medium', 'low', 'generic', null], default: null },
-  emailSource:     { type: String, enum: ['own', 'leads', 'github', 'website', 'hunter', 'default', 'manual', null], default: null },
+  emailSource:     { type: String, enum: ['own', 'leads', 'github', 'website', 'hunter', 'default', 'manual', 'web', 'gravatar', 'directory', 'set', 'test', null], default: null },
   note:            { type: String, default: '' }, // why there's no email, or a warning
 
   status: { type: String, enum: ['new', 'ready', 'moved', 'discarded', 'error'], default: 'new' },

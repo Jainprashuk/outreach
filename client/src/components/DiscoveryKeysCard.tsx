@@ -10,7 +10,7 @@ import {
 const PROVIDERS: { key: DiscoveryProvider; name: string; what: string; url: string; usage?: 'tavily' | 'serpapi' | 'hunter' }[] = [
   { key: 'tavily', name: 'Tavily', what: 'Finds people at a company (1,000 free searches a month, no card).', url: 'https://app.tavily.com', usage: 'tavily' },
   { key: 'serpapi', name: 'SerpApi', what: 'Backup people search when Tavily is used up (250 free a month).', url: 'https://serpapi.com/users/sign_up', usage: 'serpapi' },
-  { key: 'hunter', name: 'Hunter', what: 'Last resort for a company’s email format, once per company (50 free a month).', url: 'https://hunter.io/users/sign_up', usage: 'hunter' },
+  { key: 'hunter', name: 'Hunter', what: 'Optional. Gravatar, the web and email-format sites usually find the format already; Hunter is only asked when they can’t (once per company, 50 free a month).', url: 'https://hunter.io/users/sign_up', usage: 'hunter' },
   { key: 'github', name: 'GitHub token', what: 'Optional. Raises GitHub’s limit from 60 to 5,000 requests an hour. No scopes needed.', url: 'https://github.com/settings/personal-access-tokens/new' },
 ];
 

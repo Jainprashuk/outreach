@@ -1867,7 +1867,7 @@ export interface Prospect {
 }
 
 export interface ProspectSearchStep {
-  key: 'company' | 'people-search' | 'github' | 'website' | 'pattern' | 'emails';
+  key: 'company' | 'people-search' | 'github' | 'website' | 'web-format' | 'pattern' | 'emails';
   status: 'pending' | 'running' | 'done' | 'skipped' | 'error';
   found: number;
   detail: string;
@@ -1907,6 +1907,8 @@ export interface PatternSummary {
   hardBounces: number;
   real: number;
   hunter: boolean;
+  /** How many email-format directory sites name this format. */
+  directory?: number;
 }
 
 export interface CompanyFormat {
@@ -1918,6 +1920,14 @@ export interface CompanyFormat {
   githubCheckedAt: string | null;
   websiteCheckedAt: string | null;
   hunterAskedAt: string | null;
+  webAskedAt: string | null;
+  gravatarCheckedAt: string | null;
+  directory: { site: string; pattern: string; share: number | null }[];
+  /** A format you set yourself (or confirmed with a test email); it wins over the automatic one. */
+  manual: { pattern: string; from: 'list' | 'example' | 'test'; example: string | null; at: string | null } | null;
+  /** Test emails at this company, newest first. */
+  tests: FormatTest[];
+  lastMailboxCheckAt: string | null;
   genericEmails: string[];
   samples: Record<string, number>;
   contactsAtDomain: number;
@@ -1927,8 +1937,35 @@ export interface CompanyFormat {
     source: string;
     runnerUp: string | null;
     patterns: PatternSummary[];
+    /** With a format set by you: what the app would pick on its own. */
+    auto: { pattern: string; confidence: 'high' | 'medium' | 'low'; source: string } | null;
+    /** Your own sends disagree with the format you set. */
+    conflict: 'bounces' | 'replies' | null;
+    conflictWith: string | null;
+    /** A first-name-only format with no reply behind it: held at low/medium. */
+    nameOnly?: boolean;
+    /** Confirmed by a test email at a company that may accept every address. */
+    catchAllRisk?: boolean;
   };
   defaultGuess: string;
+}
+
+export type FormatTestStatus = 'sending' | 'held' | 'failed' | 'waiting' | 'no-bounce' | 'replied' | 'bounced' | 'bounce-other' | 'gone';
+export interface FormatTest {
+  id: string;
+  prospectId: string;
+  contactId: string;
+  name: string;
+  email: string;
+  pattern: string | null;
+  templateKey: string;
+  createdAt: string;
+  confirmedAt: string | null;
+  status: FormatTestStatus;
+  reason: string;
+  sentAt: string | null;
+  /** "No bounce" needs a mailbox check after this time. */
+  checkAfter: string | null;
 }
 
 export interface DiscoveryConfigView {
@@ -2146,6 +2183,17 @@ export const addGenericProspectApi = (domain: string, email: string) =>
 export const companyFormatApi = (domain: string) => apiFetch<CompanyFormat>(`/api/prospects/patterns/${encodeURIComponent(domain)}`);
 export const setGithubOrgApi = (domain: string, githubOrg: string) =>
   apiFetch<{ ok: boolean; githubOrg: string | null }>(`/api/prospects/patterns/${encodeURIComponent(domain)}`, { method: 'PATCH', ...json({ githubOrg }) });
+export type SetFormatBody = { pattern: string | null } | { exampleName: string; exampleEmail: string };
+export const setCompanyFormatApi = (domain: string, body: SetFormatBody) =>
+  apiFetch<{ ok: boolean; pattern: string | null; from: 'list' | 'example' | null; people: number; withEmail: number }>(
+    `/api/prospects/patterns/${encodeURIComponent(domain)}`, { method: 'PATCH', ...json(body) });
+export const prospectAddressesApi = (id: string) =>
+  apiFetch<{ addresses: Record<string, string | null>; knownEmail: string | null }>(`/api/prospects/${encodeURIComponent(id)}/addresses`);
+export const startFormatTestApi = (body: { prospectId: string; template: string; pattern?: string; email?: string; attachResume?: boolean }) =>
+  apiFetch<{ ok: boolean; error: string | null; tests: FormatTest[]; lastMailboxCheckAt: string | null }>('/api/prospects/format-tests', { method: 'POST', ...json(body) });
+export const confirmFormatTestApi = (id: string) =>
+  apiFetch<{ ok: boolean; pattern: string; confidence: string; people: number; withEmail: number }>(
+    `/api/prospects/format-tests/${encodeURIComponent(id)}/confirm`, { method: 'POST' });
 export const recheckCompanyApi = (domain: string) =>
   apiFetch<{ ok: boolean; people: number; withEmail: number; pattern: string; confidence: string }>(
     `/api/prospects/patterns/${encodeURIComponent(domain)}/recheck`, { method: 'POST' });

@@ -133,10 +133,20 @@ console.log('\ndecide');
   eq('no evidence → prior, low', [d.pattern, d.confidence, d.source], ['first.last', 'low', 'default']);
 
   d = ps.decide(ps.contactEvidence([own('Priya Verma', 'priya@acme.in', { status: 'replied' })], now), prior);
-  eq('one reply → high', [d.pattern, d.confidence, d.source], ['first', 'high', 'own']);
+  eq('one reply → high (even first: a reply proves it)', [d.pattern, d.confidence, d.source], ['first', 'high', 'own']);
+
+  d = ps.decide(ps.contactEvidence([own('Priya Verma', 'priya.verma@acme.in', { status: 'sent', lastSentAt: daysAgo(8) })], now), prior);
+  eq('one delivered send → medium', [d.pattern, d.confidence], ['first.last', 'medium']);
 
   d = ps.decide(ps.contactEvidence([own('Priya Verma', 'priya@acme.in', { status: 'sent', lastSentAt: daysAgo(8) })], now), prior);
-  eq('one delivered send → medium', [d.pattern, d.confidence], ['first', 'medium']);
+  eq('first with no reply → low', [d.pattern, d.confidence, d.nameOnly], ['first', 'low', true]);
+
+  // Codilar: "verified by delivery" as first, then 23 of 31 bounced.
+  d = ps.decide(ps.contactEvidence([
+    ...['Priya Verma', 'Neha Gupta', 'Ravi Rao', 'Om Das', 'Sara Khan'].map(n => own(n, `${n.split(' ')[0].toLowerCase()}@codilar.com`, { status: 'sent', lastSentAt: daysAgo(10) })),
+    own('Anil Mehta', 'anil@codilar.com', { status: 'bounced', bounceReason: '550 5.1.1 user unknown' }),
+  ], now), prior);
+  eq('first "verified by delivery" is not proof', [d.pattern, d.confidence, !!d.verified], ['first', 'low', false]);
 
   d = ps.decide(ps.realEvidence([{ name: 'Priya Verma', email: 'pverma@acme.in' }], 'github'), prior);
   eq('one real address → medium, github', [d.pattern, d.confidence, d.source], ['flast', 'medium', 'github']);
@@ -219,7 +229,7 @@ console.log('\npriorOrder');
     { name: 'Anil Mehta', email: 'anil.mehta@c.in', status: 'sent', lastSentAt: daysAgo(10) },
   ], now);
   const order = ps.priorOrder(ev);
-  eq('your most successful format first', order.slice(0, 2), ['first', 'first.last']);
+  eq('first never leads the default guess (behind first.last)', order.slice(0, 2), ['first.last', 'first']);
   ok('every format listed', ep.PATTERN_KEYS.every(k => order.includes(k)));
   eq('empty history → fallback order', ps.priorOrder([]).slice(0, 4), ep.FALLBACK_ORDER);
 
@@ -234,7 +244,7 @@ console.log('\npriorOrder');
     { name: 'Sara Khan', email: 'sarakhan@gmail.com', status: 'replied' },
     { name: 'Om Das', email: 'omdas@gmail.com', status: 'replied' },
   ], now));
-  eq('one vote per company, personal mail ignored', votes.slice(0, 2), ['first', 'first.last']);
+  eq('one vote per company, personal mail ignored', votes.slice(0, 3), ['first.last', 'first', 'firstlast']);
   // A company whose only evidence is bounces casts no vote.
   eq('bounce-only company casts no vote', ps.priorOrder(ps.contactEvidence([
     { name: 'Anil Mehta', email: 'amehta@z.in', status: 'bounced', bounceReason: '550 5.1.1 user unknown' },
@@ -275,6 +285,121 @@ console.log('\ncompany lookup');
   eq('acronym', acronym('Tata Consultancy Services'), 'tcs');
   eq('typed website', typedDomain('https://www.acme.in/careers'), 'acme.in');
   eq('a name is not a domain', typedDomain('Acme Corp'), null);
+}
+
+console.log('\nweb format (templates, directories, web addresses)');
+{
+  const wf = require('../lib/discovery/webFormat');
+  eq('[first].[last]', wf.parseTemplate('[first].[last]'), 'first.last');
+  eq('{first}.{last}', wf.parseTemplate('{first}.{last}'), 'first.last');
+  eq('{f}{last}', wf.parseTemplate('{f}{last}'), 'flast');
+  eq('[first_initial][last]', wf.parseTemplate('[first_initial][last]'), 'flast');
+  eq('[first initial].[last]', wf.parseTemplate('[first initial].[last]'), 'f.last');
+  eq('bare first_last', wf.parseTemplate('first_last'), 'first_last');
+  eq('bare firstlast', wf.parseTemplate('firstlast'), 'firstlast');
+  eq('bare first', wf.parseTemplate('first'), 'first');
+  eq('{first}{l}', wf.parseTemplate('{first}{l}'), 'firstl');
+  eq('{last}.{first}', wf.parseTemplate('{last}.{first}'), 'last.first');
+  eq('trailing dot ignored', wf.parseTemplate('first.last.'), 'first.last');
+  eq('hyphen format not built', wf.parseTemplate('[first]-[last]'), null);
+  eq('a word is not a template', wf.parseTemplate('format'), null);
+  eq('bare single letter is not a slot', wf.parseTemplate('f.last'), null);
+  eq('example jane.doe', wf.fromExample('jane.doe@acme.com'), 'first.last');
+  eq('example jsmith', wf.fromExample('jsmith@acme.com'), 'flast');
+  eq('real person is not an example', wf.fromExample('rahul.sharma@acme.com'), null);
+
+  const R = (url, title, snippet) => ({ url, title, snippet });
+  const dir = wf.directoryFormats([
+    R('https://rocketreach.co/acme-email-format_1', 'Acme Email Format | acme.com Emails', 'The most common Acme email format is [first].[last] (ex. jane.doe@acme.com) being used 76.2% of the time. Other: [first] (12%).'),
+    R('https://www.leadiq.com/c/acme/emails', 'Acme Email Formats', 'Acme uses {first}.{last}@acme.com for most employees.'),
+    R('https://www.signalhire.com/companies/acme/email', 'Acme Corp email format', 'Email format for acme.com: {f}{last}@acme.com 20%, {first}.{last}@acme.com 70%'),
+    R('https://rocketreach.co/zeta-email-format_2', 'Zeta Email Format | zeta.tech', 'The most common Zeta email format is [first] (ex. jane@zeta.tech).'),
+    R('https://acme.com/contact', 'Contact Acme', 'Write to first.last@acme.com'),
+  ], 'acme.com', 'Acme');
+  eq('one vote per site, other companies and own site ignored', dir.map(d => [d.site, d.pattern]).sort(),
+    [['leadiq.com', 'first.last'], ['rocketreach.co', 'first.last'], ['signalhire.com', 'first.last']]);
+  eq('share read', dir.find(d => d.site === 'rocketreach.co').share, 76.2);
+
+  const pairs = wf.webAddresses([
+    R('https://x.com/a', 'Speakers', 'Priya Kapoor, Head of Growth at Acme (priya.kapoor@acme.com) will speak.'),
+    R('https://x.com/b', 'Press', 'Media: press@acme.com. Contact Rahul Sharma or anil.mehta@acme.com'),
+    R('https://x.com/c', 'Team', 'Write to sneha@acme.com'),
+  ], 'acme.com', ['Sneha Iyer']);
+  eq('web addresses tied to a name', pairs.map(p => [p.name, p.email]),
+    [['Priya Kapoor', 'priya.kapoor@acme.com'], ['Sneha Iyer', 'sneha@acme.com']]);
+
+  const e = ps.directoryEvidence([
+    { site: 'a.com', pattern: 'first.last' }, { site: 'b.com', pattern: 'first.last' }, { site: 'c.com', pattern: 'first.last' },
+    { site: 'a.com', pattern: 'first.last' },
+  ]);
+  eq('directory capped at two sites', e.map(x => [x.pattern, x.weight, x.sites]), [['first.last', 4, 3]]);
+  const d = ps.decide(e, ep.FALLBACK_ORDER);
+  eq('directory alone → medium', [d.pattern, d.confidence, d.source], ['first.last', 'medium', 'directory']);
+  const withBounce = ps.decide([...e, { pattern: 'first.last', kind: 'hardBounce', weight: -4, source: 'own' }], ep.FALLBACK_ORDER);
+  eq('one hard bounce cancels the directories', withBounce.source, 'default');
+  const g = ps.decide(ps.realEvidence([{ name: 'Priya Kapoor', email: 'priya.kapoor@acme.com' }, { name: 'Anil Mehta', email: 'anil.mehta@acme.com' }], 'gravatar'));
+  eq('two Gravatar hits → high', [g.pattern, g.confidence, g.source], ['first.last', 'high', 'gravatar']);
+  const pairsFirst = [{ name: 'Amit Kumar', email: 'amit@postman.com' }, { name: 'Ankit Sobti', email: 'ankit@postman.com' }];
+  const gf = ps.decide(ps.realEvidence(pairsFirst, 'gravatar', { guessedOwner: true }));
+  eq('first-name-only Gravatar hits alone don\'t pick the format', [gf.source, gf.confidence], ['default', 'low']);
+  const gfd = ps.decide([...ps.realEvidence(pairsFirst, 'gravatar', { guessedOwner: true }), ...ps.directoryEvidence([{ site: 'a.com', pattern: 'first' }])]);
+  eq('…they add to one format site, still low', [gfd.pattern, gfd.confidence, gfd.score], ['first', 'low', 4]);
+  const gfd2 = ps.decide(ps.directoryEvidence([{ site: 'a.com', pattern: 'first' }, { site: 'b.com', pattern: 'first' }]));
+  eq('two format sites agreeing on first → medium', [gfd2.pattern, gfd2.confidence], ['first', 'medium']);
+  const mixed = ps.decide([...ps.realEvidence(pairsFirst, 'gravatar', { guessedOwner: true }),
+    ...ps.realEvidence([{ name: 'Priya Kapoor', email: 'priya.kapoor@postman.com' }, { name: 'Anil Mehta', email: 'anil.mehta@postman.com' }], 'gravatar', { guessedOwner: true })]);
+  eq('full-name hits beat first-name-only hits', [mixed.pattern, mixed.confidence], ['first.last', 'high']);
+  const gh = ps.decide(ps.realEvidence(pairsFirst, 'github'));
+  eq('two known owners (GitHub commits) of first-name addresses → medium, no reply yet', [gh.pattern, gh.confidence], ['first', 'medium']);
+}
+
+console.log('\nformat set by you');
+{
+  const auto = ps.decide([
+    { pattern: 'flast', kind: 'reply', weight: 2, source: 'own' },
+  ]);
+  const m = ps.manualDecision({ pattern: 'first.last', from: 'list' }, auto);
+  eq('picked from list → medium, source set', [m.pattern, m.confidence, m.source], ['first.last', 'medium', 'set']);
+  eq('a reply in another format warns', [m.conflict, m.conflictWith], ['replies', 'flast']);
+  eq('from a real address → high', ps.manualDecision({ pattern: 'first.last', from: 'example' }, ps.decide([])).confidence, 'high');
+  const bounced = ps.decide([
+    { pattern: 'first.last', kind: 'hardBounce', weight: -4, source: 'own' },
+    { pattern: 'first.last', kind: 'hardBounce', weight: -4, source: 'own' },
+  ]);
+  eq('two bounces in your format warn', ps.manualDecision({ pattern: 'first.last', from: 'list' }, bounced).conflict, 'bounces');
+  eq('no evidence, no warning', ps.manualDecision({ pattern: 'first', from: 'list' }, ps.decide([])).conflict, null);
+}
+
+console.log('\ntest format (one email)');
+{
+  const { testStatus, WAIT_MS } = require('../lib/formatTest');
+  const t = { email: 'priya.kapoor@acme.com' };
+  const sentAt = new Date(now.getTime() - 60 * 60 * 1000);
+  const after = new Date(sentAt.getTime() + WAIT_MS + 1000);
+  const before = new Date(sentAt.getTime() + 60 * 1000);
+  const st = (c, job, check) => testStatus(t, c, job || null, check || null, now).status;
+  eq('queued → sending', st({ status: 'queued' }, { status: 'processing', items: [{ status: 'pending' }] }), 'sending');
+  eq('held by Gmail limit', st({ status: 'queued' }, { status: 'paused', items: [{ status: 'pending' }] }), 'held');
+  eq('skipped by a guard → failed', st({ status: 'queued' }, { status: 'done', items: [{ status: 'skipped', error: 'blocked' }] }), 'failed');
+  eq('send failed', st({ status: 'failed', failReason: 'auth' }), 'failed');
+  eq('sent, no check yet → waiting', st({ status: 'sent', lastSentAt: sentAt }), 'waiting');
+  eq('sent, check too soon → waiting', st({ status: 'sent', lastSentAt: sentAt }, null, before), 'waiting');
+  eq('sent, checked 15+ min later → no bounce', st({ status: 'sent', lastSentAt: sentAt }, null, after), 'no-bounce');
+  eq('hard bounce', st({ status: 'bounced', lastSentAt: sentAt, bounceReason: '550 5.1.1 user unknown' }), 'bounced');
+  eq('mailbox full is not a format answer', st({ status: 'bounced', lastSentAt: sentAt, bounceReason: '552 mailbox full' }), 'bounce-other');
+  eq('reply', st({ status: 'replied', lastSentAt: sentAt, repliedAt: now }), 'replied');
+  eq('deleted contact', st(null), 'gone');
+
+  const noEvidence = ps.decide([]);
+  const m = ps.manualDecision({ pattern: 'first.last', from: 'test' }, noEvidence);
+  eq('test with no bounce anywhere → medium, catch-all risk', [m.confidence, m.catchAllRisk], ['medium', true]);
+  const rejects = ps.decide(ps.contactEvidence([
+    { name: 'Rahul Sharma', email: 'rahul@acme.com', status: 'bounced', bounceReason: '550 5.1.1 user unknown' },
+  ], now));
+  const m2 = ps.manualDecision({ pattern: 'first.last', from: 'test' }, rejects);
+  eq('test after a bounce at the company → high', [m2.confidence, m2.catchAllRisk], ['high', false]);
+  const replied = ps.decide(ps.contactEvidence([{ name: 'Priya Kapoor', email: 'priya.kapoor@acme.com', status: 'replied' }], now));
+  eq('test that got a reply → high', ps.manualDecision({ pattern: 'first.last', from: 'test' }, replied).confidence, 'high');
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

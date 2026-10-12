@@ -25,6 +25,7 @@ const PENDING: Record<string, string> = {
   'people-search': 'Searching the web for people',
   github: 'Checking the company’s GitHub',
   website: 'Reading the company’s website',
+  'web-format': 'Checking Gravatar and the web for their format',
   pattern: 'Working out their email format',
   emails: 'Guessing each person’s address',
 };
@@ -121,20 +122,51 @@ function describe(step: ProspectSearchStep, search: ProspectSearch, onSetOrg?: (
       return line;
     }
 
+    case 'web-format': {
+      if (i.reason === 'manual') return { title: 'You set their email format yourself', tone: 'muted', text: `Using ${i.pattern} — no outside lookups needed.` };
+      if (i.reason === 'proven') return { title: 'Format already proven', tone: 'muted', text: 'No extra lookups needed.' };
+      const parts: string[] = [];
+      if (i.gravatarSkipped === 'recent') parts.push('Gravatar checked recently');
+      else if (i.gravatarChecked) parts.push(i.gravatar ? `Gravatar confirmed ${plural(i.gravatar, 'real address', 'real addresses')}` : `Gravatar: none of ${plural(i.gravatarChecked, 'guess', 'guesses')} registered`);
+      if (i.githubChecked) parts.push(i.github ? `GitHub confirmed ${plural(i.github, 'address', 'addresses')}` : 'not on GitHub');
+      const dir: { site: string; pattern: string; share: number | null }[] = i.directory || [];
+      if (i.web) parts.push(`${plural(i.web, 'real address', 'real addresses')} on the web`);
+      if (dir.length) {
+        const top = dir.map(d => d.pattern);
+        const agree = top.filter(p => p === top[0]).length;
+        parts.push(`${plural(dir.length, 'format site')} (${dir.map(d => d.site).slice(0, 3).join(', ')})${agree > 1 ? ` — ${agree} say ${top[0]}` : ''}`);
+      }
+      if (i.webSkipped === 'recent') parts.push('web searched recently');
+      if (i.webSkipped === 'no-key') {
+        return { title: parts.length ? parts.join(' · ') : 'Web lookups skipped', tone: 'info', action: SETTINGS,
+          text: 'A free Tavily key lets the app read email-format sites and find real addresses on the web.' };
+      }
+      if (i.webSkipped === 'allowance') parts.push('free web searches used up this month');
+      else if (i.webSkipped === 'error' && i.webError) parts.push(`web search failed (${i.webError})`);
+      const found = (i.gravatar || 0) + (i.github || 0) + (i.web || 0) + dir.length;
+      return { title: found ? 'Found more signs of their format' : 'No more signs of their format', tone: found ? 'good' : 'muted',
+        text: parts.join(' · ') || 'Nothing new.' };
+    }
+
     case 'pattern': {
       const ex = PATTERN_EXAMPLE[i.pattern] ? `${PATTERN_EXAMPLE[i.pattern]}@${domain}` : i.pattern;
+      if (i.source === 'set') {
+        return { title: `Using the format you set: ${i.pattern}`, tone: i.conflict ? 'warn' : 'good',
+          text: `Like ${ex}.${i.conflict ? ` Your own emails point to ${i.autoPattern || 'another format'} — see the company card above.` : ''}` };
+      }
       if (i.source === 'default') {
         return { title: 'No proof of their email format yet', tone: 'warn',
-          action: i.hasHunterKey ? undefined : { label: 'Add a Hunter key', to: '/settings' },
-          text: `Guessing ${i.pattern} (like ${ex}) — the format most of your companies use. These are labelled Low: about a third turn out right, so check them before sending.` };
+          text: `Guessing ${i.pattern} (like ${ex}) — the format most of your companies use. These are labelled Low: about a third turn out right. If you find one real address (or the format on rocketreach.co), use “Set format” on the company card.` };
       }
       const proof: string[] = [];
       if (i.replies) proof.push(plural(i.replies, 'reply', 'replies'));
       if (i.delivered) proof.push(plural(i.delivered, 'delivered email'));
       if (i.real) proof.push(plural(i.real, 'real address', 'real addresses'));
+      if (i.weak) proof.push(`${plural(i.weak, 'first-name-only address', 'first-name-only addresses')} — a weak sign, often a founder’s`);
+      if (i.directory) proof.push(plural(i.directory, 'format site'));
       if (i.hunter) proof.push('Hunter');
       return { title: `Their email format is ${i.pattern}`, tone: i.confidence === 'high' ? 'good' : 'info',
-        text: `Like ${ex} · ${CONFIDENCE_LABEL[i.confidence as 'high'] || i.confidence} confidence, from ${SOURCE_LABEL[i.source] || i.source}${proof.length ? ` (${proof.join(', ')})` : ''}${i.runnerUp ? ` · a few use ${i.runnerUp}` : ''}.` };
+        text: `Like ${ex} · ${CONFIDENCE_LABEL[i.confidence as 'high'] || i.confidence} confidence, from ${SOURCE_LABEL[i.source] || i.source}${proof.length ? ` (${proof.join(', ')})` : ''}${i.runnerUp ? ` · a few use ${i.runnerUp}` : ''}.${i.nameOnly ? ' First-name addresses are often only founders’ and early staff’s — held back until someone replies from one.' : ''}` };
     }
 
     case 'emails': {
