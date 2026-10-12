@@ -199,135 +199,162 @@ function CompanyCard({ format, prospects, onRecheck, onSearchAgain, onAddGeneric
   const d = format.decision;
   const example = PATTERN_EXAMPLE[d.pattern] ? `${PATTERN_EXAMPLE[d.pattern]}@${format.domain}` : '';
   const open = prospects.filter(p => OPEN.has(p.status));
-  const stat = (n: number, label: string, color?: string, help?: string) => (
-    <div className="tc-stat" title={help}>
-      <div className="tc-stat-n" style={color ? { color } : undefined}>{n}</div>
-      <div className="tc-stat-l">{label}</div>
-    </div>
-  );
   const label = (c: string) => open.filter(p => p.email && p.emailSource !== 'manual' && p.emailConfidence === c).length;
+  const moved = prospects.filter(p => p.status === 'moved').length;
+  const isSet = d.source === 'set';
+
+  // One sentence on where the format came from — the details sit behind the badge's hover.
+  const why = isSet
+    ? (format.manual?.from === 'test' ? `Confirmed by a test email to ${format.manual.example}`
+      : format.manual?.from === 'example' && format.manual.example ? `Set by you from ${format.manual.example}` : 'Set by you')
+      + (d.catchAllRisk ? ' · this company may accept every address, so it stays Medium until someone replies' : '')
+    : d.source === 'default' ? 'Not proven yet — your most common format'
+    : `From ${SOURCE_LABEL[d.source] || d.source}${d.runnerUp ? ` · a few use ${d.runnerUp}` : ''}`
+      + (d.nameOnly ? ' · first-name addresses are often only founders’, so it stays low until someone replies' : '');
+
+  const count = (n: number, text: string, color?: string, help?: string) => (
+    <span className="tc-count" title={help}>
+      {color && <span className="tc-dot" style={{ background: color }} />}<strong>{n}</strong> {text}
+    </span>
+  );
 
   return (
     <div className="s-card" style={{ marginBottom: 16 }}>
       <div className="s-body">
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-          <div style={{ display: 'flex', gap: 12, minWidth: 0 }}>
-            <div className="tc-report-ico" style={{ width: 40, height: 40, color: 'var(--accent)' }}><i className="ti ti-building" /></div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 600, fontSize: 16 }}>
-                {format.companyName || format.domain}
-                <Link to={`/companies/${encodeURIComponent(`d:${format.domain}`)}`} className="btn btn-xs" style={{ marginLeft: 8, verticalAlign: 'middle' }}
-                  title="Everything about this company: contacts from every source, Naukri jobs, LinkedIn posts">
-                  <i className="ti ti-building" /> Company page
-                </Link>
-              </div>
-              <div style={{ fontSize: 12, color: 'var(--text2)' }}>
-                {format.domain}
-                {format.githubOrg && <> · <a href={`https://github.com/${format.githubOrg}`} target="_blank" rel="noreferrer">github.com/{format.githubOrg}</a></>}
-                {format.contactsAtDomain > 0 && <> · {format.contactsAtDomain} of your contacts work here</>}
-              </div>
+        <div className="tc-head">
+          <div className="tc-report-ico" style={{ width: 40, height: 40, color: 'var(--accent)' }}><i className="ti ti-building" /></div>
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{ fontWeight: 600, fontSize: 16 }}>{format.companyName || format.domain}</div>
+            <div className="tc-meta">
+              <span>{format.domain}</span>
+              <Link to={`/companies/${encodeURIComponent(`d:${format.domain}`)}`} title="Everything about this company: contacts from every source, Naukri jobs, LinkedIn posts">Company page</Link>
+              {format.githubOrg && <a href={`https://github.com/${format.githubOrg}`} target="_blank" rel="noreferrer">github.com/{format.githubOrg}</a>}
+              {format.contactsAtDomain > 0 && <span>{format.contactsAtDomain} of your contacts work here</span>}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className="btn btn-sm" type="button" disabled={busy} onClick={onRecheck}
-              title="Re-label everyone from what's known now — including replies and bounces since the search. No outside lookups.">
-              <i className="ti ti-refresh" /> Re-check labels
-            </button>
-            <button className="btn btn-sm" type="button" disabled={busy} onClick={() => onTestFormat()}
-              title="Send one real email to one person in this format — if it doesn't bounce, confirm it for everyone">
-              <i className="ti ti-flask" /> Test format
-            </button>
-            <button className="btn btn-sm" type="button" disabled={busy} onClick={onSetFormat}
-              title="Set the email format yourself — pick it, or paste one real address you found">
-              <i className="ti ti-at" /> Set format
-            </button>
-            <button className="btn btn-sm" type="button" disabled={busy} onClick={onSetOrg} title="Set the company's GitHub organisation by hand">
-              <i className="ti ti-brand-github" /> GitHub
-            </button>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="btn btn-sm btn-primary" type="button" disabled={busy} onClick={onSearchAgain}
               title="Search again, re-reading GitHub and the website too">
               <i className="ti ti-search" /> Search again
             </button>
+            <MoreMenu disabled={busy} items={[
+              { icon: 'ti ti-refresh', label: 'Re-check labels', hint: 'From your latest replies and bounces', onClick: onRecheck },
+              { icon: 'ti ti-brand-github', label: 'Set GitHub organisation', onClick: onSetOrg },
+            ]} />
           </div>
         </div>
 
-        <div className="info-box" style={{ marginTop: 14, marginBottom: 0, alignItems: 'center' }}>
-          <i className="ti ti-mail" style={{ fontSize: 15, flexShrink: 0 }} />
-          <div style={{ flex: 1 }}>
-            {d.source === 'set' ? (
-              <>
-                {format.manual?.from === 'test'
-                  ? <>Email format <strong>{d.pattern}</strong>{example && <> (like {example})</>} — confirmed by a test email to {format.manual.example}.</>
-                  : <>You set their email format: <strong>{d.pattern}</strong>{example && <> (like {example})</>}
-                    {format.manual?.from === 'example' && format.manual.example && <>, from {format.manual.example}</>}.</>}
-                {d.catchAllRisk && <> Some companies accept every address, so “no bounce” can’t fully prove it here — labelled Medium until someone replies.</>}{' '}
-                <button type="button" className="btn btn-xs" disabled={busy} onClick={() => onUseFormat(null)}
-                  title={d.auto ? `Go back to the automatic format (${d.auto.pattern})` : 'Go back to the automatic format'}>
-                  Clear
-                </button>
-              </>
-            ) : d.source === 'default' ? (
-              <>
-                Email format not proven yet — guessing <strong>{d.pattern}</strong>{example && <> (like {example})</>}, the format most of your companies use.{' '}
-                <button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={() => onTestFormat()}>Test it with one email</button>{' '}
-                <button type="button" className="btn btn-xs" disabled={busy} onClick={onSetFormat}>Know it? Set it</button>
-              </>
-            ) : (
-              <>
-                Their email format is <strong>{d.pattern}</strong>{example && <> (like {example})</>}, from {SOURCE_LABEL[d.source] || d.source}{d.runnerUp && <> · a few use <strong>{d.runnerUp}</strong></>}.
-                {d.nameOnly && <> First-name addresses often belong only to founders and early staff, so this stays {d.confidence === 'low' ? 'Low' : 'Medium'} until someone replies from one.</>}
-                {d.confidence !== 'high' && <>{' '}
-                  <button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={() => onTestFormat()}>Test it with one email</button>{' '}
-                  <button type="button" className="btn btn-xs" disabled={busy} onClick={onSetFormat}>Know it? Set it</button></>}
-              </>
-            )}
-          </div>
-          <ConfidenceBadge confidence={d.confidence} pattern={d.pattern} source={d.source} />
+        <div className="tc-counts">
+          {count(open.length, 'to review')}
+          {count(label('high'), 'high', 'var(--green)', 'Proven format, or their own address')}
+          {count(label('medium'), 'medium', 'var(--amber)', 'One sign the format is right')}
+          {count(label('low'), 'low', 'var(--red)', 'A best guess with no proof — check first')}
+          {count(moved, 'in outreach', 'var(--blue)')}
         </div>
-
-        {d.source === 'set' && d.conflict && d.conflictWith && (
-          <div className="info-box danger" style={{ marginTop: 10, marginBottom: 0, alignItems: 'center' }}>
-            <i className="ti ti-alert-triangle" style={{ fontSize: 15, flexShrink: 0 }} />
-            <div style={{ flex: 1 }}>
-              {d.conflict === 'bounces'
-                ? <>Your emails in <strong>{d.pattern}</strong> have bounced as unknown addresses.</>
-                : <>Someone at {format.domain} replied from a <strong>{d.conflictWith}</strong> address, and nobody from {d.pattern} yet.</>}
-              {' '}Your own sends point to <strong>{d.conflictWith}</strong>.
-            </div>
-            <button type="button" className="btn btn-xs" disabled={busy} onClick={() => onUseFormat(d.conflictWith)}>Use {d.conflictWith} instead</button>
-          </div>
-        )}
 
         {format.hasMx === false && (
-          <div className="info-box danger" style={{ marginTop: 10, marginBottom: 0 }}>
+          <div className="info-box danger" style={{ marginTop: 12, marginBottom: 0 }}>
             <i className="ti ti-alert-triangle" style={{ fontSize: 15, flexShrink: 0 }} />
             <div>{format.domain} has no mail server, so nobody there can be emailed. Check the company.</div>
           </div>
         )}
 
-        <div className="tc-stats">
-          {stat(open.length, 'To review')}
-          {stat(label('high'), 'High confidence', 'var(--green)', 'Proven format, or their own address')}
-          {stat(label('medium'), 'Medium', 'var(--amber)', 'One sign the format is right')}
-          {stat(label('low'), 'Low — check first', 'var(--red)', 'A best guess with no proof')}
-          {stat(prospects.filter(p => p.status === 'moved').length, 'In outreach', 'var(--blue)')}
+        <div className="tc-format">
+          <div className="tc-format-row">
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div className="tc-format-label">Email format</div>
+              <div className="tc-format-main">
+                <strong>{d.pattern}</strong>
+                {example && <span className="tc-format-ex">{example}</span>}
+                <ConfidenceBadge confidence={d.confidence} pattern={d.pattern} source={d.source} />
+              </div>
+              <div className="tc-format-why">{why}</div>
+            </div>
+            <div className="tc-format-actions">
+              {d.confidence !== 'high' && (
+                <button type="button" className="btn btn-sm btn-primary" disabled={busy} onClick={() => onTestFormat()}
+                  title="Send one real email to one person — if it doesn't bounce, confirm the format for everyone">
+                  <i className="ti ti-flask" /> Test with one email
+                </button>
+              )}
+              <button type="button" className="btn btn-sm" disabled={busy} onClick={onSetFormat}
+                title="Pick the format yourself, or paste one real address you found">
+                <i className="ti ti-pencil" /> Set
+              </button>
+              {d.confidence === 'high' && (
+                <button type="button" className="btn btn-sm" disabled={busy} onClick={() => onTestFormat()} title="Send one test email anyway">
+                  <i className="ti ti-flask" /> Test
+                </button>
+              )}
+              {isSet && (
+                <button type="button" className="btn btn-sm" disabled={busy} onClick={() => onUseFormat(null)}
+                  title={d.auto ? `Go back to the automatic format (${d.auto.pattern})` : 'Go back to the automatic format'}>
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+
+          {isSet && d.conflict && d.conflictWith && (
+            <div className="info-box danger" style={{ marginTop: 10, marginBottom: 0, alignItems: 'center' }}>
+              <i className="ti ti-alert-triangle" style={{ fontSize: 15, flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                {d.conflict === 'bounces'
+                  ? <>Your emails in <strong>{d.pattern}</strong> have bounced as unknown addresses.</>
+                  : <>Someone here replied from a <strong>{d.conflictWith}</strong> address, and nobody from {d.pattern} yet.</>}
+              </div>
+              <button type="button" className="btn btn-xs" disabled={busy} onClick={() => onUseFormat(d.conflictWith)}>Use {d.conflictWith}</button>
+            </div>
+          )}
+
+          <FormatTests tests={format.tests || []} lastMailboxCheckAt={format.lastMailboxCheckAt}
+            confirmedPattern={format.manual?.from === 'test' ? format.manual.pattern : null}
+            busy={busy} checking={checking} onCheckMailbox={onCheckMailbox} onConfirm={onConfirmTest} onRetry={onTestFormat} />
         </div>
 
-        <FormatTests tests={format.tests || []} lastMailboxCheckAt={format.lastMailboxCheckAt}
-          confirmedPattern={format.manual?.from === 'test' ? format.manual.pattern : null}
-          busy={busy} checking={checking} onCheckMailbox={onCheckMailbox} onConfirm={onConfirmTest} onRetry={onTestFormat} />
-
         {format.genericEmails.length > 0 && (
-          <div style={{ marginTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: 'var(--text2)' }}>Shared inboxes on their website:</span>
+          <div className="tc-generic">
+            <span>Shared inboxes on their website:</span>
             {format.genericEmails.map(e => (
-              <button key={e} className="btn btn-xs" type="button" onClick={() => onAddGeneric(e)} title="Add this address to the list">
+              <button key={e} className="tc-chip" type="button" onClick={() => onAddGeneric(e)} title="Add this address to the list">
                 <i className="ti ti-plus" /> {e}
               </button>
             ))}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** A "⋯" button with a small menu of secondary actions. */
+function MoreMenu({ items, disabled }: { items: { icon: string; label: string; hint?: string; onClick: () => void }[]; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', onDown); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  return (
+    <div className="usermenu-wrap" ref={wrap}>
+      <button type="button" className="btn btn-sm" aria-label="More actions" aria-haspopup="menu" aria-expanded={open}
+        disabled={disabled} onClick={() => setOpen(o => !o)}>
+        <i className="ti ti-dots" />
+      </button>
+      {open && (
+        <div className="usermenu-panel" role="menu">
+          {items.map(it => (
+            <button key={it.label} type="button" role="menuitem" onClick={() => { setOpen(false); it.onClick(); }}>
+              <i className={it.icon} />
+              <span>{it.label}{it.hint && <span style={{ display: 'block', fontSize: 11, color: 'var(--text3)' }}>{it.hint}</span>}</span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

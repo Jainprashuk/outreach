@@ -2,6 +2,7 @@
 // still sending, waiting for bounces, no bounce (confirm it), replied, or bounced (try
 // another format or person). Status comes from the contact, worked out on the server.
 // Nothing polls: Refresh scans the mailbox and reloads these results.
+import { useState } from 'react';
 import type { FormatTest } from '../../lib/api';
 import { ago } from './SearchReport';
 
@@ -28,8 +29,10 @@ export default function FormatTests({ tests, lastMailboxCheckAt, confirmedPatter
   onConfirm: (t: FormatTest) => void;
   onRetry: (pre: { prospectId?: string; pattern?: string }) => void;
 }) {
+  const [all, setAll] = useState(false);
   if (!tests.length) return null;
   const pending = tests.some(t => t.status === 'waiting' || t.status === 'sending');
+  const shown = all ? tests : tests.slice(0, 1);
 
   const text = (t: FormatTest): string => {
     switch (t.status) {
@@ -50,31 +53,27 @@ export default function FormatTests({ tests, lastMailboxCheckAt, confirmedPatter
   };
 
   return (
-    <div style={{ marginTop: 14 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-        <div style={{ fontWeight: 600, fontSize: 13 }}>
-          <i className="ti ti-flask" /> Format tests
-          <span style={{ fontWeight: 400, color: 'var(--text3)', marginLeft: 8, fontSize: 12 }}>
-            mailbox checked {lastMailboxCheckAt ? ago(lastMailboxCheckAt) : 'never'}
-          </span>
-        </div>
+    <div className="tc-tests">
+      <div className="tc-tests-head">
+        <span>Test emails <span style={{ color: 'var(--text3)' }}>· mailbox checked {lastMailboxCheckAt ? ago(lastMailboxCheckAt) : 'never'}</span></span>
         <button type="button" className={`btn btn-xs${pending ? ' btn-primary' : ''}`} disabled={checking} onClick={onCheckMailbox}
           title="Scan your Gmail for bounces and replies, then reload these results (takes up to a minute)">
           {checking ? <><i className="ti ti-loader-2 tc-spin" /> Refreshing…</> : <><i className="ti ti-refresh" /> Refresh</>}
         </button>
       </div>
-      <ol className="tc-steps" style={{ margin: 0 }}>
-        {tests.map(t => {
+      <ol className="tc-test-list">
+        {shown.map(t => {
           const look = LOOK[t.status];
           const confirmed = !!t.confirmedAt && confirmedPattern === t.pattern;
           return (
-            <li key={t.id} className="tc-step">
+            <li key={t.id} className="tc-test">
               <i className={look.icon} style={{ color: look.color }} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div className="tc-step-title">
-                  {t.email} <span style={{ fontWeight: 400, color: 'var(--text3)' }}>· {t.pattern || 'own address'} · {look.label}{confirmed ? ' · confirmed' : ''}</span>
+                  <span style={{ color: look.color }}>{look.label}{confirmed ? ' · confirmed' : ''}</span>
+                  <span style={{ fontWeight: 400, color: 'var(--text2)' }}> · {t.email}</span>
                 </div>
-                <div className="tc-step-text">{t.name} · {text(t)}</div>
+                <div className="tc-step-text">{text(t)}</div>
               </div>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
                 {(t.status === 'no-bounce' || t.status === 'replied') && !confirmed && t.pattern && (
@@ -104,6 +103,11 @@ export default function FormatTests({ tests, lastMailboxCheckAt, confirmedPatter
           );
         })}
       </ol>
+      {tests.length > 1 && (
+        <button type="button" className="tc-link" onClick={() => setAll(v => !v)}>
+          {all ? 'Show only the latest' : `Show ${tests.length - 1} earlier test${tests.length === 2 ? '' : 's'}`}
+        </button>
+      )}
     </div>
   );
 }

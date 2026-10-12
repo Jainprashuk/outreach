@@ -287,3 +287,29 @@ input[type="checkbox"].row-cb { cursor: pointer; width: 15px; height: 15px; }
   padding: 9px 11px; border-radius: 8px; background: var(--text); color: var(--bg);
   font-size: 12px; line-height: 1.45; box-shadow: 0 6px 20px rgba(0,0,0,.2);
 }
+
+/* Discover company card: header, compact counts, one "Email format" block. */
+.tc-head { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.tc-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--text2); margin-top: 2px; }
+.tc-counts { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 12px; font-size: 12.5px; color: var(--text2); }
+.tc-count { display: inline-flex; align-items: center; gap: 5px; }
+.tc-count strong { color: var(--text); font-weight: 600; }
+.tc-dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+.tc-format { margin-top: 14px; padding: 14px 16px; border: 0.5px solid var(--border); border-radius: var(--radius-lg); background: var(--bg2); }
+.tc-format-row { display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.tc-format-label { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--text3); margin-bottom: 4px; }
+.tc-format-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 16px; }
+.tc-format-ex { font-size: 12.5px; color: var(--text2); }
+.tc-format-why { font-size: 12px; color: var(--text2); margin-top: 4px; line-height: 1.5; }
+.tc-format-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.tc-tests { margin-top: 12px; padding-top: 10px; border-top: 0.5px solid var(--border); }
+.tc-tests-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+.tc-test-list { list-style: none; margin: 4px 0 0; padding: 0; }
+.tc-test { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 0.5px solid var(--border); }
+.tc-test:last-child { border-bottom: 0; }
+.tc-test > i { font-size: 16px; margin-top: 1px; flex-shrink: 0; }
+.tc-link { background: none; border: 0; padding: 4px 0 0; font: inherit; font-size: 12px; color: var(--accent); cursor: pointer; }
+.tc-generic { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 12px; font-size: 12px; color: var(--text3); }
+.tc-chip { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; border: 0.5px solid var(--border); background: none; color: var(--text2); font: inherit; font-size: 12px; cursor: pointer; }
+.tc-chip:hover { color: var(--text); border-color: var(--border-md, var(--border)); }
+@media (max-width: 640px) { .tc-format-actions { width: 100%; } }
