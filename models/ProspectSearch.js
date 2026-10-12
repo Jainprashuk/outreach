@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 // One "Find people" run for one company. The background function writes its
 // progress here step by step, and the Discover tab polls it.
-const STEP_KEYS = ['company', 'people-search', 'github', 'website', 'pattern', 'emails'];
+const STEP_KEYS = ['company', 'people-search', 'github', 'website', 'web-format', 'pattern', 'emails'];
 
 const prospectSearchSchema = new mongoose.Schema({
   userId:      { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },

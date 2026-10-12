@@ -28,6 +28,11 @@ export const SOURCE_LABEL: Record<string, string> = {
   github: 'GitHub commits',
   website: 'the company website',
   hunter: 'Hunter',
+  gravatar: 'Gravatar (the address exists)',
+  web: 'real addresses found on the web',
+  directory: 'email-format sites (RocketReach and similar)',
+  set: 'set by you',
+  test: 'a test email',
   default: 'your most common format',
   manual: 'typed by you',
 };
@@ -48,6 +53,7 @@ export const STEP_LABEL: Record<string, string> = {
   'people-search': 'Searching the web for people',
   github: 'Checking GitHub',
   website: 'Reading the company website',
+  'web-format': 'Checking Gravatar and the web',
   pattern: 'Working out the email format',
   emails: 'Guessing each address',
 };

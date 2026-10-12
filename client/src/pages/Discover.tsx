@@ -10,16 +10,19 @@ import { SkeletonRows } from '../components/Skeleton';
 import SearchReport, { ago } from '../components/prospects/SearchReport';
 import HiringView from '../components/prospects/HiringView';
 import SuggestedCompanies from '../components/prospects/SuggestedCompanies';
+import SetFormatModal from '../components/prospects/SetFormatModal';
+import TestFormatModal from '../components/prospects/TestFormatModal';
+import FormatTests from '../components/prospects/FormatTests';
 import RolesInput, { MAX_ROLES, parseRoles } from '../components/prospects/RolesInput';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useVisibleInterval } from '../hooks/useVisibleInterval';
 import {
   addGenericProspectApi, cancelSearchApi, clearHistoryApi, companyFormatApi, prospectHistoryApi, removeSearchApi, discardProspectsApi, discoveryConfigApi, loadProspectsApi,
-  moveProspectsApi, prospectCompaniesApi, prospectSearchApi, recheckCompanyApi, restoreProspectsApi,
+  moveProspectsApi, prospectCompaniesApi, prospectSearchApi, recheckCompanyApi, restoreProspectsApi, setCompanyFormatApi, confirmFormatTestApi,
   setGithubOrgApi, startProspectSearchApi, lookupCompanyApi, updateProspectApi,
   type CompanyCandidate, type CompanyFormat, type HiringCompany, type SuggestedCompany, type DiscoveryConfigView, type EmailConfidence, type MoveProspectsResult,
-  type Prospect, type ProspectCompany, type ProspectSearch,
+  type Prospect, type ProspectCompany, type ProspectSearch, type FormatTest,
 } from '../lib/api';
 import { CONFIDENCE_LABEL, PATTERN_EXAMPLE, SOURCE_LABEL, autoPick } from '../lib/prospects';
 
@@ -176,13 +179,21 @@ function SearchCard({ config, busy, onSearch, prefill, onDefaultsSaved }: {
 
 // ── The company: its email format and what's been found there ────────────────
 
-function CompanyCard({ format, prospects, onRecheck, onSearchAgain, onAddGeneric, onSetOrg, busy }: {
+function CompanyCard({ format, prospects, onRecheck, onSearchAgain, onAddGeneric, onSetOrg, onSetFormat, onUseFormat, onTestFormat, onConfirmTest, onCheckMailbox, checking, busy }: {
   format: CompanyFormat;
   prospects: Prospect[];
   onRecheck: () => void;
   onSearchAgain: () => void;
   onAddGeneric: (email: string) => void;
   onSetOrg: () => void;
+  onSetFormat: () => void;
+  /** Save a format straight away; null goes back to the automatic one. */
+  onUseFormat: (pattern: string | null) => void;
+  /** Open Test format, optionally pre-filled (Try another format / person). */
+  onTestFormat: (pre?: { prospectId?: string; pattern?: string }) => void;
+  onConfirmTest: (t: FormatTest) => void;
+  onCheckMailbox: () => void;
+  checking: boolean;
   busy: boolean;
 }) {
   const d = format.decision;
@@ -222,6 +233,14 @@ function CompanyCard({ format, prospects, onRecheck, onSearchAgain, onAddGeneric
               title="Re-label everyone from what's known now — including replies and bounces since the search. No outside lookups.">
               <i className="ti ti-refresh" /> Re-check labels
             </button>
+            <button className="btn btn-sm" type="button" disabled={busy} onClick={() => onTestFormat()}
+              title="Send one real email to one person in this format — if it doesn't bounce, confirm it for everyone">
+              <i className="ti ti-flask" /> Test format
+            </button>
+            <button className="btn btn-sm" type="button" disabled={busy} onClick={onSetFormat}
+              title="Set the email format yourself — pick it, or paste one real address you found">
+              <i className="ti ti-at" /> Set format
+            </button>
             <button className="btn btn-sm" type="button" disabled={busy} onClick={onSetOrg} title="Set the company's GitHub organisation by hand">
               <i className="ti ti-brand-github" /> GitHub
             </button>
@@ -235,14 +254,49 @@ function CompanyCard({ format, prospects, onRecheck, onSearchAgain, onAddGeneric
         <div className="info-box" style={{ marginTop: 14, marginBottom: 0, alignItems: 'center' }}>
           <i className="ti ti-mail" style={{ fontSize: 15, flexShrink: 0 }} />
           <div style={{ flex: 1 }}>
-            {d.source === 'default' ? (
-              <>Email format not proven yet — guessing <strong>{d.pattern}</strong>{example && <> (like {example})</>}, the format most of your companies use.</>
+            {d.source === 'set' ? (
+              <>
+                {format.manual?.from === 'test'
+                  ? <>Email format <strong>{d.pattern}</strong>{example && <> (like {example})</>} — confirmed by a test email to {format.manual.example}.</>
+                  : <>You set their email format: <strong>{d.pattern}</strong>{example && <> (like {example})</>}
+                    {format.manual?.from === 'example' && format.manual.example && <>, from {format.manual.example}</>}.</>}
+                {d.catchAllRisk && <> Some companies accept every address, so “no bounce” can’t fully prove it here — labelled Medium until someone replies.</>}{' '}
+                <button type="button" className="btn btn-xs" disabled={busy} onClick={() => onUseFormat(null)}
+                  title={d.auto ? `Go back to the automatic format (${d.auto.pattern})` : 'Go back to the automatic format'}>
+                  Clear
+                </button>
+              </>
+            ) : d.source === 'default' ? (
+              <>
+                Email format not proven yet — guessing <strong>{d.pattern}</strong>{example && <> (like {example})</>}, the format most of your companies use.{' '}
+                <button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={() => onTestFormat()}>Test it with one email</button>{' '}
+                <button type="button" className="btn btn-xs" disabled={busy} onClick={onSetFormat}>Know it? Set it</button>
+              </>
             ) : (
-              <>Their email format is <strong>{d.pattern}</strong>{example && <> (like {example})</>}, from {SOURCE_LABEL[d.source] || d.source}{d.runnerUp && <> · a few use <strong>{d.runnerUp}</strong></>}.</>
+              <>
+                Their email format is <strong>{d.pattern}</strong>{example && <> (like {example})</>}, from {SOURCE_LABEL[d.source] || d.source}{d.runnerUp && <> · a few use <strong>{d.runnerUp}</strong></>}.
+                {d.nameOnly && <> First-name addresses often belong only to founders and early staff, so this stays {d.confidence === 'low' ? 'Low' : 'Medium'} until someone replies from one.</>}
+                {d.confidence !== 'high' && <>{' '}
+                  <button type="button" className="btn btn-xs btn-primary" disabled={busy} onClick={() => onTestFormat()}>Test it with one email</button>{' '}
+                  <button type="button" className="btn btn-xs" disabled={busy} onClick={onSetFormat}>Know it? Set it</button></>}
+              </>
             )}
           </div>
           <ConfidenceBadge confidence={d.confidence} pattern={d.pattern} source={d.source} />
         </div>
+
+        {d.source === 'set' && d.conflict && d.conflictWith && (
+          <div className="info-box danger" style={{ marginTop: 10, marginBottom: 0, alignItems: 'center' }}>
+            <i className="ti ti-alert-triangle" style={{ fontSize: 15, flexShrink: 0 }} />
+            <div style={{ flex: 1 }}>
+              {d.conflict === 'bounces'
+                ? <>Your emails in <strong>{d.pattern}</strong> have bounced as unknown addresses.</>
+                : <>Someone at {format.domain} replied from a <strong>{d.conflictWith}</strong> address, and nobody from {d.pattern} yet.</>}
+              {' '}Your own sends point to <strong>{d.conflictWith}</strong>.
+            </div>
+            <button type="button" className="btn btn-xs" disabled={busy} onClick={() => onUseFormat(d.conflictWith)}>Use {d.conflictWith} instead</button>
+          </div>
+        )}
 
         {format.hasMx === false && (
           <div className="info-box danger" style={{ marginTop: 10, marginBottom: 0 }}>
@@ -258,6 +312,10 @@ function CompanyCard({ format, prospects, onRecheck, onSearchAgain, onAddGeneric
           {stat(label('low'), 'Low — check first', 'var(--red)', 'A best guess with no proof')}
           {stat(prospects.filter(p => p.status === 'moved').length, 'In outreach', 'var(--blue)')}
         </div>
+
+        <FormatTests tests={format.tests || []} lastMailboxCheckAt={format.lastMailboxCheckAt}
+          confirmedPattern={format.manual?.from === 'test' ? format.manual.pattern : null}
+          busy={busy} checking={checking} onCheckMailbox={onCheckMailbox} onConfirm={onConfirmTest} onRetry={onTestFormat} />
 
         {format.genericEmails.length > 0 && (
           <div style={{ marginTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -500,6 +558,9 @@ export default function Discover() {
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
   const [working, setWorking] = useState(false);
+  const [formatOpen, setFormatOpen] = useState(false);
+  const [testOpen, setTestOpen] = useState<null | { prospectId?: string; pattern?: string }>(null);
+  const [checking, setChecking] = useState(false);
 
   const [tab, setTab] = useState<Tab>('open');
   const [confidence, setConfidence] = useState('');
@@ -727,6 +788,34 @@ export default function Discover() {
     } catch (err: any) { toast(err.message, 'error'); }
   };
 
+  const useFormat = async (pattern: string | null) => {
+    setWorking(true);
+    try {
+      const r = await setCompanyFormatApi(domain, { pattern });
+      toast(pattern ? `Using ${pattern} — ${r.withEmail} of ${r.people} re-labelled` : 'Back to the automatic format', 'success');
+      await Promise.all([loadProspects(), loadFormat()]);
+    } catch (err: any) { toast(err.message, 'error'); } finally { setWorking(false); }
+  };
+
+  const checkMailboxNow = async () => {
+    setChecking(true);
+    try {
+      const r = await app.checkMailbox();
+      const bounced = (r && r.bounced && r.bounced.length) || 0;
+      toast(bounced ? `Mailbox checked — ${bounced} new bounce${bounced === 1 ? '' : 's'}` : 'Mailbox checked — no new bounces', bounced ? 'info' : 'success');
+      await Promise.all([loadFormat(), loadProspects()]);
+    } catch (err: any) { toast(err.message, 'error'); } finally { setChecking(false); }
+  };
+  const confirmTest = async (t: FormatTest) => {
+    if (!window.confirm(`Use ${t.pattern} for everyone at ${domain}? Everyone not yet in outreach is re-labelled.`)) return;
+    setWorking(true);
+    try {
+      const r = await confirmFormatTestApi(t.id);
+      toast(`${r.pattern} confirmed — ${r.withEmail} of ${r.people} re-labelled (${r.confidence})`, 'success');
+      await Promise.all([loadProspects(), loadFormat()]);
+    } catch (err: any) { toast(err.message, 'error'); } finally { setWorking(false); }
+  };
+
   const current = companies.find(c => c.domain === domain);
   const busy = loading && prospects.length === 0;
 
@@ -813,7 +902,27 @@ export default function Discover() {
       {!allMode && domain && format && (
         <CompanyCard format={format} prospects={prospects} busy={working || running} onRecheck={recheck}
           onSearchAgain={() => startSearch(domain, search?.roles || [], current?.companyName || '', true)}
-          onAddGeneric={addGeneric} onSetOrg={setOrg} />
+          onAddGeneric={addGeneric} onSetOrg={setOrg} onSetFormat={() => setFormatOpen(true)} onUseFormat={useFormat}
+          onTestFormat={pre => setTestOpen(pre || {})} onConfirmTest={confirmTest} onCheckMailbox={checkMailboxNow} checking={checking} />
+      )}
+
+      {!allMode && domain && format && testOpen && (
+        <TestFormatModal format={format} prospects={prospects} initial={testOpen} onClose={() => setTestOpen(null)}
+          onSent={async r => {
+            setTestOpen(null);
+            if (r.error) toast(r.error, 'error');
+            else toast('Test email queued — its result shows on the company card', 'success');
+            await Promise.all([loadProspects(), loadFormat()]);
+          }} />
+      )}
+
+      {!allMode && domain && format && formatOpen && (
+        <SetFormatModal format={format} onClose={() => setFormatOpen(false)}
+          onSaved={async r => {
+            setFormatOpen(false);
+            toast(`Format set to ${r.pattern} — ${r.withEmail} of ${r.people} re-labelled`, 'success');
+            await Promise.all([loadProspects(), loadFormat()]);
+          }} />
       )}
 
       {!allMode && search && search.domain === domain && (

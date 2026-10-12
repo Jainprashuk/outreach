@@ -14,7 +14,7 @@ const companyPatternSchema = new mongoose.Schema({
   // them correctly instead of trusting a number computed by the old rules.
   samples: [{
     _id: false,
-    source: { type: String, enum: ['github', 'website'] },
+    source: { type: String, enum: ['github', 'website', 'web', 'gravatar', 'github-author'] },
     name:   { type: String, default: '' },
     email:  { type: String },
   }],
@@ -27,6 +27,25 @@ const companyPatternSchema = new mongoose.Schema({
 
   hunterPattern:  { type: String, default: null },
   hunterAskedAt:  { type: Date, default: null },  // asked once per domain, ever
+
+  // Email-format directory sites (RocketReach …) as read from search snippets, one
+  // per site. See lib/discovery/webFormat.js.
+  directory: [{
+    _id: false,
+    site:    { type: String },
+    pattern: { type: String },
+    share:   { type: Number, default: null },
+  }],
+  webAskedAt:        { type: Date, default: null }, // the two web searches (2 credits)
+  gravatarCheckedAt: { type: Date, default: null }, // Gravatar + GitHub author lookups (free)
+
+  // A format you set yourself. It wins over everything else for this company until
+  // you clear it. 'example' = worked out from a real address you pasted; 'test' = a
+  // Discover test email to it didn't bounce (models/FormatTest.js).
+  manualPattern: { type: String, default: null },
+  manualFrom:    { type: String, enum: ['list', 'example', 'test', null], default: null },
+  manualExample: { type: String, default: null },
+  manualAt:      { type: Date, default: null },
 
   hasMx:       { type: Boolean, default: null },
   mxCheckedAt: { type: Date, default: null },
