@@ -163,3 +163,12 @@
   .pagination-bar .page-info { min-width: 0; font-size: 12px; }
   #send-job-widget { width: auto; left: 12px; right: 12px; }
 }
+
+/* Desktop: the action buttons stay on one line and the title block gives way
+   (its subtitle wraps). Wrapping the buttons left "Import leads" stranded on a
+   second row once the bell and user menu shared the bar. Narrower screens keep
+   wrapping (there the title would be squeezed instead). */
+@media (min-width: 1280px) {
+  .topbar-left { flex: 1 1 auto; min-width: 260px; }
+  .topbar-actions { flex-wrap: nowrap; flex-shrink: 0; }
+}

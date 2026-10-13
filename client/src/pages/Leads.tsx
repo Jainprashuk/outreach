@@ -329,10 +329,12 @@ export default function Leads() {
       subtitle={`${stats.total} staged · ${stats.fresh} new · ${stats.moved} in outreach · ${stats.emailed} emailed · ${stats.replied} replied${stats.bounced ? ` · ${stats.bounced} bounced` : ''}`}
       actions={
         <>
-          <Link to="/contacts" className="btn btn-sm"><i className="ti ti-users" /> Contacts</Link>
+          {/* Icon-only: Contacts is also in the sidebar, and the Guide is occasional.
+              Keeps the row to one line beside the bell and user menu. */}
+          <Link to="/contacts" className="btn btn-sm" title="Contacts" aria-label="Contacts"><i className="ti ti-users" /></Link>
           <button className="btn btn-sm" type="button" onClick={() => setGuide('how')}
-            title="How lead scraping works and how to set it up">
-            <i className="ti ti-book" /> Guide
+            title="Guide — how lead scraping works and how to set it up" aria-label="Guide">
+            <i className="ti ti-book" />
           </button>
           <button className="btn btn-sm" type="button"
             onClick={() => { setShowScrape(v => !v); setShowImport(false); setShowSources(false); }}>
