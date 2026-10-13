@@ -21,6 +21,12 @@ const leadSchema = new mongoose.Schema({
   // to one would misattribute which search actually works.
   queries:    { type: [String], default: [] },
 
+  // Only the newer sources (paste / hn / web-post, lib/sources/) fill these. No
+  // defaults on purpose: harvester rows never carry them, and stay byte-identical.
+  location:   { type: String },
+  postedAt:   { type: Date },
+  snippet:    { type: String },   // the post text the email came from, ≤1,500 chars
+
   // Identity used for dedupe, precomputed on insert so the import check is one
   // indexed $in instead of an $or across three fields. `e:<email>` when there is
   // an email, otherwise `a:<author_url>` and finally `n:<author_name>`.

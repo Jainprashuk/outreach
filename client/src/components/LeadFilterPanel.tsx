@@ -144,6 +144,11 @@ export default function LeadFilterPanel({ leads, filters, onChange, onReset, mat
               </select>
             </Group>
 
+            <Group label={`Found by${filters.sources.length ? ` (${filters.sources.length})` : ''}`}>
+              <MultiCheck options={opts.sources} selected={filters.sources}
+                onChange={v => onChange({ sources: v })} empty="No sources recorded" />
+            </Group>
+
             <Group label={`Link type${filters.linkTypes.length ? ` (${filters.linkTypes.length})` : ''}`} wide>
               <MultiCheck options={opts.linkTypes} selected={filters.linkTypes}
                 onChange={v => onChange({ linkTypes: v as LinkType[] })}
@@ -207,11 +212,6 @@ export default function LeadFilterPanel({ leads, filters, onChange, onReset, mat
             <Group label={`Email domain${filters.domains.length ? ` (${filters.domains.length})` : ''}`} wide>
               <MultiCheck options={opts.domains} selected={filters.domains} search
                 onChange={v => onChange({ domains: v })} empty="No email addresses yet" />
-            </Group>
-
-            <Group label={`Source${filters.sources.length ? ` (${filters.sources.length})` : ''}`}>
-              <MultiCheck options={opts.sources} selected={filters.sources}
-                onChange={v => onChange({ sources: v })} empty="No sources recorded" />
             </Group>
 
             <Group label={`Harvest run${filters.runs.length ? ` (${filters.runs.length})` : ''}`}>

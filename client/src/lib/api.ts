@@ -385,6 +385,11 @@ export interface SourceLead {
   post_url: string | null;
   source: string;
   query?: string;         // the search that surfaced this lead (added Sep 2026)
+  // Only the Leads sources (paste / hn / web-post) send these.
+  role?: string;
+  location?: string;
+  posted_at?: string | null;
+  snippet?: string;
 }
 
 /** The whole uploaded file. */
@@ -419,6 +424,10 @@ export interface Lead {
   contactId: string | null;
   promotedAt: string | null;
   batchUpdatedAt: string | null;   // the harvest run's own updated_at
+  // Only leads from the Leads sources (paste / hn / web-post) carry these.
+  location?: string;
+  postedAt?: string;
+  snippet?: string;
   dedupeKey?: string;              // internal: how re-imports match this row
   createdAt: string;
   updatedAt: string;
@@ -470,6 +479,68 @@ export const loadLeadOutcomesApi = () =>
 
 export const importLeadsApi = (payload: LeadFile | SourceLead[]) =>
   apiFetch<LeadImportResult>('/api/leads/import', { method: 'POST', body: JSON.stringify(payload) });
+
+// ── Leads sources: Paste text, HN "Who is hiring?", hiring posts ────────────
+
+export interface SourcesConfig {
+  roles: string[];
+  locations: string[];
+  maxYears: number | null;
+  webOn: boolean;
+  webPerDay: number;
+  hnOn: boolean;
+}
+
+export interface SourcesConfigView {
+  config: SourcesConfig;
+  hasSearchKey: boolean;
+  tavily: { used: number; cap: number };
+  maxPerDay: number;
+}
+
+export interface SourceRun {
+  id: string;
+  source: 'web' | 'hn';
+  trigger: 'cron' | 'manual';
+  status: 'running' | 'done' | 'failed';
+  startedAt: string;
+  finishedAt: string | null;
+  label: string;
+  queries: string[];
+  credits: number;
+  read: number;
+  withEmail: number;
+  matched: number;
+  created: number;
+  duplicates: number;
+  rejected: number;
+  error: string | null;
+}
+
+/** One preview row from Paste text: a lead in the harvester shape, plus why it scored what it did. */
+export interface PasteLead extends SourceLead {
+  fit_reasons: string[];
+  existing: string[];      // of `emails`, the ones already on your Leads board
+}
+
+export interface PastePreview {
+  leads: PasteLead[];
+  chunks: number;
+  skippedChunks: number;
+  truncated: boolean;
+  deadDomains: string[];
+  aiError: string | null;
+  maxText: number;
+}
+
+export const sourcesConfigApi = () => apiFetch<SourcesConfigView>('/api/sources/config');
+export const saveSourcesConfigApi = (patch: Partial<SourcesConfig>) =>
+  apiFetch<SourcesConfigView>('/api/sources/config', { method: 'PUT', body: JSON.stringify(patch) });
+export const sourceRunsApi = () => apiFetch<{ web: SourceRun[]; hn: SourceRun[] }>('/api/sources/runs');
+export const runSourceApi = (source: 'web' | 'hn') =>
+  apiFetch<{ ok: true }>('/api/sources/run', { method: 'POST', body: JSON.stringify({ source }) });
+export const pastePreviewApi = (text: string) =>
+  apiFetch<PastePreview>('/api/sources/paste/preview', { method: 'POST', body: JSON.stringify({ text }) });
 
 export const moveLeadsToOutreachApi = (template: string, leads: MoveToOutreachRow[]) =>
   apiFetch<MoveToOutreachResult>('/api/leads/move-to-outreach', {
@@ -2310,7 +2381,7 @@ export const adminSendingTimelineApi = (range: TimelineRange, scope: TimelineSco
   apiFetch<Timeline>(`/api/admin/sending/timeline?range=${range}&scope=${scope}`);
 
 // ── Admin: Gemini logs ───────────────────────────────────────────────────────
-export type AiFeature = 'classify' | 'draft' | 'discover' | 'other';
+export type AiFeature = 'classify' | 'draft' | 'discover' | 'sources' | 'other';
 export type AiOutcome = 'ok' | 'rate-limited' | 'auth' | 'transient' | 'bad-output' | 'aborted';
 export interface AiTokens { input?: number | null; output?: number | null; thinking?: number | null; total?: number | null }
 export interface AiContext { contactEmail?: string | null; contactName?: string | null; contactId?: string | null; company?: string | null }

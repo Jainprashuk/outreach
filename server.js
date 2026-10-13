@@ -567,9 +567,10 @@ const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAft
 const { lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver } = require('./lib/lifecycle/inngest');
 const { prospectsSearch } = require('./lib/prospectSearch');
 const { companiesEnrich, companiesEnrichDaily } = require('./lib/discovery/enrich');
+const { sourcesHn, sourcesHnDaily, sourcesWeb, sourcesWebDaily } = require('./lib/sources/inngest');
 app.use('/api/inngest', serve({
   client: inngest,
-  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch, companiesEnrich, companiesEnrichDaily, reportFailedFunctions],
+  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch, companiesEnrich, companiesEnrichDaily, sourcesHn, sourcesHnDaily, sourcesWeb, sourcesWebDaily, reportFailedFunctions],
 }));
 
 // Sign-in is an emailed one-time code; see routes/auth.js and lib/loginCode.js.
@@ -593,6 +594,8 @@ app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));
 app.use('/api/jobs', requireDb, require('./routes/jobs'));
 app.use('/api/leads', requireDb, require('./routes/leads'));
+// Leads sources beyond the harvester: Paste text, HN "Who is hiring?", hiring posts.
+app.use('/api/sources', requireDb, require('./routes/sources'));
 // Discover tab: people found at a company, with guessed work emails. A
 // separate store from Lead (the LinkedIn posts board) — see models/Prospect.js.
 app.use('/api/prospects', requireDb, require('./routes/prospects'));

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import Avatar from './Avatar';
 import { useApp } from '../context/AppContext';
 import { moveLeadsToOutreachApi, type Lead, type MoveToOutreachResult } from '../lib/api';
-import { deriveCompany, isCompanyDerived } from '../lib/leads';
+import { deriveCompany, isCompanyDerived, profileUrlOf, sourceLabel } from '../lib/leads';
 
 interface Edit { name: string; company: string; role: string; }
 
@@ -130,8 +130,9 @@ export default function MoveToOutreachModal({ leads, onClose, onDone }: {
                       <div style={{ fontSize: 11, color: 'var(--text3)' }}>
                         {isSkipped ? 'Skipped — stays in your leads as “new”' : (
                           <>
-                            fit {l.fitScore}{l.source ? ` · ${l.source}` : ''}
-                            {l.authorUrl ? <> · <a href={l.authorUrl} target="_blank" rel="noopener noreferrer">profile</a></> : null}
+                            fit {l.fitScore}{l.source ? ` · ${sourceLabel(l.source)}` : ''}
+                            {profileUrlOf(l) ? <> · <a href={profileUrlOf(l)!} target="_blank" rel="noopener noreferrer">profile</a></> : null}
+                            {!profileUrlOf(l) && l.postUrl ? <> · <a href={l.postUrl} target="_blank" rel="noopener noreferrer">post</a></> : null}
                           </>
                         )}
                       </div>

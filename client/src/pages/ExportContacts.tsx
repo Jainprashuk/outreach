@@ -17,7 +17,7 @@ import {
   activeChips, applyLeadFilters, countActive, DEFAULT_FILTERS, tabCounts, TAB_LABELS,
   type LeadFilters, type LeadTab,
 } from '../lib/leadFilters';
-import { APPLY_STATUS_LABELS, deriveCompany } from '../lib/leads';
+import { APPLY_STATUS_LABELS, deriveCompany, profileUrlOf } from '../lib/leads';
 import { outcomeOf, stageOf, STAGE_BADGE, STAGE_LABELS } from '../lib/leadOutcome';
 
 const PAGE_SIZE = 25;
@@ -59,7 +59,7 @@ const leadColumns = (outcomes: LeadOutcomeMap): ColumnDef<Lead>[] => [
   { key: 'status', label: 'Lead status', get: l => TAB_LABELS[l.status] || l.status },
   { key: 'apply', label: 'Application', get: l => APPLY_STATUS_LABELS[l.applyStatus || 'not-applied'] },
   { key: 'hiring', label: 'Hiring', get: l => yesNo(l.hiring) },
-  { key: 'profile', label: 'LinkedIn profile', get: l => l.authorUrl || '' },
+  { key: 'profile', label: 'LinkedIn profile', get: l => profileUrlOf(l) || '' },
   { key: 'post', label: 'Post URL', get: l => l.postUrl || '' },
   { key: 'queries', label: 'Search queries', get: l => (l.queries || []).join('; ') },
   { key: 'links', label: 'Links', get: l => (l.links || []).join(' ') },
