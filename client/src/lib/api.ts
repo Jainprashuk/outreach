@@ -1386,6 +1386,44 @@ export const adminUpdateUserApi = (id: string, patch: { status?: string; isAdmin
 export const adminRevokeSessionsApi = (id: string) =>
   apiFetch<{ ok: true; revoked: number }>(`/api/admin/users/${id}/revoke-sessions`, { method: 'POST' });
 
+// ── One account (admin): analytics, numbers only, and actions ───────────────
+/** GET /api/admin/users/:id/analytics — every name/company/text field stripped server-side. */
+export interface AdminUserAnalytics {
+  user: { id: string; email: string; name: string; status: string; isAdmin: boolean; lastActiveAt: string | null; createdAt: string };
+  label: string;
+  report: Omit<ReportStats, 'label' | 'topReplies' | 'waiting' | 'upcomingInterviews'> & {
+    waiting: { count: number };
+    upcomingInterviewCount: number;
+  };
+  discover: Omit<DiscoverAnalytics, 'topRoles' | 'companies'>;
+  pipeline: {
+    contacts: Record<string, number>; approval: Record<string, number>; replies: Record<string, number>;
+    leads: Record<string, number>; interviews: Record<string, number>;
+  };
+  sending: {
+    jobs: Record<string, number>; campaigns: Record<string, number>;
+    pausedByAdmin: { jobs: number; campaigns: number };
+    hasGmail: boolean; lastMailboxCheckAt: string | null;
+  };
+}
+export const adminUserAnalyticsApi = (id: string, q: ReportPeriodQuery, days = 30) =>
+  apiFetch<AdminUserAnalytics>(`/api/admin/users/${id}/analytics?${reportQueryString(q)}&days=${days}`);
+
+export const adminPauseSendingApi = (id: string) =>
+  apiFetch<{ ok: true; jobs: number; campaigns: number }>(`/api/admin/users/${id}/sending/pause`, { method: 'POST' });
+export const adminResumeSendingApi = (id: string) =>
+  apiFetch<{ ok: true; jobs: number; jobsDone: number; jobsNoCredentials: number; campaigns: number; campaignsCompleted: number }>(
+    `/api/admin/users/${id}/sending/resume`, { method: 'POST' });
+
+export type AdminSendNowType = 'weekly-report' | 'welcome' | 'setup-reminder' | 'inactive';
+export const adminSendEmailNowApi = (id: string, type: AdminSendNowType) =>
+  apiFetch<{ ok: boolean; status: string; reason?: string; to?: string; testMode?: boolean }>(
+    `/api/admin/users/${id}/emails/send`, { method: 'POST', body: JSON.stringify({ type }) });
+
+export const adminCheckMailboxApi = (id: string) =>
+  apiFetch<{ ok: boolean; skipped?: 'no_credentials'; scanned?: number; replied?: number; bounced?: number }>(
+    `/api/admin/users/${id}/check-mailbox`, { method: 'POST' });
+
 export const adminOtpHealthApi = () =>
   apiFetch<{ since: string; failures: Array<{ email: string; error: string; at: string }> }>('/api/admin/otp-health');
 

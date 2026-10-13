@@ -651,7 +651,7 @@ router.post('/:id/resume', requireOnboarded, async (req, res) => {
     // leaving it set re-trips on every resume. Resuming is the owner saying the
     // cause is fixed; the next batch becomes lastJobId and is judged afresh.
     const updated = await Campaign.findOneAndUpdate({ _id: campaign._id, userId: req.userId },
-      { $set: { status: 'running', pausedAt: null, lastError: null, lastJobId: null } }, { new: true }).lean();
+      { $set: { status: 'running', pausedAt: null, pausedByAdmin: false, lastError: null, lastJobId: null } }, { new: true }).lean();
 
     // Resuming at 11pm should not dump a day's batch, so this is opt-in.
     let released = null;

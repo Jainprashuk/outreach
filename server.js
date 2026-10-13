@@ -1105,6 +1105,10 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
   return { ok: true, scanned, bounced, replied, lastCheckedAt: new Date(), backfill };
 }
 
+// routes/admin.js runs one account's scan from the user drawer; handed over
+// here because requiring server.js from a router would be circular.
+app.locals.checkMailboxForUser = checkMailboxForUser;
+
 // POST /api/check-mailbox
 // A signed-in person checks their own mailbox. The cron has no session, so it
 // sweeps every account, longest-unchecked first, within a time budget — Vercel

@@ -598,3 +598,27 @@ td.cell-actions > * + * { margin-left: 4px; }
   .notif-panel { position: fixed; top: 64px; left: 12px; right: 12px; width: auto; }
   .usermenu-btn { padding: 3px; }
 }
+
+/* ── Admin: one account's drawer (AdminUserDrawer.tsx) ─────────────────────── */
+.user-drawer-wrap {
+  position: fixed; inset: 0; z-index: 350; display: flex; justify-content: flex-end; /* above the sidebar (300), below modals (400) */
+  background: color-mix(in srgb, #06070b 45%, transparent); backdrop-filter: blur(3px);
+}
+.user-drawer {
+  width: min(460px, 100vw); height: 100%; overflow-y: auto; background: var(--bg);
+  border-left: 1px solid var(--border); box-shadow: var(--shadow-lg); padding: 20px 18px 28px;
+  animation: user-drawer-in .18s ease-out;
+}
+@keyframes user-drawer-in { from { transform: translateX(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.user-drawer h3 { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--text3); margin: 20px 0 8px; }
+.user-drawer .ud-stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.user-drawer .ud-stat { background: var(--bg2); border-radius: var(--radius); padding: 8px 10px; }
+.user-drawer .ud-stat b { display: block; font-size: 17px; font-variant-numeric: tabular-nums; }
+.user-drawer .ud-stat span { font-size: 11px; color: var(--text2); }
+.user-drawer .ud-action { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }
+.user-drawer .ud-action:last-child { border-bottom: 0; }
+.user-drawer .ud-action-text { min-width: 0; font-size: 12.5px; }
+.user-drawer .ud-action-text div:last-child { font-size: 11.5px; color: var(--text3); margin-top: 1px; }
+.tr-clickable { cursor: pointer; }
+.tr-clickable:hover td { background: var(--bg2); }
+@media (prefers-reduced-motion: reduce) { .user-drawer { animation: none; } }

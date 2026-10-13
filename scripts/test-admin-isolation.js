@@ -42,6 +42,32 @@ const call = async (method, path, cookie, body) => {
   return { status: res.status, data };
 };
 
+const DENY = ['passwordHash', 'gmailAppPasswordEnc', 'workerTokenHash', 'shareTokenHash',
+              'tokenHash', 'codeHash', 'codeSalt', 'statusHistory', 'thread', 'items', 'replySnippet',
+              'topReplies', 'upcomingInterviews', 'companies', 'topRoles'];
+
+let SECRETS = [];
+/** The planted strings never appear, no sensitive key names, no hash-shaped values. */
+function expectNoContent(data) {
+  const json = JSON.stringify(data);
+  SECRETS.every(x => !json.includes(x)) ? ok('no planted name or company appears anywhere in the payload') : bad('a planted NAME/COMPANY leaked');
+  const badKeys = [];
+  const hashes = [];
+  (function walk(node, path) {
+    if (node && typeof node === 'object') {
+      for (const [k, v] of Object.entries(node)) {
+        // A count may share a list's name (discover.totals.companies is a number).
+        if (DENY.includes(k) && typeof v !== 'number') badKeys.push(`${path}.${k}`);
+        walk(v, `${path}.${k}`);
+      }
+    } else if (typeof node === 'string' && /^[a-f0-9]{64}$/.test(node)) {
+      hashes.push(path);
+    }
+  })(data, '');
+  badKeys.length === 0 ? ok('no sensitive key names in the payload') : bad(`sensitive keys present: ${badKeys.join(', ')}`);
+  hashes.length === 0 ? ok('no hash-shaped strings in the payload') : bad(`hash-shaped values at: ${hashes.join(', ')}`);
+}
+
 /** Every (method, path) the router actually exposes, read off its own stack. */
 function enumerateRoutes() {
   const router = require('../routes/admin');
@@ -83,6 +109,7 @@ async function main() {
   // of the content that must not leak.
   const SECRET_NAME = `ZZIntruder-${Date.now()}`;
   const SECRET_COMPANY = `ZZSecretCorp-${Date.now()}`;
+  SECRETS = [SECRET_NAME, SECRET_COMPANY];
   const outsider = await users.insertOne({
     email: `admin-isolation-${Date.now()}@example.invalid`,
     name: '', isAdmin: false, status: 'active',
@@ -96,6 +123,18 @@ async function main() {
     userId: outsiderId, name: SECRET_NAME, company: SECRET_COMPANY,
     email: `zz-${Date.now()}@example.invalid`, status: 'sent', approvalStatus: 'approved',
     lastSentAt: new Date(), statusHistory: [], createdAt: new Date(), updatedAt: new Date(),
+    // A recent reply and a "needs you" category put this contact in the report's
+    // topReplies / waiting lists, which the per-user analytics must strip.
+    repliedAt: new Date(), replyCategory: 'needs-attention', action: { state: 'needs-you', reason: 'reply' },
+  });
+  // Named rows the per-user report would otherwise list by name.
+  const plantedCampaign = await db.collection('campaigns').insertOne({
+    userId: outsiderId, name: SECRET_COMPANY, templateKey: 'x', status: 'running',
+    createdAt: new Date(), updatedAt: new Date(),
+  });
+  const plantedInterview = await db.collection('interviews').insertOne({
+    userId: outsiderId, name: SECRET_NAME, company: SECRET_COMPANY, status: 'initial-discussion',
+    interviewAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), createdAt: new Date(), updatedAt: new Date(),
   });
 
   try {
@@ -104,6 +143,8 @@ async function main() {
 
     console.log('Every admin route refuses a signed-in non-admin:');
     for (const r of routes) {
+      // The body is harmless to every route; a guard failure here must not
+      // e.g. send a real email or pause real batches.
       const { status } = await call(r.method, '/api/admin' + concrete(r.path, String(outsiderId)), outsiderCookie, { email: 'x@y.invalid' });
       if (status === 403) ok(`${r.method} ${r.path} -> 403`);
       else bad(`${r.method} ${r.path} -> ${status}, expected 403`);
@@ -136,26 +177,21 @@ async function main() {
       ? ok(`its contact was counted (total ${outsiderRow.contacts.total})`)
       : bad('its contact was not counted — the leak checks below would prove nothing');
 
-    const json = JSON.stringify(data);
-    !json.includes(SECRET_NAME) ? ok('no contact name appears anywhere in the payload') : bad('a contact NAME leaked');
-    !json.includes(SECRET_COMPANY) ? ok('no company name appears anywhere in the payload') : bad('a company name leaked');
+    expectNoContent(data);
 
-    const DENY = ['passwordHash', 'gmailAppPasswordEnc', 'workerTokenHash', 'shareTokenHash',
-                  'tokenHash', 'codeHash', 'codeSalt', 'statusHistory', 'thread', 'items', 'replySnippet'];
-    const badKeys = [];
-    const hashes = [];
-    (function walk(node, path) {
-      if (node && typeof node === 'object') {
-        for (const [k, v] of Object.entries(node)) {
-          if (DENY.includes(k)) badKeys.push(`${path}.${k}`);
-          walk(v, `${path}.${k}`);
-        }
-      } else if (typeof node === 'string' && /^[a-f0-9]{64}$/.test(node)) {
-        hashes.push(path);
-      }
-    })(data, '');
-    badKeys.length === 0 ? ok('no sensitive key names in the payload') : bad(`sensitive keys present: ${badKeys.join(', ')}`);
-    hashes.length === 0 ? ok('no hash-shaped strings in the payload') : bad(`hash-shaped values at: ${hashes.join(', ')}`);
+    console.log('\nOne account\'s analytics returns counts, not content:');
+    const one = await call('GET', `/api/admin/users/${outsiderId}/analytics?period=last-30`, adminCookie);
+    one.status === 200 ? ok('the admin gets 200') : bad(`the admin gets ${one.status}`);
+    const d = one.data || {};
+    d.pipeline && d.pipeline.contacts && d.pipeline.contacts.sent >= 1
+      ? ok('its contact was counted') : bad('its contact was not counted — the leak checks below would prove nothing');
+    d.report && d.report.waiting && d.report.waiting.count >= 1
+      ? ok('the reply was counted as waiting') : bad('the reply was not counted as waiting');
+    d.report && d.report.campaigns && d.report.campaigns.length >= 1
+      ? ok('its campaign was listed (by position)') : bad('its campaign was not listed');
+    expectNoContent(d);
+    const bad1 = await call('GET', '/api/admin/users/not-an-id/analytics', adminCookie);
+    bad1.status === 400 ? ok('a malformed id -> 400') : bad(`a malformed id -> ${bad1.status}`);
 
     console.log('\nAn admin cannot lock the install out of itself:');
     const self = await call('PATCH', `/api/admin/users/${admin._id}`, adminCookie, { status: 'disabled' });
@@ -172,6 +208,8 @@ async function main() {
       : bad(`CHANGED: isAdmin=${after.isAdmin} status=${after.status}`);
   } finally {
     await contacts.deleteOne({ _id: plantedContact.insertedId });
+    await db.collection('campaigns').deleteOne({ _id: plantedCampaign.insertedId });
+    await db.collection('interviews').deleteOne({ _id: plantedInterview.insertedId });
     await users.deleteOne({ _id: outsiderId });
     await db.collection('sessions').deleteMany({ userId: outsiderId });
     await db.collection('logincodes').deleteMany({ email: outsiderDoc.email });

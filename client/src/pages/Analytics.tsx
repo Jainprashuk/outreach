@@ -8,6 +8,8 @@ import { Card, HBar } from '../components/AnalyticsCards';
 import LeadsAnalytics from '../components/LeadsAnalytics';
 import DiscoverAnalytics from '../components/DiscoverAnalytics';
 import ReportsPanel from '../components/ReportsPanel';
+import AdminUserAnalytics from '../components/AdminUserAnalytics';
+import { useSession } from '../context/SessionContext';
 import { Skeleton } from '../components/Skeleton';
 import InterviewFunnelCard from '../components/InterviewFunnelCard';
 import { useInterviews } from '../context/InterviewContext';
@@ -19,7 +21,7 @@ import {
   computeMetrics, countActivity, cvar, dayKey, fmtAgo, fmtDur, pct,
   STATUS_META, type ActivityWindowKey, type Analyzed, type Metrics,
 } from '../lib/analytics';
-import { loadAnalyticsContactsApi, type Contact, type Interview } from '../lib/api';
+import { adminOverviewApi, loadAnalyticsContactsApi, type Contact, type Interview } from '../lib/api';
 
 // ── Time-series chart (2-series, hover crosshair) ────────────────────────────
 const TS = { W: 720, H: 210, padL: 32, padR: 12, padT: 12, padB: 26 };
@@ -425,7 +427,22 @@ export default function Analytics() {
   const toast = useToast();
   const { interviews, loaded: interviewsLoaded } = useInterviews();
   // ?view=reports is where the Monday email's "View in the app" button lands.
-  const [search] = useSearchParams();
+  const [search, setSearch] = useSearchParams();
+  // Admins only: ?user=<id> shows another account's analytics, numbers only.
+  const { isAdmin, user: me } = useSession();
+  const viewUser = isAdmin ? search.get('user') : null;
+  const [accounts, setAccounts] = useState<Array<{ id: string; email: string; status: string }>>([]);
+  useEffect(() => {
+    if (!isAdmin) return;
+    adminOverviewApi(30)
+      .then(o => setAccounts(o.users.filter(u => u.id).map(u => ({ id: u.id as string, email: u.email, status: u.status }))))
+      .catch(() => {});
+  }, [isAdmin]);
+  const pickUser = (id: string) => {
+    const next = new URLSearchParams(search);
+    if (id) next.set('user', id); else next.delete('user');
+    setSearch(next, { replace: true });
+  };
   const [view, setView] = useState<'outreach' | 'leads' | 'discover' | 'reports'>(() => {
     const v = search.get('view');
     return v === 'leads' || v === 'reports' || v === 'discover' ? v : 'outreach';
@@ -460,7 +477,7 @@ export default function Analytics() {
 
   // First time the Outreach view is shown — including when the page opened on
   // Leads or Reports (?view=…) and you switch across afterwards.
-  useEffect(() => { if (view === 'outreach' && !contactsLoaded && !refreshing) load(); }, [view]);
+  useEffect(() => { if (!viewUser && view === 'outreach' && !contactsLoaded && !refreshing) load(); }, [view, viewUser]);
 
   const A = useMemo(() => contacts.map(analyze), [contacts]);
   const m = useMemo(() => computeMetrics(A), [A]);
@@ -545,8 +562,18 @@ export default function Analytics() {
   const amber = cvar('--amber') || '#8a5c00';
   const fuShare = m.repliedCount ? pct(m.afterFuCount, m.repliedCount) : 0;
 
+  const picker = isAdmin && accounts.length > 0 && (
+    <select value={viewUser || ''} onChange={e => pickUser(e.target.value)} aria-label="Whose analytics"
+      style={{ maxWidth: 260 }}>
+      <option value="">My analytics</option>
+      {accounts.filter(a => a.id !== me?.id).map(a => (
+        <option key={a.id} value={a.id}>{a.email}{a.status !== 'active' ? ` (${a.status})` : ''}</option>
+      ))}
+    </select>
+  );
+
   const switcher = (
-    <div className="section-head" style={{ marginBottom: 14 }}>
+    <div className="section-head" style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
       <div className="nav-tabs">
         <button type="button" className={`nav-tab${view === 'outreach' ? ' active' : ''}`} onClick={() => setView('outreach')}>
           <i className="ti ti-send" /> Outreach
@@ -561,8 +588,21 @@ export default function Analytics() {
           <i className="ti ti-file-analytics" /> Reports
         </button>
       </div>
+      {picker}
     </div>
   );
+
+  if (viewUser) {
+    const who = accounts.find(a => a.id === viewUser);
+    return (
+      <Layout title="Analytics" subtitle={`${who ? who.email : 'Another account'} — numbers only`} actions={picker || undefined}>
+        <div className="info-box" style={{ marginBottom: 14 }}>
+          <i className="ti ti-eye" /> You are viewing <strong>{who ? who.email : 'another account'}</strong> as an admin. Counts only: no contact names, companies or messages.
+        </div>
+        <AdminUserAnalytics userId={viewUser} />
+      </Layout>
+    );
+  }
 
   if (view === 'outreach' && !(contactsLoaded && interviewsLoaded)) {
     return (

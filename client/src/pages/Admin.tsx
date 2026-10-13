@@ -10,6 +10,7 @@ import AdminIssues from '../components/AdminIssues';
 import AdminSending from '../components/AdminSending';
 import AdminAiLogs from '../components/AdminAiLogs';
 import UserEmailsModal from '../components/UserEmailsModal';
+import AdminUserDrawer from '../components/AdminUserDrawer';
 import InfoTip from '../components/InfoTip';
 import { EMAIL_TYPES, effectiveState, TONE_COLOR } from '../lib/lifecycleTypes';
 import {
@@ -56,6 +57,14 @@ export default function Admin() {
   const [requests, setRequests] = useState<AccessRequestRow[]>([]);
   const [reqFilter, setReqFilter] = useState<'pending' | 'all'>('pending');
   const [emailsOpen, setEmailsOpen] = useState<string | null>(null);
+  // One account's drawer. ?user=<id> opens it (Analytics links here).
+  const [drawerId, setDrawerId] = useState<string | null>(() => new URLSearchParams(window.location.search).get('user'));
+  const openDrawer = (uid: string | null) => {
+    setDrawerId(uid);
+    const url = new URL(window.location.href);
+    if (uid) url.searchParams.set('user', uid); else url.searchParams.delete('user');
+    window.history.replaceState(null, '', url.pathname + url.search + url.hash);
+  };
   // The lifecycle email switches, schedule and history live on their own tab,
   // and so do the Issues log and the Gemini logs.
   type Tab = 'overview' | 'sending' | 'emails' | 'issues' | 'ai';
@@ -431,7 +440,10 @@ export default function Admin() {
                     const busy = busyId === u.id;
                     return (
                       <Fragment key={u.id}>
-                      <tr>
+                      <tr className={u.id ? 'tr-clickable' : undefined}
+                        title={u.id ? 'Open this account — details and actions' : undefined}
+                        // Buttons inside the row keep their own job.
+                        onClick={e => { if (u.id && !(e.target as HTMLElement).closest('button, a, input, select')) openDrawer(u.id); }}>
                         <td>
                           <div style={{ fontWeight: 500 }}>{u.email}</div>
                           <div style={{ display: 'flex', gap: 5, marginTop: 3 }}>
@@ -510,6 +522,18 @@ export default function Admin() {
                 </tbody>
               </table>
             </div>
+
+            {(() => {
+              const row = drawerId ? data.users.find(x => x.id === drawerId) : null;
+              return row ? (
+                <AdminUserDrawer
+                  row={row} isSelf={row.id === user?.id}
+                  onClose={() => openDrawer(null)}
+                  onChanged={() => load(days)}
+                  onOpenEmails={() => setEmailsOpen(row.id)}
+                />
+              ) : null;
+            })()}
 
             {(() => {
               const row = emailsOpen ? data.users.find(x => x.id === emailsOpen) : null;

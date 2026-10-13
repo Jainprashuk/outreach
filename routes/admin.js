@@ -25,6 +25,12 @@
  * logs tab) return every AI provider request in full — prompts carry reply
  * bodies, conversation transcripts and reply profiles; outputs carry the
  * model's verdicts and drafts. Written by lib/aiCallLog.js, kept 30 days.
+ *
+ * PER-USER VIEW AND ACTIONS (2026-10-13, owner's choice: numbers only). The
+ * /users/:id/analytics endpoint is one account's analytics with every content
+ * field stripped by sanitizeForAdmin() — invariant 2 still holds. The per-user
+ * actions (pause/resume sending, send a lifecycle email now, check mailbox)
+ * act on that account and answer with counts.
  */
 const express = require('express');
 const mongoose = require('mongoose');
@@ -55,10 +61,13 @@ const LifecycleEmail = require('../models/LifecycleEmail');
 const { getLifecycleConfig, getLifecycleConfigWithHistory, setLifecycleSwitch } = require('../lib/lifecycle/config');
 const { forecast, masterOnConfig } = require('../lib/lifecycle/forecast');
 const { TYPES, TYPE_KEYS, isType, MANUAL_EMAILS_PER_DAY } = require('../lib/lifecycle/types');
-const { istMidnight } = require('../lib/reportPeriod');
-const { buildMessage } = require('../lib/lifecycle/deliver');
+const { buildMessage, deliver } = require('../lib/lifecycle/deliver');
 const { USER_FIELDS } = require('../lib/lifecycle/candidates');
 const systemMail = require('../lib/systemMail');
+const { buildReportStats } = require('../lib/reportStats');
+const { discoverAnalytics } = require('../lib/prospectAnalytics');
+const { istMidnight, resolvePeriod, labelFor } = require('../lib/reportPeriod');
+const { pauseAllForUser, resumeAllForUser, adminPausedCounts } = require('../lib/userSending');
 const unsubscribe = require('../lib/lifecycle/unsubscribe');
 
 const router = express.Router();
@@ -940,6 +949,226 @@ router.patch('/users/:id/emails', async (req, res) => {
   }
 });
 
+// ── One account: analytics (numbers only) and actions ────────────────────────
+
+/**
+ * Strips every content field from a report and a Discover summary so what is
+ * left obeys invariant 2. Exported for scripts/test-admin-isolation.js.
+ * Keeps an allowlist rather than deleting known keys, so a field added to
+ * buildReportStats later stays out until someone decides it is a count.
+ */
+function sanitizeForAdmin(report, discover) {
+  const r = report ? {
+    period: report.period,
+    previous: report.previous,
+    generatedAt: report.generatedAt,
+    quiet: report.quiet,
+    headline: report.headline,
+    outreach: report.outreach,
+    series: report.series,
+    replyCategories: (report.replyCategories || []).map(c => ({ key: c.key, label: c.label, n: c.n })),
+    // A campaign's name is the user's text; its position is not.
+    campaigns: (report.campaigns || []).map((c, i) => ({
+      name: `Campaign ${i + 1}`, status: c.status, sent: c.sent, remaining: c.remaining, finishedInPeriod: c.finishedInPeriod,
+    })),
+    pipeline: report.pipeline,
+    waiting: { count: (report.waiting && report.waiting.count) || 0 },
+    upcomingInterviewCount: (report.upcomingInterviews || []).length,
+    bySource: report.bySource,
+  } : null;
+  const d = discover ? {
+    days: discover.days,
+    totals: discover.totals,
+    byLabel: discover.byLabel,
+    status: discover.status,
+    via: discover.via,
+    runs: discover.runs,
+    searchesPerDay: discover.searchesPerDay,
+    allowance: discover.allowance,
+    month: discover.month,
+  } : null;
+  return { report: r, discover: d };
+}
+
+const countBy = async (Model, match, field) => {
+  const rows = await Model.aggregate([
+    { $match: { ...match, deleted: { $ne: true } } },
+    { $group: { _id: { $ifNull: [`$${field}`, 'none'] }, n: { $sum: 1 } } },
+  ]);
+  return Object.fromEntries(rows.map(r => [String(r._id), r.n]));
+};
+
+const loadTarget = async (req, res, fields = { email: 1 }) => {
+  if (!mongoose.isValidObjectId(req.params.id)) { res.status(400).json({ error: 'Not a valid account id' }); return null; }
+  const target = await User.findById(req.params.id, fields).lean();
+  if (!target) { res.status(404).json({ error: 'No such account' }); return null; }
+  return target;
+};
+
+/** Two audit rows, as everywhere in this file: one for the admin, one for the person it happened to. */
+const auditAction = (req, target, action, message, meta = {}, userMessage = null) => {
+  logEvent({
+    userId: req.userId, category: 'admin', action,
+    message: `${target.email}: ${message}`,
+    meta: { targetUserId: id(target._id), targetEmail: target.email, ...meta },
+  }).catch(() => {});
+  if (userMessage) {
+    logEvent({ userId: target._id, category: 'account', action: 'changed-by-admin', message: userMessage, meta }).catch(() => {});
+  }
+};
+
+/**
+ * GET /api/admin/users/:id/analytics?period=…&days=30
+ * One account's analytics, counts only. `period` takes the same values as
+ * GET /api/reports; `days` is the Discover window.
+ */
+router.get('/users/:id/analytics', async (req, res) => {
+  try {
+    const target = await loadTarget(req, res, { email: 1, name: 1, status: 1, isAdmin: 1, lastActiveAt: 1, createdAt: 1 });
+    if (!target) return;
+    let p;
+    try { p = resolvePeriod(req.query); } catch (err) { return res.status(400).json({ error: err.message }); }
+    const days = Math.min(90, Math.max(1, Number(req.query.days) || 30));
+    const userId = target._id;
+
+    const [report, discover, contactsByStatus, approval, replies, leadsByStatus, interviewsByStatus, jobsByStatus, campaignsByStatus, paused, settings] = await Promise.all([
+      buildReportStats(userId, p),
+      discoverAnalytics(userId, { days }),
+      countBy(Contact, { userId }, 'status'),
+      countBy(Contact, { userId }, 'approvalStatus'),
+      countBy(Contact, { userId, repliedAt: { $ne: null } }, 'replyCategory'),
+      countBy(Lead, { userId }, 'status'),
+      countBy(Interview, { userId }, 'status'),
+      countBy(SendJob, { userId }, 'status'),
+      countBy(Campaign, { userId }, 'status'),
+      adminPausedCounts(userId),
+      Settings.findOne({ userId }, { lastMailboxCheckAt: 1, gmailAppPasswordEnc: 1 }).lean(),
+    ]);
+
+    // Reading one person's numbers is the sensitive part; log it like read-fleet,
+    // throttled per admin per account.
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    const recent = await ActivityLog.findOne({
+      userId: req.userId, category: 'admin', action: 'read-user-analytics',
+      'meta.targetUserId': id(userId), createdAt: { $gt: tenMinutesAgo },
+    }, { _id: 1 }).lean();
+    if (!recent) auditAction(req, target, 'read-user-analytics', 'viewed analytics (numbers only)');
+
+    const clean = sanitizeForAdmin(report, discover);
+    res.json({
+      user: {
+        id: id(userId), email: target.email, name: target.name || '', status: target.status,
+        isAdmin: target.isAdmin === true, lastActiveAt: target.lastActiveAt || null, createdAt: target.createdAt,
+      },
+      label: labelFor(p),
+      report: clean.report,
+      discover: clean.discover,
+      pipeline: {
+        contacts: contactsByStatus, approval, replies,
+        leads: leadsByStatus, interviews: interviewsByStatus,
+      },
+      sending: {
+        jobs: jobsByStatus, campaigns: campaignsByStatus, pausedByAdmin: paused,
+        hasGmail: !!(settings && settings.gmailAppPasswordEnc),
+        lastMailboxCheckAt: (settings && settings.lastMailboxCheckAt) || null,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/admin/users/:id/sending/pause — every live batch and running campaign. */
+router.post('/users/:id/sending/pause', async (req, res) => {
+  try {
+    const target = await loadTarget(req, res);
+    if (!target) return;
+    const r = await pauseAllForUser(target._id);
+    auditAction(req, target, 'pause-sending', `paused ${r.jobs} batch(es), ${r.campaigns} campaign(s)`, r,
+      (r.jobs || r.campaigns) ? `An administrator paused your sending (${r.jobs} batch(es), ${r.campaigns} campaign(s))` : null);
+    res.json({ ok: true, ...r });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/** POST /api/admin/users/:id/sending/resume — only what an admin paused. */
+router.post('/users/:id/sending/resume', async (req, res) => {
+  try {
+    const target = await loadTarget(req, res);
+    if (!target) return;
+    const r = await resumeAllForUser(target._id);
+    auditAction(req, target, 'resume-sending', `resumed ${r.jobs} batch(es), ${r.campaigns} campaign(s)`, r,
+      (r.jobs || r.campaigns) ? `An administrator resumed your sending (${r.jobs} batch(es), ${r.campaigns} campaign(s))` : null);
+    res.json({ ok: true, ...r });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+const SENDABLE_NOW = ['weekly-report', 'welcome', 'setup-reminder', 'inactive'];
+const SEND_NOW_GAP_MS = 10 * 60 * 1000;
+
+/**
+ * POST /api/admin/users/:id/emails/send { type }
+ * Sends one lifecycle email now, through the same deliver() as the sweeps, so
+ * the user's opt-outs, admin blocks and the switches all still apply.
+ */
+router.post('/users/:id/emails/send', async (req, res) => {
+  try {
+    const type = req.body && req.body.type;
+    if (!SENDABLE_NOW.includes(type)) return res.status(400).json({ error: `type must be one of ${SENDABLE_NOW.join(', ')}` });
+    const target = await loadTarget(req, res);
+    if (!target) return;
+
+    const recent = await LifecycleEmail.findOne({
+      userId: target._id, type, key: { $regex: '^admin:' }, createdAt: { $gt: new Date(Date.now() - SEND_NOW_GAP_MS) },
+    }, { _id: 1 }).lean();
+    if (recent) return res.status(429).json({ error: 'That email was sent to this account in the last 10 minutes.' });
+
+    const key = `admin:${Date.now()}`;
+    let result;
+    try {
+      result = await deliver({ type, userId: target._id, key }, { force: true });
+    } catch (err) {
+      return res.status(502).json({ error: `Send failed: ${err.message}` });
+    }
+    auditAction(req, target, 'send-email-now', `${TYPES[type].label} -> ${result.status}${result.reason ? ` (${result.reason})` : ''}`,
+      { type, status: result.status, reason: result.reason || null });
+    res.json({ ok: result.status === 'sent', ...result });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * POST /api/admin/users/:id/check-mailbox
+ * Runs that account's mailbox scan now. A scan takes up to ~50s, so one started
+ * in the last minute (by the cron, the user or another admin) is not doubled.
+ */
+router.post('/users/:id/check-mailbox', async (req, res) => {
+  try {
+    const target = await loadTarget(req, res);
+    if (!target) return;
+    const check = req.app.locals.checkMailboxForUser;
+    if (typeof check !== 'function') return res.status(503).json({ error: 'Mailbox check is not available on this server.' });
+
+    const s = await Settings.findOne({ userId: target._id }, { lastMailboxCheckAt: 1 }).lean();
+    if (s && s.lastMailboxCheckAt && Date.now() - new Date(s.lastMailboxCheckAt).getTime() < 60_000) {
+      return res.status(409).json({ error: 'This mailbox was checked less than a minute ago.' });
+    }
+    const r = await check(target._id);
+    if (r.skipped === 'no_credentials') return res.json({ ok: false, skipped: 'no_credentials' });
+    // replied/bounced are lists of addresses — content. Only their sizes leave.
+    const size = (v) => (Array.isArray(v) ? v.length : Number(v) || 0);
+    const out = { ok: true, scanned: Number(r.scanned) || 0, replied: size(r.replied), bounced: size(r.bounced) };
+    auditAction(req, target, 'check-mailbox', `mailbox checked: ${out.replied} repl(ies), ${out.bounced} bounce(s)`, out);
+    res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Issues ────────────────────────────────────────────────────────────────────
 // Everything that went wrong for anybody. Written by lib/issues.js.
 
@@ -1399,3 +1628,4 @@ router.get('/ai-calls/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports.sanitizeForAdmin = sanitizeForAdmin;

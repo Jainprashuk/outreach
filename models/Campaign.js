@@ -68,6 +68,9 @@ const campaignSchema = new mongoose.Schema({
   releases:    { type: [releaseSchema], default: [] },
   completedAt: { type: Date, default: null },
   pausedAt:    { type: Date, default: null },
+  // Set only by lib/userSending.js when an admin paused the whole account, so the
+  // admin's resume brings back exactly what it paused. Any resume clears it.
+  pausedByAdmin: { type: Boolean, default: false },
 
   // Campaign operational updates are mailed back to the sender account. Keeping
   // the first Message-ID lets every update use one Gmail conversation.

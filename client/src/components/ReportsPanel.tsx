@@ -8,6 +8,10 @@ import {
 
 // Your own report for any period: on screen first, then as a PDF or emailed to
 // yourself. The server scopes every number to the signed-in account.
+//
+// An admin viewing another account (AdminUserAnalytics) passes `fetcher` and
+// `adminMode`: the same numbers, with no PDF/email buttons and no named lists —
+// the server has already stripped every name and company.
 
 type Preset = 'last-week' | 'this-week' | 'last-30' | 'past' | 'custom';
 
@@ -34,7 +38,12 @@ function Delta({ h, rate }: { h: ReportHeadline; rate?: boolean }) {
   );
 }
 
-export default function ReportsPanel() {
+export default function ReportsPanel({ fetcher, adminMode = false, upcomingInterviewCount = 0 }: {
+  fetcher?: (q: ReportPeriodQuery) => Promise<ReportStats>;
+  adminMode?: boolean;
+  /** Admin mode only: the upcoming interviews arrive as a count, not a list. */
+  upcomingInterviewCount?: number;
+} = {}) {
   const toast = useToast();
   const [preset, setPreset] = useState<Preset>('last-week');
   const [weeks, setWeeks] = useState<Array<{ week: string; label: string }>>([]);
@@ -62,7 +71,7 @@ export default function ReportsPanel() {
     setLoading(true);
     setError('');
     try {
-      setReport(await reportApi(q));
+      setReport(await (fetcher || reportApi)(q));
     } catch (e: any) {
       setError(e.message || 'Could not build the report');
     } finally {
@@ -95,7 +104,9 @@ export default function ReportsPanel() {
       <div className="an-card">
         <div className="an-card-head">
           <div className="an-card-title"><i className="ti ti-file-analytics" /> Generate a report</div>
-          <div className="an-card-sub">Your own numbers for any period, the same as the Monday email. Check them here, then download the PDF or email it to yourself.</div>
+          <div className="an-card-sub">{adminMode
+            ? 'This account\'s numbers for any period, the same as their Monday email. Counts only — no names or companies.'
+            : 'Your own numbers for any period, the same as the Monday email. Check them here, then download the PDF or email it to yourself.'}</div>
         </div>
         <div className="an-card-body">
           <div className="seg-toggle" style={{ flexWrap: 'wrap', marginBottom: 10 }}>
@@ -120,12 +131,14 @@ export default function ReportsPanel() {
             <button className="btn btn-sm btn-primary" type="button" onClick={generate} disabled={loading}>
               {loading ? <><i className="ti ti-loader-2" style={{ animation: 'spin 1s linear infinite' }} /> Generating…</> : <><i className="ti ti-player-play" /> Generate</>}
             </button>
+            {!adminMode && <>
             <a className={`btn btn-sm${!report || !q ? ' disabled' : ''}`} href={report && q ? reportPdfUrl(q) : undefined} aria-disabled={!report || !q}>
               <i className="ti ti-download" /> Download PDF
             </a>
             <button className="btn btn-sm" type="button" onClick={emailIt} disabled={!report || emailing}>
               <i className={`ti ${emailing ? 'ti-loader-2' : 'ti-mail'}`} /> {emailing ? 'Sending…' : 'Email it to me'}
             </button>
+            </>}
           </div>
           {error && <div className="login-error" style={{ textAlign: 'left', marginTop: 10 }}>{error}</div>}
         </div>
@@ -239,8 +252,8 @@ export default function ReportsPanel() {
               {!report.campaigns.length ? <div className="an-empty">No campaign activity in this period.</div> : (
                 <table className="an-table">
                   <thead><tr><th>Campaign</th><th>Status</th><th style={{ textAlign: 'right' }}>Sent</th><th style={{ textAlign: 'right' }}>Remaining</th></tr></thead>
-                  <tbody>{report.campaigns.map(c => (
-                    <tr key={c.name}><td>{c.name}</td><td>{c.finishedInPeriod ? 'finished' : c.status}</td>
+                  <tbody>{report.campaigns.map((c, i) => (
+                    <tr key={`${i}${c.name}`}><td>{c.name}</td><td>{c.finishedInPeriod ? 'finished' : c.status}</td>
                       <td style={{ textAlign: 'right' }}>{n(c.sent)}</td><td style={{ textAlign: 'right' }}>{n(c.remaining)}</td></tr>
                   ))}</tbody>
                 </table>
@@ -248,6 +261,15 @@ export default function ReportsPanel() {
             </div>
           </div>
 
+          {adminMode ? (
+            <div className="an-card" style={{ marginTop: 16 }}>
+              <div className="an-card-head"><div className="an-card-title"><i className="ti ti-calendar-event" /> Coming up</div></div>
+              <div className="an-card-body" style={{ fontSize: 12.5 }}>
+                <div><strong>{n(upcomingInterviewCount)}</strong> interview{upcomingInterviewCount === 1 ? '' : 's'} in the next 7 days</div>
+                <div style={{ marginTop: 4 }}><strong>{n(report.waiting.count)}</strong> repl{report.waiting.count === 1 ? 'y is' : 'ies are'} waiting on them</div>
+              </div>
+            </div>
+          ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: 16, marginTop: 16 }}>
             <div className="an-card">
               <div className="an-card-head"><div className="an-card-title"><i className="ti ti-calendar-event" /> Coming up</div></div>
@@ -281,6 +303,7 @@ export default function ReportsPanel() {
               </div>
             </div>
           </div>
+          )}
         </>
       )}
       </Refreshing>
