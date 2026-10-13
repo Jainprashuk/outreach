@@ -178,6 +178,12 @@ async function main() {
       check(rows.every(x => sameKeys(x, KEYS[tab])), `${tab}: exactly the allowlisted keys`);
     }
     const disc = all.discover.rows || [];
+    // A lead with no address, to prove "Has email" hides it.
+    await plant(leads, { userId: B, authorName: 'No Mail', email: null, company: 'ZZLib Co', source: 'hn',
+      authorUrl: `https://news.ycombinator.com/item?id=${ts}`, dedupeKey: `a:${ts}`, status: 'new', fitScore: 1 });
+    const allLeads = (await call('GET', `/api/library/leads?q=No%20Mail`, adminCookie)).data.rows || [];
+    const mailLeads = (await call('GET', `/api/library/leads?q=No%20Mail&hasEmail=1`, adminCookie)).data.rows || [];
+    check(allLeads.some(l => l.name === 'No Mail') && !mailLeads.some(l => l.name === 'No Mail'), 'Has email hides a lead with no address');
     check(!disc.some(p => p.name === 'Dis Carded'), 'a discarded Discover person does not appear');
     const co = (all.companies.rows || []).find(c => c.domain === DOMAIN);
     check(co && co.formats.some(f => f.pattern === 'first.last' && f.tested), 'the company shows the format a user set');

@@ -96,6 +96,7 @@ export default function Library() {
   const [domain, setDomain] = useState(params.get('domain') || '');
   const [hideMine, setHideMine] = useState(false);
   const [hideBounced, setHideBounced] = useState(false);
+  const [hasEmail, setHasEmail] = useState(false);
   const [sort, setSort] = useState<'recent' | 'people'>('recent');
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -115,6 +116,7 @@ export default function Library() {
   const query = {
     q: search, source, domain,
     hideMine: hideMine ? '1' : '', hideBounced: hideBounced ? '1' : '',
+    hasEmail: hasEmail && tab !== 'people' ? '1' : '',
     sort: tab === 'companies' && sort === 'people' ? 'people' : '',
   };
   const list = useLibrary(tab, query, page, selected.size > 0);
@@ -289,6 +291,11 @@ export default function Library() {
           </select>
         ) : (
           <>
+            {tab !== 'people' && (
+              <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, color: 'var(--text2)' }}>
+                <input type="checkbox" checked={hasEmail} onChange={e => { setHasEmail(e.target.checked); resetPage(); }} /> Has email
+              </label>
+            )}
             <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 12.5, color: 'var(--text2)' }}>
               <input type="checkbox" checked={hideMine} onChange={e => { setHideMine(e.target.checked); resetPage(); }} /> Hide ones I already have
             </label>
