@@ -8,6 +8,9 @@ export interface SessionUser {
   /** Can see the fleet-wide admin dashboard. A DISPLAY gate only — routes/admin.js
    *  re-checks this server-side, and that is the real boundary. */
   isAdmin: boolean;
+  /** Can see the shared Library tab (an admin, or turned on by one). Display gate
+   *  only — requireLibraryAccess re-checks on every request. */
+  canSeeLibrary?: boolean;
   /** Has finished first-run setup. */
   onboarded: boolean;
 }
@@ -19,6 +22,7 @@ interface Session {
   share: boolean;
   user: SessionUser | null;
   isAdmin: boolean;
+  canSeeLibrary: boolean;
   /** Whether to send someone to the wizard. Defaults to TRUE when the field is
    *  missing, so a session payload that predates onboarding (or a partial
    *  failure) does not trap every user in a wizard they do not need. The server
@@ -72,6 +76,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       share,
       user,
       isAdmin: user?.isAdmin === true,
+      canSeeLibrary: user?.canSeeLibrary === true || user?.isAdmin === true,
       onboarded: user ? user.onboarded !== false : true,
       loading,
       refresh,

@@ -24,6 +24,7 @@ const { attachUser, resolveSoleUserId } = require('./lib/currentUser');
 const { isOnboarded } = require('./lib/onboarding');
 const { requireOnboarded } = require('./lib/onboardingGuard');
 const { requireAdmin } = require('./lib/requireAdmin');
+const { requireLibraryAccess, canSeeLibrary } = require('./lib/requireLibraryAccess');
 const { resolveWorkerUser } = require('./lib/workerAuth');
 const { issueShareToken, revokeShareToken, resolveShareUser, hasShareToken } = require('./lib/shareAuth');
 const { usersByStaleness, runForUsers } = require('./lib/fanout');
@@ -386,7 +387,7 @@ app.get('/api/share/session', requireDb, async (req, res) => {
     try {
       const session = await resolveSession(req);
       if (session) {
-        const doc = await User.findById(session.userId, { email: 1, name: 1, isAdmin: 1, status: 1, onboarding: 1 }).lean();
+        const doc = await User.findById(session.userId, { email: 1, name: 1, isAdmin: 1, libraryAccess: 1, status: 1, onboarding: 1 }).lean();
         // isAdmin and onboarding live INSIDE `user`, which is only ever
         // populated once resolveSession has succeeded. That keeps them
         // structurally unreachable on the public share path below, which this
@@ -409,6 +410,7 @@ app.get('/api/share/session', requireDb, async (req, res) => {
             email: doc.email,
             name,
             isAdmin: doc.isAdmin === true,
+            canSeeLibrary: canSeeLibrary(doc),
             onboarded: isOnboarded(doc),
           };
         }
@@ -620,6 +622,9 @@ app.use('/api/issues', requireDb, require('./routes/issues'));
 // auditHttpMutations like everything else — moving it above those would lose the
 // audit trail on exactly the routes that most need one.
 app.use('/api/admin', requireDb, requireAdmin, require('./routes/admin'));
+// The shared Library: other accounts' contact data, so it has its own gate —
+// an admin turns it on per account (lib/requireLibraryAccess.js).
+app.use('/api/library', requireDb, requireLibraryAccess, require('./routes/library'));
 
 // ── Configure Gmail credentials ────────────────────────────────────────────
 app.post('/api/config', requireDb, async (req, res) => {

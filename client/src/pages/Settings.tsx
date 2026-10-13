@@ -11,6 +11,7 @@ import { BUILTIN_VARIABLES } from '../lib/format';
 import SmtpChart from '../components/SmtpChart';
 import TokenCard from '../components/TokenCard';
 import EmailPrefsCard from '../components/EmailPrefsCard';
+import LibrarySharingCard from '../components/LibrarySharingCard';
 import ReplyProfileCard from '../components/ReplyProfileCard';
 import DiscoveryKeysCard from '../components/DiscoveryKeysCard';
 
@@ -386,6 +387,7 @@ export default function Settings() {
       {/* Both save on their own, independently of the Save button below. */}
       <ReplyProfileCard />
       <EmailPrefsCard />
+      <LibrarySharingCard />
 
       <div style={{ display: 'flex', justifyContent: 'flex-end', paddingBottom: 32 }}>
         <button className="btn btn-primary" onClick={save} disabled={saveState === 'saving' || loading} style={{ padding: '9px 22px' }} type="button">

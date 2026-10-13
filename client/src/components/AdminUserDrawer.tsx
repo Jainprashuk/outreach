@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { useToast } from '../context/ToastContext';
+import Switch from './Switch';
 import { fmtAgo } from '../lib/analytics';
 import {
   adminCheckMailboxApi, adminPauseSendingApi, adminResumeSendingApi, adminRevokeSessionsApi,
-  adminSendEmailNowApi, adminUpdateUserApi, type AdminSendNowType, type AdminUserRow,
+  adminSendEmailNowApi, adminSetLibraryAccessApi, adminUpdateUserApi, type AdminSendNowType, type AdminUserRow,
 } from '../lib/api';
 
 // Admin → Overview → click an account. Everything an admin can do to ONE
@@ -82,6 +83,7 @@ export default function AdminUserDrawer({ row, isSelf, onClose, onChanged, onOpe
             {row.name && <div style={{ fontSize: 12.5, color: 'var(--text2)' }}>{row.name}</div>}
             <div style={{ display: 'flex', gap: 5, marginTop: 5, flexWrap: 'wrap' }}>
               {row.isAdmin && <span className="badge badge-approved">admin</span>}
+              {!row.isAdmin && row.libraryAccess && <span className="badge" title="Can see the shared Library">library</span>}
               {row.status === 'active' && <span className="badge badge-sent">active</span>}
               {row.status === 'invited' && <span className="badge badge-pending">never signed in</span>}
               {row.status === 'disabled' && <span className="badge badge-rejected">disabled</span>}
@@ -186,6 +188,20 @@ export default function AdminUserDrawer({ row, isSelf, onClose, onChanged, onOpe
               return row.isAdmin ? 'Admin access removed' : 'Now an admin';
             }, { confirm: row.isAdmin ? `Remove admin access from ${row.email}?` : `Make ${row.email} an admin? They will see every account's counts and can act on them.` })}
           >{spin('admin', row.isAdmin ? 'ti-shield-off' : 'ti-shield-check')} {row.isAdmin ? 'Remove' : 'Make admin'}</button>
+        </div>
+        <div className="ud-action">
+          <div className="ud-action-text">
+            <div>Library tab</div>
+            <div>{row.isAdmin
+              ? 'Admins always see the shared Library.'
+              : row.libraryAccess ? 'They can see and copy from the shared Library.' : 'Hidden. Turn on to let them see and copy from the shared Library.'}
+              {row.librarySharing === false && ' Their own data is kept out of it (their choice).'}</div>
+          </div>
+          <Switch label="Library tab" checked={row.isAdmin || row.libraryAccess === true} disabled={!!busy || row.isAdmin}
+            onChange={on => run('library', async () => {
+              await adminSetLibraryAccessApi(id, on);
+              return on ? 'Library turned on for them' : 'Library hidden for them';
+            })} />
         </div>
         <div className="ud-action">
           <div className="ud-action-text">

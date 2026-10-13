@@ -25,6 +25,9 @@ const contactSchema = new mongoose.Schema({
   jobTitle:    { type: String },
   naukriJobId: { type: String },
   linkedin:    { type: String },
+  // Set only on contacts copied in from the shared Library (routes/library.js).
+  // No default, same reason: every other contact keeps no such key.
+  fromLibrary: { type: Boolean },
   status: { type: String, enum: ['queued', 'in-campaign', 'sent', 'follow-up-sent', 'failed', 'bounced', 'replied', 'follow-up-replied', 'closed', 'no-openings', 'in-review', 'blocked'], default: 'queued' },
   approvalStatus: { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   editedSubject: { type: String, default: null },

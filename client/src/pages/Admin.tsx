@@ -448,6 +448,7 @@ export default function Admin() {
                           <div style={{ fontWeight: 500 }}>{u.email}</div>
                           <div style={{ display: 'flex', gap: 5, marginTop: 3 }}>
                             {u.isAdmin && <span className="badge badge-approved">admin</span>}
+                            {!u.isAdmin && u.libraryAccess && <span className="badge" title="Can see the shared Library">library</span>}
                             {u.status === 'invited' && <span className="badge badge-pending">never signed in</span>}
                             {u.status === 'disabled' && <span className="badge badge-rejected">disabled</span>}
                             {isSelf && <span className="badge">you</span>}
