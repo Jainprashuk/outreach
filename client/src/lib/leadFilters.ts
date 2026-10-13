@@ -1,5 +1,5 @@
 import type { Lead, LeadStatus } from './api';
-import { APPLY_STATUS_LABELS, deriveCompany, HARD_REJECT, isFreemail } from './leads';
+import { APPLY_STATUS_LABELS, deriveCompany, HARD_REJECT, isFreemail, profileUrlOf, sourceLabel } from './leads';
 import { identityOf } from './leadAnalytics';
 import { classifyLink, hasApplyableLink, LINK_TYPE_META, LINK_TYPE_ORDER, type LinkType } from './linkTypes';
 import { STAGE_LABELS, stageOf, outcomeOf, type OutcomeStage } from './leadOutcome';
@@ -64,7 +64,7 @@ export function filterOptions(leads: Lead[]) {
   };
   return {
     domains: count(l => ((l.email || '').split('@')[1] || null)),
-    sources: count(l => l.source || null),
+    sources: count(l => l.source || null).map(o => ({ ...o, label: sourceLabel(o.value) })),
     queries: (() => {
       // A lead can be credited to several queries, so it counts once per query.
       const m = new Map<string, number>();
@@ -118,7 +118,7 @@ export function applyLeadFilters(leads: Lead[], f: LeadFilters, outcomes: LeadOu
     if (max !== null && Number.isFinite(max) && l.fitScore > max) return false;
 
     if (!tri(f.hiring, l.hiring)) return false;
-    if (!tri(f.hasProfile, !!l.authorUrl)) return false;
+    if (!tri(f.hasProfile, !!profileUrlOf(l))) return false;
     if (!tri(f.hasPost, !!l.postUrl)) return false;
     if (!tri(f.hasLinks, l.links.length > 0)) return false;
     // Matches if ANY of the lead's links is one of the selected types.
@@ -174,7 +174,7 @@ export function activeChips(f: LeadFilters): Chip[] {
   if (f.hasEmail !== 'any') c.push({ key: 'hasEmail', label: `Has email: ${TRI_LABEL[f.hasEmail]}` });
   if (f.emailKind !== 'any') c.push({ key: 'emailKind', label: f.emailKind === 'freemail' ? 'Personal email' : 'Work email' });
   if (f.domains.length) c.push({ key: 'domains', label: `Domain: ${f.domains.length === 1 ? f.domains[0] : `${f.domains.length} selected`}` });
-  if (f.sources.length) c.push({ key: 'sources', label: `Source: ${f.sources.join(', ')}` });
+  if (f.sources.length) c.push({ key: 'sources', label: `Found by: ${[...new Set(f.sources.map(sourceLabel))].join(', ')}` });
   if (f.queries.length) c.push({ key: 'queries', label: f.queries.length === 1 ? `Query: ${f.queries[0]}` : `${f.queries.length} queries` });
   if (f.runs.length) c.push({ key: 'runs', label: `${f.runs.length} harvest run${f.runs.length > 1 ? 's' : ''}` });
   if (f.hideRejects) c.push({ key: 'hideRejects', label: 'Hard rejects hidden' });
@@ -200,12 +200,13 @@ export const countActive = (f: LeadFilters) => activeChips(f).length;
 
 /**
  * Filters that stay behind the "Advanced" tab. Chosen from what the data
- * actually supports: `hiring` and `source` are constant across every row today,
- * domains run to hundreds of options, and the rest answer narrow questions.
+ * actually supports: `hiring` is nearly constant across rows, domains run to
+ * hundreds of options, and the rest answer narrow questions. `sources` moved out
+ * once Paste text / HN / Hiring posts made it vary.
  */
 export const ADVANCED_KEYS: Array<keyof LeadFilters> = [
   'company', 'role', 'hiring', 'hasProfile', 'hasPost', 'hasLinks',
-  'addresses', 'contact', 'importedWithin', 'domains', 'sources', 'runs',
+  'addresses', 'contact', 'importedWithin', 'domains', 'runs',
 ];
 
 export const countAdvanced = (f: LeadFilters) =>

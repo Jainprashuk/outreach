@@ -4,7 +4,7 @@ import Avatar from './Avatar';
 import { updateLeadApi, type ApplyStatus, type Lead, type LeadOutcome } from '../lib/api';
 import {
   APPLY_BADGE_CLASS, APPLY_STATUS_LABELS, APPLY_STATUS_ORDER,
-  deriveCompany, isCompanyDerived, LEAD_BADGE_CLASS, LEAD_STATUS_LABELS,
+  deriveCompany, isCompanyDerived, LEAD_BADGE_CLASS, LEAD_STATUS_LABELS, profileUrlOf, sourceLabel,
 } from '../lib/leads';
 import { APPLYABLE, classifyLink, LINK_TYPE_META } from '../lib/linkTypes';
 import { contactBadgeClass, contactStatusLabel, stageOf, STAGE_LABELS } from '../lib/leadOutcome';
@@ -79,7 +79,7 @@ export default function LeadDetailModal({ lead, allLeads, outcome, onSaved, onCl
         </div>
 
         <div style={{ padding: '10px 0 4px' }}>
-          <div className="section-title" style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '10px 0 2px' }}>From the harvester</div>
+          <div className="section-title" style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '10px 0 2px' }}>{['paste', 'hn', 'web-post'].includes(lead.source) ? 'Where it was found' : 'From the harvester'}</div>
           <Field label="Fit score">
             <span style={{ color: lead.fitScore === -999 ? 'var(--red)' : undefined }}>
               {lead.fitScore}{lead.fitScore === -999 ? ' · hard reject' : ''}
@@ -88,7 +88,7 @@ export default function LeadDetailModal({ lead, allLeads, outcome, onSaved, onCl
           <Field label="Hiring">{lead.hiring ? 'Yes' : 'No'}</Field>
           <Field label={`Found by (${(lead.queries || []).length})`}>
             {(lead.queries || []).length === 0
-              ? muted('no query recorded — re-import to backfill')
+              ? muted(lead.source === 'paste' || lead.source === 'hn' ? '—' : 'no query recorded — re-import to backfill')
               : (
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                   {lead.queries.map(q => (
@@ -100,8 +100,10 @@ export default function LeadDetailModal({ lead, allLeads, outcome, onSaved, onCl
                 </div>
               )}
           </Field>
-          <Field label="Source">{lead.source || muted('—')}</Field>
-          <Field label="Profile">{lead.authorUrl ? <Ext href={lead.authorUrl} /> : muted('—')}</Field>
+          <Field label="Source">{sourceLabel(lead.source)}</Field>
+          {lead.location && <Field label="Location">{lead.location}</Field>}
+          {lead.postedAt && <Field label="Posted">{new Date(lead.postedAt).toLocaleDateString()}</Field>}
+          <Field label="Profile">{profileUrlOf(lead) ? <Ext href={profileUrlOf(lead)!} /> : muted('—')}</Field>
           <Field label="Post">{lead.postUrl ? <Ext href={lead.postUrl} /> : muted('—')}</Field>
           <Field label={`Links (${lead.links.length})`}>
             {lead.links.length === 0 ? muted('none') : (
@@ -124,6 +126,13 @@ export default function LeadDetailModal({ lead, allLeads, outcome, onSaved, onCl
             )}
           </Field>
           <Field label="Harvested at">{fmt(lead.batchUpdatedAt)}</Field>
+          {lead.snippet && (
+            <Field label="Post text">
+              <div style={{ whiteSpace: 'pre-wrap', fontSize: 12, color: 'var(--text2)', maxHeight: 180, overflowY: 'auto' }}>
+                {lead.snippet}
+              </div>
+            </Field>
+          )}
 
           <div className="section-title" style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 0.4, margin: '18px 0 2px' }}>Contact details</div>
           <Field label="Email">{lead.email || muted('none — cannot be moved to outreach')}</Field>

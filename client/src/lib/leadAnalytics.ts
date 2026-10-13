@@ -1,5 +1,5 @@
 import type { Lead } from './api';
-import { deriveCompany, HARD_REJECT } from './leads';
+import { deriveCompany, HARD_REJECT, profileUrlOf } from './leads';
 import { outcomeOf, stageOf } from './leadOutcome';
 import { hasApplyableLink } from './linkTypes';
 import type { LeadOutcomeMap } from './api';
@@ -56,7 +56,7 @@ export function computeLeadMetrics(leads: Lead[]): LeadMetrics {
     contactsCreated: leads.filter(l => l.status === 'added-to-outreach' && l.contactId).length,
     alreadyExisted: leads.filter(l => l.status === 'added-to-outreach' && !l.contactId).length,
     conversion: withEmail > 0 ? Math.round((moved / withEmail) * 1000) / 10 : 0,
-    withProfile: leads.filter(l => l.authorUrl).length,
+    withProfile: leads.filter(l => profileUrlOf(l)).length,
     withPost: leads.filter(l => l.postUrl).length,
     withLinks: leads.filter(l => l.links.length > 0).length,
     hiring: leads.filter(l => l.hiring).length,

@@ -4,6 +4,24 @@ export const HARD_REJECT = -999;
 
 export const isReject = (l: { fitScore: number }) => l.fitScore === HARD_REJECT;
 
+// Where a lead came from (Lead.source). '' is an older harvester row.
+export const SOURCE_LABELS: Record<string, string> = {
+  'scroll': 'LinkedIn',
+  'gmail': 'Gmail alerts',
+  'paste': 'Pasted',
+  'hn': 'HN',
+  'web-post': 'Hiring posts',
+};
+export const sourceLabel = (source: string | null | undefined) =>
+  (source && SOURCE_LABELS[source]) || source || 'LinkedIn';
+
+// The Leads sources key a lead by its post (or a pasted message), not by a person,
+// so their authorUrl is never a profile.
+const POST_SOURCES = new Set(['paste', 'hn', 'web-post']);
+/** The author's profile link, or null when there isn't one. */
+export const profileUrlOf = (l: { authorUrl: string | null; source?: string }) =>
+  l.authorUrl && !POST_SOURCES.has(l.source || '') && /^https?:\/\//i.test(l.authorUrl) ? l.authorUrl : null;
+
 export const LEAD_STATUS_LABELS: Record<LeadStatus, string> = {
   'new': 'New',
   'added-to-outreach': 'Added to outreach',

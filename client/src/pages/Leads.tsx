@@ -9,6 +9,8 @@ import LeadFilterPanel from '../components/LeadFilterPanel';
 import InterviewCell from '../components/InterviewCell';
 import { SkeletonRows } from '../components/Skeleton';
 import ScrapePanel from '../components/leads/ScrapePanel';
+import SourcesPanel from '../components/leads/SourcesPanel';
+import PasteTextImport from '../components/leads/PasteTextImport';
 import ScraperSetupGuide, { type GuideTab } from '../components/leads/ScraperSetupGuide';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
@@ -30,7 +32,7 @@ import {
   APPLY_BADGE_CLASS, APPLY_STATUS_LABELS, APPLY_STATUS_ORDER, isApplyActioned,
 } from '../lib/leads';
 import {
-  deriveCompany, explodeForPreview, isCompanyDerived, isReject,
+  deriveCompany, explodeForPreview, isCompanyDerived, isReject, profileUrlOf, sourceLabel,
   summarisePreview, sourceLeadsFromFile,
   LEAD_BADGE_CLASS, LEAD_STATUS_LABELS,
   type PreviewRow, type PreviewSummary,
@@ -64,6 +66,9 @@ export default function Leads() {
   // Scrape and Import are both full-width panels; showing either replaces the
   // other rather than stacking two of them above the table.
   const [showScrape, setShowScrape] = useState(false);
+  const [showSources, setShowSources] = useState(false);
+  // The import panel reads either a harvester JSON file or any pasted text.
+  const [importMode, setImportMode] = useState<'json' | 'text'>('json');
   const [guide, setGuide] = useState<GuideTab | null>(null);
   const [pasted, setPasted] = useState('');
   const [dragOver, setDragOver] = useState(false);
@@ -118,6 +123,20 @@ export default function Leads() {
 
   const filtered = useMemo(() => applyLeadFilters(leads, filters, outcomes), [leads, filters, outcomes]);
   const chips = useMemo(() => activeChips(filters), [filters]);
+  // Quick source picker. Harvester rows are 'scroll' or '' (older dumps), so
+  // "LinkedIn" covers both; each option is the Lead.source values it selects.
+  const sourceOptions = useMemo(() => {
+    const n = new Map<string, number>();
+    leads.forEach(l => n.set(l.source || '', (n.get(l.source || '') || 0) + 1));
+    const groups: Array<{ label: string; values: string[] }> = [
+      { label: 'LinkedIn', values: ['scroll', ''] },
+      ...[...n.keys()].filter(s => s && s !== 'scroll').map(s => ({ label: sourceLabel(s), values: [s] })),
+    ];
+    return groups
+      .map(g => ({ ...g, count: g.values.reduce((t, v) => t + (n.get(v) || 0), 0) }))
+      .filter(g => g.count > 0);
+  }, [leads]);
+  const sourceValue = filters.sources.slice().sort().join(',');
   const activeCount = countActive(filters);
 
   const setFilter = (patch: Partial<LeadFilters>) => { setFilters(f => ({ ...f, ...patch })); resetPage(); };
@@ -316,27 +335,44 @@ export default function Leads() {
             <i className="ti ti-book" /> Guide
           </button>
           <button className="btn btn-sm" type="button"
-            onClick={() => { setShowScrape(v => !v); setShowImport(false); }}>
+            onClick={() => { setShowScrape(v => !v); setShowImport(false); setShowSources(false); }}>
             <i className={showScrape ? 'ti ti-x' : 'ti ti-brand-linkedin'} /> {showScrape ? 'Close scrape' : 'Scrape'}
           </button>
+          <button className="btn btn-sm" type="button" title="Hiring posts and HN Who is hiring — more places to find real emails"
+            onClick={() => { setShowSources(v => !v); setShowImport(false); setShowScrape(false); }}>
+            <i className={showSources ? 'ti ti-x' : 'ti ti-world-search'} /> {showSources ? 'Close sources' : 'Sources'}
+          </button>
           <button className="btn btn-primary" type="button"
-            onClick={() => { setShowImport(v => !v); setShowScrape(false); }}>
+            onClick={() => { setShowImport(v => !v); setShowScrape(false); setShowSources(false); }}>
             <i className={showImport ? 'ti ti-x' : 'ti ti-file-code'} /> {showImport ? 'Close import' : 'Import leads'}
           </button>
         </>
       }
     >
-      <ScrapePanel open={showScrape} onOpen={() => { setShowScrape(true); setShowImport(false); }}
+      <ScrapePanel open={showScrape} onOpen={() => { setShowScrape(true); setShowImport(false); setShowSources(false); }}
         onImported={reload} onHelp={() => setGuide('setup')} />
+
+      <SourcesPanel open={showSources} onImported={() => { reload().catch(() => { /* the table refreshes on the next load */ }); }} />
 
       {guide && <ScraperSetupGuide initialTab={guide} onClose={() => setGuide(null)} />}
 
       {showImport && (
         <div className="section" style={{ marginBottom: 18 }}>
           <div className="section-head">
-            <span className="section-title">Import harvester JSON</span>
+            <span className="section-title">Import leads</span>
+          </div>
+          <div className="nav-tabs import-mode">
+            <button type="button" className={`nav-tab${importMode === 'json' ? ' active' : ''}`} onClick={() => setImportMode('json')}>
+              <i className="ti ti-file-code" style={{ marginRight: 4 }} />Harvester JSON
+            </button>
+            <button type="button" className={`nav-tab${importMode === 'text' ? ' active' : ''}`} onClick={() => setImportMode('text')}>
+              <i className="ti ti-clipboard-text" style={{ marginRight: 4 }} />Paste text
+            </button>
           </div>
 
+          {importMode === 'text' ? (
+            <PasteTextImport onSaved={async () => { setShowImport(false); resetPage(); await reload(); }} />
+          ) : (<>
           <div className="upload-zone"
             style={dragOver ? { borderColor: 'var(--accent)', background: 'var(--accent-bg)' } : undefined}
             onDragOver={e => { e.preventDefault(); setDragOver(true); }}
@@ -418,6 +454,7 @@ export default function Leads() {
               </div>
             </div>
           )}
+          </>)}
         </div>
       )}
 
@@ -440,6 +477,18 @@ export default function Leads() {
         <input type="text" placeholder="Search name, email, company, links..." value={filters.search}
           onChange={e => setFilter({ search: e.target.value })}
           style={{ flex: 1, minWidth: 180, maxWidth: 280 }} />
+        {sourceOptions.length > 1 && (
+          <select value={sourceValue} aria-label="Source" style={{ width: 'auto' }}
+            onChange={e => setFilter({ sources: e.target.value ? e.target.value.split(',').map(v => v) : [] })}>
+            <option value="">All sources</option>
+            {sourceOptions.map(o => (
+              <option key={o.label} value={o.values.slice().sort().join(',')}>{o.label} ({o.count})</option>
+            ))}
+            {sourceValue && !sourceOptions.some(o => o.values.slice().sort().join(',') === sourceValue) && (
+              <option value={sourceValue}>Custom (from Filters)</option>
+            )}
+          </select>
+        )}
         <div style={{ position: 'relative' }}>
           <button className={`btn btn-sm${showFilters || activeCount > 0 ? ' btn-primary' : ''}`} type="button"
             data-filter-trigger onClick={() => setShowFilters(v => !v)}>
@@ -543,9 +592,12 @@ export default function Leads() {
                     <Avatar name={l.authorName} />
                     <div>
                       <div className="name" style={{ whiteSpace: 'normal', maxWidth: 260 }}>
-                        {l.authorUrl
-                          ? <a href={l.authorUrl} target="_blank" rel="noopener noreferrer">{l.authorName}</a>
+                        {profileUrlOf(l)
+                          ? <a href={profileUrlOf(l)!} target="_blank" rel="noopener noreferrer">{l.authorName}</a>
                           : l.authorName}
+                        {l.source && l.source !== 'scroll' && (
+                          <span className="source-chip" title={`Found by: ${sourceLabel(l.source)}`}>{sourceLabel(l.source)}</span>
+                        )}
                       </div>
                       <div className="email">
                         {l.email || <span style={{ color: 'var(--text3)' }}>no email</span>}

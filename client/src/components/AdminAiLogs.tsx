@@ -13,6 +13,7 @@ const FEATURES: Array<{ key: AiFeature; label: string; hint: string }> = [
   { key: 'classify', label: 'Reply sorting', hint: 'Sorting an incoming reply into a category' },
   { key: 'draft', label: 'Reply drafts', hint: 'Writing a first draft of a reply' },
   { key: 'discover', label: 'Discover', hint: "Reading names off a company's team page" },
+  { key: 'sources', label: 'Lead sources', hint: 'Reading job posts from Paste text, HN and Hiring posts' },
   { key: 'other', label: 'Other', hint: 'Calls made without a feature label (scripts, tests)' },
 ];
 const featureLabel = (f: string) => FEATURES.find(x => x.key === f)?.label || f;
