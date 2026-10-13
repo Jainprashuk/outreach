@@ -136,7 +136,7 @@ router.get('/users', async (req, res) => {
       // purely to become booleans, and must never reach the response.
       User.find({}, {
         email: 1, name: 1, createdAt: 1, lastLoginAt: 1, isAdmin: 1, status: 1,
-        onboarding: 1, workerTokenHash: 1, shareTokenHash: 1,
+        onboarding: 1, workerTokenHash: 1, shareTokenHash: 1, libraryAccess: 1, libraryOptOut: 1,
         lastActiveAt: 1, emailOptOut: 1, emailBlockedByAdmin: 1,
       }).sort({ createdAt: 1 }).lean(),
 
@@ -270,6 +270,9 @@ router.get('/users', async (req, res) => {
         email: u.email,
         name: u.name || '',
         isAdmin: u.isAdmin === true,
+        // Booleans only: can they see the shared Library, and do they share into it.
+        libraryAccess: u.libraryAccess === true,
+        librarySharing: u.libraryOptOut !== true,
         status: u.status || 'active',
         createdAt: u.createdAt || null,
         lastLoginAt: u.lastLoginAt || null,
@@ -510,6 +513,29 @@ router.patch('/users/:id', async (req, res) => {
     }).catch(() => {});
 
     res.json({ ok: true, revoked });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Turn the shared Library tab on or off for one account. Admins always see it,
+ * so this only matters for everyone else. Answers with the flag and nothing else.
+ */
+router.post('/users/:id/library-access', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Not a valid account id' });
+    const on = req.body && req.body.on;
+    if (typeof on !== 'boolean') return res.status(400).json({ error: 'Expected { on: true|false }' });
+    const target = await User.findById(req.params.id, { email: 1 }).lean();
+    if (!target) return res.status(404).json({ error: 'No such account' });
+    await User.updateOne({ _id: target._id }, { $set: { libraryAccess: on } });
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'library-access',
+      message: `${target.email}: library access -> ${on}`,
+      meta: { targetUserId: String(target._id), targetEmail: target.email, libraryAccess: on },
+    }).catch(() => {});
+    res.json({ ok: true, libraryAccess: on });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

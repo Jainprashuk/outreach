@@ -35,6 +35,16 @@ const userSchema = new mongoose.Schema({
   // check must be `isAdmin === true`, never `isAdmin !== false`.
   isAdmin: { type: Boolean, default: false },
 
+  // Shared Library (routes/library.js). Two separate switches:
+  //   libraryAccess  — an admin let this account SEE the Library tab. Off unless
+  //                    turned on; admins always see it. Check `=== true`.
+  //   libraryOptOut  — the user's own choice to keep THEIR data out of it. A
+  //                    missing field means shared, so check `!== true`.
+  // Neither is backfilled: .lean() reads a missing field as undefined, and both
+  // checks are written so that undefined means the default.
+  libraryAccess: { type: Boolean, default: false },
+  libraryOptOut: { type: Boolean, default: false },
+
   // invited  — an admin whitelisted the address; has never signed in
   // active   — has completed at least one sign-in
   // disabled — access revoked, data kept

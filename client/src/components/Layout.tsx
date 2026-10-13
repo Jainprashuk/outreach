@@ -37,7 +37,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
   minimal?: boolean;
 }) {
   const { theme, toggleTheme } = useTheme(); // applies data-theme + provides the toggle
-  const { owner, isAdmin } = useSession();
+  const { owner, isAdmin, canSeeLibrary } = useSession();
   const { reminders } = useInterviews();
   const actionQueue = useActionQueue();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -108,6 +108,9 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
       {item('/leads', 'ti-target-arrow', 'Leads', 'Hiring posts collected from LinkedIn, with recruiters’ emails and apply links. Move the good ones to outreach.')}
       {item('/discover', 'ti-compass', 'Discover', 'Type a company: find people who work there and guess their work email. You choose who moves to outreach.')}
       {item('/companies', 'ti-building', 'Companies', 'One page per company: your contacts there from every source, LinkedIn posts, Naukri jobs, interviews, the email format and whether it’s worth searching.')}
+      {/* Display only — requireLibraryAccess re-checks on every request. Hidden
+          unless an admin turned it on for this account. */}
+      {canSeeLibrary && item('/library', 'ti-books', 'Library', 'Contacts, leads, Discover people and companies from every user, in one shared list. Only the details — never anyone’s sends or replies. Add the ones you want to your outreach.')}
       {item('/naukri', 'ti-briefcase-2', 'Naukri', 'Keeps your Naukri profile fresh and applies to the jobs you approve, using a worker on your computer.')}
       {item('/campaigns', 'ti-calendar-repeat', 'Campaigns', 'Hands-off sending: give it a list and it emails a set number of people a day for you.')}
       {item('/logs', 'ti-list-details', 'Logs', 'A record of everything the app did — sends, imports, scrapes, errors — for checking what happened and when.')}

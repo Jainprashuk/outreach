@@ -1397,6 +1397,10 @@ export interface AdminUserRow {
   email: string;
   name: string;
   isAdmin: boolean;
+  /** Can see the shared Library tab (admins always can). */
+  libraryAccess?: boolean;
+  /** Their data is part of the shared Library (they have not opted out). */
+  librarySharing?: boolean;
   status: 'active' | 'invited' | 'disabled' | 'n/a';
   createdAt: string | null;
   lastLoginAt: string | null;
@@ -1452,6 +1456,12 @@ export const adminInviteApi = (email: string, opts?: { name?: string; isAdmin?: 
 export const adminUpdateUserApi = (id: string, patch: { status?: string; isAdmin?: boolean }) =>
   apiFetch<{ ok: true; revoked: number }>(`/api/admin/users/${id}`, {
     method: 'PATCH', body: JSON.stringify(patch),
+  });
+
+/** Show or hide the shared Library tab for one account (admins always see it). */
+export const adminSetLibraryAccessApi = (id: string, on: boolean) =>
+  apiFetch<{ ok: true; libraryAccess: boolean }>(`/api/admin/users/${id}/library-access`, {
+    method: 'POST', body: JSON.stringify({ on }),
   });
 
 export const adminRevokeSessionsApi = (id: string) =>
@@ -2423,3 +2433,52 @@ export interface AiCallDetail extends Omit<AiCallRow, 'promptPreview' | 'outputP
 export const adminAiCallsApi = (params: Record<string, string>) =>
   apiFetch<AiCallsView>(`/api/admin/ai-calls?${new URLSearchParams(params)}`);
 export const adminAiCallApi = (id: string) => apiFetch<AiCallDetail>(`/api/admin/ai-calls/${encodeURIComponent(id)}`);
+
+// ── Shared Library ───────────────────────────────────────────────────────────
+// Every account's contact data, pooled — never anyone's progress. Behind
+// requireLibraryAccess on the server; the session's canSeeLibrary only decides
+// whether to show the link.
+
+export type LibraryTab = 'people' | 'leads' | 'discover' | 'companies';
+export interface LibraryAddedBy { name: string; you: boolean }
+interface LibraryRowBase { key: string; addedBy: LibraryAddedBy[]; firstAt: string | null; lastAt: string | null }
+interface LibraryPersonFlags { email: string; bounced: boolean; inMine: boolean }
+export interface LibraryPerson extends LibraryRowBase, LibraryPersonFlags {
+  name: string; company: string; role: string; jobTitle: string; linkedin: string;
+  /** lead | discover | naukri | outreach */
+  sources: string[];
+}
+export interface LibraryLead extends LibraryRowBase, LibraryPersonFlags {
+  name: string; company: string; role: string; location: string;
+  authorUrl: string; postUrl: string; postedAt: string | null;
+  /** scroll | paste | hn | web-post | gmail */
+  sources: string[];
+}
+export interface LibraryProspect extends LibraryRowBase, LibraryPersonFlags {
+  name: string; title: string; company: string; domain: string; linkedin: string;
+  emailPattern: string; emailConfidence: '' | 'high' | 'medium' | 'low' | 'generic';
+  foundVia: string[];
+}
+export interface LibraryCompany extends LibraryRowBase {
+  domain: string; company: string; people: number; contacts: number; leads: number; prospects: number;
+  contributors: number;
+  /** Formats people set for this company in Discover, with how many accounts agree. */
+  formats: { pattern: string; accounts: number; tested: boolean }[];
+  genericEmails: string[];
+}
+export type LibraryRow = LibraryPerson | LibraryLead | LibraryProspect | LibraryCompany;
+export interface LibraryPage<R = LibraryRow> { rows: R[]; total: number; page: number; pages: number; limit: number; ids?: string[] }
+
+export const loadLibraryApi = (tab: LibraryTab, params: Record<string, string>, signal?: AbortSignal) =>
+  apiFetch<LibraryPage>(`/api/library/${tab}?${new URLSearchParams(params)}`, { signal });
+
+export interface LibraryImportResult {
+  created: number; existing: number; filled: number;
+  noEmail: number; bounced: number; blocked: number; lowConfidence: number; notFound: number;
+}
+export const importLibraryApi = (tab: LibraryTab, keys: string[], template: string) =>
+  apiFetch<LibraryImportResult>('/api/library/import', { method: 'POST', body: JSON.stringify({ tab, keys, template }) });
+
+export const librarySharingApi = () => apiFetch<{ sharing: boolean }>('/api/settings/library-sharing');
+export const setLibrarySharingApi = (sharing: boolean) =>
+  apiFetch<{ sharing: boolean }>('/api/settings/library-sharing', { method: 'PUT', body: JSON.stringify({ sharing }) });

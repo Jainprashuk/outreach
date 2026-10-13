@@ -6,6 +6,7 @@ import Mailbox from './pages/Mailbox';
 import Leads from './pages/Leads';
 import Discover from './pages/Discover';
 import Companies from './pages/Companies';
+import Library from './pages/Library';
 import Naukri from './pages/Naukri';
 import Jobs from './pages/Jobs';
 import CampaignsRouter from './pages/campaigns/CampaignsRouter';
@@ -63,6 +64,12 @@ function AdminOnly({ children }: { children: ReactNode }) {
   return isAdmin ? <>{children}</> : <NotAuthorised variant="admin" />;
 }
 
+// Display gate only — requireLibraryAccess on the server is the boundary.
+function LibraryOnly({ children }: { children: ReactNode }) {
+  const { canSeeLibrary } = useSession();
+  return canSeeLibrary ? <>{children}</> : <Navigate to="/" replace />;
+}
+
 export default function App() {
   const { loading } = useSession();
 
@@ -92,6 +99,7 @@ export default function App() {
       <Route path="/target-company" element={<DiscoverRedirect />} />
       <Route path="/companies" element={owner(<Companies />)} />
       <Route path="/companies/:key" element={owner(<Companies />)} />
+      <Route path="/library" element={owner(<LibraryOnly><Library /></LibraryOnly>)} />
       <Route path="/jobs" element={owner(<Jobs />)} />
       <Route path="/naukri" element={owner(<Naukri />)} />
       {/* Splat route: the list, wizard and detail screens live in CampaignsRouter. */}

@@ -13,6 +13,7 @@ const { createSession, resolveSession, destroySession, setCookieHeader, clearCoo
 const { logEvent } = require('../lib/activityLog');
 const { isOnboarded } = require('../lib/onboarding');
 const { notifyAdmins } = require('../lib/notify');
+const { canSeeLibrary } = require('../lib/requireLibraryAccess');
 
 const router = express.Router();
 
@@ -21,6 +22,7 @@ const publicUser = (user) => ({
   email: user.email,
   name: user.name || '',
   isAdmin: user.isAdmin === true,
+  canSeeLibrary: canSeeLibrary(user),
   onboarded: isOnboarded(user),
 });
 
@@ -167,7 +169,7 @@ router.get('/session', async (req, res) => {
   try {
     const session = await resolveSession(req);
     if (!session) return res.json({ authenticated: false });
-    const user = await User.findById(session.userId, { email: 1, name: 1, isAdmin: 1, status: 1, onboarding: 1 }).lean();
+    const user = await User.findById(session.userId, { email: 1, name: 1, isAdmin: 1, libraryAccess: 1, status: 1, onboarding: 1 }).lean();
     // A session whose user was deleted, or whose access was revoked while they
     // were signed in.
     if (!user || user.status === 'disabled') return res.json({ authenticated: false });

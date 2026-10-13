@@ -176,4 +176,28 @@ router.put('/email-prefs', async (req, res) => {
   }
 });
 
+// ── Shared Library ───────────────────────────────────────────────────────────
+// Whether THIS account's contacts, leads and Discover people are part of the
+// shared Library (routes/library.js). Shared unless turned off. Separate from
+// /api/settings so that payload stays exactly as it was.
+router.get('/library-sharing', async (req, res) => {
+  try {
+    const u = await User.findById(req.userId, { libraryOptOut: 1 }).lean();
+    res.json({ sharing: !(u && u.libraryOptOut === true) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.put('/library-sharing', async (req, res) => {
+  try {
+    const { sharing } = req.body || {};
+    if (typeof sharing !== 'boolean') return res.status(400).json({ error: 'Expected { sharing: true|false }' });
+    await User.updateOne({ _id: req.userId }, { $set: { libraryOptOut: !sharing } });
+    res.json({ sharing });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
