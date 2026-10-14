@@ -11,6 +11,8 @@ const { deadline } = require('../lib/http');
 const actionQueue = require('../lib/actionQueue');
 const contactList = require('../lib/contactList');
 const contactListDb = require('../lib/contactListDb');
+const analyticsSummary = require('../lib/analyticsSummary');
+const Interview = require('../models/Interview');
 
 const router = express.Router();
 
@@ -147,6 +149,32 @@ router.get('/list', async (req, res) => {
     // contact, only for an account with data the database version can't match.
     res.json(await contactListDb.listResponse(Contact, req.userId, req.query, serialize)
       || await contactListDb.memoryListResponse(Contact, req.userId, req.query, serialize));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/contacts/analytics-summary?tz=<IANA zone> — everything the Outreach
+// analytics page derives from contacts, computed in the database (lib/analyticsSummary.js).
+// `tz` is the browser's, for its day/weekday/hour buckets.
+const validTz = (tz) => {
+  try { if (tz) { new Intl.DateTimeFormat('en-US', { timeZone: tz }); return tz; } } catch (_) { /* below */ }
+  return 'UTC';
+};
+router.get('/analytics-summary', async (req, res) => {
+  try {
+    res.json(await analyticsSummary.summary(Contact, Interview, req.userId, { tz: validTz(req.query.tz) }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/contacts/analytics-activity — just the Recent activity card's contact side,
+// which the page asks for again every minute.
+router.get('/analytics-activity', async (req, res) => {
+  try {
+    const scope = { userId: new mongoose.Types.ObjectId(String(req.userId)), deleted: { $ne: true } };
+    res.json(await analyticsSummary.activity(Contact.collection, scope, Date.now()));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

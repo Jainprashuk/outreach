@@ -17,11 +17,13 @@ import {
   EMPTY_FUNNEL, indexInterviews, interviewFunnel, type InterviewFunnel,
 } from '../lib/interviewAnalytics';
 import {
-  ACTIVITY_META, ACTIVITY_WINDOWS, analyze, buildActivityEvents, buildDailySeries,
-  computeMetrics, countActivity, cvar, dayKey, fmtAgo, fmtDur, pct,
-  STATUS_META, type ActivityWindowKey, type Analyzed, type Metrics,
+  ACTIVITY_META, ACTIVITY_WINDOWS, cvar, fmtAgo, fmtDur, mergeActivity, pct,
+  STATUS_META, type ActivityWindowKey, type Metrics,
 } from '../lib/analytics';
-import { adminOverviewApi, loadAnalyticsContactsApi, type Contact, type Interview } from '../lib/api';
+import {
+  adminOverviewApi, loadAnalyticsActivityApi, loadAnalyticsSummaryApi,
+  type AnalyticsActivity, type AnalyticsSummary, type Interview,
+} from '../lib/api';
 
 // ── Time-series chart (2-series, hover crosshair) ────────────────────────────
 const TS = { W: 720, H: 210, padL: 32, padR: 12, padT: 12, padB: 26 };
@@ -144,16 +146,11 @@ function ReplyTimeChart({ pairs }: { pairs: number[] }) {
 }
 
 // ── Weekly rhythm ────────────────────────────────────────────────────────────
-function WeekdayChart({ A }: { A: Analyzed[] }) {
+// Sends and replies per weekday, Monday first (counted on the server, in your timezone).
+function WeekdayChart({ sends, reps }: { sends: number[]; reps: number[] }) {
   const c1 = cvar('--chart-1') || '#4f46e5';
   const c2 = cvar('--chart-2') || '#0d9488';
   const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const sends = [0, 0, 0, 0, 0, 0, 0], reps = [0, 0, 0, 0, 0, 0, 0];
-  const idx = (t: number) => (new Date(t).getDay() + 6) % 7;
-  A.forEach(a => {
-    a.sends.forEach(s => sends[idx(s.t)]++);
-    a.replies.forEach(r => reps[idx(r.t)]++);
-  });
   const maxS = Math.max(1, ...sends), maxR = Math.max(1, ...reps);
   const W = 340, H = 190, padL = 8, padR = 8, padT = 16, padB = 26;
   const cW = W - padL - padR, cH = H - padT - padB;
@@ -185,28 +182,28 @@ function WeekdayChart({ A }: { A: Analyzed[] }) {
 }
 
 // ── Recent activity (counts per event type across time windows) ──────────────
-function ActivitySection({ A, interviews }: { A: Analyzed[]; interviews: Interview[] }) {
+function ActivitySection({ initial, interviews }: { initial: AnalyticsActivity; interviews: Interview[] }) {
+  const [activity, setActivity] = useState(initial);
   const [now, setNow] = useState(() => Date.now());
   const [win, setWin] = useState<ActivityWindowKey>('24h');
+  useEffect(() => { setActivity(initial); }, [initial]);
 
-  // Windows are relative to "now", so keep it ticking while the page is open.
+  // Windows are relative to "now", so keep it ticking while the page is open: the
+  // contact side is counted on the server, so each tick asks it again (not while hidden).
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 60000);
+    const id = setInterval(() => {
+      if (document.visibilityState === 'hidden') return;
+      loadAnalyticsActivityApi()
+        .then(a => { setActivity(a); setNow(Date.now()); })
+        .catch(() => setNow(Date.now()));
+    }, 60000);
     return () => clearInterval(id);
   }, []);
 
-  const events = useMemo(() => buildActivityEvents(A, interviews), [A, interviews]);
-  const cols = useMemo(
-    () => ACTIVITY_WINDOWS.map(w => ({ ...w, counts: countActivity(events, w.ms, now) })),
-    [events, now],
-  );
+  const cols = useMemo(() => mergeActivity(activity, interviews, now), [activity, interviews, now]);
 
   const activeWin = ACTIVITY_WINDOWS.find(w => w.key === win)!;
-  const feed = useMemo(() => {
-    const from = now - activeWin.ms;
-    const known = new Set(ACTIVITY_META.map(m => m.type));
-    return events.filter(e => !e.countOnly && e.t >= from && e.t <= now && known.has(e.type)).slice(0, 40);
-  }, [events, now, activeWin]);
+  const feed = cols.find(c => c.key === win)!.feed;
 
   const rows = ACTIVITY_META.filter(m => cols.some(col => col.counts[m.type] > 0));
   const totalIn = (key: ActivityWindowKey) => {
@@ -313,13 +310,11 @@ function ActivitySection({ A, interviews }: { A: Analyzed[]; interviews: Intervi
 interface Insight { i: string; c: string; t: string; x: React.ReactNode; }
 
 function buildInsights(
-  A: Analyzed[], m: Metrics, templates: Record<string, { name: string }>, iv: InterviewFunnel,
+  S: AnalyticsSummary, m: Metrics, templates: Record<string, { name: string }>, iv: InterviewFunnel,
 ): Insight[] {
   const items: Insight[] = [];
 
-  const tmap: Record<string, { s: number; r: number }> = {};
-  A.forEach(a => { if (!a.everSent) return; const k = a.c.template || '—'; tmap[k] = tmap[k] || { s: 0, r: 0 }; tmap[k].s++; if (a.everReplied) tmap[k].r++; });
-  const ranked = Object.entries(tmap).filter(([, v]) => v.s >= 20)
+  const ranked = S.templates.map(([k, v]) => [k, { s: v.sent, r: v.replied }] as const).filter(([, v]) => v.s >= 20)
     .map(([k, v]) => ({ name: templates[k]?.name || k, rate: pct(v.r, v.s), s: v.s }))
     .sort((a, b) => b.rate - a.rate);
   if (ranked.length >= 2) {
@@ -329,7 +324,7 @@ function buildInsights(
     items.push({ i: 'ti-trophy', c: '--green', t: 'Template baseline', x: <><b>{ranked[0].name}</b> converts at {ranked[0].rate}% over {ranked[0].s} sends.</> });
   }
 
-  const allPairs = A.flatMap(a => a.pairs).sort((a, b) => a - b);
+  const allPairs = [...S.pairs].sort((a, b) => a - b);
   if (allPairs.length >= 5) {
     const med = allPairs[Math.floor(allPairs.length / 2)];
     const within24 = pct(allPairs.filter(h => h <= 24).length, allPairs.length);
@@ -337,8 +332,7 @@ function buildInsights(
       x: <>Median reply lands in <b>{fmtDur(med)}</b>; {within24}% arrive within 24 hours. If no reply after ~3 days, it likely isn't coming — follow up then.</> });
   }
 
-  const wd = [0, 0, 0, 0, 0, 0, 0], hr = new Array(24).fill(0);
-  A.forEach(a => a.replies.forEach(r => { const d = new Date(r.t); wd[d.getDay()]++; hr[d.getHours()]++; }));
+  const wd = S.replyWd, hr = S.replyHr;
   const wdMax = Math.max(...wd);
   if (wdMax > 2) {
     const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -354,13 +348,7 @@ function buildInsights(
       x: <>Follow-ups recovered <b>{m.afterFuCount}</b> replies ({share}% of all replies) that the first email didn't get. Reply rate on follow-ups: {pct(m.afterFuCount, m.fuCount)}%.</> });
   }
 
-  const now = Date.now(), wk = 7 * 86400000;
-  const inWin = (t: number, from: number, to: number) => t >= from && t < to;
-  let s1 = 0, s2 = 0, r1 = 0, r2 = 0;
-  A.forEach(a => {
-    a.sends.forEach(s => { if (inWin(s.t, now - wk, now)) s1++; else if (inWin(s.t, now - 2 * wk, now - wk)) s2++; });
-    a.replies.forEach(r => { if (inWin(r.t, now - wk, now)) r1++; else if (inWin(r.t, now - 2 * wk, now - wk)) r2++; });
-  });
+  const { s1, s2, r1, r2 } = S.week;
   if (s1 + s2 > 0) {
     const dir = s1 > s2 ? 'up' : s1 < s2 ? 'down' : 'flat';
     items.push({
@@ -382,7 +370,7 @@ function buildInsights(
   }
 
   if (m.repliedCount >= 5) {
-    const adv = A.filter(a => a.everReplied && (a.ever.has('in-review') || a.ever.has('closed'))).length;
+    const adv = S.adv;
     items.push({ i: 'ti-target-arrow', c: '--indigo', t: 'Reply → pipeline conversion',
       x: <><b>{adv}</b> of {m.repliedCount} repliers ({pct(adv, m.repliedCount)}%) progressed to review or closed.{m.repliedCount - adv > 0 ? ` ${m.repliedCount - adv} replies may still need a next step.` : ''}</> });
   }
@@ -408,7 +396,7 @@ function buildInsights(
       x: <>{m.repliedCount} contacts have replied but none are tracked in Interviews — flag the real conversations there so this page can measure what replies actually turn into.</> });
   }
 
-  const due = A.filter(a => (a.c.status === 'sent' || a.c.status === 'replied') && !a.c.followUpSentAt && a.c.lastSentAt && (now - new Date(a.c.lastSentAt).getTime()) > 3 * 86400000).length;
+  const due = S.due;
   if (due > 0 || m.queuedNow > 0) {
     items.push({ i: 'ti-hourglass-high', c: '--amber', t: 'Waiting on you',
       x: <>{due > 0 ? <><b>{due}</b> contacts are due a follow-up</> : null}{due > 0 && m.queuedNow > 0 ? ' · ' : ''}{m.queuedNow > 0 ? <><b>{m.queuedNow}</b> are queued and never emailed</> : null}.</> });
@@ -420,6 +408,18 @@ function buildInsights(
 
   return items;
 }
+
+// Before the first load: every figure zero (the page shows skeletons until then).
+const EMPTY_ACTIVITY: AnalyticsActivity = { now: 0, counts: {}, feeds: {} };
+const EMPTY_SUMMARY: AnalyticsSummary = {
+  now: 0, tz: 'UTC',
+  metrics: { total: 0, sentCount: 0, repliedCount: 0, fuCount: 0, bouncedCount: 0, afterFuCount: 0,
+    beforeFuCount: 0, inReviewEver: 0, closedEver: 0, queuedNow: 0, replyRate: 0, bounceRate: 0 },
+  statusCurrent: [], statusEver: [], journey: [], templates: [], companies: [], pairs: [],
+  series: { 30: [], 90: [] }, weekday: { sends: [0, 0, 0, 0, 0, 0, 0], replies: [0, 0, 0, 0, 0, 0, 0] },
+  replyWd: [0, 0, 0, 0, 0, 0, 0], replyHr: new Array(24).fill(0), week: { s1: 0, s2: 0, r1: 0, r2: 0 },
+  adv: 0, due: 0, interviewRows: [], activity: EMPTY_ACTIVITY,
+};
 
 // ── Page ─────────────────────────────────────────────────────────────────────
 export default function Analytics() {
@@ -452,9 +452,9 @@ export default function Analytics() {
   const [range, setRange] = useState(30);
   const [statusMode, setStatusMode] = useState<'current' | 'ever'>('current');
   const [refreshing, setRefreshing] = useState(false);
-  // Held here, not in the app store: these carry only the fields analytics reads
-  // (GET /api/contacts?view=analytics), so no other page may mistake them for full contacts.
-  const [contacts, setContacts] = useState<Contact[]>([]);
+  // Everything this view derives from contacts, computed on the server
+  // (GET /api/contacts/analytics-summary) — the contacts themselves never come down.
+  const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
   // Until the first load lands the Outreach view shows skeletons — an empty list
   // would otherwise render every figure as a confident 0.
   const [contactsLoaded, setContactsLoaded] = useState(false);
@@ -465,7 +465,7 @@ export default function Analytics() {
       if (view === 'leads') setLeadsRefresh(n => n + 1);
       else if (view === 'discover') setDiscoverRefresh(n => n + 1);
       else {
-        await Promise.all([loadAnalyticsContactsApi().then(setContacts), app.loadTemplates()]);
+        await Promise.all([loadAnalyticsSummaryApi().then(setSummary), app.loadTemplates()]);
         setContactsLoaded(true);
       }
     } catch (err: any) {
@@ -479,19 +479,20 @@ export default function Analytics() {
   // Leads or Reports (?view=…) and you switch across afterwards.
   useEffect(() => { if (!viewUser && view === 'outreach' && !contactsLoaded && !refreshing) load(); }, [view, viewUser]);
 
-  const A = useMemo(() => contacts.map(analyze), [contacts]);
-  const m = useMemo(() => computeMetrics(A), [A]);
+  const S = summary ?? EMPTY_SUMMARY;
+  const m = S.metrics;
   // Interviews live in their own store keyed on (sourceType, sourceId), so the
   // join has to happen here — no contact field records that someone interviewed.
+  // Only the contacts an interview points at can count, so those are all the server sends.
   const iv = useMemo(
     () => (interviewsLoaded
-      ? interviewFunnel(contacts, indexInterviews(interviews), 'contact', c => c.email)
+      ? interviewFunnel(S.interviewRows, indexInterviews(interviews), 'contact', c => c.email)
       : EMPTY_FUNNEL),
-    [contacts, interviews, interviewsLoaded],
+    [S, interviews, interviewsLoaded],
   );
-  const series = useMemo(() => buildDailySeries(A, range), [A, range]);
-  const allPairs = useMemo(() => A.flatMap(a => a.pairs), [A]);
-  const insights = useMemo(() => buildInsights(A, m, app.templates, iv), [A, m, app.templates, iv]);
+  const series = S.series[String(range) as '30' | '90'] || [];
+  const allPairs = S.pairs;
+  const insights = useMemo(() => buildInsights(S, m, app.templates, iv), [S, m, app.templates, iv]);
 
   const sortedPairs = [...allPairs].sort((a, b) => a - b);
   const median = sortedPairs.length ? sortedPairs[Math.floor(sortedPairs.length / 2)] : null;
@@ -525,38 +526,20 @@ export default function Analytics() {
   const accent = cvar('--accent') || '#4f46e5';
 
   // Status breakdown
-  const statusRows = statusMode === 'current'
-    ? Object.entries(A.reduce<Record<string, number>>((acc, a) => { acc[a.c.status] = (acc[a.c.status] || 0) + 1; return acc; }, {}))
-        .map(([s, n]) => ({ s, n }))
-    : Object.keys(STATUS_META).map(s => ({ s, n: A.filter(a => a.ever.has(s)).length })).filter(r => r.n > 0);
-  statusRows.sort((a, b) => b.n - a.n);
+  const statusRows = statusMode === 'current' ? S.statusCurrent : S.statusEver;
+  const nowByStatus = new Map(S.statusCurrent.map(r => [r.s, r.n]));
 
   // Reply journey
-  const repliers = A.filter(a => a.everReplied);
-  const journeyRows = Object.entries(repliers.reduce<Record<string, number>>((acc, a) => {
-    acc[a.outcome] = (acc[a.outcome] || 0) + 1; return acc;
-  }, {})).sort((a, b) => b[1] - a[1]);
+  const repliersCount = m.repliedCount;
+  const journeyRows = S.journey;
 
   // Templates
-  const tplRows = Object.entries(A.reduce<Record<string, { sent: number; replied: number }>>((acc, a) => {
-    if (!a.everSent) return acc;
-    const k = a.c.template || '—';
-    acc[k] = acc[k] || { sent: 0, replied: 0 };
-    acc[k].sent++;
-    if (a.everReplied) acc[k].replied++;
-    return acc;
-  }, {})).map(([k, v]) => ({ name: app.templates[k]?.name || k, ...v, rate: pct(v.replied, v.sent) }))
+  const tplRows = S.templates
+    .map(([k, v]) => ({ name: app.templates[k]?.name || k, ...v, rate: pct(v.replied, v.sent) }))
     .sort((a, b) => b.rate - a.rate);
 
   // Companies
-  const coRows = Object.entries(A.reduce<Record<string, { total: number; replied: number }>>((acc, a) => {
-    const co = (a.c.company || '').trim(); if (!co) return acc;
-    acc[co] = acc[co] || { total: 0, replied: 0 };
-    acc[co].total++;
-    if (a.everReplied) acc[co].replied++;
-    return acc;
-  }, {})).map(([co, v]) => ({ co, ...v, rate: pct(v.replied, v.total) }))
-    .sort((a, b) => b.total - a.total).slice(0, 8);
+  const coRows = S.companies;
 
   const teal = cvar('--teal') || '#085041';
   const amber = cvar('--amber') || '#8a5c00';
@@ -691,7 +674,7 @@ export default function Analytics() {
         ))}
       </div>
 
-      <ActivitySection A={A} interviews={interviews} />
+      <ActivitySection initial={S.activity} interviews={interviews} />
 
       <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
         <Card title="Outreach funnel" icon="ti-filter"
@@ -719,9 +702,9 @@ export default function Analytics() {
           {statusRows.length === 0 ? <div className="an-empty"><i className="ti ti-inbox" />No contacts yet</div>
             : statusRows.map(({ s, n }) => {
               const meta = STATUS_META[s] || { label: s, c: '--slate' };
-              const nowN = statusMode === 'ever' ? A.filter(a => a.c.status === s).length : null;
+              const nowN = statusMode === 'ever' ? (nowByStatus.get(s) || 0) : null;
               return (
-                <HBar key={s} label={meta.label} dotColor={cvar(meta.c)} n={n} d={A.length || 1} fill={cvar(meta.c)}
+                <HBar key={s} label={meta.label} dotColor={cvar(meta.c)} n={n} d={m.total || 1} fill={cvar(meta.c)}
                   extra={nowN !== null && nowN !== n ? ` · now: ${nowN}` : ''} />
               );
             })}
@@ -785,20 +768,20 @@ export default function Analytics() {
 
       <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
         <Card title="Reply journey" icon="ti-route" sub="What happened to contacts after they replied" delay=".24s">
-          {repliers.length === 0 ? <div className="an-empty"><i className="ti ti-route-off" />No replies yet</div> : (
+          {repliersCount === 0 ? <div className="an-empty"><i className="ti ti-route-off" />No replies yet</div> : (
             <>
               <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12 }}>
-                {repliers.length} contacts have replied at least once. They currently sit at:
+                {repliersCount} contacts have replied at least once. They currently sit at:
               </div>
               {journeyRows.map(([s, n]) => {
                 const meta = STATUS_META[s] || { label: s, c: '--slate' };
-                return <HBar key={s} label={meta.label} dotColor={cvar(meta.c)} n={n} d={repliers.length} fill={cvar(meta.c)} />;
+                return <HBar key={s} label={meta.label} dotColor={cvar(meta.c)} n={n} d={repliersCount} fill={cvar(meta.c)} />;
               })}
             </>
           )}
         </Card>
         <Card title="Weekly rhythm" icon="ti-calendar-week" sub="Sends vs. replies by day of week" delay=".28s">
-          <WeekdayChart A={A} />
+          <WeekdayChart sends={S.weekday.sends} reps={S.weekday.replies} />
         </Card>
       </div>
 

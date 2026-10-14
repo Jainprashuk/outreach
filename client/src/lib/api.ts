@@ -189,6 +189,53 @@ export const loadMailboxContactsApi = () => apiFetch<Contact[]>('/api/contacts?v
 /** Only the contacts Send step 3 reads (approved + queued, or pending) — same objects as loadContactsApi. */
 export const loadSendContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=send');
 export const loadAnalyticsContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=analytics');
+
+/** The contact side of the Recent activity card, at the server's `now` (lib/analyticsSummary.js). */
+export interface AnalyticsActivity {
+  now: number;
+  /** window key → activity type → count. */
+  counts: Record<string, Record<string, number>>;
+  /** window key → the newest 40 contact events in it, newest first. */
+  feeds: Record<string, Array<{ id: string; name: string; company?: string; t: number; type: string }>>;
+}
+
+/** Everything the Outreach analytics page derives from contacts, computed on the server. */
+export interface AnalyticsSummary {
+  now: number;
+  tz: string;
+  metrics: {
+    total: number; sentCount: number; repliedCount: number; fuCount: number; bouncedCount: number;
+    afterFuCount: number; beforeFuCount: number; inReviewEver: number; closedEver: number; queuedNow: number;
+    replyRate: number; bounceRate: number;
+  };
+  statusCurrent: Array<{ s: string; n: number }>;
+  statusEver: Array<{ s: string; n: number }>;
+  journey: Array<[string, number]>;
+  /** Template key → contacts emailed / ever replied, in the page's table order before its sort. */
+  templates: Array<[string, { sent: number; replied: number }]>;
+  companies: Array<{ co: string; total: number; replied: number; rate: number }>;
+  /** Hours from a send to the reply it earned, ascending. */
+  pairs: number[];
+  series: Record<'30' | '90', Array<{ day: number; sent: number; replied: number }>>;
+  /** Monday-first, for the Weekly rhythm chart. */
+  weekday: { sends: number[]; replies: number[] };
+  /** Replies by Date#getDay() (Sunday-first) and by hour, in your timezone. */
+  replyWd: number[];
+  replyHr: number[];
+  week: { s1: number; s2: number; r1: number; r2: number };
+  adv: number;
+  due: number;
+  /** The contacts the Interviews store points at — the only rows the interview funnel counts. */
+  interviewRows: Array<{ id: string; email: string }>;
+  activity: AnalyticsActivity;
+}
+
+const browserTz = () => {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+};
+export const loadAnalyticsSummaryApi = () =>
+  apiFetch<AnalyticsSummary>(`/api/contacts/analytics-summary?tz=${encodeURIComponent(browserTz())}`);
+export const loadAnalyticsActivityApi = () => apiFetch<AnalyticsActivity>('/api/contacts/analytics-activity');
 export const loadTemplatesApi = () => apiFetch<Template[]>('/api/templates');
 
 /** Counts the Dashboard and Contacts headers show, over every contact. */
