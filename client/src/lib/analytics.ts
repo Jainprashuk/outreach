@@ -1,7 +1,7 @@
 // Port of the event-based analytics derivations from analytics.html.
 // All metrics count what contacts EVER passed through (statusHistory), not just
 // their current resting status.
-import type { Contact, Interview } from './api';
+import type { AnalyticsActivity, Contact, Interview } from './api';
 import { FOLLOWED_UP, INTERVIEW_STATUS_LABELS, INTERVIEW_STATUS_ORDER } from './interviews';
 
 export const STATUS_META: Record<string, { label: string; c: string }> = {
@@ -225,6 +225,26 @@ export function buildActivityEvents(A: Analyzed[], interviews: Interview[] = [])
   });
 
   return out.sort((x, y) => y.t - x.t);
+}
+
+/**
+ * The Recent activity card from the server's contact events plus the interview events
+ * held here — what buildActivityEvents + countActivity gave over every contact. On equal
+ * timestamps contact events come first, as they were pushed first there.
+ */
+export function mergeActivity(server: AnalyticsActivity, interviews: Interview[], now: number) {
+  const ivEvents = buildActivityEvents([], interviews);
+  const known = new Set(ACTIVITY_META.map(m => m.type));
+  return ACTIVITY_WINDOWS.map(w => {
+    const counts = countActivity(ivEvents, w.ms, now);
+    Object.entries(server.counts[w.key] || {}).forEach(([type, n]) => { if (type in counts) counts[type] += n; });
+    const from = now - w.ms;
+    const inWin = (e: ActivityEvent) => !e.countOnly && e.t >= from && e.t <= now && known.has(e.type);
+    const contactFeed: ActivityEvent[] = (server.feeds[w.key] || [])
+      .map(e => ({ t: e.t, type: e.type, c: { id: e.id, name: e.name, company: e.company } }));
+    const feed = [...contactFeed, ...ivEvents].filter(inWin).sort((x, y) => y.t - x.t).slice(0, 40);
+    return { ...w, counts, feed };
+  });
 }
 
 /** Counts per activity type inside `ms` before `now` (only known types are kept). */
