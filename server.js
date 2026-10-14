@@ -34,6 +34,7 @@ const { classifyReply } = require('./lib/replyClassifier');
 const actionQueue = require('./lib/actionQueue');
 const { runBackfillBatch } = require('./routes/contacts');
 const { notifyMailboxScan, notifyInterviewsDue } = require('./lib/mailboxNotifications');
+const { createContactIndex } = require('./lib/mailboxContacts');
 const Lead = require('./models/Lead');
 const { serialize: serializeLead, leadOutcomes } = require('./routes/leads');
 
@@ -717,19 +718,24 @@ const cleanMsgId = (id) => (id || '').replace(/^<|>$/g, '') || null;
 const threadHasMessageId = (contact, messageId) =>
   !!messageId && (contact.thread || []).some(t => cleanMsgId(t.messageId) === messageId);
 
-// tryMatchReply — uses pre-loaded lean maps; writes via findOneAndUpdate (no doc hydration).
+// What tryMatchReply / trySentReply look a contact up by. The scan loads those contacts
+// (contacts.ensure) before calling them, so both take the message already parsed.
+const refTokensOf = (parsed) => [
+  parsed.inReplyTo,
+  ...(Array.isArray(parsed.references) ? parsed.references : (parsed.references ? [parsed.references] : [])),
+].filter(Boolean).map(t => t.replace(/^<|>$/g, ''));
+const fromAddrOf = (parsed) => (parsed.from?.value?.[0]?.address || '').toLowerCase();
+const toAddrOf = (parsed) => (parsed.to?.value?.[0]?.address || '').toLowerCase();
+
+// tryMatchReply — uses lean maps loaded for this message; writes via findOneAndUpdate (no doc hydration).
 // Runs on every scan regardless of whether the contact already has a prior reply, so an
 // ongoing back-and-forth (2nd, 3rd, ... reply) keeps getting captured — de-duped purely on
 // message-id so the same inbound message is never appended to `thread` twice.
-const tryMatchReply = async (raw, byMessageId, byEmail, replied, userId) => {
-  const parsed = await simpleParser(raw);
-  const fromAddr = (parsed.from?.value?.[0]?.address || '').toLowerCase();
+const tryMatchReply = async (parsed, byMessageId, byEmail, replied, userId) => {
+  const fromAddr = fromAddrOf(parsed);
   if (!fromAddr || /mailer-daemon|postmaster/i.test(fromAddr)) return;
 
-  const refTokens = [
-    parsed.inReplyTo,
-    ...(Array.isArray(parsed.references) ? parsed.references : (parsed.references ? [parsed.references] : [])),
-  ].filter(Boolean).map(t => t.replace(/^<|>$/g, ''));
+  const refTokens = refTokensOf(parsed);
 
   let contact = null;
   for (const token of refTokens) {
@@ -837,15 +843,11 @@ const KEEP_ON_REPLY = ['closed', 'no-openings', 'in-review', 'blocked'];
 // was waiting on you, the queue item moves to "waiting on them" (lib/actionQueue.js).
 // De-duped on message-id, which also naturally skips messages the app already recorded at
 // send time (inngest-fns.js), since those already carry the same Message-ID header.
-const trySentReply = async (raw, byMessageId, byEmail, userId) => {
-  const parsed = await simpleParser(raw);
-  const toAddr = (parsed.to?.value?.[0]?.address || '').toLowerCase();
+const trySentReply = async (parsed, byMessageId, byEmail, userId) => {
+  const toAddr = toAddrOf(parsed);
   if (!toAddr) return;
 
-  const refTokens = [
-    parsed.inReplyTo,
-    ...(Array.isArray(parsed.references) ? parsed.references : (parsed.references ? [parsed.references] : [])),
-  ].filter(Boolean).map(t => t.replace(/^<|>$/g, ''));
+  const refTokens = refTokensOf(parsed);
 
   let contact = null;
   for (const token of refTokens) {
@@ -929,35 +931,16 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
   const bounced = [];
   const replied = [];
 
-  // Pre-load ALL contacts once with a lean projection — eliminates N+1 queries in the scan loop.
-  // `thread.messageId` only (not full text/html) keeps this payload small even as threads grow.
-  const allContacts = await Contact.find(
-    { userId: userId, deleted: { $ne: true } },
-    'email name company status bounceReason messageId updatedAt thread.messageId lastSentAt repliedAt action replyCategory lastInboundAt lastOutboundAt'
-  ).lean();
-
   // byEmailAll: for bounce matching (any status)
   // byEmail + byMessageId: for reply/sent matching — any contact that has ever been emailed
   // or replied, or has any thread activity. Deliberately NOT keyed off `status`: you can
   // manually re-triage a replied contact to closed/no-openings/in-review after reading it,
   // which would otherwise silently stop the scanner from noticing any further reply from
   // them. `lastSentAt`/`repliedAt` never get touched by that manual triage.
-  const byEmailAll  = new Map();
-  const byEmail     = new Map();
-  const byMessageId = new Map();
-
-  for (const c of allContacts) {
-    const addr = c.email.toLowerCase();
-    byEmailAll.set(addr, c);
-    const isThreadable = !!(c.lastSentAt || c.repliedAt) || (c.thread && c.thread.length > 0);
-    if (isThreadable) {
-      byEmail.set(addr, c);
-      if (c.messageId) byMessageId.set(c.messageId.replace(/^<|>$/g, ''), c);
-      for (const t of (c.thread || [])) {
-        if (t.messageId) byMessageId.set(cleanMsgId(t.messageId), c);
-      }
-    }
-  }
+  // Filled on demand: contacts.ensure() loads the contacts holding the given addresses and
+  // message ids, ahead of the lookups that need them (lib/mailboxContacts.js).
+  const contacts = createContactIndex(Contact, userId);
+  const { byEmailAll, byEmail, byMessageId } = contacts;
 
   // IMAP SINCE is a date, not a time, so every 5-minute tick matches all of today's mail —
   // and downloading every one of those in full is what pushed a scan towards Vercel's 60s
@@ -971,17 +954,22 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
     if (msg.envelope?.inReplyTo) ids.push(cleanMsgId(msg.envelope.inReplyTo));
     return ids.filter(Boolean);
   };
-  const candidates = async (uids, keep) => {
-    if (!uids.length) return [];
-    const out = [];
-    // Collect first, fetch after: imapflow can't run another command inside a fetch loop.
-    for await (const msg of client.fetch(uids, { uid: true, envelope: true, headers: ['references'] }, { uid: true })) {
-      if (keep(msg)) out.push(msg.uid);
-    }
-    return out;
-  };
   const alreadyCaptured = (msg) => byMessageId.has(cleanMsgId(msg.envelope?.messageId));
   const addr = (list) => (list?.[0]?.address || '').toLowerCase();
+  const candidates = async (uids, keep) => {
+    if (!uids.length) return [];
+    const msgs = [];
+    // Collect first, fetch after: imapflow can't run another command inside a fetch loop.
+    for await (const msg of client.fetch(uids, { uid: true, envelope: true, headers: ['references'] }, { uid: true })) {
+      msgs.push(msg);
+    }
+    // Load the contacts every key `keep` can look up, then decide.
+    await contacts.ensure({
+      emails: msgs.flatMap(m => [addr(m.envelope?.from), addr(m.envelope?.to)]),
+      messageIds: msgs.flatMap(m => [cleanMsgId(m.envelope?.messageId), ...refsOf(m)]),
+    });
+    return msgs.filter(keep).map(m => m.uid);
+  };
 
   const scanMailbox = async (mailbox) => {
     let lock;
@@ -1008,8 +996,8 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
         const hits = parseBounces(raw);
 
         if (hits.length > 0) {
+          await contacts.ensure({ emails: hits.map(h => h.email.toLowerCase()) });
           for (const { email, reason } of hits) {
-            // O(1) lookup — no DB query
             const existing = byEmailAll.get(email.toLowerCase());
             if (!existing) continue;
 
@@ -1028,7 +1016,9 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
           continue;
         }
 
-        await tryMatchReply(raw, byMessageId, byEmail, replied, userId);
+        const parsed = await simpleParser(raw);
+        await contacts.ensure({ emails: [fromAddrOf(parsed)], messageIds: refTokensOf(parsed) });
+        await tryMatchReply(parsed, byMessageId, byEmail, replied, userId);
       }
     } finally {
       lock.release();
@@ -1053,7 +1043,9 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
       for (const uid of wanted) {
         const msg = await client.fetchOne(uid, { source: true }, { uid: true });
         if (!msg?.source) continue;
-        await trySentReply(msg.source.toString('utf8'), byMessageId, byEmail, userId);
+        const parsed = await simpleParser(msg.source.toString('utf8'));
+        await contacts.ensure({ emails: [toAddrOf(parsed)], messageIds: refTokensOf(parsed) });
+        await trySentReply(parsed, byMessageId, byEmail, userId);
       }
     } finally {
       lock.release();
@@ -1090,7 +1082,12 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
   // In-app notifications for what this scan found. Awaited, not fired and forgotten: on
   // Vercel the function can be frozen once it returns, which would drop the writes.
   // Neither call throws.
-  await notifyMailboxScan(userId, { replied, bounced, contacts: allContacts });
+  // The high-bounce check needs every bounced contact, not just the ones this scan looked up.
+  // The scan's own changes are already written, so the database has them too.
+  const bouncedNow = bounced.length
+    ? await Contact.find({ userId, deleted: { $ne: true }, status: 'bounced' }, { _id: 1, status: 1 }).lean()
+    : [];
+  await notifyMailboxScan(userId, { replied, bounced, contacts: bouncedNow });
   await notifyInterviewsDue(userId);
 
   // Drains the legacy thread/classification backfill in the background, piggybacking on this
