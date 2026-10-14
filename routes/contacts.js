@@ -10,6 +10,7 @@ const { classifyReply } = require('../lib/replyClassifier');
 const { deadline } = require('../lib/http');
 const actionQueue = require('../lib/actionQueue');
 const contactList = require('../lib/contactList');
+const contactListDb = require('../lib/contactListDb');
 
 const router = express.Router();
 
@@ -133,29 +134,10 @@ router.get('/', async (req, res) => {
 //   &sort=&dir=   (Dashboard only)   &page=&limit=   &ids=1 (also every filtered id, in order)
 router.get('/list', async (req, res) => {
   try {
-    const f = contactList.parseListQuery(req.query);
-    // Same filter and order as GET / — only the fields the filters read.
-    const slim = await Contact.find({ ...BASE_FILTER, userId: req.userId }, contactList.FILTER_FIELDS)
-      .sort({ createdAt: -1 }).lean();
-    const filtered = contactList.applyListQuery(slim, f);
-
-    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 25));
-    const pages = Math.ceil(filtered.length / limit) || 1;
-    const page = Math.min(Math.max(1, parseInt(req.query.page, 10) || 1), pages);
-    const pageIds = filtered.slice((page - 1) * limit, page * limit).map(c => c._id);
-
-    // The rows themselves, whole except the thread — which neither table reads.
-    const docs = pageIds.length
-      ? await Contact.find({ _id: { $in: pageIds }, userId: req.userId }, { thread: 0 }).lean()
-      : [];
-    const byId = new Map(docs.map(d => [String(d._id), d]));
-    const contacts = pageIds.map(id => byId.get(String(id))).filter(Boolean).map(serialize);
-
-    res.json({
-      contacts, total: filtered.length, page, pages, limit,
-      stats: contactList.getStats(slim),
-      ...(req.query.ids === '1' ? { ids: filtered.map(c => String(c._id)) } : {}),
-    });
+    // Computed in the database; the in-memory version, which downloads every
+    // contact, only for an account with data the database version can't match.
+    res.json(await contactListDb.listResponse(Contact, req.userId, req.query, serialize)
+      || await contactListDb.memoryListResponse(Contact, req.userId, req.query, serialize));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
