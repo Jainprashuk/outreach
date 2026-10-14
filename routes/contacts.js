@@ -65,28 +65,37 @@ const ANALYTICS_FIELDS = {
 // query the full list runs (only the fields the predicate needs are fetched), because
 // many contacts share a createdAt (a bulk import) and a narrower query can return
 // such ties in a different order — for Send step 3 that order is the send order.
-// The predicates are the pages' own, verbatim. Proven by scripts/parity/*-view.js.
+// The predicates are the pages' own, verbatim (`keep`), and `match` is the same rule
+// for the database, so only the subset is ever downloaded. The {userId, createdAt}
+// index scan gives the full list's order, ties included, without a sort of its own.
+// Proven by scripts/parity/*-view.js.
 const SUBSET_VIEWS = {
   // pages/Mailbox.tsx: queued (GET /api/actions' match) or with an inbound message.
   mailbox: {
-    fields: { 'action.state': 1, 'thread.direction': 1 },
     keep: c => actionQueue.STATES.includes(c.action && c.action.state)
       || (c.thread || []).some(t => t.direction === 'inbound'),
+    match: { $or: [
+      { $and: [{ $eq: [{ $type: '$action' }, 'object'] }, { $in: [{ $ifNull: ['$action.state', null] }, actionQueue.STATES] }] },
+      { $anyElementTrue: [{ $map: {
+        input: { $cond: [{ $isArray: '$thread' }, '$thread', []] },
+        in: { $eq: ['$$this.direction', 'inbound'] },
+      } }] },
+    ] },
   },
   // pages/send/Step3.tsx: the approved queue it sends, and the pending ones it counts.
   send: {
-    fields: { status: 1, approvalStatus: 1 },
     keep: c => (c.status === 'queued' && c.approvalStatus === 'approved') || c.approvalStatus === 'pending',
+    match: { $or: [
+      { $and: [{ $eq: ['$status', 'queued'] }, { $eq: ['$approvalStatus', 'approved'] }] },
+      { $eq: ['$approvalStatus', 'pending'] },
+    ] },
   },
 };
 
-async function subsetView({ fields, keep }, filter) {
-  const order = await Contact.find(filter, fields).sort({ createdAt: -1 }).lean();
-  const ids = order.filter(keep).map(c => c._id);
-  if (!ids.length) return [];
-  const docs = await Contact.find({ ...filter, _id: { $in: ids } }, { 'thread.html': 0 }).lean();
-  const byId = new Map(docs.map(d => [String(d._id), d]));
-  return ids.map(id => byId.get(String(id))).filter(Boolean).map(serialize);
+async function subsetView({ match }, filter) {
+  const docs = await Contact.find({ ...filter, $expr: match }, { 'thread.html': 0 })
+    .sort({ createdAt: -1 }).hint({ userId: 1, createdAt: -1 }).lean();
+  return docs.map(serialize);
 }
 
 // GET /api/contacts
