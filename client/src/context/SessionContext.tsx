@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { API_BASE } from '../lib/api';
+import { clearLeadCache } from '../lib/leadCache';
 
 export interface SessionUser {
   id: string;
@@ -62,6 +63,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // Per-viewer UI state is not namespaced by account, so it must not survive
       // a sign-out into the next person's session on a shared browser.
       try { localStorage.removeItem('activeJobId'); } catch { /* blocked storage */ }
+      // Same for the browser copy of your leads (lib/leadCache.ts).
+      await clearLeadCache().catch(() => {});
       window.location.href = '/login';
     }
   }, []);
