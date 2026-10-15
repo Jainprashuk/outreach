@@ -1,3 +1,4 @@
+import { loadLeadOutcomesSynced, loadLeadsSynced } from './leadCache';
 // Port of the API layer from js/app.js — same endpoints, same semantics.
 
 import { reportClientIssue } from './issueReporter';
@@ -517,12 +518,13 @@ export interface LeadOutcome {
 
 export type LeadOutcomeMap = Record<string, LeadOutcome>;
 
-export const loadLeadsApi = () => apiFetch<Lead[]>('/api/leads');
+/** Every lead, as GET /api/leads returns them — through the browser copy in lib/leadCache.ts. */
+export const loadLeadsApi = () => loadLeadsSynced<Lead>();
 /** Every lead with only links/applyUrl/postUrl — enough to suggest job boards, nothing else. */
 export const loadLeadBoardLinksApi = () => apiFetch<Lead[]>('/api/leads?view=boards');
 
-export const loadLeadOutcomesApi = () =>
-  apiFetch<{ outcomes: LeadOutcomeMap; count: number }>('/api/leads/outcomes');
+/** As GET /api/leads/outcomes returns it — through the browser copy in lib/leadCache.ts. */
+export const loadLeadOutcomesApi = () => loadLeadOutcomesSynced<LeadOutcome>();
 
 export const importLeadsApi = (payload: LeadFile | SourceLead[]) =>
   apiFetch<LeadImportResult>('/api/leads/import', { method: 'POST', body: JSON.stringify(payload) });

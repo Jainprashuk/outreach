@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const Lead = require('../models/Lead');
 const Contact = require('../models/Contact');
 const { importContacts, isValidEmail } = require('../lib/contactImport');
@@ -31,35 +32,115 @@ const HARD_REJECT = -999;
 // promoted. Keyed on EMAIL, not contactId: contactId is only stamped when a new
 // contact is created, so leads whose address already existed as a contact carry
 // null and an id-based join would miss most of them.
-async function leadOutcomes(userId) {
+const OUTCOME_FIELDS = {
+  email: 1, status: 1, approvalStatus: 1, template: 1, lastSentAt: 1,
+  followUpSentAt: 1, repliedAt: 1, replySnippet: 1, bounceReason: 1, failReason: 1,
+};
+
+// The contacts behind leads' addresses, in the order the outcome map is built (a later
+// contact with the same address wins). `projection` lets the cache sync ask for ids only.
+async function outcomeContacts(userId, projection) {
   const emails = await Lead.distinct('email', { userId, email: { $ne: null }, ...BASE_FILTER });
-  if (emails.length === 0) return {};
+  if (emails.length === 0) return [];
+  return Contact.find({ userId, email: { $in: emails }, deleted: { $ne: true } }, projection)
+    .collation({ locale: 'en', strength: 2 }).lean();
+}
 
-  const contacts = await Contact.find(
-    { userId, email: { $in: emails }, deleted: { $ne: true } },
-    {
-      email: 1, status: 1, approvalStatus: 1, template: 1, lastSentAt: 1,
-      followUpSentAt: 1, repliedAt: 1, replySnippet: 1, bounceReason: 1, failReason: 1,
-    }
-  ).collation({ locale: 'en', strength: 2 }).lean();
+// One contact's entry in the outcome map, and its key.
+const outcomeKey = (c) => c.email.trim().toLowerCase();
+const outcomeOfContact = (c) => ({
+  contactId: String(c._id),
+  status: c.status,
+  approvalStatus: c.approvalStatus,
+  template: c.template || '',
+  lastSentAt: c.lastSentAt || null,
+  followUpSentAt: c.followUpSentAt || null,
+  repliedAt: c.repliedAt || null,
+  replySnippet: c.replySnippet || null,
+  bounceReason: c.bounceReason || null,
+  failReason: c.failReason || null,
+});
 
+async function leadOutcomes(userId) {
   const outcomes = {};
-  for (const c of contacts) {
-    outcomes[c.email.trim().toLowerCase()] = {
-      contactId: String(c._id),
-      status: c.status,
-      approvalStatus: c.approvalStatus,
-      template: c.template || '',
-      lastSentAt: c.lastSentAt || null,
-      followUpSentAt: c.followUpSentAt || null,
-      repliedAt: c.repliedAt || null,
-      replySnippet: c.replySnippet || null,
-      bounceReason: c.bounceReason || null,
-      failReason: c.failReason || null,
-    };
-  }
+  for (const c of await outcomeContacts(userId, OUTCOME_FIELDS)) outcomes[outcomeKey(c)] = outcomeOfContact(c);
   return outcomes;
 }
+
+// ── Browser cache sync (client/src/lib/leadCache.ts) ─────────────────────────
+// The Leads page, Leads analytics and Export read every lead and every outcome; on the
+// throttled Atlas free tier that download takes ~36 s. The browser keeps a copy, and
+// each visit asks only for the current order with a hash of every document, then
+// fetches the documents whose hash it doesn't hold. Order and documents are exactly
+// what GET /api/leads and GET /api/leads/outcomes return (scripts/parity/lead-cache.js).
+const SYNC_CHUNK = 500;
+const LEAD_ORDER = { fitScore: -1, createdAt: -1 };
+const hashOf = (doc) => ({ $toString: { $toHashedIndexKey: doc } });
+const asIds = (ids) => (Array.isArray(ids) ? ids : []).slice(0, SYNC_CHUNK)
+  .filter(id => mongoose.isValidObjectId(id)).map(id => new mongoose.Types.ObjectId(String(id)));
+
+// GET /api/leads/sync → { user, order: [[id, hash]] } in GET /api/leads' order.
+router.get('/sync', async (req, res) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(String(req.userId));
+    const filter = { userId, ...BASE_FILTER };
+    const [order, hashes] = await Promise.all([
+      Lead.find(filter, { _id: 1 }).sort(LEAD_ORDER).lean(),
+      Lead.collection.aggregate([{ $match: filter }, { $project: { h: hashOf('$$ROOT') } }]).toArray(),
+    ]);
+    const h = new Map(hashes.map(r => [String(r._id), r.h]));
+    res.json({ user: String(userId), order: order.map(d => [String(d._id), h.get(String(d._id))]) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/leads/sync { ids } → [{ id, h, v }] — v is the lead exactly as GET /api/leads sends it.
+router.post('/sync', async (req, res) => {
+  try {
+    req.skipAudit = true; // a read sent as POST for its id list — nothing changes
+    const userId = new mongoose.Types.ObjectId(String(req.userId));
+    const rows = await Lead.collection.aggregate([
+      { $match: { _id: { $in: asIds(req.body?.ids) }, userId, ...BASE_FILTER } },
+      { $project: { _id: 0, doc: '$$ROOT', h: hashOf('$$ROOT') } },
+    ]).toArray();
+    res.json(rows.map(r => ({ id: String(r.doc._id), h: r.h, v: serialize(r.doc) })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/leads/outcomes/sync → { user, order: [[contactId, hash]] } in the outcome map's order.
+router.get('/outcomes/sync', async (req, res) => {
+  try {
+    const userId = new mongoose.Types.ObjectId(String(req.userId));
+    const order = await outcomeContacts(userId, { _id: 1 });
+    const hashes = order.length ? await Contact.collection.aggregate([
+      { $match: { _id: { $in: order.map(c => c._id) }, userId } },
+      { $project: { h: hashOf(Object.fromEntries(Object.keys(OUTCOME_FIELDS).map(k => [k, `$${k}`]))) } },
+    ]).toArray() : [];
+    const h = new Map(hashes.map(r => [String(r._id), r.h]));
+    res.json({ user: String(userId), order: order.map(c => [String(c._id), h.get(String(c._id))]) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/leads/outcomes/sync { ids } → [{ id, h, v: { key, outcome } }].
+router.post('/outcomes/sync', async (req, res) => {
+  try {
+    req.skipAudit = true; // a read sent as POST for its id list — nothing changes
+    const userId = new mongoose.Types.ObjectId(String(req.userId));
+    const fields = Object.fromEntries(Object.keys(OUTCOME_FIELDS).map(k => [k, `$${k}`]));
+    const rows = await Contact.collection.aggregate([
+      { $match: { _id: { $in: asIds(req.body?.ids) }, userId, deleted: { $ne: true } } },
+      { $project: { doc: { _id: '$_id', ...fields }, h: hashOf(fields) } },
+    ]).toArray();
+    res.json(rows.map(r => ({ id: String(r._id), h: r.h, v: { key: outcomeKey(r.doc), outcome: outcomeOfContact(r.doc) } })));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.get('/outcomes', async (req, res) => {
   try {
@@ -320,3 +401,7 @@ router.delete('/:id', async (req, res) => {
 module.exports = router;
 module.exports.serialize = serialize;
 module.exports.leadOutcomes = leadOutcomes;
+module.exports.outcomeContacts = outcomeContacts;
+module.exports.outcomeKey = outcomeKey;
+module.exports.outcomeOfContact = outcomeOfContact;
+module.exports.OUTCOME_FIELDS = OUTCOME_FIELDS;
