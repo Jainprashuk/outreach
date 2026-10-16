@@ -1,7 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Layout from '../components/Layout';
 import { loadActivityLogsApi, type ActivityLog } from '../lib/api';
-import { useVisibleInterval } from '../hooks/useVisibleInterval';
+import { useAdaptiveInterval } from '../hooks/useAdaptiveInterval';
+
+// 3s while entries keep arriving; after 5 polls with nothing new, 30s until the
+// next new entry. An open Logs tab with nothing happening was 1,200 requests an hour.
+const FAST_MS = 3000;
+const SLOW_MS = 30_000;
+const SLOW_AFTER_UNCHANGED = 5;
 
 export default function Logs() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
@@ -9,8 +15,16 @@ export default function Logs() {
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [feature, setFeature] = useState<'all' | 'campaign' | 'outreach' | 'leads' | 'interviews' | 'postings' | 'classifier'>('all');
   const [eventType, setEventType] = useState<'all' | 'email' | 'changes' | 'failures'>('all');
-  const load = () => loadActivityLogsApi().then(setLogs).catch(e => setError(e.message));
-  useVisibleInterval(load, 3000);
+  const newestRef = useRef<string | null>(null);
+  const [unchanged, setUnchanged] = useState(0);
+  const load = () => loadActivityLogsApi().then(next => {
+    const newest = next[0]?.id ?? null;
+    setUnchanged(n => (newest === newestRef.current ? n + 1 : 0));
+    newestRef.current = newest;
+    setLogs(next);
+    setError('');
+  }).catch(e => setError(e.message));
+  useAdaptiveInterval(load, { fastMs: FAST_MS, slowMs: SLOW_MS, fast: unchanged < SLOW_AFTER_UNCHANGED });
   const filtered = useMemo(() => logs.filter(log => {
     const outreach = ['contacts', 'templates', 'settings', 'jobs', 'email'];
     if (feature === 'outreach' && !outreach.includes(log.category)) return false;
@@ -25,13 +39,14 @@ export default function Logs() {
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
       <button className={`btn btn-sm${filtersOpen ? ' btn-primary' : ''}`} type="button" onClick={() => setFiltersOpen(open => !open)}><i className="ti ti-filter" /> Filters</button>
       <span className="contact-count-badge">{filtered.length} entries</span>
+      <button className="btn btn-sm" type="button" onClick={() => { setUnchanged(0); load(); }}><i className="ti ti-refresh" /> Refresh</button>
     </div>
     {filtersOpen && <div className="info-box" style={{ marginBottom: 14, display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap' }}>
       <label><div style={{ fontSize: 12, marginBottom: 4 }}>Feature</div><select value={feature} onChange={e => setFeature(e.target.value as typeof feature)}><option value="all">All features</option><option value="campaign">Campaigns</option><option value="outreach">Outreach</option><option value="leads">Leads</option><option value="interviews">Interviews</option><option value="postings">Job postings</option><option value="classifier">Reply classifier</option></select></label>
       <label><div style={{ fontSize: 12, marginBottom: 4 }}>Event</div><select value={eventType} onChange={e => setEventType(e.target.value as typeof eventType)}><option value="all">All events</option><option value="email">Mail sent / failed</option><option value="changes">Creates, edits, deletes</option><option value="failures">Failures only</option></select></label>
       <button className="btn btn-sm" type="button" onClick={() => { setFeature('all'); setEventType('all'); }}>Clear filters</button>
     </div>}
-    <div className="info-box" style={{ marginBottom: 14 }}><i className="ti ti-refresh" />Updates automatically every 3 seconds. Reads, searches, and filters are not logged.</div>
+    <div className="info-box" style={{ marginBottom: 14 }}><i className="ti ti-refresh" />Updates automatically: every 3 seconds while new entries arrive, every 30 seconds when quiet. Reads, searches, and filters are not logged.</div>
     <div className="table-card"><table><thead><tr><th>Time</th><th>Area</th><th>Action</th><th>Details</th></tr></thead><tbody>
       {filtered.length === 0 ? <tr><td colSpan={4}><div className="empty-state"><i className="ti ti-notes" />No matching log entries</div></td></tr> : filtered.map(log => {
         const meta = log.meta as Record<string, any>;

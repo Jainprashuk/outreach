@@ -1185,6 +1185,7 @@ router.post('/users/:id/check-mailbox', async (req, res) => {
     }
     const r = await check(target._id);
     if (r.skipped === 'no_credentials') return res.json({ ok: false, skipped: 'no_credentials' });
+    if (r.skipped === 'already_running') return res.status(409).json({ error: 'A check of this mailbox is already running.' });
     // replied/bounced are lists of addresses — content. Only their sizes leave.
     const size = (v) => (Array.isArray(v) ? v.length : Number(v) || 0);
     const out = { ok: true, scanned: Number(r.scanned) || 0, replied: size(r.replied), bounced: size(r.bounced) };
@@ -1281,10 +1282,14 @@ const HOUR = 60 * MIN;
 const DAY = 24 * HOUR;
 const IST_MS = 5.5 * HOUR;
 
-// What each scheduled endpoint is ASKED to do (.github/workflows).
+// What each scheduled job is ASKED to do: paths are .github/workflows, `inngest:`
+// names are Inngest crons (lib/campaigns/inngest.js, lib/mailbox/inngest.js).
+// Mirrors SCHEDULE in lib/cronBeat.js.
 const CRONS = [
-  { name: '/api/check-mailbox', label: 'Mailbox check', everyMin: 5 },
-  { name: '/api/campaigns/run-due', label: 'Campaign releases', everyMin: 60 },
+  { name: '/api/check-mailbox', label: 'Mailbox check (GitHub)', everyMin: 5 },
+  { name: '/api/campaigns/run-due', label: 'Campaign releases (GitHub)', everyMin: 60 },
+  { name: 'inngest:mailbox-sweep', label: 'Mailbox check', everyMin: 120 },
+  { name: 'inngest:campaigns-run-due', label: 'Campaign releases', everyMin: 60 },
   { name: '/api/postings/sync', label: 'Job postings sync', everyMin: 360 },
 ];
 

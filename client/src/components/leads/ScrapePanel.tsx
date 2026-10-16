@@ -4,7 +4,7 @@ import {
   type ScrapeStatus, type ScrapeRun,
 } from '../../lib/api';
 import { useToast } from '../../context/ToastContext';
-import { useVisibleInterval } from '../../hooks/useVisibleInterval';
+import { useAdaptiveInterval } from '../../hooks/useAdaptiveInterval';
 
 // Harvesting runs on a worker on the Mac — `jl harvest` drives a real logged-in
 // Chrome over CDP and cannot run on Vercel. So the button always QUEUES; the
@@ -12,6 +12,9 @@ import { useVisibleInterval } from '../../hooks/useVisibleInterval';
 // That distinction has to be visible before you click, not discovered after.
 
 const POLL_MS = 3000;
+// Nothing running: the panel only needs to notice a run that starts elsewhere
+// (the worker's own schedule). Starting one here reloads at once.
+const IDLE_POLL_MS = 60_000;
 const MAX_QUERIES = 20;   // MAX_SEARCHES in scroll_harvest.py — the cap is deliberate
 const HISTORY_LIMIT = 15;
 const DAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -148,7 +151,8 @@ export default function ScrapePanel({ open, onOpen, onImported, onHelp }: Props)
   }, [loadRuns]);
 
   useEffect(() => { loadRuns(); }, [loadRuns]);
-  useVisibleInterval(load, POLL_MS);
+  // Polls even while the panel is closed: a running harvest still shows a banner then.
+  useAdaptiveInterval(load, { fastMs: POLL_MS, slowMs: IDLE_POLL_MS, fast: !!status?.activeRun });
 
   useEffect(() => {
     if (!status?.activeRun) return;

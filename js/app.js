@@ -444,7 +444,9 @@ const App = (() => {
     } catch (_) {}
   };
 
+  let _sjwLastPollAt = 0;
   const _sjwPoll = async () => {
+    _sjwLastPollAt = Date.now();
     try {
       const res = await fetch(`${API_BASE}/api/jobs/active-all`);
       if (!res.ok) return;
@@ -481,7 +483,12 @@ const App = (() => {
   const _sjwCheckForActiveJob = () => {
     if (_sjwIsStep3()) return; // step3 has its own inline progress
     _sjwPoll();
-    if (!_sjwInterval) _sjwInterval = setInterval(_sjwPoll, 3000);
+    // 3s while a card is showing; with none, every 30s; never in a hidden tab.
+    if (!_sjwInterval) _sjwInterval = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (_sjwJobs.size === 0 && Date.now() - _sjwLastPollAt < 30000) return;
+      _sjwPoll();
+    }, 3000);
   };
 
   // Placeholder — real implementation wired up after window._app is defined below

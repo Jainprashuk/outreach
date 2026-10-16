@@ -162,6 +162,8 @@ export default function Step3() {
     pollRef.current = setInterval(async () => {
       const id = jobIdRef.current;
       if (!id) return;
+      // A hidden tab skips the tick; the next one after it is shown catches up.
+      if (document.visibilityState !== 'visible') return;
       try {
         const res = await fetch(`${API_BASE}/api/jobs/${id}`);
         if (!res.ok) return;
