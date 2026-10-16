@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import Layout from '../../components/Layout';
 import UpcomingBatchTable from '../../components/campaigns/UpcomingBatchTable';
@@ -477,7 +478,9 @@ export default function CampaignDetail() {
       )}
       {confirmRun && (() => {
         const n = nextRunAt(c);
-        return (
+        // Portalled to <body> like the app's other modals: inside the page content
+        // it is positioned against the scrolled content, not the screen.
+        return createPortal(
           <div className="edit-modal-wrap open" onClick={(e) => { if (e.target === e.currentTarget) setConfirmRun(false); }}>
             <div className="edit-modal" role="dialog" aria-modal="true" style={{ maxWidth: 480 }}>
               <div className="reply-modal-header">
@@ -500,7 +503,8 @@ export default function CampaignDetail() {
                 </button>
               </div>
             </div>
-          </div>
+          </div>,
+          document.body,
         );
       })()}
     </Layout>
