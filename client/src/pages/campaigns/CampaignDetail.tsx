@@ -30,6 +30,15 @@ export default function CampaignDetail() {
   // Two questions live under Upcoming: who goes next, and when does this finish.
   const [upcomingView, setUpcomingView] = useState<'batch' | 'schedule'>('batch');
   const [busy, setBusy] = useState(false);
+  // In-page, not window.confirm: the browser can dismiss a native dialog by
+  // itself (focus change, dialog suppression), which made it flash and vanish.
+  const [confirmRun, setConfirmRun] = useState(false);
+  useEffect(() => {
+    if (!confirmRun) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setConfirmRun(false); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [confirmRun]);
   // Without this, the page shows a precise countdown for a release that can
   // never fire, which is worse than showing nothing.
   const [meta, setMeta] = useState<CampaignMeta | null>(null);
@@ -103,15 +112,7 @@ export default function CampaignDetail() {
   const resume = () => act(() => resumeCampaignApi(c.id), 'Campaign resumed.');
 
   const runNow = async () => {
-    const n = nextRunAt(c);
-    const ok = window.confirm(
-      `Send ${c.contactsPerDay} emails now?\n\n`
-      + `This releases today's batch immediately instead of waiting`
-      + `${n ? ` for ${fmtIst(n)}` : ''}. The emails go out one every `
-      + `${Math.round(60 / Math.max(1, c.ratePerHour))} minutes and cannot be recalled once sent, `
-      + `and today's scheduled release will not run again.`,
-    );
-    if (!ok) return;
+    setConfirmRun(false);
     setBusy(true);
     try {
       const r = await runCampaignNowApi(c.id);
@@ -165,7 +166,7 @@ export default function CampaignDetail() {
       actions={<>
         <Link to="/campaigns" className="btn btn-sm"><i className="ti ti-arrow-left" /> All campaigns</Link>
         {c.status === 'running' && (
-          <button className="btn btn-sm" type="button" disabled={busy} onClick={runNow}>
+          <button className="btn btn-sm" type="button" disabled={busy} onClick={() => setConfirmRun(true)}>
             <i className="ti ti-player-track-next" /> Run now
           </button>
         )}
@@ -474,6 +475,34 @@ export default function CampaignDetail() {
           </section>
         </div>
       )}
+      {confirmRun && (() => {
+        const n = nextRunAt(c);
+        return (
+          <div className="edit-modal-wrap open" onClick={(e) => { if (e.target === e.currentTarget) setConfirmRun(false); }}>
+            <div className="edit-modal" role="dialog" aria-modal="true" style={{ maxWidth: 480 }}>
+              <div className="reply-modal-header">
+                <div style={{ fontWeight: 600, fontSize: 15 }}>Send {c.contactsPerDay} emails now?</div>
+                <button aria-label="Close" className="btn btn-sm" onClick={() => setConfirmRun(false)} type="button">
+                  <i className="ti ti-x" />
+                </button>
+              </div>
+              <div style={{ padding: '14px 0', fontSize: 13, lineHeight: 1.6, color: 'var(--text2)' }}>
+                This releases today&apos;s batch immediately instead of waiting{n ? ` for ${fmtIst(n)}` : ''}.
+                The emails go out one every {Math.round(60 / Math.max(1, c.ratePerHour))} minutes and cannot be
+                recalled once sent, and today&apos;s scheduled release will not run again.
+              </div>
+              <div className="reply-modal-footer">
+                <button className="btn btn-sm" onClick={() => setConfirmRun(false)} type="button">
+                  <i className="ti ti-x" /> Cancel
+                </button>
+                <button className="btn btn-primary" onClick={runNow} type="button" disabled={busy}>
+                  <i className="ti ti-player-track-next" /> Send now
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </Layout>
   );
 }
