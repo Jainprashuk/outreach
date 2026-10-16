@@ -267,7 +267,6 @@ export default function Leads() {
     );
     setSelected(new Set());
     await reload();
-    app.loadContacts().catch(() => { /* the Contacts page will fetch on visit */ });
   };
 
   const setApplyStatusBulk = async (applyStatus: ApplyStatus) => {

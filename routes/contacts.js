@@ -208,6 +208,19 @@ router.get('/companies', async (req, res) => {
   }
 });
 
+// Campaign wizard duplicate count: every address you have, lowercased — the same
+// set it used to build from the full list, without downloading the contacts.
+router.get('/emails', async (req, res) => {
+  try {
+    const docs = await Contact.find({ ...BASE_FILTER, userId: req.userId }, { email: 1, _id: 0 }).lean();
+    const emails = new Set();
+    for (const d of docs) if (d.email) emails.add(String(d.email).toLowerCase());
+    res.json({ emails: [...emails] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get('/stats', async (req, res) => {
   try {
     const [agg] = await Contact.aggregate([

@@ -8,7 +8,7 @@ import Stepper from './Stepper';
 import { useApp } from '../../context/AppContext';
 import { useToast } from '../../context/ToastContext';
 import { bodyToHtml, renderTemplate } from '../../lib/format';
-import type { ApprovalStatus, Contact } from '../../lib/api';
+import { loadSendContactsApi, type ApprovalStatus, type Contact } from '../../lib/api';
 
 interface Approval extends Contact { localApproval: ApprovalStatus; }
 
@@ -41,11 +41,13 @@ export default function Step2() {
   // Load THIS page's own fresh data and seed approvals from the result — mirrors
   // step2.html, which always loadContacts() then filters. Seeding from the shared
   // context would use stale data (e.g. after reset-for-send on the previous step).
+  // ?view=send holds every pending contact, in the full list's order, so the filter
+  // below gives the same approvals without downloading every contact.
   useEffect(() => {
     (async () => {
       try {
         const [contacts] = await Promise.all([
-          app.loadContacts(), app.loadTemplates(), app.loadSettings(),
+          loadSendContactsApi(), app.loadTemplates(), app.loadSettings(),
         ]);
         const pending = contacts.filter(c =>
           c.approvalStatus === 'pending' && (!filterIds || filterIds.has(c.id)),

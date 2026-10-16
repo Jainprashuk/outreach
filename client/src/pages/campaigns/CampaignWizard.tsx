@@ -12,6 +12,7 @@ import {
 } from '../../lib/campaignMapping';
 import { uploadCampaign } from '../../lib/campaignUpload';
 import {
+  loadContactEmailsApi,
   appendCampaignRowsApi, createCampaignApi, deleteCampaignApi, loadCampaignMetaApi,
   type Campaign, type CampaignMeta,
 } from '../../lib/api';
@@ -55,10 +56,14 @@ export default function CampaignWizard() {
   const launchingRef = useRef(false);
 
   useEffect(() => { loadCampaignMetaApi().then(setMeta).catch(() => {}); }, []);
-  // Templates for the picker, contacts for the duplicate count. Landing here
-  // directly (rather than via a page that already called init) would otherwise
-  // give an empty template list and a duplicate count of zero.
-  useEffect(() => { if (!app.loaded) app.init().catch(() => {}); }, [app.loaded]);
+  // Templates for the picker. Landing here directly (rather than via a page that
+  // already loaded them) would otherwise give an empty template list.
+  useEffect(() => { if (!app.metaLoaded) app.initMeta().catch(() => {}); }, [app.metaLoaded]);
+  // Addresses only, for the duplicate count — not the full contact list.
+  const [existingEmails, setExistingEmails] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    loadContactEmailsApi().then(r => setExistingEmails(new Set(r.emails))).catch(() => {});
+  }, []);
   useEffect(() => {
     if (!templateKey) {
       const first = Object.keys(app.templates)[0];
@@ -77,13 +82,9 @@ export default function CampaignWizard() {
   const grid = sheets[sheetIdx]?.grid || [];
   const { headers, rows } = useMemo(() => splitGrid(grid, headerRow), [grid, headerRow]);
 
-  // Free and client-side: the contact list is already loaded, so we can tell the
-  // user how many of their rows are people they have already emailed. The server
-  // applies the same rule authoritatively at release time.
-  const existingEmails = useMemo(
-    () => new Set(app.contacts.map((c) => c.email.toLowerCase())),
-    [app.contacts],
-  );
+  // existingEmails (above) tells the user how many of their rows are people they
+  // have already emailed. The server applies the same rule authoritatively at
+  // release time.
 
   // ~15ms at 10k x 50. Deliberately NOT debounced — instant feedback when you
   // change a <select> is the entire point of the mapping screen.

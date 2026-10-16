@@ -183,6 +183,8 @@ export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promi
 // ── Endpoint wrappers (1:1 with window._app) ─────────────────────────────────
 export const loadContactsApi = () => apiFetch<Contact[]>('/api/contacts');
 /** Your companies with a contact count each — for the Contacts company filter. */
+/** Every contact address, lowercased — for the campaign wizard's "already in Contacts" count. */
+export const loadContactEmailsApi = () => apiFetch<{ emails: string[] }>('/api/contacts/emails');
 export const loadContactCompaniesApi = () => apiFetch<{ companies: { company: string; n: number }[] }>('/api/contacts/companies');
 /** Only the contacts the Mailbox can show (queued or with an inbound message) — same objects as loadContactsApi. */
 export const loadMailboxContactsApi = () => apiFetch<Contact[]>('/api/contacts?view=mailbox');
