@@ -571,9 +571,12 @@ const { lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliv
 const { prospectsSearch } = require('./lib/prospectSearch');
 const { companiesEnrich, companiesEnrichDaily } = require('./lib/discovery/enrich');
 const { sourcesHn, sourcesHnDaily, sourcesWeb, sourcesWebDaily } = require('./lib/sources/inngest');
+const { campaignsRunDue } = require('./lib/campaigns/inngest');
+// checkMailboxForUser is declared further down; function declarations are hoisted.
+const { mailboxSweep, mailboxCheckUser } = require('./lib/mailbox/inngest').createMailboxFunctions({ checkMailboxForUser });
 app.use('/api/inngest', serve({
   client: inngest,
-  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch, companiesEnrich, companiesEnrichDaily, sourcesHn, sourcesHnDaily, sourcesWeb, sourcesWebDaily, reportFailedFunctions],
+  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch, companiesEnrich, companiesEnrichDaily, sourcesHn, sourcesHnDaily, sourcesWeb, sourcesWebDaily, reportFailedFunctions, campaignsRunDue, mailboxSweep, mailboxCheckUser],
 }));
 
 // Sign-in is an emailed one-time code; see routes/auth.js and lib/loginCode.js.
@@ -592,6 +595,7 @@ app.use('/api/logs', requireDb, require('./routes/logs'));
 app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/actions', requireDb, require('./routes/actions'));
 app.use('/api/notifications', requireDb, require('./routes/notifications'));
+app.use('/api/pulse', requireDb, require('./routes/pulse'));
 app.use('/api/replies', requireDb, require('./routes/replies'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));
@@ -898,12 +902,55 @@ const SLOW_SCAN_MS = 30_000;
 // every account: there is no longer a single mailbox to check.
 // `sentLookbackDays` widens only the Sent-folder pass — for the one-time catch-up of replies
 // you typed in Gmail before the Sent folder was read at all (scripts/backfill-sent-replies.js).
-async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
+//
+// `phase` splits one scan across several calls, each inside Vercel's 60s, for the
+// scheduled scan of a mailbox that has gone unchecked for long (lib/mailbox/inngest.js):
+//   'inbox'    INBOX and Spam only; returns what it found, stamps nothing
+//   'sent'     the Sent folder only
+//   'finalize' stamps lastMailboxCheckAt (at carry.startedAt) and sends the
+//              notifications for carry.replied / carry.bounced; no backfill, as
+//              the full scan skips it after a slow scan too
+// No phase is the whole scan, exactly as before.
+async function checkMailboxForUser(userId, opts = {}) {
   const sender = await mailer.getSenderFor(userId);
   if (!sender.email || !sender.appPassword) {
     return { ok: false, skipped: 'no_credentials' };
   }
 
+  const lease = await claimMailboxScan(userId);
+  if (!lease) return { ok: false, skipped: 'already_running' };
+  try {
+    return await runMailboxCheck(userId, sender, opts);
+  } finally {
+    await releaseMailboxScan(userId, lease);
+  }
+}
+
+// Longer than one 60s function, so a lease outlives the scan that holds it, and
+// short enough that one left behind by a killed function frees itself quickly.
+const MAILBOX_LEASE_MS = 3 * 60 * 1000;
+
+// The lease's expiry time doubles as its token: release clears only our own.
+// A user without a Settings row has no lease to take, and nothing to race.
+async function claimMailboxScan(userId) {
+  const now = new Date();
+  const until = new Date(now.getTime() + MAILBOX_LEASE_MS);
+  const claimed = await Settings.findOneAndUpdate(
+    { userId, $or: [{ mailboxScanUntil: null }, { mailboxScanUntil: { $lt: now } }] },
+    { $set: { mailboxScanUntil: until } },
+    { projection: { _id: 1 } },
+  );
+  if (claimed) return until;
+  return (await Settings.exists({ userId })) ? null : 'none';
+}
+
+async function releaseMailboxScan(userId, lease) {
+  if (lease === 'none') return;
+  await Settings.updateOne({ userId, mailboxScanUntil: lease }, { $set: { mailboxScanUntil: null } })
+    .catch(err => console.error('[mailbox] lease release failed:', err.message));
+}
+
+async function runMailboxCheck(userId, sender, { sentLookbackDays = null, phase = null, carry = null } = {}) {
   const settings = await Settings.findOne({ userId: userId }, { 'resume.data': 0 });
   const lastChecked = settings?.lastMailboxCheckAt ?? null;
 
@@ -926,6 +973,10 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
     auth: { user: sender.email, pass: sender.appPassword },
     logger: false,
   });
+  // A dropped connection (socket timeout) is emitted as an 'error' event; with no
+  // listener Node kills the whole process. The command in flight rejects anyway,
+  // so the scan still fails normally and reports it.
+  client.on('error', (err) => console.error(`[mailbox] IMAP connection error for user ${userId}: ${err.message}`));
 
   let scanned = 0;
   const bounced = [];
@@ -1064,20 +1115,37 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
   };
 
   const scanStartedAt = Date.now();
-  try {
-    await client.connect();
-    const boxes = await client.list();
-    for (const mailbox of ['INBOX', specialFolder(boxes, '\\Junk', '[Gmail]/Spam')]) {
-      await scanMailbox(mailbox);
+  const doInbox = !phase || phase === 'inbox';
+  const doSent = !phase || phase === 'sent';
+  if (doInbox || doSent) {
+    try {
+      await client.connect();
+      const boxes = await client.list();
+      if (doInbox) {
+        for (const mailbox of ['INBOX', specialFolder(boxes, '\\Junk', '[Gmail]/Spam')]) {
+          await scanMailbox(mailbox);
+        }
+      }
+      if (doSent) await scanSentMailbox(specialFolder(boxes, '\\Sent', '[Gmail]/Sent Mail'));
+    } catch (err) {
+      throw new Error(`IMAP check failed: ${err.message}`);
+    } finally {
+      try { await client.logout(); } catch (_) {}
     }
-    await scanSentMailbox(specialFolder(boxes, '\\Sent', '[Gmail]/Sent Mail'));
-  } catch (err) {
-    throw new Error(`IMAP check failed: ${err.message}`);
-  } finally {
-    try { await client.logout(); } catch (_) {}
+  }
+  if (phase === 'inbox' || phase === 'sent') {
+    return { ok: true, phase, scanned, bounced, replied, startedAt: new Date(scanStartedAt) };
+  }
+  if (phase === 'finalize') {
+    bounced.push(...(carry?.bounced || []));
+    replied.push(...(carry?.replied || []));
+    scanned += Number(carry?.scanned) || 0;
   }
 
-  await Settings.findOneAndUpdate({ userId: userId }, { lastMailboxCheckAt: new Date() });
+  // The phased scan stamps the time it STARTED: mail that arrived while it ran
+  // stays inside the next scan's window.
+  const checkedAt = phase === 'finalize' && carry?.startedAt ? new Date(carry.startedAt) : new Date();
+  await Settings.findOneAndUpdate({ userId: userId }, { lastMailboxCheckAt: checkedAt });
 
   // In-app notifications for what this scan found. Awaited, not fired and forgotten: on
   // Vercel the function can be frozen once it returns, which would drop the writes.
@@ -1097,7 +1165,7 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
   // Skipped when the scan itself was slow: the backfill has a 20s budget of its own, and the
   // two together must stay under the function's 60s cap. The next tick picks it up.
   let backfill = null;
-  if (Date.now() - scanStartedAt > SLOW_SCAN_MS) {
+  if (phase === 'finalize' || Date.now() - scanStartedAt > SLOW_SCAN_MS) {
     backfill = { skipped: 'slow_scan' };
   } else {
     try {
@@ -1107,7 +1175,7 @@ async function checkMailboxForUser(userId, { sentLookbackDays = null } = {}) {
     }
   }
 
-  return { ok: true, scanned, bounced, replied, lastCheckedAt: new Date(), backfill };
+  return { ok: true, scanned, bounced, replied, lastCheckedAt: phase === 'finalize' ? checkedAt : new Date(), backfill };
 }
 
 // routes/admin.js runs one account's scan from the user drawer; handed over
@@ -1124,6 +1192,9 @@ app.post('/api/check-mailbox', requireDb, async (req, res) => {
       const result = await checkMailboxForUser(req.userId);
       if (result.skipped === 'no_credentials') {
         return res.status(400).json({ error: 'Not configured. Set up Gmail first.' });
+      }
+      if (result.skipped === 'already_running') {
+        return res.status(409).json({ error: 'A mailbox check is already running. Try again in a minute.' });
       }
       return res.json(result);
     }

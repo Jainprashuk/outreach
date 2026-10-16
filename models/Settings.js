@@ -27,6 +27,10 @@ const settingsSchema = new mongoose.Schema({
   customVariables: { type: [variableSchema], default: [] },
   resume: { type: resumeSchema, default: null },
   lastMailboxCheckAt: { type: Date, default: null },
+  // Lease held while a mailbox scan runs, so the scheduled scan, the Dashboard and
+  // an admin never scan the same mailbox at once. Expires by itself if Vercel kills
+  // the function before it is released (server.js claimMailboxScan).
+  mailboxScanUntil: { type: Date, default: null },
   // Facts about you for AI reply drafts (lib/replyDraft.js) — role, experience, notice
   // period, locations. The model is told to use only these, so they are what stops it
   // inventing an answer.

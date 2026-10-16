@@ -8,6 +8,7 @@ import { SessionProvider } from './context/SessionContext';
 import { InterviewProvider } from './context/InterviewContext';
 import { ActionQueueProvider } from './context/ActionQueueContext';
 import { NotificationProvider } from './context/NotificationContext';
+import { PulseProvider } from './context/PulseContext';
 import InterviewReminders from './components/InterviewReminders';
 import ErrorBoundary from './components/ErrorBoundary';
 import { installGlobalIssueHandlers } from './lib/issueReporter';
@@ -25,6 +26,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
         <ToastProvider>
           <AppProvider>
             <InterviewProvider>
+              <PulseProvider>
               <ActionQueueProvider>
                 <NotificationProvider>
                 <ErrorBoundary>
@@ -35,6 +37,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
                 <InterviewReminders />
                 </NotificationProvider>
               </ActionQueueProvider>
+              </PulseProvider>
             </InterviewProvider>
           </AppProvider>
         </ToastProvider>

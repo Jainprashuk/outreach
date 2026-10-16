@@ -13,6 +13,7 @@ import {
 } from '../lib/api';
 import { useApp } from './AppContext';
 import { useSession } from './SessionContext';
+import { usePulseChange } from './PulseContext';
 
 const REFRESH_MS = 3 * 60 * 1000;
 const EMPTY_COUNTS: Record<ActionBucket, number> = { 'needs-you': 0, 'follow-up': 0, waiting: 0, snoozed: 0, done: 0 };
@@ -46,6 +47,10 @@ export function ActionQueueProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const enabled = !sessionLoading && !!owner;
+  // A mailbox scan (anywhere: the schedule, another tab) or a send job starting or
+  // finishing is what moves contacts between these tabs on the server. Job COUNT
+  // only: the full jobs stamp moves on every email a running job sends.
+  usePulseChange(p => `${p.mailbox}|${p.jobs.split(':')[0]}`, () => reload().catch(() => {}), enabled);
 
   // Share/unauthenticated visitors would just get a 401 here, so don't ask.
   // Ticks are skipped while the tab is hidden — a forgotten background tab used to

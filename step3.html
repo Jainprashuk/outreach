@@ -302,6 +302,7 @@ function updateProgress(job) {
 }
 
 async function pollJob() {
+  if (document.visibilityState !== 'visible') return;
   try {
     const res = await fetch(`${API_BASE}/api/jobs/${jobId}`);
     if (!res.ok) return;

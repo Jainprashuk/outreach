@@ -11,7 +11,7 @@ import AppliedTable from '../components/naukri/AppliedTable';
 import QueuedJobs from '../components/naukri/QueuedJobs';
 import SkippedJobs from '../components/naukri/SkippedJobs';
 import ConnectionCard from '../components/naukri/config/ConnectionCard';
-import { useVisibleInterval } from '../hooks/useVisibleInterval';
+import { useAdaptiveInterval } from '../hooks/useAdaptiveInterval';
 import ScheduleCard from '../components/naukri/config/ScheduleCard';
 import SearchesCard from '../components/naukri/config/SearchesCard';
 import FiltersCard from '../components/naukri/config/FiltersCard';
@@ -33,6 +33,9 @@ import { fmtTime } from '../components/naukri/format';
 // shows two half-refreshed views of the same moment.
 
 const POLL_MS = 3000;
+// No run active or queued: nothing on the tab moves except a run the worker's
+// schedule starts. Starting or cancelling one here reloads at once.
+const IDLE_POLL_MS = 30_000;
 
 type View = 'activity' | 'review' | 'queued' | 'skipped' | 'applied' | 'config';
 
@@ -65,7 +68,8 @@ export default function Naukri() {
     try { setConfig((await naukriConfigApi()).config); } catch { /* cards keep what they have */ }
   }, []);
 
-  useVisibleInterval(load, POLL_MS);
+  const busyRun = !!overview && (!!overview.activeRun || overview.queuedRuns.length > 0);
+  useAdaptiveInterval(load, { fastMs: POLL_MS, slowMs: IDLE_POLL_MS, fast: busyRun });
 
   useEffect(() => { if (view === 'config' && !config) loadConfig(); }, [view, config, loadConfig]);
 

@@ -7,10 +7,13 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { API_BASE, JOBS_CHANGED_EVENT, type SendJob } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { useVisibleInterval } from '../hooks/useVisibleInterval';
+import { usePulseChange } from '../context/PulseContext';
 
 const MAX_CARDS = 4;      // beyond this, collapse the rest into a "+N more" line
 const DISMISS_MS = 8000;  // how long a finished job stays visible
-const IDLE_POLL_MS = 30_000; // nothing in flight: only catching jobs started elsewhere (cron, another tab)
+// Nothing in flight: a job started elsewhere (a campaign release, another tab) is
+// noticed through the pulse's `jobs` stamp within ~30s. This is only the safety net.
+const IDLE_POLL_MS = 5 * 60_000;
 
 const fmtTime = (ms: number) => {
   if (ms <= 0) return 'finishing…';
@@ -84,6 +87,9 @@ export default function SendJobWidget() {
   // an hour per open tab. Jobs started from this tab announce themselves (see
   // JOBS_CHANGED_EVENT in lib/api.ts), so they still appear immediately.
   useVisibleInterval(poll, jobs.length > 0 ? 3000 : IDLE_POLL_MS, !isStep3);
+  // Idle, the pulse (read-only) stands in for the 30s /active-all poll, which
+  // also writes. While cards are showing, the 3s poll above already covers it.
+  usePulseChange(p => p.jobs, poll, !isStep3 && jobs.length === 0);
 
   useEffect(() => {
     if (isStep3) return;

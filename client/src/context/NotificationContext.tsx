@@ -6,8 +6,11 @@ import {
 } from 'react';
 import { clearNotificationsApi, loadNotificationsApi, markNotificationsReadApi, type AppNotification } from '../lib/api';
 import { useSession } from './SessionContext';
+import { usePulseChange } from './PulseContext';
 
-const REFRESH_MS = 3 * 60 * 1000;
+// A safety net only: the pulse's `notifications` stamp (new, read or cleared)
+// triggers a reload within ~30s of any change.
+const REFRESH_MS = 10 * 60 * 1000;
 
 interface NotificationStore {
   items: AppNotification[];
@@ -43,6 +46,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const enabled = !sessionLoading && !!owner;
+  usePulseChange(p => p.notifications, () => reload().catch(() => {}), enabled);
 
   useEffect(() => {
     if (!enabled) return;
