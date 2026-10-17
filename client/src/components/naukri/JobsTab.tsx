@@ -3,6 +3,7 @@ import QueuedJobs from './QueuedJobs';
 import NeedsAnswer from './NeedsAnswer';
 import AppliedTable from './AppliedTable';
 import SkippedJobs from './SkippedJobs';
+import InfoTip, { JOBS_INFO } from './InfoTip';
 
 // Everything after the inbox, by where it stands: waiting to go, stuck on a
 // question, sent, or skipped for good. One tab with four views rather than four
@@ -38,6 +39,7 @@ export default function JobsTab({ overview, view, onView, onChanged }: {
                 ...(urgent && view !== key ? { background: 'var(--red)', color: '#fff' } : {}),
               }}>{n}</span>
             )}
+            <InfoTip title={label}>{JOBS_INFO[key]}</InfoTip>
           </button>
         ))}
       </div>

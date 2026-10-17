@@ -8,6 +8,7 @@ import NaukriSetupGuide, { type NaukriGuideTab } from '../components/naukri/Nauk
 import RunTimeline, { ActiveRun } from '../components/naukri/RunTimeline';
 import ReviewQueue from '../components/naukri/ReviewQueue';
 import JobsTab, { type JobsView } from '../components/naukri/JobsTab';
+import InfoTip, { TAB_INFO } from '../components/naukri/InfoTip';
 import ConnectionCard from '../components/naukri/config/ConnectionCard';
 import { useAdaptiveInterval } from '../hooks/useAdaptiveInterval';
 import ScheduleCard from '../components/naukri/config/ScheduleCard';
@@ -207,6 +208,7 @@ export default function Naukri() {
               className={`nav-tab${view === key ? ' active' : ''}`}>
               <i className={`ti ${icon}`} style={{ marginRight: 5 }} />{label}
               {counts[key] ? <span className="contact-count-badge" style={{ marginLeft: 6 }}>{counts[key]}</span> : null}
+              <InfoTip title={label}>{TAB_INFO[key]}</InfoTip>
             </button>
           ))}
         </div>
