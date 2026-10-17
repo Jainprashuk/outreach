@@ -1862,7 +1862,7 @@ export const addNaukriStarterRulesApi = () =>
     '/api/naukri/config/starter-rules', { method: 'POST' });
 
 export interface NaukriDraft {
-  answer: string; quote: string; source: 'resume' | 'profile' | '';
+  answer: string; quote: string; source: 'resume' | 'profile' | 'answer' | '';
   status: 'ready' | 'unknown' | 'error' | 'ignored';
 }
 

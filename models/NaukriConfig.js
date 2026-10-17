@@ -59,7 +59,7 @@ const draftSchema = new mongoose.Schema({
   // The resume or profile line the answer came from, shown beside it so you can
   // check it at a glance.
   quote:    { type: String, default: '' },
-  source:   { type: String, enum: ['resume', 'profile', ''], default: '' },
+  source:   { type: String, enum: ['resume', 'profile', 'answer', ''], default: '' },
   // ready = has an answer · unknown = the resume does not say · error = AI busy
   // (retried later) · ignored = you dismissed it
   status:   { type: String, enum: ['ready', 'unknown', 'error', 'ignored'], default: 'ready' },

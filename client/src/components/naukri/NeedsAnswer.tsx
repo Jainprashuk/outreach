@@ -63,11 +63,11 @@ function QuestionCard({ group, busy, onUse, onIgnore }: {
         {!group.drafting && d && d.status === 'ready' && d.quote && (
           <Hint>
             <i className="ti ti-sparkles" style={{ marginRight: 4 }} />
-            AI draft, from your {d.source || 'resume'}: “{d.quote}” — check it before you use it.
+            AI draft, from {d.source === 'answer' ? 'an answer you gave before' : `your ${d.source || 'resume'}`}: “{d.quote}” — check it before you use it.
           </Hint>
         )}
         {!group.drafting && d && d.status === 'unknown' && (
-          <Hint>Your resume and profile don’t say — type the answer yourself.</Hint>
+          <Hint>Your resume, profile and earlier answers don’t say — type the answer yourself.</Hint>
         )}
         {!group.drafting && d && d.status === 'error' && (
           <Hint>AI was busy; type it yourself, or come back to this tab later for a draft.</Hint>

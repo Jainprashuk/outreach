@@ -614,8 +614,13 @@ const sameQuestion = (a, b) => matchable(a) === matchable(b);
 // What a draft was written from, as a short fingerprint. Ignored drafts are
 // your decision and never expire; every other draft is only good for the
 // resume text and profile it saw.
-const draftBasis = (resumeText, profile) => require('crypto').createHash('sha1')
-  .update(String(resumeText || '')).update(JSON.stringify(profile || {})).digest('hex').slice(0, 16);
+// Answers you have given count too: a new rule can answer a question that
+// was "unknown" before, so it makes the other drafts stale.
+const draftBasis = (resumeText, profile, answers = []) => require('crypto').createHash('sha1')
+  .update(String(resumeText || '')).update(JSON.stringify(profile || {}))
+  .update(JSON.stringify((answers || []).filter(a => a.enabled !== false).map(a => [a.pattern, a.answer])))
+  .digest('hex').slice(0, 16);
+const plainAnswers = (config) => (config.answers || []).map(a => (a.toObject ? a.toObject() : a));
 const draftStillGood = (d, basis) => d && (d.status === 'ignored' || (d.status !== 'error' && d.basis === basis));
 
 // GET /api/naukri/needs-answer
@@ -639,7 +644,7 @@ router.get('/needs-answer', async (req, res) => {
     ]);
     const drafts = config.drafts || [];
     const text = await resumeTextFor(req.userId, config);
-    const basis = draftBasis(text, config.profile && config.profile.toObject ? config.profile.toObject() : config.profile);
+    const basis = draftBasis(text, config.profile && config.profile.toObject ? config.profile.toObject() : config.profile, plainAnswers(config));
     res.json({
       aiDrafts: !!config.aiDrafts,
       hasResumeText: !!text.trim(),
@@ -680,10 +685,11 @@ router.post('/needs-answer/draft', async (req, res) => {
 
     const resumeTextNow = await resumeTextFor(req.userId, config);
     const profile = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
-    const out = await draftAnswer(question, { resumeText: resumeTextNow, profile, options, userId: req.userId });
+    const rules = plainAnswers(config);
+    const out = await draftAnswer(question, { resumeText: resumeTextNow, profile, options, rules, userId: req.userId });
     const draft = {
       question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options,
-      basis: draftBasis(resumeTextNow, profile), createdAt: new Date(),
+      basis: draftBasis(resumeTextNow, profile, rules), createdAt: new Date(),
     };
     // Atomic replace rather than config.save(): the tab drafts several
     // questions in parallel, and concurrent document saves would conflict.

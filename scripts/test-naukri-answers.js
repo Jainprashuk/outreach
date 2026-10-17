@@ -6,7 +6,7 @@
 // No database, no network, no browser — every function here is pure.
 
 const { resolveAnswer, pickOption, matchable, STARTER_RULES } = require('../lib/naukriAnswers');
-const { parseDraft, quoteIsReal } = require('../lib/naukriDraft');
+const { parseDraft, quoteIsReal, ruleLines } = require('../lib/naukriDraft');
 
 let pass = 0, fail = 0;
 const ok = (label, cond, detail = '') => {
@@ -76,6 +76,25 @@ eq('years answer quoting a dateless line → unknown',
   parseDraft('{"answer":"4","quote":"Built payment systems in Node.js"}', { ...ctx, question: 'How many years of experience in Node.js?' }).status, 'unknown');
 eq('years answer quoting a dated line → ready',
   parseDraft('{"answer":"5","quote":"Senior Engineer, Acme (2019 – 2024)"}', { ...ctx, question: 'How many years of experience in Node.js?' }).status, 'ready');
+console.log('\nearlier answers as context');
+const given = [
+  { pattern: 'how many years of react experience|years in react', answer: '4' },
+  { pattern: 'expected ctc', answer: '{{expectedCtcLpa}}' },
+  { pattern: 'off rule', answer: 'x', enabled: false },
+  { pattern: 'unfilled', answer: '{{phone}}' },
+];
+eq('rule lines: first alternative, placeholders filled, disabled and unfilled left out',
+  ruleLines(given, profile), '- Q: how many years of react experience A: 4\n- Q: expected ctc A: 18');
+eq('a draft quoting an earlier answer is ready',
+  parseDraft('{"answer":"4","source":"answer","quote":"how many years of react experience A: 4"}',
+    { ...ctx, rules: given, question: 'Years of experience in React.js?' }).status, 'ready');
+eq('…and is labelled as coming from an answer',
+  parseDraft('{"answer":"4","source":"answer","quote":"how many years of react experience A: 4"}',
+    { ...ctx, rules: given, question: 'Years of experience in React.js?' }).source, 'answer');
+eq('a made-up earlier answer is rejected',
+  parseDraft('{"answer":"7","source":"answer","quote":"how many years of angular experience A: 7"}',
+    { ...ctx, rules: given, question: 'Years in Angular?' }).status, 'unknown');
+
 ok('quoteIsReal is loose on spacing', quoteIsReal('built  payment systems', [resumeText]));
 ok('quoteIsReal rejects tiny quotes', !quoteIsReal('a', [resumeText]));
 

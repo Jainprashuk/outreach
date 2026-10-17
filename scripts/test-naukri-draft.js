@@ -62,6 +62,12 @@ const show = (d) => `${d.status} "${d.answer}" ← "${d.quote}"${d.note ? ` (${d
   console.log('    ' + show(d));
   ok('choice answer is one of the options, or unknown', d.status !== 'ready' || ['0-1 years', '2-3 years', '4+ years'].includes(d.answer));
 
+  console.log('\nearlier answers are used');
+  const rules = [{ pattern: 'how many years of hands-on react experience', answer: '4' }];
+  d = await draftAnswer('Years of experience in React.js?', { resumeText, profile, rules });
+  console.log('    ' + show(d));
+  ok('a reworded question gets the answer you gave before', d.status === 'ready' && /^4\b/.test(d.answer) && d.source === 'answer', show(d));
+
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);
 })();
