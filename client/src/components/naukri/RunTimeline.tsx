@@ -57,7 +57,9 @@ function dominantReason(run: NaukriRun): string | null {
     counts.set(key, (counts.get(key) || 0) + 1);
   }
   const [reason, n] = [...counts.entries()].sort((a, b) => b[1] - a[1])[0];
-  return n === skips.length ? `all ${reason}` : `${n} ${reason}`;
+  // Says "skipped" outright: it sits after the failed count, and "all an
+  // unanswered question" there read as describing the failures too.
+  return n === skips.length ? `skips all: ${reason}` : `${n} skipped: ${reason}`;
 }
 
 function Row({ run }: { run: NaukriRun }) {

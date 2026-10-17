@@ -46,7 +46,7 @@ const SENT_STATUSES = ['applied', 'in-review', 'interviewing', 'offer', 'rejecte
 // worker running last week's code kept reporting company-site skips as ordinary
 // ones, and they went straight back into the queue to be attempted again. The
 // rule belongs where it cannot drift.
-const TERMINAL_SKIP = /applies on the company site|already applied/i;
+const TERMINAL_SKIP = /applies on the company site|already applied|walk-in drive|listing closed or removed/i;
 // Only this one says anything about the EMPLOYER. "Already applied" is about
 // you and that one listing, and counting it here flagged every other job from
 // a company you had applied to once as company-site.

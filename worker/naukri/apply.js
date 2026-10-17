@@ -60,6 +60,18 @@ function withTimeout(promise, ms, label) {
 
 const APPLY_BUTTON = '#apply-button';
 const COMPANY_SITE_BUTTON = '#company-site-button';
+// Walk-in listings offer "I am interested" instead of Apply (verified live
+// 2026-10-17). That registers interest in a drive; it is not an application,
+// so the worker never clicks it.
+const WALKIN_BUTTON = '#walkin-button';
+
+// A listing that has closed or been taken down. Its page has no Apply button,
+// which used to be reported as "Naukri changed their DOM" and retried forever.
+const CLOSED_MARKERS = [
+  'no longer accepting', 'not accepting applications', 'job has expired', 'this job has expired',
+  'job is no longer available', 'no longer available', 'job has been removed', 'job you are looking for',
+  'this job is closed', 'hiring for this job is closed',
+];
 
 // Naukri's questionnaire drawer. Ordered most-current first.
 const CHATBOT = ['.chatbot_DrawerContentWrapper', '.chatbot_Drawer', '[class*="chatbot_Drawer"]'];
@@ -235,7 +247,23 @@ async function runChatbot(page, config, onStep) {
   return { state: 'stuck', asked, reason: `more than ${MAX_QUESTIONS} questions` };
 }
 
+// What the page offered instead of Apply, for a failure reason someone can act
+// on: the address it ended up at and the buttons it showed.
+async function describePage(page) {
+  const offered = await page.evaluate(() => [...document.querySelectorAll('button, [role=button]')]
+    .filter(b => b.offsetParent !== null)
+    .map(b => `${b.id ? '#' + b.id + ' ' : ''}"${(b.innerText || '').trim().slice(0, 30)}"`)
+    .filter(t => !/""$/.test(t)).slice(0, 6)).catch(() => []);
+  let url = '';
+  try { url = page.url(); } catch (_) {}
+  return `page: ${url.slice(0, 120)} · buttons: ${offered.join(', ') || 'none'}`;
+}
+
 async function applyToOne(page, job, { config, dryRun, onStep }) {
+  // In front, because Chrome slows background tabs to a crawl and the action
+  // buttons hydrate late — a listing checked from behind another tab can look
+  // like it has no Apply button at all.
+  await page.bringToFront().catch(() => {});
   await page.goto(job.url, { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(1500);
   await check(page, `the listing for "${job.title}"`);
@@ -252,9 +280,15 @@ async function applyToOne(page, job, { config, dryRun, onStep }) {
   // company-site job into a failure instead of a clean skip. Racing the two
   // selectors removes the timing question entirely.
   const appeared = await Promise.race([
-    page.waitForSelector(APPLY_BUTTON, { timeout: 12000 }).then(() => 'native').catch(() => null),
-    page.waitForSelector(COMPANY_SITE_BUTTON, { timeout: 12000 }).then(() => 'external').catch(() => null),
+    page.waitForSelector(APPLY_BUTTON, { timeout: 20000 }).then(() => 'native').catch(() => null),
+    page.waitForSelector(COMPANY_SITE_BUTTON, { timeout: 20000 }).then(() => 'external').catch(() => null),
+    page.waitForSelector(WALKIN_BUTTON, { timeout: 20000 }).then(() => 'walkin').catch(() => null),
   ]);
+
+  if (appeared === 'walkin') {
+    return { outcome: 'skipped', terminal: true,
+      reason: 'Walk-in drive — Naukri only offers "I am interested" here, which is not an application. Attend the walk-in if you want it.' };
+  }
 
   // External ATS. We have no idea what form is on the other side, so we do not
   // follow it — that would be applying somewhere you never showed us.
@@ -265,7 +299,19 @@ async function applyToOne(page, job, { config, dryRun, onStep }) {
       reason: 'Applies on the company site — open it yourself, this worker only does native Naukri applies' };
   }
   if (appeared !== 'native') {
-    return { outcome: 'failed', reason: 'No Apply button appeared on the page. Naukri may have changed their DOM — fix APPLY_BUTTON in worker/naukri/apply.js.' };
+    const text = await bodyText(page);
+    let url = '';
+    try { url = page.url(); } catch (_) {}
+    // Already applied, shown as a disabled "Applied" in place of the button.
+    if (ALREADY_MARKERS.some(m => text.includes(m)) || /\bapplied\b/.test((await page.locator('[class*="apply-button-container"]').first().innerText().catch(() => '')).toLowerCase())) {
+      return { outcome: 'skipped', terminal: true, reason: 'Naukri says you have already applied to this job' };
+    }
+    // Closed or taken down: a closed-listing message, or Naukri sent us away
+    // from the listing altogether.
+    if (CLOSED_MARKERS.some(m => text.includes(m)) || (url && !/job-listings-/.test(url))) {
+      return { outcome: 'skipped', terminal: true, reason: 'Listing closed or removed — Naukri no longer takes applications for it' };
+    }
+    return { outcome: 'failed', reason: `No Apply button on the listing (${await describePage(page)})` };
   }
 
   // Re-read after the race: a page carrying both must still be treated as
