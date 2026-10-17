@@ -8,6 +8,7 @@ import { useApp } from '../../context/AppContext';
 import { useToast } from '../../context/ToastContext';
 import { apiFetch, bulkUpdateContactsApi, resetForSendApi } from '../../lib/api';
 import { parseCsvText, readFileText } from '../../lib/csv';
+import { describeSkips } from '../../lib/sendSkips';
 
 interface Row { name: string; email: string; company: string; role: string; template: string; }
 
@@ -87,7 +88,7 @@ export default function Step1() {
       try {
         const { contacts, skipped, cooldownLabel } = await resetForSendApi(keptIds);
         if (skipped.length > 0) {
-          toast(`${skipped.length} skipped — already emailed in the last ${cooldownLabel}.`, contacts.length === 0 ? 'error' : 'info');
+          toast(describeSkips(skipped, cooldownLabel), contacts.length === 0 ? 'error' : 'info');
         }
         if (contacts.length === 0) return;
         const sendIds = contacts.map(c => c.id);

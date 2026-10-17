@@ -5,14 +5,19 @@ const Prospect = require('../models/Prospect');
 const SendJob = require('../models/SendJob');
 const Settings = require('../models/Settings');
 const mailer = require('../lib/mailer');
+const { SCREEN_FIELDS, screenDocs } = require('../lib/sendScreen');
+const { loadInterviewSets } = require('../lib/interviewGuard');
 
 const router = express.Router();
 
 // The Action Center: the floating button's counts, and the id lists its one-click
 // workflows start from (client/src/components/ActionCenter.tsx). Read-only.
 //
-// Each count and its id list are built from the same filter object below, so the
-// number on a button is exactly how many contacts the button acts on.
+// Each count and its id list are built the same way, so the number on a button is
+// exactly how many contacts the button acts on. The contact buttons also apply the
+// send rules (lib/sendScreen.js): someone in your interviews, waiting on your
+// reply, emailed in the last 24h, or bounced is never offered — the send would
+// only refuse them.
 
 const DAY = 24 * 3600 * 1000;
 const THREE_DAYS_MS = 3 * DAY;
@@ -47,22 +52,28 @@ async function heldBySendJobs(userId) {
   return held;
 }
 
-async function readyIds(userId) {
+// Sendable contact ids for one button, in its order.
+const SORT = { followup: { lastSentAt: 1 }, ready: { createdAt: 1 }, pending: { createdAt: 1 } };
+const FILTER = { followup: followUpFilter, ready: readyFilter, pending: pendingFilter };
+async function sendableIds(userId, kind, interviewSets) {
   const [rows, held] = await Promise.all([
-    Contact.find(readyFilter(userId), { _id: 1 }).sort({ createdAt: 1 }).lean(),
-    heldBySendJobs(userId),
+    Contact.find(FILTER[kind](userId)).select(SCREEN_FIELDS).sort(SORT[kind]).lean(),
+    kind === 'ready' ? heldBySendJobs(userId) : new Set(),
   ]);
-  return rows.map(r => String(r._id)).filter(id => !held.has(id));
+  const { contacts } = await screenDocs(userId, rows.filter(r => !held.has(String(r._id))), interviewSets);
+  return contacts.map(c => String(c._id));
 }
+const readyIds = (userId, sets) => sendableIds(userId, 'ready', sets);
 
 // GET /api/action-center/summary — every count the panel shows, in one round trip.
 router.get('/summary', async (req, res) => {
   try {
     const userId = req.userId;
+    const sets = await loadInterviewSets(userId);
     const [followUpDue, ready, pending, failed, newLeads, readyProspects, settings, sender] = await Promise.all([
-      Contact.countDocuments(followUpFilter(userId)),
-      readyIds(userId).then(ids => ids.length),
-      Contact.countDocuments(pendingFilter(userId)),
+      sendableIds(userId, 'followup', sets).then(ids => ids.length),
+      sendableIds(userId, 'ready', sets).then(ids => ids.length),
+      sendableIds(userId, 'pending', sets).then(ids => ids.length),
       Contact.countDocuments({ userId, ...NOT_DELETED, status: 'failed' }),
       Lead.countDocuments(leadsFilter(userId)),
       Prospect.countDocuments(prospectsFilter(userId)),
@@ -90,12 +101,8 @@ router.get('/ids', async (req, res) => {
     const kind = String(req.query.kind || '');
     const pluck = (rows) => rows.map(r => String(r._id));
     let out;
-    if (kind === 'followup') {
-      out = { ids: pluck(await Contact.find(followUpFilter(userId), { _id: 1 }).sort({ lastSentAt: 1 }).limit(MAX.followup).lean()) };
-    } else if (kind === 'ready') {
-      out = { ids: (await readyIds(userId)).slice(0, MAX.ready) };
-    } else if (kind === 'pending') {
-      out = { ids: pluck(await Contact.find(pendingFilter(userId), { _id: 1 }).sort({ createdAt: 1 }).limit(MAX.pending).lean()) };
+    if (kind === 'followup' || kind === 'ready' || kind === 'pending') {
+      out = { ids: (await sendableIds(userId, kind)).slice(0, MAX[kind]) };
     } else if (kind === 'leads') {
       out = { ids: pluck(await Lead.find(leadsFilter(userId), { _id: 1 }).sort({ fitScore: -1, createdAt: -1 }).limit(MAX.leads).lean()) };
     } else if (kind === 'prospects') {
@@ -111,4 +118,4 @@ router.get('/ids', async (req, res) => {
 });
 
 module.exports = router;
-module.exports._test = { followUpFilter, readyFilter, pendingFilter, leadsFilter, prospectsFilter, readyIds };
+module.exports._test = { followUpFilter, readyFilter, pendingFilter, leadsFilter, prospectsFilter, sendableIds, readyIds };

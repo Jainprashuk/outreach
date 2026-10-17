@@ -9,6 +9,7 @@ import InterviewCell from '../components/InterviewCell';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { API_BASE, loadContactCompaniesApi, resetForSendApi, type Contact } from '../lib/api';
+import { describeSkips } from '../lib/sendSkips';
 import { CATEGORY_OPTIONS } from '../lib/format';
 import { parseCsvText, readFileText } from '../lib/csv';
 import { SkeletonRows } from '../components/Skeleton';
@@ -179,21 +180,7 @@ export default function Contacts() {
     try {
       const { contacts, skipped, cooldownLabel } = await resetForSendApi(ids);
       if (skipped.length > 0) {
-        const reserved = skipped.filter(c => c.reason === 'in_campaign').length;
-        const blocked = skipped.filter(c => c.reason === 'blocked').length;
-        const interviewing = skipped.filter(c => c.reason === 'in_interview').length;
-        const awaitingYou = skipped.filter(c => c.reason === 'replied').length;
-        const cooldown = skipped.length - reserved - blocked - interviewing - awaitingYou;
-        toast(
-          [
-            cooldown ? `${cooldown} contact${cooldown !== 1 ? 's were' : ' was'} skipped — already emailed in the last ${cooldownLabel}.` : '',
-            reserved ? `${reserved} contact${reserved !== 1 ? 's are' : ' is'} already reserved by a campaign.` : '',
-            blocked ? `${blocked} contact${blocked !== 1 ? 's are' : ' is'} blocklisted and won't be sent to.` : '',
-            interviewing ? `${interviewing} contact${interviewing !== 1 ? 's are' : ' is'} in your interview pipeline — outreach is stopped for them.` : '',
-            awaitingYou ? `${awaitingYou} contact${awaitingYou !== 1 ? 's have' : ' has'} replied and ${awaitingYou !== 1 ? 'are' : 'is'} waiting on your answer — reply from the Mailbox.` : '',
-          ].filter(Boolean).join(' '),
-          contacts.length === 0 ? 'error' : 'info',
-        );
+        toast(describeSkips(skipped, cooldownLabel), contacts.length === 0 ? 'error' : 'info');
         list.reload();
       }
       if (contacts.length === 0) return;

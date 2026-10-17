@@ -8,9 +8,9 @@
 // spellings of one rule, and a drift is the "button says 3, list shows 5" bug. The
 // query is evaluated with sift (mongoose's own matcher dependency).
 //
-// Part 2: on real data, each summary count equals the length of the id list its
-// button loads, the follow-up count equals the Contacts list's Follow-up due tab,
-// and another account's id sees nothing of this one's.
+// Part 2: on real data, the contact buttons offer only people a send would accept
+// (lib/sendScreen.js), the follow-up button's people are all on the Contacts list's
+// Follow-up due tab, and another account's id sees nothing of this one's.
 
 require('dotenv').config();
 const sift = require('sift').default || require('sift');
@@ -85,31 +85,28 @@ async function part2(email, env) {
   if (!user) throw new Error(`No user ${email}`);
   const userId = user._id;
 
-  const counts = {
-    followup: await Contact.countDocuments(ac.followUpFilter(userId)),
-    ready: (await ac.readyIds(userId)).length,
-    pending: await Contact.countDocuments(ac.pendingFilter(userId)),
-    leads: await Lead.countDocuments(ac.leadsFilter(userId)),
-    prospects: await Prospect.countDocuments(ac.prospectsFilter(userId)),
-  };
-  const lists = {
-    followup: (await Contact.find(ac.followUpFilter(userId), { _id: 1 }).lean()).length,
-    ready: (await ac.readyIds(userId)).length,
-    pending: (await Contact.find(ac.pendingFilter(userId), { _id: 1 }).lean()).length,
-    leads: (await Lead.find(ac.leadsFilter(userId), { _id: 1 }).lean()).length,
-    prospects: (await Prospect.find(ac.prospectsFilter(userId), { _id: 1 }).lean()).length,
-  };
-  for (const k of Object.keys(counts)) ok(`${k}: count ${counts[k]} = ids ${lists[k]}`, counts[k] === lists[k]);
+  const { screenContacts } = require('../lib/sendScreen');
+  for (const kind of ['followup', 'ready', 'pending']) {
+    const ids = await ac.sendableIds(userId, kind);
+    const raw = (await Contact.find(ac[`${kind === 'followup' ? 'followUp' : kind}Filter`](userId), { _id: 1 }).lean()).length;
+    const again = await screenContacts(userId, ids);
+    ok(`${kind}: ${ids.length} of ${raw} offered, and every one passes the send rules`, again.eligible === ids.length && ids.length <= raw,
+      JSON.stringify(again.skipped));
+  }
+  ok('leads: count = ids', await Lead.countDocuments(ac.leadsFilter(userId)) === (await Lead.find(ac.leadsFilter(userId), { _id: 1 }).lean()).length);
+  ok('prospects: count = ids', await Prospect.countDocuments(ac.prospectsFilter(userId)) === (await Prospect.find(ac.prospectsFilter(userId), { _id: 1 }).lean()).length);
 
-  // The Contacts list's own Follow-up due tab, through whichever path the route uses.
+  // Everyone the follow-up button offers is on the Contacts list's own Follow-up due tab.
   const serialize = (c) => ({ ...c, id: String(c._id) });
   const q = { tab: 'followup-due', ids: '1', limit: '1' };
   const listed = (await listResponse(Contact, userId, q, serialize)) || (await memoryListResponse(Contact, userId, q, serialize));
-  ok(`follow-up count ${counts.followup} = Contacts "Follow-up due" tab ${listed.ids.length}`, counts.followup === listed.ids.length);
+  const onTab = new Set(listed.ids);
+  const fu = await ac.sendableIds(userId, 'followup');
+  ok(`follow-up: all ${fu.length} offered are on the "Follow-up due" tab (${onTab.size})`, fu.every(id => onTab.has(id)));
 
   const stranger = new mongoose.Types.ObjectId();
-  const leak = await Contact.countDocuments(ac.followUpFilter(stranger)) + await Contact.countDocuments(ac.pendingFilter(stranger))
-    + (await ac.readyIds(stranger)).length;
+  const leak = (await ac.sendableIds(stranger, 'followup')).length + (await ac.sendableIds(stranger, 'pending')).length
+    + (await ac.sendableIds(stranger, 'ready')).length;
   ok('an unknown account sees nothing', leak === 0, `saw ${leak}`);
   await mongoose.disconnect();
 }
