@@ -81,7 +81,7 @@ function Row({ run }: { run: NaukriRun }) {
         <span style={{ minWidth: 70, fontSize: 13 }}>{run.kind}</span>
         <Muted style={{ minWidth: 118 }}>{fmtRunTime(run.createdAt)}</Muted>
         <Muted style={{ flex: 1, minWidth: 150 }}>
-          {summary(run)}{why ? ` · ${why}` : ''}
+          {[summary(run), why].filter(Boolean).join(' · ')}
         </Muted>
         {run.trigger === 'scheduled' && <Muted>scheduled</Muted>}
         {hasDetail && <i className={`ti ti-chevron-${open ? 'up' : 'down'}`} style={{ fontSize: 14, color: 'var(--text2)' }} />}

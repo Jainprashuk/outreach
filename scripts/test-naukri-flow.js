@@ -42,6 +42,19 @@ async function main() {
   const app = express();
   app.use(express.json({ limit: '5mb' }));
   app.use((req, _res, next) => { req.userId = userId; next(); });
+  // Network trouble on demand: drop the next N /result requests by cutting the
+  // connection — after the server has processed them when `afterProcessing`,
+  // so the worker never sees the reply (the case that must not double-count).
+  const flaky = { drop: 0, afterProcessing: false };
+  app.use('/api/naukri/result', (req, res, next) => {
+    if (flaky.drop <= 0) return next();
+    flaky.drop--;
+    if (!flaky.afterProcessing) return req.socket.destroy();
+    const end = res.json.bind(res);
+    res.json = () => { req.socket.destroy(); return res; };
+    next();
+    void end;
+  });
   app.use('/api/naukri', require('../routes/naukri'));
   const server = await new Promise(r => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   const base = `http://127.0.0.1:${server.address().port}`;
@@ -51,7 +64,12 @@ async function main() {
   process.env.OUTREACH_URL = base;
   process.env.NAUKRI_STUB = '1';
   process.env.NAUKRI_STUB_JOBS = '9';
-  const { executeRun } = require('../worker/naukri-worker');
+  process.env.NAUKRI_RETRY_WAITS = '50,50,50';
+  process.env.HOME_OUTBOX_NOTE = 'the outbox lives in ~/.job-leads; the test restores it';
+  const { executeRun, flushOutbox, readOutbox, OUTBOX_FILE } = require('../worker/naukri-worker');
+  const fsx = require('fs');
+  const savedOutbox = fsx.existsSync(OUTBOX_FILE) ? fsx.readFileSync(OUTBOX_FILE) : null;
+  if (savedOutbox) fsx.rmSync(OUTBOX_FILE);
 
   const call = async (method, path, body) => {
     const res = await fetch(base + '/api/naukri' + path, {
@@ -211,6 +229,45 @@ async function main() {
     g = await call('GET', '/config');
     ok('clearing the text reads the file again', /Acme/.test(g.config.resume.text));
 
+    console.log('\nnetwork blips mid-run');
+    let seq = 0;
+    const fresh = async (n) => {
+      const docs = await NaukriJob.insertMany(Array.from({ length: n }, () => {
+        const id = `net-${++seq}`;
+        return { userId, sourceId: id, sourceKey: `naukri:${id}`, title: `Network test ${seq}`, company: `NetCo ${seq}`,
+          url: `https://www.naukri.com/job-listings-${id}`, approval: 'approved', approvedAt: new Date(), priority: 5 };
+      }));
+      return docs.map(d => String(d._id));
+    };
+    await NaukriJob.updateMany({ userId, ...{ approval: 'approved', applyStatus: { $in: ['none', 'failed'] } } }, { $set: { approval: 'pending' } });
+    await fresh(3);
+    await call('POST', '/runs', { kind: 'apply' });
+    flaky.drop = 2; flaky.afterProcessing = false;
+    const f1 = await runQuiet();
+    ok('two dropped result reports are retried; the run finishes', f1.run && f1.run.status === 'done', f1.run && f1.run.error);
+    ok('every job recorded exactly once', f1.run.results.length === (f1.claimed.jobs || []).length, `${f1.run.results.length} vs ${(f1.claimed.jobs || []).length}`);
+
+    const more = await fresh(2);
+    await call('POST', '/runs', { kind: 'apply' });
+    flaky.drop = 1; flaky.afterProcessing = true;
+    const f2 = await runQuiet();
+    const hist = await NaukriJob.find({ _id: { $in: more } }).lean();
+    ok('a report the server took but whose reply was lost is not counted twice',
+      f2.run.status === 'done' && f2.run.results.length === (f2.claimed.jobs || []).length
+      && hist.every(j => j.applyHistory.filter(h => ['applied', 'skipped'].includes(h.to)).length === 1),
+      `${f2.run.results.length} results, history ${hist.map(j => j.applyHistory.length).join(',')}`);
+
+    const last = await fresh(2);
+    await call('POST', '/runs', { kind: 'apply' });
+    flaky.drop = 99; flaky.afterProcessing = false;
+    const f3 = await runQuiet();
+    ok('a long outage stops the run with a plain reason', f3.run.status === 'failed' && /Lost the connection/.test(f3.run.error || ''), f3.run.error);
+    ok('…and the undelivered result is saved on this Mac', readOutbox().length === 1, `${readOutbox().length} saved`);
+    flaky.drop = 0;
+    await quiet(flushOutbox)();
+    ok('…then delivered once the connection is back', readOutbox().length === 0
+      && (await NaukriJob.countDocuments({ _id: { $in: last }, applyStatus: { $ne: 'none' } })) === 1);
+
     console.log('\nschedule slot during an active run waits');
     const now = new Date();
     const ist = new Date(now.getTime() - 60_000).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -228,6 +285,7 @@ async function main() {
     ok('and stamps the slot', !!c2.schedule.lastFiredAt);
   } finally {
     server.close();
+    try { fsx.rmSync(OUTBOX_FILE, { force: true }); if (savedOutbox) fsx.writeFileSync(OUTBOX_FILE, savedOutbox); } catch (_) {}
     const db = mongoose.connection.db;
     for (const c of ['naukrijobs', 'naukriruns', 'naukriconfigs', 'naukriworkers', 'notifications', 'issues', 'settings']) {
       await db.collection(c).deleteMany({ userId }).catch(() => {});

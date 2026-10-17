@@ -96,8 +96,64 @@ async function api(pathname, body) {
   let data;
   try { data = JSON.parse(text); }
   catch (_) { throw new Error(`${pathname} returned non-JSON (${res.status}): ${text.slice(0, 200)}`); }
-  if (!res.ok) throw new Error(data.error || `${pathname} failed with ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `${pathname} failed with ${res.status}`), { status: res.status });
   return data;
+}
+
+// The same call, retried through a network blip. Seen live on 2026-10-17: one
+// "fetch failed" while reporting a job's result ended a whole apply run. Only
+// the failures a retry can fix are retried — no connection, a timeout, or the
+// server/Vercel having a moment (5xx, 429, a non-JSON error page). A real
+// answer like "No such job" (4xx) is not.
+// NAUKRI_RETRY_WAITS (comma-separated ms) shortens them for tests only.
+const RETRY_WAITS_MS = process.env.NAUKRI_RETRY_WAITS
+  ? process.env.NAUKRI_RETRY_WAITS.split(',').map(Number).filter(n => n >= 0)
+  : [2000, 4000, 8000, 15000, 30000, 30000];   // ~1.5 min in all
+const retryable = (err) => !err.status || err.status >= 500 || err.status === 429;
+
+async function apiRetry(pathname, body, waits = RETRY_WAITS_MS) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await api(pathname, body);
+    } catch (err) {
+      if (!retryable(err) || attempt >= waits.length) throw err;
+      log(`${pathname}: ${err.message.split('\n')[0]} — retrying in ${waits[attempt] / 1000}s`);
+      await sleep(waits[attempt]);
+    }
+  }
+}
+
+// Results that could not be delivered even after retrying, kept on disk until
+// they can be. A result is the record of what was sent under your name, so it
+// is never just dropped. Flushed before every claim.
+const OUTBOX_FILE = path0.join(require('os').homedir(), '.job-leads', 'naukri-outbox.json');
+
+function readOutbox() {
+  try { return JSON.parse(fs.readFileSync(OUTBOX_FILE, 'utf8')) || []; } catch (_) { return []; }
+}
+function writeOutbox(items) {
+  try {
+    fs.mkdirSync(path0.dirname(OUTBOX_FILE), { recursive: true });
+    if (items.length) fs.writeFileSync(OUTBOX_FILE, JSON.stringify(items, null, 1));
+    else fs.rmSync(OUTBOX_FILE, { force: true });
+  } catch (err) { log('could not write the result outbox:', err.message); }
+}
+async function flushOutbox() {
+  const items = readOutbox();
+  if (!items.length) return;
+  const left = [];
+  for (const item of items) {
+    try { await api('/api/naukri/result', item); }
+    catch (err) { if (retryable(err)) left.push(item); else log(`dropping undeliverable result for job ${item.jobId}: ${err.message}`); }
+  }
+  writeOutbox(left);
+  log(`outbox: sent ${items.length - left.length} saved result(s)${left.length ? `, ${left.length} still waiting` : ''}`);
+}
+
+// Thrown when a result could not be delivered: the run stops rather than keep
+// applying to jobs it cannot record.
+class PortalUnreachable extends Error {
+  constructor(message) { super(message); this.name = 'PortalUnreachable'; }
 }
 
 // The resume lives in Mongo, not on disk. Playwright's setInputFiles needs a
@@ -147,7 +203,7 @@ const isCheckpoint = (err) => err && err.name === 'Checkpoint';
 
 async function executeRun(runDoc, config, openSession = null) {
   let deadlineTimer = null;
-  const finish = (status, extra) => api('/api/naukri/finish', { runId: runDoc.id, status, ...extra });
+  const finish = (status, extra) => apiRetry('/api/naukri/finish', { runId: runDoc.id, status, ...extra });
   let resumePath = null;
 
   // Fire-and-forget: a progress POST that fails must never interrupt a run that
@@ -159,7 +215,18 @@ async function executeRun(runDoc, config, openSession = null) {
   // Per-job outcomes are NOT fire-and-forget. An apply run that dies halfway
   // must still have told the server what it already sent, or the next run would
   // apply to the same job again.
-  const onResult = (result) => api('/api/naukri/result', { runId: runDoc.id, ...result });
+  const onResult = async (result) => {
+    const item = { runId: runDoc.id, ...result };
+    try {
+      return await apiRetry('/api/naukri/result', item);
+    } catch (err) {
+      if (!retryable(err)) throw err;
+      writeOutbox([...readOutbox(), item]);
+      throw new PortalUnreachable('Lost the connection to the portal for over a minute while recording a result, '
+        + 'so the run stopped instead of applying to jobs it could not record. The result is saved on this Mac '
+        + 'and will be sent automatically when the connection is back.');
+    }
+  };
 
   // A deadline that actually ends the run.
   //
@@ -288,7 +355,7 @@ async function executeRun(runDoc, config, openSession = null) {
     // A timeout is reported as itself, without a stack: the stack is this
     // file's race, not the thing that hung, and printing it would send you
     // looking in the wrong place.
-    const detail = timedOut ? err.message : String(err.stack || err.message);
+    const detail = timedOut || err.name === 'PortalUnreachable' ? err.message : String(err.stack || err.message);
     try { await finish('failed', { error: detail.slice(0, 1500) }); } catch (_) {}
     return {};
   } finally {
@@ -341,6 +408,9 @@ async function main() {
           if (stuck.length) log(chromeHealth.stuckTabsError(stuck));
         }
       }
+
+      // Anything a previous run could not deliver goes first, before new work.
+      await flushOutbox().catch(err => log('outbox flush failed:', err.message));
 
       let claimed;
       try {
@@ -401,4 +471,4 @@ if (require.main === module) {
   main().catch((err) => { console.error(err); process.exit(1); });
 }
 
-module.exports = { executeRun, CFG };
+module.exports = { executeRun, flushOutbox, readOutbox, OUTBOX_FILE, CFG };

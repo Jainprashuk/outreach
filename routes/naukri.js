@@ -1597,6 +1597,15 @@ router.post('/result', async (req, res) => {
     const job = await NaukriJob.findOne({ _id: jobId, userId: req.userId, ...BASE_FILTER });
     if (!job) return res.status(404).json({ error: 'No such job' });
 
+    // Already recorded: the worker retries a report whose response it never
+    // saw (a network blip after the server had processed it), and replays
+    // saved results when the connection comes back. Recording it twice would
+    // double the history and the run's counts.
+    const already = await NaukriRun.exists({
+      _id: runId, userId: req.userId, results: { $elemMatch: { jobId: job._id, outcome } },
+    });
+    if (already) return res.json({ ok: true, duplicate: true });
+
     // A dry run rehearses; it must leave no trace on the job that would make it
     // look applied to, or stop a real run from picking it up later.
     if (outcome !== 'dry-run') {
