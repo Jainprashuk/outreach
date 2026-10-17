@@ -245,9 +245,19 @@ router.post('/move-to-outreach', async (req, res) => {
       statusUpdateFailed = true; // contacts exist — surface it rather than lying
     }
 
+    // Every contact these leads now stand for — new ones and ones that already
+    // existed — so a caller can carry straight on (the Action Center starts a
+    // send with them). Callers that only read the counts are unaffected.
+    const existedEmails = rows.map(r => r.email.trim().toLowerCase()).filter(e => !contactIdByEmail.has(e));
+    const existed = existedEmails.length
+      ? await Contact.find({ userId: req.userId, email: { $in: existedEmails }, deleted: { $ne: true } }, { _id: 1 })
+        .collation({ locale: 'en', strength: 2 }).lean()
+      : [];
+
     res.json({
       ok: true,
       created,
+      contactIds: [...new Set([...created.map(c => String(c._id)), ...existed.map(c => String(c._id))])],
       alreadyExisted: rows.length - created.length,
       filled,
       skippedNoEmail,

@@ -510,6 +510,8 @@ export interface MoveToOutreachResult {
   alreadyExisted: number;
   skippedNoEmail: number;
   movedIds: string[];
+  /** Every contact the moved leads now stand for — new and already existing. */
+  contactIds?: string[];
   statusUpdateFailed?: boolean;
 }
 
@@ -1261,6 +1263,18 @@ export const createCampaignFromContactsApi = (body: {
 }) => apiFetch<Campaign>('/api/campaigns/from-contacts', {
   method: 'POST', body: JSON.stringify(body),
 });
+
+export interface CampaignContactsPreview {
+  requested: number;
+  eligible: number;
+  skipped: { missing: number; in_campaign: number; invalid: number; cooldown: number; dead: number; interview: number; replied: number };
+  credentialsMissing: boolean;
+}
+/** What createCampaignFromContactsApi would accept, without creating anything. */
+export const previewCampaignFromContactsApi = (contactIds: string[]) =>
+  apiFetch<CampaignContactsPreview>('/api/campaigns/from-contacts', {
+    method: 'POST', body: JSON.stringify({ contactIds, dryRun: true }),
+  });
 
 /** Phase 2: rows, in byte-budgeted chunks. `last: true` flips draft -> running. */
 export const appendCampaignRowsApi = (
@@ -2275,6 +2289,8 @@ export interface DiscoveryConfigView {
 
 export interface MoveProspectsResult {
   ok: boolean;
+  /** New contacts plus ones these people already were. */
+  contactIds?: string[];
   moved: number;
   alreadyMoved: number;
   notReady: number;
@@ -2697,3 +2713,20 @@ export const adminSetAiRolloutApi = (change: { enforce?: boolean; graceUntil?: s
   apiFetch<AiRollout>('/api/admin/ai-keys/rollout', { method: 'PUT', body: JSON.stringify(change) });
 export const adminSetAiFallbackApi = (id: string, on: boolean) =>
   apiFetch<{ ok: true; aiOwnerFallback: boolean }>(`/api/admin/users/${id}/ai-fallback`, { method: 'POST', body: JSON.stringify({ on }) });
+
+// ── Action Center (the floating button) ──────────────────────────────────────
+export interface ActionCenterSummary {
+  followUpDue: number;
+  ready: number;
+  pending: number;
+  failed: number;
+  newLeads: number;
+  readyProspects: number;
+  lastMailboxCheckAt: string | null;
+  gmailConnected: boolean;
+}
+export type ActionCenterIdKind = 'followup' | 'ready' | 'pending' | 'leads' | 'prospects';
+export const actionCenterSummaryApi = () => apiFetch<ActionCenterSummary>('/api/action-center/summary');
+export const actionCenterIdsApi = (kind: ActionCenterIdKind) =>
+  apiFetch<{ ids: string[] }>(`/api/action-center/ids?kind=${kind}`);
+

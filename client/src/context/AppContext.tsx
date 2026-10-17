@@ -57,6 +57,9 @@ interface AppStore {
   uploadResume: (file: File) => Promise<void>;
   deleteResume: () => Promise<void>;
   setSenderMailboxCheckedAt: (d: Date) => void;
+  /** For writes made outside this store (e.g. the Action Center): bumps
+      contactsVersion so paged lists and their counts refetch. */
+  contactsChanged: () => void;
 }
 
 const AppContext = createContext<AppStore | null>(null);
@@ -244,6 +247,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setSenderMailboxCheckedAt(d) {
       setSender(prev => ({ ...prev, lastMailboxCheckAt: d }));
     },
+    contactsChanged: bump,
   }), [contacts, templates, sender, loaded, metaLoaded, contactsVersion, bump, loadContacts, loadMailboxContacts, loadTemplates, loadSettings, init, initMeta, initMailbox, getStats, filterContacts]);
 
   return <AppContext.Provider value={store}>{children}</AppContext.Provider>;

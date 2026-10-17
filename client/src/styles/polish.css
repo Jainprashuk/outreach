@@ -179,6 +179,162 @@ body:has(.bulk-bar.visible) #send-job-widget,
 body:has(.bulk-bar.visible) .toast-container {
   bottom: calc(84px + env(safe-area-inset-bottom));
 }
+/* The Action Center button takes the corner; the widget and toasts stack above it. */
+.ac-wrap { position: fixed; right: 20px; bottom: calc(20px + env(safe-area-inset-bottom)); z-index: 450; }
+body:has(.ac-wrap) #send-job-widget,
+body:has(.ac-wrap) .toast-container { bottom: calc(80px + env(safe-area-inset-bottom)); }
+body:has(.bulk-bar.visible) .ac-wrap { bottom: calc(84px + env(safe-area-inset-bottom)); }
+body:has(.bulk-bar.visible):has(.ac-wrap) #send-job-widget,
+body:has(.bulk-bar.visible):has(.ac-wrap) .toast-container { bottom: calc(144px + env(safe-area-inset-bottom)); }
+
+/* ── Action Center ─────────────────────────────────────────────────────────
+   A speed dial: the ⚡ button fans out a stack of compact chips above itself.
+   Each chip is one action; hovering (or focusing) it shows a detail card. */
+.ac-btn {
+  position: relative; width: 52px; height: 52px; border-radius: 50%; cursor: pointer;
+  border: 1px solid rgba(255,255,255,.18);
+  background: var(--accent-grad, var(--accent)); color: #fff; font-size: 24px;
+  box-shadow: 0 10px 26px -6px var(--accent-glow, rgba(99,102,241,.55)), inset 0 1px 0 rgba(255,255,255,.28);
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: transform .18s var(--ease), filter .15s var(--ease), box-shadow .18s var(--ease);
+}
+.ac-btn i { filter: drop-shadow(0 1px 1px rgba(0,0,0,.25)); }
+.ac-btn:hover {
+  filter: brightness(1.07); transform: translateY(-2px);
+  box-shadow: 0 14px 30px -6px var(--accent-glow, rgba(99,102,241,.6)), inset 0 1px 0 rgba(255,255,255,.28);
+}
+.ac-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.ac-btn[aria-expanded="true"] { transform: rotate(90deg); }
+.ac-btn .notif-badge {
+  top: -3px; right: -3px; min-width: 19px; height: 19px; font-size: 10.5px;
+  background: var(--red, #ef4444); box-shadow: 0 0 0 2.5px var(--canvas, var(--bg));
+}
+/* Something to do: a soft ring, three times, then still. */
+.ac-btn.has-due::after {
+  content: ''; position: absolute; inset: -1px; border-radius: 50%;
+  border: 2px solid var(--accent); opacity: 0; pointer-events: none;
+  animation: ac-ring 2.4s var(--ease) 0.6s 3;
+}
+@keyframes ac-ring { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(1.55); opacity: 0; } }
+
+/* Hover label: what the button is, and how much is waiting. */
+.ac-btn-label {
+  position: absolute; right: calc(100% + 10px); top: 50%; transform: translate(6px, -50%);
+  white-space: nowrap; pointer-events: none; opacity: 0;
+  padding: 6px 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600;
+  background: var(--bg2); color: var(--text); border: 1px solid var(--border-md, var(--border));
+  box-shadow: var(--shadow-lg); transition: opacity .15s var(--ease), transform .15s var(--ease);
+}
+.ac-btn-label em { font-style: normal; color: var(--text2); font-weight: 500; }
+.ac-wrap:hover .ac-btn-label { opacity: 1; transform: translate(0, -50%); }
+@media (hover: none) { .ac-btn-label { display: none; } }
+
+/* Room under the last row of any page, so the button never sits on its controls. */
+body:has(.ac-wrap) #main { padding-bottom: 84px; }
+
+.ac-dial {
+  position: absolute; right: 0; bottom: calc(100% + 12px);
+  display: flex; flex-direction: column; align-items: flex-end; gap: 10px;
+  max-height: min(640px, calc(100vh - 120px)); overflow-y: auto; overscroll-behavior: contain;
+  padding: 4px 2px 2px 24px; scrollbar-width: none;
+}
+.ac-dial::-webkit-scrollbar { width: 0; height: 0; }
+.ac-group-stack { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.ac-group {
+  font-size: 10.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  color: var(--text3); padding: 0 6px; text-shadow: 0 0 6px var(--canvas, var(--bg));
+}
+
+.ac-chip {
+  display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px 0 11px;
+  border-radius: 999px; border: 1px solid var(--border-md, var(--border));
+  background: var(--bg2); color: var(--text); font: inherit; font-size: 13px; font-weight: 600;
+  box-shadow: var(--shadow-lg); cursor: pointer; white-space: nowrap;
+  animation: ac-pop .18s var(--ease) both;
+  transition: transform .12s var(--ease), border-color .12s var(--ease), background-color .12s var(--ease);
+}
+.ac-chip i { font-size: 17px; color: var(--accent); }
+.ac-chip:hover, .ac-chip:focus-visible { transform: translateX(-3px); border-color: var(--accent); outline: none; }
+.ac-chip.tone-warning i { color: var(--amber); }
+.ac-chip.tone-error i { color: var(--red, #ef4444); }
+.ac-chip.tone-success i { color: var(--green, #22c55e); }
+.ac-chip.is-disabled { cursor: default; color: var(--text3); background: var(--bg); box-shadow: none; }
+.ac-chip.is-disabled i { color: var(--text3); }
+.ac-chip.is-disabled:hover { transform: none; border-color: var(--border-md, var(--border)); }
+.ac-chip:disabled { opacity: .55; cursor: wait; }
+.ac-chip-muted { cursor: default; color: var(--text2); font-weight: 500; }
+.ac-chip-muted i { color: var(--green, #22c55e); }
+.ac-chip-count {
+  min-width: 22px; height: 20px; padding: 0 6px; border-radius: 10px;
+  background: var(--accent-bg); color: var(--accent); font-size: 11.5px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.ac-chip.tone-error .ac-chip-count { background: var(--red-bg, rgba(239,68,68,.14)); color: var(--red, #ef4444); }
+.ac-chip.tone-warning .ac-chip-count { background: var(--amber-bg); color: var(--amber); }
+@keyframes ac-pop { from { opacity: 0; transform: translateY(8px) scale(.96); } to { opacity: 1; transform: none; } }
+
+/* While open, the page dims behind the dial so the chips read cleanly. */
+.ac-scrim {
+  position: fixed; inset: 0; z-index: 445;
+  background: color-mix(in srgb, var(--canvas, #000) 55%, transparent);
+  backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+  animation: ac-fade .15s var(--ease) both;
+}
+/* The send widget shares the corner and stacks higher: step aside while the dial is open. */
+body:has(.ac-scrim) #send-job-widget { visibility: hidden; }
+.ac-group { text-shadow: none; }
+.ac-chip-lock { font-size: 13px !important; color: var(--text3) !important; margin-left: -2px; }
+
+/* Run: a single row of round icon buttons. */
+.ac-run-row { display: flex; gap: 8px; animation: ac-pop .18s var(--ease) both; }
+.ac-icon-btn {
+  position: relative; width: 40px; height: 40px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--border-md, var(--border)); background: var(--bg2); color: var(--accent);
+  font-size: 18px; cursor: pointer; box-shadow: var(--shadow-lg);
+  transition: transform .12s var(--ease), border-color .12s var(--ease);
+}
+.ac-icon-btn:hover, .ac-icon-btn:focus-visible { transform: translateY(-2px); border-color: var(--accent); outline: none; }
+.ac-icon-btn.is-disabled { color: var(--text3); background: var(--bg); box-shadow: none; cursor: default; }
+.ac-icon-btn.is-disabled:hover { transform: none; border-color: var(--border-md, var(--border)); }
+.ac-icon-btn:disabled { opacity: .55; cursor: wait; }
+.ac-lock-dot {
+  position: absolute; right: -3px; bottom: -3px; width: 17px; height: 17px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 10.5px;
+  background: var(--bg2); border: 1px solid var(--border-md, var(--border)); color: var(--amber);
+}
+.ac-icon-count {
+  position: absolute; top: -5px; right: -5px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px;
+  background: var(--accent); color: #fff; font-size: 10px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+
+/* The detail card, beside whichever chip is hovered. Fixed, so the dial's scroll never clips it. */
+.ac-tip {
+  position: fixed; z-index: 460; transform: translateY(-50%); pointer-events: none;
+  width: min(280px, calc(100vw - 120px)); padding: 10px 12px;
+  background: var(--bg2); border: 1px solid var(--border-md, var(--border));
+  border-radius: 12px; box-shadow: var(--shadow-lg); animation: ac-fade .12s var(--ease) both;
+}
+.ac-tip-title { font-size: 13px; font-weight: 600; line-height: 1.35; color: var(--text); }
+.ac-tip-body { margin-top: 4px; font-size: 12.5px; line-height: 1.4; color: var(--text2); }
+.ac-tip-warn { margin-top: 6px; font-size: 12px; color: var(--amber); display: flex; gap: 5px; align-items: center; }
+.ac-tip-cta { margin-top: 6px; font-size: 11.5px; color: var(--accent); font-weight: 600; }
+@keyframes ac-fade { from { opacity: 0; } to { opacity: 1; } }
+
+.ac-spin { animation: ac-spin 1s linear infinite; }
+@keyframes ac-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ac-spin, .ac-chip, .ac-tip, .ac-scrim, .ac-run-row, .ac-btn.has-due::after { animation: none; }
+  .ac-btn, .ac-chip, .ac-icon-btn, .ac-btn-label { transition: none; }
+}
+/* Touch screens have no hover: tapping runs the action, so the card is skipped. */
+@media (hover: none) { .ac-tip { display: none; } }
+@media (max-width: 700px) {
+  .ac-wrap { right: 14px; }
+  .ac-btn { width: 46px; height: 46px; font-size: 21px; }
+  .ac-chip { height: 34px; font-size: 12.5px; }
+}
 
 /* ── Sidebar ───────────────────────────────────────────────────────────────
    Off-canvas on a phone it runs edge to edge, including under the notch and

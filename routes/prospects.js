@@ -745,8 +745,9 @@ router.patch('/:id', async (req, res) => {
  * the Test-format send (lib/formatTest.js).
  *
  * @returns {Promise<{moved: number, alreadyMoved: number, notReady: number, blocked: number,
- *                    duplicates: number, contactIds: Map<string, string>}>}
+ *                    duplicates: number, contactIds: Map<string, string>, existingContactIds: string[]}>}
  *          contactIds: prospect id → new contact id, for the ones moved
+ *          existingContactIds: contacts that already had a moved row's address
  */
 async function moveProspects(userId, ids, template) {
   const docs = await Prospect.find({ _id: { $in: ids }, userId, ...BASE_FILTER }).lean();
@@ -810,7 +811,7 @@ async function moveProspects(userId, ids, template) {
   });
   if (ops.length) await Prospect.bulkWrite(ops, { ordered: false });
 
-  return { ...out, contactIds };
+  return { ...out, contactIds, existingContactIds: [...existingByEmail.values()] };
 }
 
 // POST /api/prospects/move — { ids, template }. Creates pending contacts (Step 2
@@ -820,8 +821,10 @@ router.post('/move', async (req, res) => {
     const ids = idList(req.body && req.body.ids);
     if (!ids) return res.status(400).json({ error: `Expected 1–${MAX_IDS} prospect ids` });
     const template = String((req.body && req.body.template) || '');
-    const { contactIds, ...out } = await moveProspects(req.userId, ids, template);
-    res.json({ ok: true, ...out });
+    const { contactIds, existingContactIds, ...out } = await moveProspects(req.userId, ids, template);
+    // New contacts plus the ones these people already were, for callers that
+    // carry straight on into a send (the Action Center).
+    res.json({ ok: true, ...out, contactIds: [...new Set([...contactIds.values(), ...existingContactIds])] });
   } catch (err) { err500(res, err); }
 });
 

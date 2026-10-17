@@ -5,6 +5,7 @@ import { useSession } from '../context/SessionContext';
 import { useInterviews } from '../context/InterviewContext';
 import { useActionQueue } from '../context/ActionQueueContext';
 import SendJobWidget from './SendJobWidget';
+import ActionCenter from './ActionCenter';
 import NavTip from './NavTip';
 import NotificationBell from './NotificationBell';
 import UserMenu from './UserMenu';
@@ -177,6 +178,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
         <main id="main">{wide ? children : <div className="section" style={{ flex: 1 }}>{children}</div>}</main>
       </div>
       <SendJobWidget />
+      {!minimal && <ActionCenter />}
     </div>
   );
 }

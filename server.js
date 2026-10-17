@@ -619,6 +619,8 @@ app.use('/api/interviews', requireDb, require('./routes/interviews'));
 // the email SendJob routes above, and these are job *postings* anyway.
 app.use('/api/postings', requireDb, require('./routes/postings'));
 app.use('/api/campaigns', requireDb, require('./routes/campaigns'));
+// The floating Action Center: counts and the id lists its workflows start from.
+app.use('/api/action-center', requireDb, require('./routes/actionCenter'));
 app.use('/api/blocklist', requireDb, require('./routes/blocklist'));
 // First-run setup. Below the /api stack above, so it inherits attachUser and
 // the mutation audit log like every other owner-scoped router.

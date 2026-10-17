@@ -13,6 +13,7 @@ const { deadline } = require('../lib/http');
 const { inCooldown } = require('../lib/cooldown');
 const { isDeadAddress } = require('../lib/deadAddress');
 const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
+const { hasUnansweredReply } = require('../lib/actionQueue');
 const mailer = require('../lib/mailer');
 
 const { requireOnboarded } = require('../lib/onboardingGuard');
@@ -295,12 +296,49 @@ router.post('/', async (req, res) => {
   }
 });
 
+// Which of the given contact ids may enter a contact campaign, and why each of
+// the others may not. Shared by from-contacts and its dryRun so the preview
+// count is exactly what a real create accepts.
+async function screenContacts(userId, rawIds) {
+  const ids = [...new Set(Array.isArray(rawIds) ? rawIds.filter(mongoose.isValidObjectId).map(String) : [])];
+  const skipped = { missing: 0, in_campaign: 0, invalid: 0, cooldown: 0, dead: 0, interview: 0, replied: 0 };
+  if (!ids.length) return { requested: 0, eligible: 0, skipped, contacts: [] };
+  const candidates = await Contact.find({ _id: { $in: ids }, userId, ...BASE_FILTER })
+    .select('name email company role status lastSentAt lastOutboundAt repliedAt bounceReason statusHistory.status').lean();
+  skipped.missing = ids.length - candidates.length;
+  // Contacts already in the interview pipeline never enter a campaign at all.
+  const interviewSets = await loadInterviewSets(userId);
+  const contacts = [];
+  for (const c of candidates) {
+    if (c.status === 'in-campaign') skipped.in_campaign++;
+    // A contact whose email is not an address would be reserved here and then
+    // fail at send time with "No recipients defined" — leave it out instead.
+    else if (!EMAIL_RE.test(normEmail(c.email))) skipped.invalid++;
+    else if (inCooldown(c)) skipped.cooldown++;
+    // An address that already bounced would only bounce again — and each bounce
+    // costs the sending account reputation.
+    else if (isDeadAddress(c)) skipped.dead++;
+    else if (isInInterview({ id: c._id, email: c.email }, interviewSets)) skipped.interview++;
+    // They wrote back and you haven't answered: a scheduled email would talk over
+    // them. The send worker skips these too; leaving them out keeps the count honest.
+    else if (hasUnansweredReply(c)) skipped.replied++;
+    else contacts.push(c);
+  }
+  return { requested: ids.length, eligible: contacts.length, skipped, contacts };
+}
+
 // POST /api/campaigns/from-contacts — a campaign whose rows point at existing
 // contacts. This is intentionally separate from the spreadsheet endpoint: the
 // latter must continue to retire existing contacts as duplicates.
 router.post('/from-contacts', async (req, res) => {
   try {
     const b = req.body || {};
+    // dryRun: report how many of the selected contacts would go in, and why the
+    // rest would not, without writing anything (the Action Center's send sheet).
+    if (b.dryRun) {
+      const { contacts, ...preview } = await screenContacts(req.userId, b.contactIds);
+      return res.json({ ...preview, credentialsMissing: !await hasSendCredentials(req.userId) });
+    }
     const name = normText(b.name);
     if (!name) return res.status(400).json({ error: 'Give the campaign a name.' });
     const templateKey = String(b.templateKey || '').trim();
@@ -313,18 +351,10 @@ router.post('/from-contacts', async (req, res) => {
     if (configError) return res.status(400).json({ error: configError });
     if (!await hasSendCredentials(req.userId)) return res.status(400).json({ error: 'credentials_missing' });
 
-    const ids = [...new Set(Array.isArray(b.contactIds) ? b.contactIds.filter(mongoose.isValidObjectId) : [])];
-    if (!ids.length) return res.status(400).json({ error: 'Select at least one contact.' });
-    const candidates = await Contact.find({ _id: { $in: ids }, userId: req.userId, ...BASE_FILTER, status: { $ne: 'in-campaign' } })
-      .select('name email company role status lastSentAt bounceReason statusHistory.status').lean();
-    // Contacts already in the interview pipeline never enter a campaign at all.
-    const interviewSets = await loadInterviewSets(req.userId);
-    // A contact whose email is not an address would be reserved here and then
-    // fail at send time with "No recipients defined" — leave it out instead.
-    // An address that already bounced would only bounce again — and each bounce
-    // costs the sending account reputation.
-    const contacts = candidates.filter(c => EMAIL_RE.test(normEmail(c.email))
-      && !inCooldown(c) && !isDeadAddress(c) && !isInInterview({ id: c._id, email: c.email }, interviewSets));
+    if (!(Array.isArray(b.contactIds) && b.contactIds.some(mongoose.isValidObjectId))) {
+      return res.status(400).json({ error: 'Select at least one contact.' });
+    }
+    const { contacts } = await screenContacts(req.userId, b.contactIds);
     if (!contacts.length) return res.status(400).json({ error: 'None of the selected contacts are available.' });
 
     const runHourIst = Number.isInteger(Number(b.runHourIst))

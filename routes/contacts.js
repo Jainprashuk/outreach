@@ -239,7 +239,10 @@ router.get('/stats', async (req, res) => {
         followUpDue:  { $sum: { $cond: [{ $and: [
           { $eq: ['$status', 'sent'] },
           { $eq: [{ $ifNull: ['$followUpSentAt', null] }, null] },
-          { $lt: ['$lastSentAt', new Date(Date.now() - THREE_DAYS_MS)] },
+          // Same rule as the list (lib/contactListDb.js followUpDue): a missing
+          // lastSentAt is null, which $lt would count as older than any date.
+          { $ne: [{ $ifNull: ['$lastSentAt', null] }, null] },
+          { $lte: ['$lastSentAt', new Date(Date.now() - THREE_DAYS_MS)] },
         ]}, 1, 0] }},
         followUpSent: { $sum: { $cond: [{ $eq: ['$status', 'follow-up-sent'] }, 1, 0] } },
         closed:       { $sum: { $cond: [{ $eq: ['$status', 'closed'] },         1, 0] } },
