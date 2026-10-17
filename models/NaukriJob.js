@@ -43,6 +43,9 @@ const naukriJobSchema = new mongoose.Schema({
   // legitimately turns up under several searches, and collapsing that to one
   // would misattribute which search actually works.
   queries: { type: [String], default: [] },
+  // Where it was found: 'search' (one of your searches) and/or 'recommended'
+  // (Naukri's Recommended jobs). Both, when it turned up both ways.
+  origins: { type: [String], default: [] },
 
   // ── what WE observed ───────────────────────────────────────────────────────
   firstSeenAt: { type: Date, default: Date.now },  // written once, via $setOnInsert
@@ -55,6 +58,8 @@ const naukriJobSchema = new mongoose.Schema({
   // auto-approve, which is off by default) may move it forward.
   approval:   { type: String, enum: ['pending', 'approved', 'rejected'], default: 'pending' },
   approvedAt: { type: Date, default: null },
+  // Who approved it: you, or auto-approve (score at or above your threshold).
+  approvedBy: { type: String, enum: ['you', 'auto', null], default: null },
   rejectedReason: { type: String, default: '' },
 
   // ── the outcome ────────────────────────────────────────────────────────────
@@ -63,7 +68,9 @@ const naukriJobSchema = new mongoose.Schema({
   // applyNote so the config UI can offer it as a one-click addition.
   applyStatus: {
     type: String,
-    enum: ['none', 'applied', 'skipped', 'failed', 'in-review', 'interviewing', 'offer', 'rejected'],
+    // 'dismissed' = a skip you have closed. Off every list and count except
+    // its own, and never claimed again.
+    enum: ['none', 'applied', 'skipped', 'failed', 'dismissed', 'in-review', 'interviewing', 'offer', 'rejected'],
     default: 'none',
   },
   appliedAt:    { type: Date, default: null },
@@ -71,8 +78,10 @@ const naukriJobSchema = new mongoose.Schema({
   // Whether a future run should try this job again.
   //
   // Not every skip is the same. A skip caused by an unanswered screening
-  // question SHOULD be retried — adding the rule is exactly what makes it
-  // succeed next time, and that loop is the point of surfacing the question.
+  // question CAN succeed later — but only once a rule answers it. Such a job is
+  // not claimed while it sits in 'skipped'; saving a rule that resolves its
+  // question moves it back to 'none' (requeueAnswered in routes/naukri.js), so
+  // it is retried exactly when retrying can work, and never before.
   // A skip caused by "Apply on company site", or by Naukri saying you already
   // applied, can never succeed no matter how many times it is attempted.
   //
@@ -99,6 +108,16 @@ const naukriJobSchema = new mongoose.Schema({
   // The unanswered question text, when applyStatus === 'skipped'. Its own field
   // rather than parsed back out of applyNote, because the config UI queries it.
   unknownQuestion: { type: String, default: '' },
+  // The choices offered for that question, when it was a radio or checkbox.
+  // An AI draft must pick one of these, never invent its own.
+  questionOptions: { type: [String], default: [] },
+
+  // ── fit ────────────────────────────────────────────────────────────────────
+  // 0–100 from lib/naukriScore.js, recomputed on every harvest it appears in.
+  // Sorts the inbox and gates auto-approve. Null for rows harvested before
+  // scoring existed.
+  score:        { type: Number, default: null },
+  scoreReasons: { type: [String], default: [] },
   applyHistory: {
     type: [{
       _id:  false,
@@ -120,6 +139,8 @@ const naukriJobSchema = new mongoose.Schema({
 naukriJobSchema.index({ userId: 1, sourceKey: 1 }, { unique: true });
 // The review queue.
 naukriJobSchema.index({ userId: 1, approval: 1, lastSeenAt: -1 });
+// The inbox, best first.
+naukriJobSchema.index({ userId: 1, approval: 1, score: -1 });
 // The applied view, and the per-day apply cap.
 naukriJobSchema.index({ userId: 1, applyStatus: 1, appliedAt: -1 });
 

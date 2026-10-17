@@ -26,7 +26,9 @@ function summary(run: NaukriRun): string {
   if (run.status === 'failed' || run.status === 'blocked') return run.error ? '' : 'no detail recorded';
   switch (run.kind) {
     case 'refresh': return 'profile updated';
-    case 'harvest': return `${s.found} found · ${s.new} new${s.updated ? ` · ${s.updated} updated` : ''}`;
+    case 'harvest': return `${s.found} found · ${s.new} new${s.updated ? ` · ${s.updated} updated` : ''}`
+      + `${s.recommended ? ` · ${s.recommended} from recommended` : ''}`
+      + `${s.autoApproved ? ` · ${s.autoApproved} auto-approved` : ''}`;
     case 'apply': {
       // A rehearsal reports what it walked, never a count that reads as work
       // done. "0 applied" on a dry run looks like a failure; it isn't one.

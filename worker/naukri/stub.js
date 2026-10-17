@@ -72,7 +72,10 @@ async function harvest(session, { config, onProgress }) {
   if (process.env.NAUKRI_STUB_EMPTY === '1') return { jobs: [], searches: 1 };
 
   const count = Number(process.env.NAUKRI_STUB_JOBS) || 8;
-  const searches = (config.searches && config.searches.length ? config.searches : [{ keywords: 'backend engineer' }]);
+  const { sourcesOf } = require('./harvest');
+  const sources = sourcesOf(config);
+  const searches = !sources.searches ? []
+    : (config.searches && config.searches.length ? config.searches : [{ keywords: 'backend engineer' }]);
   const jobs = [];
 
   for (let s = 0; s < searches.length; s++) {
@@ -97,15 +100,41 @@ async function harvest(session, { config, onProgress }) {
         url: `https://www.naukri.com/job-listings-stub-${n}`,
         postedText: `${1 + (n % 6)} days ago`,
         queries: [label],
+        origins: ['search'],
       });
     }
     onProgress({ phase: 'searching', label, page: s + 1, pagesTotal: searches.length, found: jobs.length });
   }
 
-  return { jobs, searches: searches.length };
+  // Recommended: a few of its own, plus stub-0 again so the "found both ways"
+  // path is exercised whenever searches ran too.
+  let recommended = 0;
+  if (sources.recommended) {
+    onProgress({ phase: 'recommended', label: 'Recommended for you', page: 1, pagesTotal: 1, found: jobs.length });
+    await sleep(200);
+    const both = jobs.find(j => j.sourceId === 'stub-0');
+    if (both) { both.origins.push('recommended'); both.queries.push('Recommended for you'); recommended++; }
+    for (let i = 0; i < 3; i++) {
+      recommended++;
+      jobs.push({
+        sourceId: `stub-rec-${i}`, title: `Platform Engineer ${i + 1}`, company: COMPANIES[i % COMPANIES.length],
+        location: LOCATIONS[i % LOCATIONS.length], experienceMin: 3, experienceMax: 7,
+        salaryText: 'Not disclosed', tags: ['node', 'kubernetes'], url: `https://www.naukri.com/job-listings-stub-rec-${i}`,
+        postedText: '2 days ago', queries: ['Recommended for you'], origins: ['recommended'],
+        // The real feed says outright when Apply leaves Naukri; the last one does.
+        companySite: i === 2,
+      });
+    }
+  }
+
+  return { jobs, searches: searches.length, recommended };
 }
 
-async function apply(session, { jobs, dryRun, onProgress, onResult }) {
+const STUB_QUESTION = 'Do you have experience with SAP?';
+const STUB_OPTIONS = ['Yes', 'No'];
+
+async function apply(session, { config = {}, jobs, dryRun, onProgress, onResult }) {
+  const { resolveAnswer, pickOption } = require('../../lib/naukriAnswers');
   maybeCheckpoint();
   maybeFail('apply');
 
@@ -119,10 +148,13 @@ async function apply(session, { jobs, dryRun, onProgress, onResult }) {
     });
     await sleep(200);
 
-    // Every third job pretends to ask something the answer bank has no rule
-    // for, so the skip path and the unknown-question feedback loop are exercised
-    // without needing a real screening form.
-    const unanswerable = i % 3 === 2;
+    // Every third job asks a Yes/No question. It is skipped unless the answer
+    // bank resolves it to one of the options — the same rule the real driver
+    // applies — so the whole loop (skip → AI draft → Use → requeue → applied)
+    // runs end to end without a real screening form.
+    const asks = i % 3 === 2;
+    const resolved = asks ? resolveAnswer(STUB_QUESTION, config) : null;
+    const unanswerable = asks && !(resolved.matched && pickOption(resolved.answer, STUB_OPTIONS));
 
     if (dryRun) {
       // A rehearsal must leave no trace on the job — the server enforces that
@@ -138,8 +170,9 @@ async function apply(session, { jobs, dryRun, onProgress, onResult }) {
       stats.skipped++;
       await onResult({
         jobId: job.id, outcome: 'skipped',
-        reason: 'Unanswered screening question',
-        question: 'Do you have experience with SAP?',
+        reason: 'Unanswered screening question — answer it under Jobs → Needs answer',
+        question: STUB_QUESTION,
+        options: STUB_OPTIONS,
       });
       continue;
     }

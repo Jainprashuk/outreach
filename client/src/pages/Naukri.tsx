@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { NaukriOverview, NaukriRunKind, NaukriConfig } from '../lib/api';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { NaukriOverview, NaukriRunKind, NaukriConfig, NaukriSources } from '../lib/api';
 import { naukriOverviewApi, naukriConfigApi, queueNaukriRunApi, cancelNaukriRunApi } from '../lib/api';
 import Layout from '../components/Layout';
 import { useToast } from '../context/ToastContext';
@@ -7,9 +7,7 @@ import StatusHeader, { readiness } from '../components/naukri/StatusHeader';
 import NaukriSetupGuide, { type NaukriGuideTab } from '../components/naukri/NaukriSetupGuide';
 import RunTimeline, { ActiveRun } from '../components/naukri/RunTimeline';
 import ReviewQueue from '../components/naukri/ReviewQueue';
-import AppliedTable from '../components/naukri/AppliedTable';
-import QueuedJobs from '../components/naukri/QueuedJobs';
-import SkippedJobs from '../components/naukri/SkippedJobs';
+import JobsTab, { type JobsView } from '../components/naukri/JobsTab';
 import ConnectionCard from '../components/naukri/config/ConnectionCard';
 import { useAdaptiveInterval } from '../hooks/useAdaptiveInterval';
 import ScheduleCard from '../components/naukri/config/ScheduleCard';
@@ -37,22 +35,75 @@ const POLL_MS = 3000;
 // schedule starts. Starting or cancelling one here reloads at once.
 const IDLE_POLL_MS = 30_000;
 
-type View = 'activity' | 'review' | 'queued' | 'skipped' | 'applied' | 'config';
+// Four tabs, in the order of the flow: what is happening, what needs a
+// decision, where every job stands, and how it is set up.
+type View = 'activity' | 'review' | 'jobs' | 'config';
 
 const TABS: Array<[View, string, string]> = [
   ['activity', 'Activity', 'ti-activity'],
-  ['review', 'Review', 'ti-checklist'],
-  ['queued', 'Waiting', 'ti-hourglass'],
-  ['skipped', 'Skipped', 'ti-player-skip-forward'],
-  ['applied', 'Applied', 'ti-send'],
+  ['review', 'Inbox', 'ti-inbox'],
+  ['jobs', 'Jobs', 'ti-briefcase'],
   ['config', 'Configuration', 'ti-settings'],
 ];
+
+const KIND_LABEL: Record<string, string> = { refresh: 'refresh', harvest: 'harvest', apply: 'apply' };
+
+// Harvest, with a choice of where to look for this one run. The tick marks the
+// default from Configuration → Searches, which is what scheduled harvests use.
+const SOURCE_CHOICES: Array<[string, string, NaukriSources]> = [
+  ['searches', 'My searches', { searches: true, recommended: false }],
+  ['recommended', 'Recommended jobs', { searches: false, recommended: true }],
+  ['both', 'Both', { searches: true, recommended: true }],
+];
+
+function HarvestMenu({ defaults, disabled, onPick }: {
+  defaults: NaukriSources | undefined; disabled: boolean; onPick: (s: NaukriSources) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, [open]);
+  const d = defaults || { searches: true, recommended: false };
+  return (
+    <span ref={ref} style={{ position: 'relative', display: 'inline-flex' }}>
+      <button className="btn btn-sm" type="button" onClick={() => setOpen(o => !o)} disabled={disabled}
+        aria-haspopup="menu" aria-expanded={open}>
+        <i className="ti ti-download" /> Harvest <i className="ti ti-chevron-down" style={{ fontSize: 11 }} />
+      </button>
+      {open && (
+        <span role="menu" style={{
+          position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 50, minWidth: 190,
+          background: 'var(--bg)', border: '1px solid var(--border-md)', borderRadius: 'var(--radius)',
+          boxShadow: 'var(--shadow-lg)', padding: 4, display: 'flex', flexDirection: 'column',
+        }}>
+          {SOURCE_CHOICES.map(([key, label, s]) => {
+            const isDefault = s.searches === d.searches && s.recommended === d.recommended;
+            return (
+              <button key={key} type="button" role="menuitem" className="btn btn-sm"
+                style={{ justifyContent: 'flex-start', border: 'none', background: 'transparent' }}
+                onClick={() => { setOpen(false); onPick(s); }}>
+                <i className={`ti ${isDefault ? 'ti-check' : 'ti-point'}`} style={{ width: 16 }} />
+                {label}{isDefault && <span style={{ color: 'var(--text3)', marginLeft: 6 }}>default</span>}
+              </button>
+            );
+          })}
+        </span>
+      )}
+    </span>
+  );
+}
 
 export default function Naukri() {
   const [overview, setOverview] = useState<NaukriOverview | null>(null);
   const [config, setConfig] = useState<NaukriConfig | null>(null);
   const [guide, setGuide] = useState<NaukriGuideTab | null>(null);
   const [view, setView] = useState<View>('activity');
+  const [jobsView, setJobsView] = useState<JobsView>('waiting');
+  const openJobs = (v: JobsView) => { setJobsView(v); setView('jobs'); };
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -75,15 +126,15 @@ export default function Naukri() {
 
   const KIND_TOAST: Record<string, string> = {
     refresh: 'Refresh queued — your profile will be re-saved on the next worker poll.',
-    harvest: 'Harvest queued — new listings will land in Review.',
+    harvest: 'Harvest queued — new listings will land in the Inbox.',
     apply: 'Apply run queued — approved jobs go out on the next worker poll.',
     probe: 'Probe queued.',
   };
 
-  const start = async (kind: NaukriRunKind) => {
+  const start = async (kind: NaukriRunKind, sources?: NaukriSources) => {
     setBusy(true);
     try {
-      await queueNaukriRunApi(kind);
+      await queueNaukriRunApi(kind, sources ? { sources } : {});
       // Queueing changes nothing visible until the worker polls, up to twenty
       // seconds later. Without a toast the button reads as broken.
       toast(KIND_TOAST[kind] || 'Run queued.', 'success');
@@ -115,18 +166,17 @@ export default function Naukri() {
 
   const r = readiness(overview);
   const canStart = r.canRun && !busy;
+  // The badge is what needs YOU: new jobs to decide, and questions to answer.
   const counts: Partial<Record<View, number>> = {
     review: overview.reviewCount,
-    queued: overview.waitingCount,
-    skipped: overview.skippedCount,
-    applied: overview.appliedCount,
+    jobs: overview.needsAnswerCount,
   };
+  const nextApply = (overview.upcoming || []).find(x => x.kinds.includes('apply'));
 
   const subtitle = [
-    `${overview.reviewCount} awaiting review`,
-    `${overview.waitingCount} approved & waiting`,
-    `${overview.appliedCount} applied`,
-    `${overview.appliedToday} today`,
+    `${overview.reviewCount} in inbox`,
+    `${overview.waitingCount} waiting`,
+    `${overview.appliedToday}/${overview.perDay} applied today`,
     overview.schedule.enabled && overview.nextOccurrence ? `next ${fmtTime(overview.nextOccurrence)}` : 'no schedule',
   ].join(' · ');
 
@@ -143,9 +193,7 @@ export default function Naukri() {
           <button className="btn btn-sm" type="button" onClick={() => start('refresh')} disabled={!canStart}>
             <i className="ti ti-refresh" /> Refresh
           </button>
-          <button className="btn btn-sm" type="button" onClick={() => start('harvest')} disabled={!canStart}>
-            <i className="ti ti-download" /> Harvest
-          </button>
+          <HarvestMenu defaults={overview.sources} disabled={!canStart} onPick={s => start('harvest', s)} />
           <button className="btn btn-primary btn-sm" type="button" onClick={() => start('apply')} disabled={!canStart}>
             <i className="ti ti-send" /> Apply
           </button>
@@ -170,6 +218,23 @@ export default function Naukri() {
 
       {view === 'activity' && (
         <>
+          {/* The week in one line, each number a link to the list behind it. */}
+          <Card>
+            <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>
+              <Band>This week</Band>
+              <button className="btn btn-xs" type="button" onClick={() => openJobs('applied')}>
+                <i className="ti ti-send" /> {overview.week.applied} applied
+              </button>
+              <button className="btn btn-xs" type="button" onClick={() => openJobs('skipped')}>
+                <i className="ti ti-player-skip-forward" /> {overview.week.skipped} skipped
+              </button>
+              <button className={`btn btn-xs${overview.needsAnswerCount ? ' btn-primary' : ''}`} type="button" onClick={() => openJobs('answer')}>
+                <i className="ti ti-help-circle" /> {overview.needsAnswerCount} need an answer
+              </button>
+              {overview.week.failed > 0 && <Muted>{overview.week.failed} failed — see Past below</Muted>}
+            </div>
+          </Card>
+
           <Card>
             <div style={{ marginBottom: 10 }}><Band>Now</Band></div>
             {overview.activeRun
@@ -180,10 +245,14 @@ export default function Naukri() {
           <Card>
             <div style={{ marginBottom: 10 }}><Band>Next</Band></div>
 
-            {overview.schedule.enabled && overview.nextOccurrence ? (
+            {overview.schedule.enabled && overview.upcoming.length ? (
               <div style={{ fontSize: 13, marginBottom: 10 }}>
-                <i className="ti ti-clock" style={{ marginRight: 6, color: 'var(--text2)' }} />
-                {overview.scheduleKinds.join(' + ') || 'nothing'} · {fmtTime(overview.nextOccurrence)}
+                {overview.upcoming.slice(0, 3).map(o => (
+                  <div key={o.at} style={{ padding: '2px 0' }}>
+                    <i className="ti ti-clock" style={{ marginRight: 6, color: 'var(--text2)' }} />
+                    {fmtTime(o.at)} · {o.kinds.map(k => KIND_LABEL[k] || k).join(' + ')}
+                  </div>
+                ))}
               </div>
             ) : (
               <div style={{ marginBottom: 10 }}>
@@ -203,8 +272,8 @@ export default function Naukri() {
             {overview.reviewCount > 0 && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10, fontSize: 13 }}>
                 <i className="ti ti-alert-triangle" style={{ color: 'var(--red)' }} />
-                <span>{overview.reviewCount} job{overview.reviewCount === 1 ? '' : 's'} awaiting your review</span>
-                <button className="btn btn-xs btn-primary" type="button" onClick={() => setView('review')}>Review</button>
+                <span>{overview.reviewCount} job{overview.reviewCount === 1 ? '' : 's'} in your inbox</span>
+                <button className="btn btn-xs btn-primary" type="button" onClick={() => setView('review')}>Open inbox</button>
               </div>
             )}
 
@@ -216,11 +285,11 @@ export default function Naukri() {
                 <i className="ti ti-hourglass" style={{ color: 'var(--text2)' }} />
                 <span>
                   {overview.waitingCount} approved, waiting to be applied to
-                  {overview.schedule.enabled && overview.schedule.runApply
-                    ? ` — runs ${fmtTime(overview.nextOccurrence)}`
+                  {overview.schedule.enabled && nextApply
+                    ? ` — next apply run ${fmtTime(nextApply.at)}`
                     : ' — nothing will send these automatically'}
                 </span>
-                <button className="btn btn-xs" type="button" onClick={() => setView('queued')}>See them</button>
+                <button className="btn btn-xs" type="button" onClick={() => openJobs('waiting')}>See them</button>
               </div>
             )}
 
@@ -240,17 +309,13 @@ export default function Naukri() {
 
       {view === 'review' && <ReviewQueue onChanged={load} />}
 
-      {view === 'queued' && <QueuedJobs overview={overview} onChanged={load} />}
-
-      {view === 'skipped' && <SkippedJobs onChanged={load} />}
-
-      {view === 'applied' && <AppliedTable onChanged={load} />}
+      {view === 'jobs' && <JobsTab overview={overview} view={jobsView} onView={setJobsView} onChanged={load} />}
 
       {view === 'config' && (
         config ? (
           <>
             <ConnectionCard overview={overview} onChanged={load} />
-            <ScheduleCard schedule={overview.schedule} nextOccurrence={overview.nextOccurrence} onSaved={load} />
+            <ScheduleCard schedule={overview.schedule} upcoming={overview.upcoming} pollSeconds={config.worker?.pollSeconds ?? 20} onSaved={load} />
             <SearchesCard config={config} onSaved={load} />
             <FiltersCard config={config} onSaved={load} />
             <ProfileCard config={config} onSaved={load} />

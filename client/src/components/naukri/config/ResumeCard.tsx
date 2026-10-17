@@ -21,6 +21,9 @@ export default function ResumeCard({ config, onSaved }: {
   const [variants, setVariants] = useState<string[]>(config.headlineVariants.length ? config.headlineVariants : ['']);
   const toast = useToast();
   const [resume, setResume] = useState(config.resume || null);
+  // The plain text the AI drafts answers from. Pulled from a PDF on upload;
+  // editable, because extraction mangles some layouts and Word files give none.
+  const [text, setText] = useState(config.resume?.text || '');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
@@ -35,7 +38,11 @@ export default function ResumeCard({ config, onSaved }: {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Upload failed');
       setResume(data.resume);
-      { toast(`Uploaded ${data.resume.filename}.`, 'success'); setMsg(`Uploaded ${data.resume.filename}.`); };
+      setText(data.resumeText || '');
+      const m = data.extracted
+        ? `Uploaded ${data.resume.filename} — text read from it below; check it reads right.`
+        : `Uploaded ${data.resume.filename}. No text could be read from it — paste your resume text below for AI drafts.`;
+      toast(m, data.extracted ? 'success' : 'info'); setMsg(m);
       onSaved();
     } catch (e: any) { toast(e?.message || 'Could not upload', 'error'); setMsg(e?.message || 'Could not upload'); }
     finally { setBusy(false); }
@@ -43,8 +50,17 @@ export default function ResumeCard({ config, onSaved }: {
 
   const remove = async () => {
     setBusy(true); setMsg('');
-    try { await deleteNaukriResumeApi(); setResume(null); { toast('Removed.', 'info'); setMsg('Removed.'); }; onSaved(); }
+    try { await deleteNaukriResumeApi(); setResume(null); setText(''); { toast('Removed.', 'info'); setMsg('Removed.'); }; onSaved(); }
     catch (e: any) { toast(e?.message || 'Could not remove', 'error'); setMsg(e?.message || 'Could not remove'); }
+    finally { setBusy(false); }
+  };
+
+  const saveText = async () => {
+    setBusy(true); setMsg('');
+    try {
+      await updateNaukriConfigApi({ resumeText: text });
+      toast('Resume text saved.', 'success'); setMsg('Resume text saved.'); onSaved();
+    } catch (e: any) { toast(e?.message || 'Could not save', 'error'); setMsg(e?.message || 'Could not save'); }
     finally { setBusy(false); }
   };
 
@@ -81,6 +97,19 @@ export default function ResumeCard({ config, onSaved }: {
         <button className="btn btn-sm" onClick={() => fileRef.current?.click()} disabled={busy} style={{ marginTop: 8 }}>
           {resume ? 'Replace' : 'Upload'} resume
         </button>
+      </div>
+
+      <div style={{ marginBottom: 16 }}>
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Resume text (what AI answer drafts are written from)</div>
+        <textarea rows={7} style={{ width: '100%', fontSize: 12 }} value={text}
+          placeholder="Read automatically from a PDF upload — or paste your resume text here."
+          onChange={e => setText(e.target.value)} />
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 6 }}>
+          <button className="btn btn-sm" onClick={saveText} disabled={busy}>Save text</button>
+          <span style={{ color: 'var(--text2)', fontSize: 11 }}>
+            Only used to draft answers you then check under Jobs → Needs answer. The file above is what gets attached.
+          </span>
+        </div>
       </div>
 
       <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 6 }}>Headline variants</div>

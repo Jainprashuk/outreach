@@ -1517,7 +1517,7 @@ router.get('/sending/timeline', async (req, res) => {
 // Every request to an AI provider, for anybody, in full. Written by lib/aiCallLog.js.
 
 const AI_RANGES = { '1h': HOUR, '24h': DAY, '7d': 7 * DAY, '30d': 30 * DAY };
-const AI_FEATURES = ['classify', 'draft', 'discover', 'sources', 'other'];
+const AI_FEATURES = ['classify', 'draft', 'discover', 'sources', 'naukri', 'other'];
 const AI_FAILED = ['rate-limited', 'auth', 'transient', 'bad-output', 'aborted'];
 const preview = (v, n) => { const t = String(v || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n)}…` : t; };
 

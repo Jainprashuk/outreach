@@ -23,6 +23,7 @@
 
 const { check, jitter } = require('./guard');
 const { newPage } = require('./session');
+const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
 // Hard caps, module constants rather than config — the same doctrine the
 // LinkedIn harvester states in TRACK-SCROLL.md. The number of pages you walk is
@@ -33,6 +34,32 @@ const PAGE_DELAY = [1800, 4200];   // between page loads, randomised
 const CARDS_PER_PAGE = 20;         // Naukri's own page size; used to stop early
 
 const CARD = 'div.srp-jobtuple-wrapper';
+
+// Naukri's "Recommended jobs" — the listings it picks for your profile.
+//
+// Verified against the live page on 2026-10-17. Its cards are NOT links (no
+// href anywhere on article.jobTuple), so they are not read off the page at all.
+// The page fetches its jobs as JSON from /jobapi/v2/search/recom-jobs — one
+// POST per tab, {"clusterId": null | "profile" | "preference" |
+// "similar_jobs"} — and the harvest listens to those responses as the page
+// makes them. No request is added; it reads what the page already asked for.
+//
+// The feed is richer than any card: it carries the listing URL (jdURL), and
+// `companyApplyJob`, Naukri's own word on whether Apply leaves for the
+// employer's site — a fact, where the search harvest can only predict.
+//
+//   tabs   .tab-wrapper#apply (default) · #profile · #preference · #similar_jobs
+//   cards  article.jobTuple[data-job-id]  (only used to see that the page painted)
+const RECOMMENDED_URL = 'https://www.naukri.com/mnjuser/recommendedjobs';
+const RECOMMENDED_FEED = /\/jobapi\/v\d+\/search\/recom-jobs/;
+const RECOMMENDED_CARD = 'article.jobTuple';
+const RECOMMENDED_TABS = [
+  ['apply', 'Applies'],          // shown first; similar to jobs you applied to
+  ['profile', 'Profile'],
+  ['preference', 'Preferences'],
+  ['similar_jobs', 'You might like'],
+];
+const RECOMMENDED_LABEL = 'Recommended for you';
 
 // "backend developer" + "bangalore" -> /backend-developer-jobs-in-bangalore
 //
@@ -119,19 +146,128 @@ async function readCards(page) {
         url: href,
         // Naukri marks these on the card. The filter uses it to avoid putting
         // something back in your queue that you already applied to by hand.
-        alreadyApplied: /\bapplied\b/i.test(card.innerText || ''),
+        // The card's own "Applied" marker — read with the title taken out, or
+        // "Applied Scientist" would be dropped as already applied to.
+        alreadyApplied: /(^|[^a-z])applied(?![a-z])/i.test((card.innerText || '').replace(titleEl ? titleEl.innerText : '', '')),
       };
     }).filter(j => j.sourceId && j.title);
   }, CARD);
 }
 
-async function harvest(session, { config = {}, onProgress = () => {} } = {}) {
-  const searches = (Array.isArray(config.searches) ? config.searches : [])
-    .filter(s => s && s.enabled !== false && (s.keywords || s.url))
-    .slice(0, MAX_SEARCHES);
+// A configured limit, never above the hard cap: Settings can only lower these.
+const capped = (v, cap) => {
+  const n = Math.floor(Number(v));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, cap) : cap;
+};
 
-  if (!searches.length) {
-    throw new Error('No searches configured. Add one in Configuration → Searches before harvesting.');
+// One recom-jobs entry -> the same shape readCards returns. Pure.
+const stripHtml = (h) => String(h || '').replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, ' ')
+  .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/[ \t]+/g, ' ').trim();
+
+function fromFeed(d, tabLabel) {
+  const ph = (type) => ((d.placeholders || []).find(p => p && p.type === type) || {}).label || '';
+  const n = (v) => (v === '' || v == null || !Number.isFinite(Number(v)) ? null : Number(v));
+  return {
+    sourceId: String(d.jobId || ''),
+    title: String(d.title || '').trim(),
+    company: String(d.companyName || '').trim(),
+    location: ph('location'),
+    experienceMin: n(d.minimumExperience),
+    experienceMax: n(d.maximumExperience),
+    salaryText: ph('salary'),
+    description: stripHtml(d.jobDescription).slice(0, 2000),
+    postedText: String(d.footerPlaceholderLabel || ''),
+    postedAt: Number.isFinite(Number(d.createdDate)) && d.createdDate ? new Date(Number(d.createdDate)).toISOString() : null,
+    tags: String(d.tagsAndSkills || '').split(',').map(t => t.trim()).filter(Boolean).slice(0, 12),
+    url: d.jdURL ? new URL(d.jdURL, 'https://www.naukri.com').toString() : '',
+    // Naukri says so outright here; no guessing from the employer's history.
+    companySite: d.companyApplyJob === true,
+    alreadyApplied: false,
+    recommendedTab: tabLabel,
+  };
+}
+
+// Walk Recommended jobs: open it, then each tab in turn, collecting what the
+// page's own feed returns. `maxTabs` caps how many tabs (1–4) are opened.
+async function harvestRecommended(page, { tabIds = null, onProgress, found }) {
+  const byId = new Map();
+  let current = RECOMMENDED_TABS[0][1];
+  const onResponse = async (res) => {
+    if (!RECOMMENDED_FEED.test(res.url())) return;
+    try {
+      const body = await res.json();
+      if (current === RECOMMENDED_TABS[0][1] && !keepFirst) return;
+      for (const d of body.jobDetails || []) {
+        const job = fromFeed(d, current);
+        if (job.sourceId && job.title && job.url && !byId.has(job.sourceId)) byId.set(job.sourceId, job);
+      }
+    } catch (_) { /* a response we cannot read adds nothing */ }
+  };
+  page.on('response', onResponse);
+  // The first tab always loads with the page; the others only when clicked,
+  // so an unselected first tab is loaded but its jobs are not kept.
+  const wanted = new Set(Array.isArray(tabIds) && tabIds.length ? tabIds : RECOMMENDED_TABS.map(t => t[0]));
+  const tabs = RECOMMENDED_TABS.filter(([id], i) => i === 0 || wanted.has(id));
+  const keepFirst = wanted.has(RECOMMENDED_TABS[0][0]);
+  try {
+    onProgress({ phase: 'recommended', label: `Recommended · ${current}`, page: 0, pagesTotal: tabs.length, found: found() });
+    const first = page.waitForResponse(r => RECOMMENDED_FEED.test(r.url()), { timeout: 25000 }).catch(() => null);
+    await page.goto(RECOMMENDED_URL, { waitUntil: 'domcontentloaded' });
+    const [feed, painted] = await Promise.all([
+      first,
+      page.waitForSelector(RECOMMENDED_CARD, { timeout: 25000 }).catch(() => null),
+    ]);
+    await check(page, 'your recommended jobs');
+    if (!painted && !feed) return [];
+    if (painted && !feed) {
+      // Cards on screen but no feed seen: the page has changed how it loads.
+      // Loud, because silently returning nothing would read as "no jobs".
+      throw new Error('Recommended jobs painted, but its jobs feed (/jobapi/…/recom-jobs) was not seen — '
+        + 'Naukri changed the page. Fix RECOMMENDED_FEED in worker/naukri/harvest.js.');
+    }
+    await sleep(800);   // let the first response's body be read
+    onProgress({ phase: 'recommended', label: `Recommended · ${current}`, page: 1, pagesTotal: tabs.length, found: found() + byId.size });
+
+    for (let i = 1; i < tabs.length; i++) {
+      const [id, label] = tabs[i];
+      const tab = page.locator(`.tab-wrapper#${id}`);
+      if (!await tab.count().catch(() => 0)) continue;     // tab not offered to this account
+      await jitter(PAGE_DELAY[0], PAGE_DELAY[1]);
+      current = label;
+      const next = page.waitForResponse(r => RECOMMENDED_FEED.test(r.url()), { timeout: 15000 }).catch(() => null);
+      await tab.click().catch(() => {});
+      await next;
+      await sleep(800);
+      await check(page, 'your recommended jobs');
+      onProgress({ phase: 'recommended', label: `Recommended · ${label}`, page: i + 1, pagesTotal: tabs.length, found: found() + byId.size });
+    }
+  } finally {
+    page.off('response', onResponse);
+  }
+  return [...byId.values()];
+}
+
+// Which sources this harvest walks. A run can carry its own choice (the
+// Harvest button's menu); otherwise the config's default. Older configs with
+// neither mean searches only — what harvesting always did.
+function sourcesOf(config) {
+  const s = config.sources || {};
+  return { searches: s.searches !== false, recommended: s.recommended === true };
+}
+
+async function harvest(session, { config = {}, onProgress = () => {} } = {}) {
+  const sources = sourcesOf(config);
+  const limits = config.searchLimits || {};
+  const maxSearches = capped(limits.maxSearches, MAX_SEARCHES);
+  const maxPages = capped(limits.maxPages, MAX_PAGES);
+  const searches = !sources.searches ? [] : (Array.isArray(config.searches) ? config.searches : [])
+    .filter(s => s && s.enabled !== false && (s.keywords || s.url))
+    .slice(0, maxSearches);
+
+  if (!searches.length && !sources.recommended) {
+    throw new Error(sources.searches
+      ? 'No searches configured. Add one in Configuration → Searches, or harvest Recommended jobs instead.'
+      : 'Nothing to harvest: neither searches nor recommended jobs are selected.');
   }
 
   // Ask Naukri to apply the age filter rather than harvesting a month and
@@ -147,13 +283,13 @@ async function harvest(session, { config = {}, onProgress = () => {} } = {}) {
     const search = searches[i];
     const label = search.label || search.keywords || search.url || `search ${i + 1}`;
 
-    for (let n = 1; n <= MAX_PAGES; n++) {
+    for (let n = 1; n <= maxPages; n++) {
       const url = searchUrl({ ...search, jobAge }, n);
       if (!url) break;
 
       onProgress({
         phase: 'searching', label,
-        page: pagesWalked + 1, pagesTotal: searches.length * MAX_PAGES,
+        page: pagesWalked + 1, pagesTotal: searches.length * maxPages,
         found: byKey.size,
       });
 
@@ -179,7 +315,7 @@ async function harvest(session, { config = {}, onProgress = () => {} } = {}) {
 
       onProgress({
         phase: 'searching', label,
-        page: pagesWalked, pagesTotal: searches.length * MAX_PAGES,
+        page: pagesWalked, pagesTotal: searches.length * maxPages,
         found: byKey.size,
       });
 
@@ -189,6 +325,35 @@ async function harvest(session, { config = {}, onProgress = () => {} } = {}) {
       if (cards.length < CARDS_PER_PAGE) break;
 
       await jitter(PAGE_DELAY[0], PAGE_DELAY[1]);
+    }
+  }
+
+  // Every job found by a search is tagged with where it came from, so the
+  // inbox can tell them apart and a job found both ways carries both.
+  for (const job of byKey.values()) job.origins = ['search'];
+
+  let recommendedFound = 0;
+  if (sources.recommended) {
+    const rec = await harvestRecommended(page, {
+      tabIds: config.sources && config.sources.recommendedTabs, onProgress, found: () => byKey.size,
+    });
+    recommendedFound = rec.length;
+    for (const job of rec) {
+      const existing = byKey.get(job.sourceId);
+      if (existing) {
+        if (!existing.origins.includes('recommended')) existing.origins.push('recommended');
+        if (!existing.queries.includes(RECOMMENDED_LABEL)) existing.queries.push(RECOMMENDED_LABEL);
+        // The feed's word beats the search card's silence on where Apply goes.
+        if (job.companySite) existing.companySite = true;
+      } else {
+        byKey.set(job.sourceId, { ...job, origins: ['recommended'], queries: [RECOMMENDED_LABEL] });
+      }
+    }
+    // Asked for recommendations and the page gave none: say so, rather than
+    // letting a working search walk hide a broken recommended reader.
+    if (!rec.length && !searches.length) {
+      await page.close().catch(() => {});
+      return { jobs: [], searches: 0, recommended: 0, pagesWalked, seen: 0, dropped: 0 };
     }
   }
 
@@ -202,7 +367,10 @@ async function harvest(session, { config = {}, onProgress = () => {} } = {}) {
   const all = [...byKey.values()];
   const { kept, counts } = applyFilters(all, config.filters || {});
 
-  return { jobs: kept, searches: searches.length, pagesWalked, seen: counts.total, dropped: counts.dropped };
+  return {
+    jobs: kept, searches: searches.length, recommended: recommendedFound,
+    pagesWalked, seen: counts.total, dropped: counts.dropped,
+  };
 }
 
-module.exports = { harvest, searchUrl, slugify, MAX_PAGES, MAX_SEARCHES };
+module.exports = { harvest, searchUrl, slugify, sourcesOf, fromFeed, MAX_PAGES, MAX_SEARCHES, RECOMMENDED_URL, RECOMMENDED_TABS };

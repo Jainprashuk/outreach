@@ -28,7 +28,7 @@
 
 const { check, jitter } = require('./guard');
 const { newPage } = require('./session');
-const { resolveAnswer, shouldSkipOnUnknown } = require('../../lib/naukriAnswers');
+const { resolveAnswer, pickOption } = require('../../lib/naukriAnswers');
 
 // Hard cap, module constant rather than config. The server also clamps, and
 // both matter: this one is the last line if a config ever arrives malformed.
@@ -127,37 +127,55 @@ const bodyText = async (page) => {
 
 // Answer one question in the chatbot. Returns 'answered' | 'unknown' | 'stuck'.
 //
+// The labels of the radio / checkbox options on screen, with their locators.
+// Read before deciding anything, so a skip can report what was offered — the
+// AI draft for that question must pick one of these, not invent its own.
+async function readOptions(page) {
+  for (const sel of [...BOT_RADIO, ...BOT_CHECKBOX]) {
+    const loc = page.locator(sel);
+    const n = await loc.count().catch(() => 0);
+    if (!n) continue;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const text = ((await loc.nth(i).innerText().catch(() => '')) || '').trim();
+      if (text) out.push({ text, el: loc.nth(i) });
+    }
+    if (out.length) return out;
+  }
+  return [];
+}
+
 // 'unknown' is a decision, not a failure: the question has no rule, so the job
-// is abandoned with the question reported so it can become a rule.
+// is abandoned with the question (and its options) reported so it can become
+// a rule.
 async function answerOne(page, question, config) {
+  const radios = await firstVisible(page, [...BOT_RADIO, ...BOT_CHECKBOX], 1200);
+  const options = radios ? await readOptions(page) : [];
+  const labels = options.map(o => o.text);
+
   const resolved = resolveAnswer(question, config);
-  if (!resolved.matched) return { state: 'unknown', question, reason: resolved.reason };
+  if (!resolved.matched) return { state: 'unknown', question, options: labels, reason: resolved.reason };
 
   const value = String(resolved.answer);
 
-  // Radio / checkbox questions: pick the option whose label matches the answer.
-  // Matched on visible text rather than index — an index would silently choose
-  // the wrong option the day Naukri reorders them.
-  const radios = await firstVisible(page, BOT_RADIO, 1200);
-  if (radios) {
-    for (const sel of BOT_RADIO) {
-      const options = page.locator(sel);
-      const n = await options.count().catch(() => 0);
-      for (let i = 0; i < n; i++) {
-        const opt = options.nth(i);
-        const text = ((await opt.innerText().catch(() => '')) || '').trim();
-        if (text && text.toLowerCase().includes(value.toLowerCase())) {
-          await opt.click();
-          await jitter(300, 700);
-          const send = await firstVisible(page, BOT_SEND, 1500);
-          if (send) { await send.click(); await jitter(600, 1200); }
-          return { state: 'answered', question, typed: text };
-        }
-      }
+  // Radio / checkbox questions: pick the option the answer names. Matched on
+  // visible text rather than index — an index would silently choose the wrong
+  // option the day Naukri reorders them — and by pickOption's exact / range /
+  // whole-word rules, never a bare substring ("No" must not pick "Not
+  // applicable").
+  if (options.length) {
+    const chosen = pickOption(value, labels);
+    if (!chosen) {
+      // None, or more than one, fits what we would have said. Choosing the
+      // nearest would be guessing on your behalf.
+      return { state: 'unknown', question, options: labels, reason: 'no option matched the configured answer' };
     }
-    // Options exist but none matches what we would have said. Choosing the
-    // nearest one would be guessing on your behalf.
-    return { state: 'unknown', question, reason: 'no option matched the configured answer' };
+    const opt = options.find(o => o.text === chosen);
+    await opt.el.click();
+    await jitter(300, 700);
+    const send = await firstVisible(page, BOT_SEND, 1500);
+    if (send) { await send.click(); await jitter(600, 1200); }
+    return { state: 'answered', question, typed: chosen };
   }
 
   const box = await firstVisible(page, BOT_TEXTAREA, 1500);
@@ -209,7 +227,9 @@ async function runChatbot(page, config, onStep) {
     const result = await answerOne(page, question, config);
     asked.push(result);
     onStep && onStep(result);
-    if (result.state !== 'answered') return { state: result.state, asked, question: result.question, reason: result.reason };
+    if (result.state !== 'answered') {
+      return { state: result.state, asked, question: result.question, options: result.options || [], reason: result.reason };
+    }
   }
 
   return { state: 'stuck', asked, reason: `more than ${MAX_QUESTIONS} questions` };
@@ -275,8 +295,9 @@ async function applyToOne(page, job, { config, dryRun, onStep }) {
   if (bot.state === 'unknown') {
     return {
       outcome: 'skipped',
-      reason: `Unanswered screening question — add a rule for it in Configuration`,
+      reason: `Unanswered screening question — answer it under Jobs → Needs answer`,
       question: bot.question,
+      options: bot.options || [],
     };
   }
   if (bot.state === 'stuck') {

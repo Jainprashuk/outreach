@@ -1626,7 +1626,7 @@ export type NaukriRunKind = 'refresh' | 'harvest' | 'apply' | 'probe';
 export type NaukriRunStatus = 'queued' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled';
 export type NaukriApproval = 'pending' | 'approved' | 'rejected';
 export type NaukriApplyStatus =
-  | 'none' | 'applied' | 'skipped' | 'failed'
+  | 'none' | 'applied' | 'skipped' | 'failed' | 'dismissed'
   | 'in-review' | 'interviewing' | 'offer' | 'rejected';
 
 export interface NaukriRun {
@@ -1636,6 +1636,8 @@ export interface NaukriRun {
   trigger: 'manual' | 'scheduled';
   /** Snapshotted at claim time, so a config change mid-run can't turn a rehearsal real. */
   dryRun: boolean;
+  /** Harvest only: this run's own source choice; null = the configured default. */
+  sources?: NaukriSources | null;
   claimedAt: string | null;
   finishedAt: string | null;
   workerHost: string;
@@ -1649,6 +1651,10 @@ export interface NaukriRun {
   stats: {
     found: number; new: number; updated: number;
     applied: number; skipped: number; failed: number; rehearsed: number; searches: number;
+    /** Harvest only: new jobs auto-approve moved straight to Waiting. */
+    autoApproved?: number;
+    /** Harvest only: listings read off Recommended jobs. */
+    recommended?: number;
   };
   results: Array<{
     jobId: string; title: string; company: string;
@@ -1675,11 +1681,18 @@ export interface NaukriJob {
   url: string;
   postedText: string;
   queries: string[];
+  /** Where it was found: your searches, Naukri's Recommended jobs, or both. */
+  origins?: Array<'search' | 'recommended'>;
   firstSeenAt: string;
   lastSeenAt: string;
   seenCount: number;
   approval: NaukriApproval;
   approvedAt: string | null;
+  /** 'auto' when auto-approve moved it to Waiting on its score. */
+  approvedBy?: 'you' | 'auto' | null;
+  /** 0–100 fit (lib/naukriScore.js). Null for rows harvested before scoring. */
+  score?: number | null;
+  scoreReasons?: string[];
   applyStatus: NaukriApplyStatus;
   appliedAt: string | null;
   applyNote: string;
@@ -1705,7 +1718,21 @@ export interface NaukriSchedule {
   runHarvest: boolean;
   /** Off by default: applying should follow your approvals, not a clock. */
   runApply: boolean;
+  /** Times 2 and 3, each with its own kinds. Empty = the single time above. */
+  extraSlots: NaukriSlot[];
 }
+
+export type NaukriRecommendedTab = 'apply' | 'profile' | 'preference' | 'similar_jobs';
+export interface NaukriSources {
+  searches: boolean; recommended: boolean;
+  /** Which Recommended-jobs tabs to read. Missing = all four. */
+  recommendedTabs?: NaukriRecommendedTab[];
+}
+
+export interface NaukriSlot { time: string; runRefresh: boolean; runHarvest: boolean; runApply: boolean }
+
+/** A scheduled wake: when, and which runs it starts. */
+export interface NaukriOccurrence { at: string; kinds: NaukriRunKind[] }
 
 export interface NaukriSearch {
   label: string; keywords: string; location: string;
@@ -1744,6 +1771,14 @@ export interface NaukriConfig {
   schedule: NaukriSchedule;
   searches: NaukriSearch[];
   useRecommended: boolean;
+  /** Where harvests look by default. The Harvest button can override per run. */
+  sources: NaukriSources;
+  /** Settings can only lower these; the worker's hard caps are 10 and 8. */
+  searchLimits: { maxSearches: number; maxPages: number };
+  /** How often the worker checks in, 15–120s. Takes effect without a restart. */
+  worker: { pollSeconds: number };
+  /** Draft answers from the resume for questions with no rule. */
+  aiDrafts: boolean;
   filters: NaukriFilters;
   profile: NaukriProfileFields;
   answers: NaukriAnswer[];
@@ -1762,7 +1797,7 @@ export interface NaukriConfig {
     /** Walk the whole apply flow, fill everything, submit nothing. */
     dryRun: boolean;
   };
-  resume?: { filename: string; size: number; uploadedAt: string | null };
+  resume?: { filename: string; size: number; uploadedAt: string | null; text?: string };
 }
 
 export interface NaukriWorkerState {
@@ -1783,7 +1818,16 @@ export interface NaukriOverview {
   schedule: NaukriSchedule;
   scheduleKinds: NaukriRunKind[];
   nextOccurrence: string | null;
+  upcoming: NaukriOccurrence[];
   reviewCount: number;
+  /** Skipped on a screening question that has no rule yet. */
+  needsAnswerCount: number;
+  /** Outcomes of the last 7 days. */
+  week: { applied: number; skipped: number; failed: number };
+  perRun: number;
+  perDay: number;
+  /** The default harvest sources, for the Harvest menu's tick. */
+  sources: NaukriSources;
   appliedCount: number;
   appliedToday: number;
   /** Approved and still actionable — what a future apply run will draw from. */
@@ -1801,17 +1845,55 @@ export interface NaukriOverview {
 export const naukriOverviewApi = () => apiFetch<NaukriOverview>('/api/naukri/overview');
 
 export const naukriConfigApi = () =>
-  apiFetch<{ config: NaukriConfig; nextOccurrence: string | null; resume: NaukriConfig['resume'] | null }>(
+  apiFetch<{ config: NaukriConfig; nextOccurrence: string | null; upcoming: NaukriOccurrence[]; resume: NaukriConfig['resume'] | null }>(
     '/api/naukri/config');
 
-/** Partial save — send only the section a card owns, so two open cards can't clobber each other. */
+/** Partial save — send only the section a card owns, so two open cards can't clobber each other.
+    `requeued` counts skipped jobs a changed answer (or profile field) just moved back to Waiting. */
 export const updateNaukriConfigApi = (patch: Record<string, unknown>) =>
-  apiFetch<{ config: NaukriConfig; nextOccurrence: string | null }>(
+  apiFetch<{ config: NaukriConfig; nextOccurrence: string | null; upcoming: NaukriOccurrence[]; requeued: number }>(
     '/api/naukri/config', { method: 'PATCH', body: JSON.stringify(patch) });
 
+/** "Add common rules" — appends the starter rules you don't already have. */
+export const addNaukriStarterRulesApi = () =>
+  apiFetch<{ config: NaukriConfig; added: number; requeued: number }>(
+    '/api/naukri/config/starter-rules', { method: 'POST' });
+
+export interface NaukriDraft {
+  answer: string; quote: string; source: 'resume' | 'profile' | '';
+  status: 'ready' | 'unknown' | 'error' | 'ignored';
+}
+
+export interface NaukriQuestionGroup {
+  question: string;
+  /** How many jobs this one question is blocking. */
+  count: number;
+  lastSeenAt: string;
+  /** The choices Naukri offered, when it was a radio question. */
+  options: string[];
+  jobs: Array<{ id: string; title: string; company: string; url: string }>;
+  draft: NaukriDraft | null;
+}
+
+export const naukriNeedsAnswerApi = () =>
+  apiFetch<{ aiDrafts: boolean; hasResumeText: boolean; questions: NaukriQuestionGroup[] }>('/api/naukri/needs-answer');
+
+export const draftNaukriAnswerApi = (question: string) =>
+  apiFetch<{ draft: NaukriDraft; note: string | null }>(
+    '/api/naukri/needs-answer/draft', { method: 'POST', body: JSON.stringify({ question }) });
+
+/** Make it a rule; every job blocked on it goes back to Waiting. */
+export const useNaukriAnswerApi = (question: string, answer: string, pattern?: string) =>
+  apiFetch<{ requeued: number }>(
+    '/api/naukri/needs-answer/use', { method: 'POST', body: JSON.stringify({ question, answer, pattern }) });
+
+export const ignoreNaukriQuestionApi = (question: string) =>
+  apiFetch<{ dismissed: number }>(
+    '/api/naukri/needs-answer/ignore', { method: 'POST', body: JSON.stringify({ question }) });
+
 /** 409 when a run is already active; 423 while paused or inside a captcha block. */
-export const queueNaukriRunApi = (kind: NaukriRunKind) =>
-  apiFetch<{ run: NaukriRun }>('/api/naukri/runs', { method: 'POST', body: JSON.stringify({ kind }) });
+export const queueNaukriRunApi = (kind: NaukriRunKind, opts: { sources?: NaukriSources } = {}) =>
+  apiFetch<{ run: NaukriRun }>('/api/naukri/runs', { method: 'POST', body: JSON.stringify({ kind, ...opts }) });
 
 export const cancelNaukriRunApi = (id: string) =>
   apiFetch<{ run: NaukriRun }>(`/api/naukri/runs/${id}/cancel`, { method: 'POST' });
@@ -1823,7 +1905,7 @@ export const listNaukriRunsApi = (page = 1, limit = 20, kind?: NaukriRunKind) =>
 export interface NaukriJobQuery {
   /** Ask for a named set the server defines — 'waiting' is exactly what the
       Waiting badge counts, so the list and the number cannot disagree. */
-  bucket?: 'waiting';
+  bucket?: 'waiting' | 'skipped' | 'needs-answer' | 'company-site' | 'other-skipped';
   approval?: NaukriApproval;
   /** 'sent' = actually went out (applied and beyond); 'any' = every outcome, skips included. */
   applyStatus?: NaukriApplyStatus | 'any' | 'sent';
@@ -1836,10 +1918,12 @@ export interface NaukriJobQuery {
   /** Listings that do not publish pay are kept — most of Naukri hides it. */
   minSalary?: number | null;
   maxAge?: number | null;
-  sort?: 'newest' | 'oldest' | 'experience' | 'company';
+  sort?: 'score' | 'queue' | 'newest' | 'oldest' | 'experience' | 'company';
   /** Filter by how the job is applied to: 'native' (not a known company-site
       employer) or 'external' (one that is). A prediction, not a guarantee. */
   applyType?: 'native' | 'external';
+  /** Where it was found. 'search' includes rows from before origins were recorded. */
+  origin?: 'search' | 'recommended';
   page?: number;
   limit?: number;
 }
@@ -1855,6 +1939,8 @@ export const listNaukriJobsApi = (params: NaukriJobQuery = {}) => {
     truncated?: boolean;
     /** Sizes for the apply-type chips, ignoring the type facet itself. */
     typeCounts?: { all: number; external: number; native: number };
+    /** Sizes for the Searches / Recommended chips. A job found both ways counts in both. */
+    originCounts?: { all: number; search: number; recommended: number };
   }>(`/api/naukri/jobs?${qs.toString()}`);
 };
 
@@ -2442,7 +2528,7 @@ export const adminSendingTimelineApi = (range: TimelineRange, scope: TimelineSco
   apiFetch<Timeline>(`/api/admin/sending/timeline?range=${range}&scope=${scope}`);
 
 // ── Admin: Gemini logs ───────────────────────────────────────────────────────
-export type AiFeature = 'classify' | 'draft' | 'discover' | 'sources' | 'other';
+export type AiFeature = 'classify' | 'draft' | 'discover' | 'sources' | 'naukri' | 'other';
 export type AiOutcome = 'ok' | 'rate-limited' | 'auth' | 'transient' | 'bad-output' | 'aborted';
 export interface AiTokens { input?: number | null; output?: number | null; thinking?: number | null; total?: number | null }
 export interface AiContext { contactEmail?: string | null; contactName?: string | null; contactId?: string | null; company?: string | null }

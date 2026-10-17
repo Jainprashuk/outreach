@@ -29,13 +29,15 @@ function trigger(o: NaukriOverview): { tone: 'ok' | 'warn'; text: string } {
   if (o.blockedUntil) {
     return { tone: 'warn', text: `Nothing will run until ${fmtTime(o.blockedUntil)} — Naukri challenged the account.` };
   }
-  if (o.schedule.enabled && o.schedule.runApply && o.nextOccurrence) {
-    return { tone: 'ok', text: `These run automatically at ${fmtTime(o.nextOccurrence)}, then on your schedule.` };
+  // Any of the schedule's times (not just the first) may be the one that applies.
+  const nextApply = (o.upcoming || []).find(x => x.kinds.includes('apply'));
+  if (o.schedule.enabled && nextApply) {
+    return { tone: 'ok', text: `These run automatically at ${fmtTime(nextApply.at)}, then on your schedule.` };
   }
-  if (o.schedule.enabled && !o.schedule.runApply) {
+  if (o.schedule.enabled) {
     return {
       tone: 'warn',
-      text: 'These will NOT run on your schedule — "Apply" is turned off under Configuration → Schedule. '
+      text: 'These will NOT run on your schedule — none of its times has "Apply" ticked (Configuration → Schedule). '
           + 'They run when you press Apply above, or when you approve more jobs.',
     };
   }
@@ -68,7 +70,7 @@ export default function QueuedJobs({ overview, onChanged }: {
       // `bucket: 'waiting'` rather than approval + a client-side filter: the
       // server owns what "waiting" means, so the chips and the tab badge count
       // the same rows. Filtering here instead is what let them disagree.
-      const r = await listNaukriJobsApi({ bucket: 'waiting', limit: 200, applyType: type || undefined });
+      const r = await listNaukriJobsApi({ bucket: 'waiting', sort: 'queue', limit: 200, applyType: type || undefined });
       setCounts(r.typeCounts); setTotal(r.total);
       // Split by whether a run can still act on them. Showing the two together
       // is what made "80 approved" look like 80 that would be applied to.
@@ -143,7 +145,7 @@ export default function QueuedJobs({ overview, onChanged }: {
   if (loading && !loadedOnce) return <Empty icon="ti-loader">Loading…</Empty>;
 
   const t = trigger(overview);
-  const perRun = overview.appliedToday >= 0 ? 20 : 20;
+  const perRun = overview.perRun || 20;
   // From the server's total, not the loaded page: the list stops at 200 rows
   // and "takes 3 runs to clear" must describe the queue, not the screen.
   const batches = Math.ceil(total / perRun);
@@ -159,7 +161,7 @@ export default function QueuedJobs({ overview, onChanged }: {
 
       {jobs.length === 0 ? (
         <Empty icon="ti-inbox">
-          Nothing approved and waiting. Approve jobs in Review to queue them.
+          Nothing approved and waiting. Approve jobs in the Inbox to queue them.
         </Empty>
       ) : (
         <Card
@@ -172,10 +174,10 @@ export default function QueuedJobs({ overview, onChanged }: {
           }
         >
           <Hint style={{ marginTop: 0, marginBottom: 10 }}>
-            A run applies to at most {perRun}, so this takes {batches} run{batches === 1 ? '' : 's'} to clear.
+            In the order they will be sent. A run applies to at most {perRun} (and {overview.perDay} a day), so this
+            takes {batches} run{batches === 1 ? '' : 's'} to clear.
             {total > jobs.length && ` Showing the first ${jobs.length}.`}
-            Roughly 6 in 14 Naukri listings apply on the company site and will be skipped — those are
-            dropped from this list once seen, not retried.
+            Jobs flagged as company-site are held back unless you tick them and press Apply to these.
           </Hint>
 
           {msg && <Muted style={{ display: 'block', marginBottom: 8 }}>{msg}</Muted>}
@@ -228,13 +230,15 @@ export default function QueuedJobs({ overview, onChanged }: {
                 <div>
                   <Muted>
                     {job.company}
-                    {job.approvedAt ? ` · approved ${fmtRunTime(job.approvedAt)}` : ''}
+                    {job.approvedAt ? ` · ${job.approvedBy === 'auto' ? 'auto-approved' : 'approved'} ${fmtRunTime(job.approvedAt)}` : ''}
+                    {job.score != null ? ` · fit ${job.score}` : ''}
+                    {job.origins?.includes('recommended') ? ' · recommended' : ''}
                     {i >= perRun ? ` · run ${Math.floor(i / perRun) + 1}` : ' · next run'}
                   </Muted>
                 </div>
                 {job.likelyExternal && (
                   <Muted style={{ display: 'block', color: 'var(--red)' }}>
-                    likely applies on the company site — this employer has before, so it will probably be skipped
+                    likely applies on the company site — held back unless you pick it with Apply to these
                   </Muted>
                 )}
               </div>

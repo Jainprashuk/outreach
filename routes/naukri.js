@@ -8,8 +8,10 @@ const NaukriWorker = require('../models/NaukriWorker');
 const ProspectSearch = require('../models/ProspectSearch');
 const Prospect = require('../models/Prospect');
 const Contact = require('../models/Contact');
-const { dueOccurrence, nextOccurrence, kindsFor, parseTime } = require('../lib/naukriSchedule');
-const { resolveAnswer } = require('../lib/naukriAnswers');
+const { dueSlot, nextSlot, upcomingSlots, slotsOf, startOfDayIn, parseTime, MAX_SLOTS } = require('../lib/naukriSchedule');
+const { resolveAnswer, matchable, STARTER_RULES } = require('../lib/naukriAnswers');
+const { scoreJob } = require('../lib/naukriScore');
+const { draftAnswer } = require('../lib/naukriDraft');
 const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = require('../lib/naukriFilters');
 const { reportIssue } = require('../lib/issues');
 const { notify } = require('../lib/notify');
@@ -45,6 +47,10 @@ const SENT_STATUSES = ['applied', 'in-review', 'interviewing', 'offer', 'rejecte
 // ones, and they went straight back into the queue to be attempted again. The
 // rule belongs where it cannot drift.
 const TERMINAL_SKIP = /applies on the company site|already applied/i;
+// Only this one says anything about the EMPLOYER. "Already applied" is about
+// you and that one listing, and counting it here flagged every other job from
+// a company you had applied to once as company-site.
+const EXTERNAL_SKIP = /applies on the company site/i;
 
 // "Approved and still queued to be sent", in ONE place.
 //
@@ -58,6 +64,41 @@ const WAITING_FILTER = {
   applyStatus: { $in: ['none', 'failed'] },
   retryable: { $ne: false },
 };
+
+// The sub-lists of Skipped, defined once so each chip's count and its list agree.
+const SKIP_BUCKETS = {
+  // approval ≠ rejected: before 'dismissed' existed, Dismiss only rejected the
+  // job and left it 'skipped', so those rows still sat in these lists.
+  'needs-answer': { applyStatus: 'skipped', approval: { $ne: 'rejected' }, unknownQuestion: { $nin: [null, ''] } },
+  'company-site': { applyStatus: 'skipped', approval: { $ne: 'rejected' }, applyNote: EXTERNAL_SKIP },
+  'other-skipped': {
+    applyStatus: 'skipped', approval: { $ne: 'rejected' },
+    unknownQuestion: { $in: [null, ''] }, applyNote: { $not: EXTERNAL_SKIP },
+  },
+};
+const ALL_SKIPPED = { applyStatus: 'skipped', approval: { $ne: 'rejected' } };
+
+// Jobs blocked on a screening question go back to Waiting the moment a rule
+// answers it — and not before. Called whenever the answer bank changes, so
+// "answer it once" is all it ever takes. Returns how many moved.
+async function requeueAnswered(userId, config) {
+  const blocked = await NaukriJob.find(
+    { userId, approval: 'approved', ...SKIP_BUCKETS['needs-answer'], ...BASE_FILTER },
+    { unknownQuestion: 1, applyNote: 1 },
+  ).lean();
+  const bank = { answers: config.answers, profile: config.profile };
+  const ready = blocked.filter(j => resolveAnswer(j.unknownQuestion, bank).matched);
+  if (!ready.length) return 0;
+  const now = new Date();
+  for (const j of ready) {
+    await NaukriJob.updateOne({ _id: j._id, userId, applyStatus: 'skipped' }, {
+      $set: { applyStatus: 'none', retryable: true, priority: 1, applyNote: '', unknownQuestion: '', questionOptions: [] },
+      $push: { applyHistory: { at: now, from: 'skipped', to: 'none', note: `answer added for: ${String(j.unknownQuestion).slice(0, 300)}` } },
+    });
+  }
+  return ready.length;
+}
+
 
 const RESUME_TYPES = new Set([
   'application/pdf',
@@ -110,6 +151,22 @@ const num = (v, { min = null, max = null, integer = false } = {}) => {
   return n;
 };
 
+// { searches, recommended } with at least one on, or null. `fallback` fills
+// any key the input leaves out.
+const cleanSources = (input, fallback = {}) => {
+  if (!input || typeof input !== 'object') return null;
+  const TABS = ['apply', 'profile', 'preference', 'similar_jobs'];
+  const tabs = Array.isArray(input.recommendedTabs)
+    ? [...new Set(input.recommendedTabs.filter(t => TABS.includes(t)))]
+    : (Array.isArray(fallback.recommendedTabs) && fallback.recommendedTabs.length ? [...fallback.recommendedTabs] : TABS);
+  const out = {
+    searches: input.searches !== undefined ? !!input.searches : fallback.searches !== false,
+    recommended: input.recommended !== undefined ? !!input.recommended : !!fallback.recommended,
+    recommendedTabs: tabs.length ? tabs : TABS,
+  };
+  return out.searches || out.recommended ? out : null;
+};
+
 // A run left 'running' by a worker that was killed would block the queue
 // forever, since /claim only ever starts one at a time.
 const failStaleRuns = (userId) => {
@@ -143,14 +200,27 @@ const blockedUntilOf = (worker) => {
   return until && until > new Date() ? until : null;
 };
 
-// How many applications have gone out since local midnight, for apply.maxPerDay.
-// Counted from NaukriJob rather than summed off run stats, because the jobs are
-// the thing that actually left — a failed run that applied to three before dying
-// still spent three.
-const appliedToday = (userId) => {
-  const since = new Date();
-  since.setHours(0, 0, 0, 0);
+// How many applications have gone out since midnight in YOUR timezone (the
+// schedule's), for apply.maxPerDay. The server runs in UTC, and counting from
+// its midnight reset the cap at 05:30 IST. Counted from NaukriJob rather than
+// summed off run stats, because the jobs are the thing that actually left — a
+// failed run that applied to three before dying still spent three.
+const appliedToday = (userId, timeZone) => {
+  let since;
+  try { since = startOfDayIn(timeZone || 'Asia/Kolkata'); }
+  catch (_) { since = new Date(); since.setHours(0, 0, 0, 0); }
   return NaukriJob.countDocuments({ userId, appliedAt: { $gte: since }, ...BASE_FILTER });
+};
+
+// Schedule facts the tab shows, in one shape for /overview and /config.
+const scheduleView = (schedule) => {
+  const now = new Date();
+  const next = nextSlot(schedule, now);
+  return {
+    nextOccurrence: next ? next.at : null,
+    scheduleKinds: next ? next.kinds : [],
+    upcoming: upcomingSlots(schedule, now, 5).map(o => ({ at: o.at, kinds: o.kinds })),
+  };
 };
 
 // ── Owner endpoints ────────────────────────────────────────────────────────
@@ -163,15 +233,16 @@ const appliedToday = (userId) => {
 router.get('/overview', async (req, res) => {
   try {
     await failStaleRuns(req.userId);
-    const [worker, config, activeRun, queued, history, reviewCount, appliedCount, todayCount, waitingCount, skippedCount] = await Promise.all([
+    const config = await NaukriConfig.getForUser(req.userId);
+    const weekAgo = new Date(Date.now() - 7 * 86400000);
+    const [worker, activeRun, queued, history, reviewCount, appliedCount, todayCount, waitingCount, skippedCount, needsAnswerCount, week] = await Promise.all([
       NaukriWorker.getForUser(req.userId),
-      NaukriConfig.getForUser(req.userId),
       NaukriRun.findOne({ userId: req.userId, status: 'running', ...BASE_FILTER }).sort({ createdAt: 1 }).lean(),
       NaukriRun.find({ userId: req.userId, status: 'queued', ...BASE_FILTER }).sort({ createdAt: 1 }).limit(10).lean(),
       NaukriRun.find({ userId: req.userId, status: { $nin: ACTIVE }, ...BASE_FILTER }).sort({ createdAt: -1 }).limit(20).lean(),
       NaukriJob.countDocuments({ userId: req.userId, approval: 'pending', ...BASE_FILTER }),
       NaukriJob.countDocuments({ userId: req.userId, applyStatus: { $in: SENT_STATUSES }, ...BASE_FILTER }),
-      appliedToday(req.userId),
+      appliedToday(req.userId, config.schedule.timezone),
       // Approved and genuinely queued to be sent. Deliberately excludes skips:
       // those have been looked at and backed out of, which is a different state
       // with a different next action, and mixing them made "138 waiting" mean
@@ -181,8 +252,19 @@ router.get('/overview', async (req, res) => {
       // middle silently shifts every position after it — that is how the panel
       // once reported the waiting count as "applied today".
       NaukriJob.countDocuments({ userId: req.userId, ...WAITING_FILTER, ...BASE_FILTER }),
-      NaukriJob.countDocuments({ userId: req.userId, applyStatus: 'skipped', ...BASE_FILTER }),
+      NaukriJob.countDocuments({ userId: req.userId, ...ALL_SKIPPED, ...BASE_FILTER }),
+      NaukriJob.countDocuments({ userId: req.userId, ...SKIP_BUCKETS['needs-answer'], ...BASE_FILTER }),
+      // This week's outcomes, from the history entries the worker writes as it
+      // goes — so a job retried twice counts as what it ended up as each time,
+      // not as whatever it is now.
+      NaukriJob.aggregate([
+        { $match: { userId: req.userId, 'applyHistory.at': { $gte: weekAgo }, deleted: { $ne: true } } },
+        { $unwind: '$applyHistory' },
+        { $match: { 'applyHistory.at': { $gte: weekAgo }, 'applyHistory.to': { $in: ['applied', 'skipped', 'failed'] } } },
+        { $group: { _id: '$applyHistory.to', n: { $sum: 1 } } },
+      ]),
     ]);
+    const weekOf = (k) => (week.find(w => w._id === k) || {}).n || 0;
 
     const lastSeenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt) : null;
     res.json({
@@ -199,9 +281,13 @@ router.get('/overview', async (req, res) => {
         nextWakeAt: worker.nextWakeAt || null,
       },
       schedule: config.schedule,
-      scheduleKinds: kindsFor(config.schedule),
-      nextOccurrence: nextOccurrence(config.schedule, new Date()),
+      ...scheduleView(config.schedule),
       reviewCount,
+      needsAnswerCount,
+      week: { applied: weekOf('applied'), skipped: weekOf('skipped'), failed: weekOf('failed') },
+      perRun: config.apply.maxPerRun,
+      perDay: config.apply.maxPerDay,
+      sources: config.sources,
       appliedCount,
       appliedToday: todayCount,
       waitingCount,
@@ -226,7 +312,7 @@ router.get('/config', async (req, res) => {
     const config = await NaukriConfig.getForUser(req.userId);
     res.json({
       config: config.toJSON(),
-      nextOccurrence: nextOccurrence(config.schedule, new Date()),
+      ...scheduleView(config.schedule),
       resume: config.resume && config.resume.size
         ? { filename: config.resume.filename, size: config.resume.size, uploadedAt: config.resume.uploadedAt }
         : null,
@@ -261,15 +347,35 @@ router.patch('/config', async (req, res) => {
         config.schedule.timezone = String(s.timezone);
       }
       if (s.catchUpHours !== undefined) {
-        const n = num(s.catchUpHours, { min: 0, max: 24 });
-        if (n == null) return res.status(400).json({ error: 'catchUpHours must be between 0 and 24' });
+        const n = num(s.catchUpHours, { min: 0, max: 12 });
+        if (n == null) return res.status(400).json({ error: 'catchUpHours must be between 0 and 12' });
         config.schedule.catchUpHours = n;
       }
       for (const k of ['runRefresh', 'runHarvest', 'runApply']) {
         if (s[k] !== undefined) config.schedule[k] = !!s[k];
       }
+      // Slots 2 and 3. Each needs a valid time and at least one kind, and no
+      // two slots may share a time — that would fire the same wake twice.
+      if (s.extraSlots !== undefined) {
+        const raw = Array.isArray(s.extraSlots) ? s.extraSlots : [];
+        if (raw.length > MAX_SLOTS - 1) return res.status(400).json({ error: `At most ${MAX_SLOTS} times a day` });
+        const seen = new Set([config.schedule.time]);
+        const clean = [];
+        for (const x of raw) {
+          const time = str(x && x.time, 5);
+          if (!parseTime(time)) return res.status(400).json({ error: `Each time must be HH:mm (got "${time}")` });
+          if (seen.has(time)) return res.status(400).json({ error: `${time} is listed twice` });
+          seen.add(time);
+          const slot = { time, runRefresh: !!(x && x.runRefresh), runHarvest: !!(x && x.runHarvest), runApply: !!(x && x.runApply) };
+          if (!slot.runRefresh && !slot.runHarvest && !slot.runApply) {
+            return res.status(400).json({ error: `The ${time} slot has nothing to do — tick refresh, harvest or apply` });
+          }
+          clean.push(slot);
+        }
+        config.schedule.extraSlots = clean;
+      }
       if (s.enabled !== undefined) {
-        if (s.enabled && kindsFor({ ...config.schedule.toObject(), ...s }).length === 0) {
+        if (s.enabled && slotsOf({ ...config.schedule.toObject(), ...s, extraSlots: config.schedule.extraSlots }).length === 0) {
           return res.status(400).json({ error: 'Turn on at least one of refresh, harvest or apply' });
         }
         config.schedule.enabled = !!s.enabled;
@@ -291,6 +397,21 @@ router.patch('/config', async (req, res) => {
       })).filter(s => s.keywords || s.url);
     }
     if (body.useRecommended !== undefined) config.useRecommended = !!body.useRecommended;
+    if (body.sources) {
+      const next = cleanSources(body.sources, config.sources);
+      if (!next) return res.status(400).json({ error: 'Pick at least one place to harvest from: your searches or recommended jobs' });
+      config.sources = next;
+    }
+    if (body.searchLimits) {
+      const l = body.searchLimits;
+      if (l.maxSearches !== undefined) config.searchLimits.maxSearches = num(l.maxSearches, { min: 1, max: 10, integer: true }) ?? 10;
+      if (l.maxPages !== undefined) config.searchLimits.maxPages = num(l.maxPages, { min: 1, max: 8, integer: true }) ?? 8;
+    }
+    if (body.worker && body.worker.pollSeconds !== undefined) {
+      config.worker.pollSeconds = num(body.worker.pollSeconds, { min: 15, max: 120, integer: true }) ?? 20;
+    }
+    if (body.aiDrafts !== undefined) config.aiDrafts = !!body.aiDrafts;
+    if (body.resumeText !== undefined) config.resume.text = str(body.resumeText, 20000);
 
     if (body.filters) {
       const f = body.filters;
@@ -319,8 +440,9 @@ router.patch('/config', async (req, res) => {
       if (p.totalExperienceMonths !== undefined) config.profile.totalExperienceMonths = num(p.totalExperienceMonths, { min: 0, max: 720, integer: true });
     }
 
+    const answersChanged = body.answers !== undefined || body.profile !== undefined;
     if (body.answers !== undefined) {
-      config.answers = (Array.isArray(body.answers) ? body.answers : []).slice(0, 100).map(a => ({
+      config.answers = (Array.isArray(body.answers) ? body.answers : []).slice(0, 200).map(a => ({
         pattern: str(a && a.pattern, 300).toLowerCase(),
         answer:  str(a && a.answer, 2000),
         kind:    ['text', 'choice', 'number', 'yesno'].includes(a && a.kind) ? a.kind : 'text',
@@ -336,9 +458,11 @@ router.patch('/config', async (req, res) => {
       // Clamped to the model's cap regardless of what the client sends. The cap
       // is not negotiable from the UI — see NaukriConfig.
       if (a.maxPerRun !== undefined) config.apply.maxPerRun = num(a.maxPerRun, { min: 1, max: NaukriConfig.MAX_APPLIES_PER_RUN, integer: true });
-      if (a.maxPerDay !== undefined) config.apply.maxPerDay = num(a.maxPerDay, { min: 1, max: 200, integer: true });
+      if (a.maxPerDay !== undefined) config.apply.maxPerDay = num(a.maxPerDay, { min: 1, max: 50, integer: true });
       if (a.autoApproveEnabled !== undefined) config.apply.autoApproveEnabled = !!a.autoApproveEnabled;
-      if (a.autoApproveMinScore !== undefined) config.apply.autoApproveMinScore = num(a.autoApproveMinScore, { min: 0, max: 100, integer: true });
+      // Floor of 50: below that, "auto-approve" is approving jobs that match
+      // under half of what you asked for.
+      if (a.autoApproveMinScore !== undefined) config.apply.autoApproveMinScore = num(a.autoApproveMinScore, { min: 50, max: 100, integer: true }) ?? 80;
       if (a.delayMinMs !== undefined) config.apply.delayMinMs = num(a.delayMinMs, { min: 500, max: 60000, integer: true });
       if (a.delayMaxMs !== undefined) config.apply.delayMaxMs = num(a.delayMaxMs, { min: 500, max: 60000, integer: true });
       if (a.coverNote !== undefined) config.apply.coverNote = str(a.coverNote, 4000);
@@ -359,7 +483,9 @@ router.patch('/config', async (req, res) => {
     }
 
     await config.save();
-    res.json({ config: config.toJSON(), nextOccurrence: nextOccurrence(config.schedule, new Date()) });
+    // A new rule — or a profile field a rule quotes — can unblock skipped jobs.
+    const requeued = answersChanged ? await requeueAnswered(req.userId, config) : 0;
+    res.json({ config: config.toJSON(), ...scheduleView(config.schedule), requeued });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -383,8 +509,10 @@ router.post('/config/test-answer', async (req, res) => {
       reason: result.reason || null,
       missing: result.missing || [],
       // What would actually happen to a job asking this, which is the question
-      // the user is really asking.
-      wouldSkip: !result.matched && config.onUnknownQuestion !== 'apply-anyway',
+      // the user is really asking. The worker always skips an unanswered
+      // question (onUnknownQuestion 'apply-anyway' was never honoured by it, and
+      // is no longer offered), so this must not claim otherwise.
+      wouldSkip: !result.matched,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -421,7 +549,7 @@ router.get('/config/unknown-questions', async (req, res) => {
   try {
     const [rows, config] = await Promise.all([
       NaukriJob.aggregate([
-        { $match: { userId: req.userId, applyStatus: 'skipped', unknownQuestion: { $nin: [null, ''] }, deleted: { $ne: true } } },
+        { $match: { userId: req.userId, ...SKIP_BUCKETS['needs-answer'], deleted: { $ne: true } } },
         { $group: { _id: '$unknownQuestion', count: { $sum: 1 }, lastSeenAt: { $max: '$updatedAt' } } },
         { $sort: { count: -1, lastSeenAt: -1 } },
         { $limit: 50 },
@@ -450,6 +578,168 @@ router.get('/config/unknown-questions', async (req, res) => {
   }
 });
 
+// POST /api/naukri/config/starter-rules — "Add common rules". Appends the
+// starter rules (lib/naukriAnswers.js STARTER_RULES) you do not already have,
+// at the END, so any rule you wrote yourself still wins.
+router.post('/config/starter-rules', async (req, res) => {
+  try {
+    const config = await NaukriConfig.getForUser(req.userId);
+    const have = new Set(config.answers.map(a => a.pattern));
+    const add = STARTER_RULES.filter(r => !have.has(r.pattern));
+    for (const r of add) config.answers.push({ pattern: r.pattern, answer: r.answer, kind: r.kind, enabled: r.enabled !== false });
+    await config.save();
+    const requeued = add.length ? await requeueAnswered(req.userId, config) : 0;
+    res.json({ config: config.toJSON(), added: add.length, requeued });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Needs answer ───────────────────────────────────────────────────────────
+// Jobs skipped for a screening question, grouped BY question — one answer
+// unblocks every job that asked it — with the AI draft for each.
+
+const sameQuestion = (a, b) => matchable(a) === matchable(b);
+
+// GET /api/naukri/needs-answer
+router.get('/needs-answer', async (req, res) => {
+  try {
+    const [rows, config] = await Promise.all([
+      NaukriJob.aggregate([
+        { $match: { userId: req.userId, ...SKIP_BUCKETS['needs-answer'], deleted: { $ne: true } } },
+        { $sort: { updatedAt: -1 } },
+        { $group: {
+            _id: '$unknownQuestion',
+            count: { $sum: 1 },
+            lastSeenAt: { $max: '$updatedAt' },
+            options: { $max: '$questionOptions' },
+            jobs: { $push: { id: { $toString: '$_id' }, title: '$title', company: '$company', url: '$url' } },
+        } },
+        { $sort: { count: -1, lastSeenAt: -1 } },
+        { $limit: 100 },
+      ]),
+      NaukriConfig.getForUser(req.userId),
+    ]);
+    const drafts = config.drafts || [];
+    res.json({
+      aiDrafts: !!config.aiDrafts,
+      hasResumeText: !!(config.resume && config.resume.text && config.resume.text.trim()),
+      questions: rows.map((r) => {
+        const d = drafts.find(x => sameQuestion(x.question, r._id));
+        return {
+          question: r._id,
+          count: r.count,
+          lastSeenAt: r.lastSeenAt,
+          options: r.options || [],
+          jobs: r.jobs.slice(0, 5),
+          draft: d ? { answer: d.answer, quote: d.quote, source: d.source, status: d.status } : null,
+        };
+      }),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/naukri/needs-answer/draft { question } — draft one answer with AI.
+// One question per request, so each stays far inside the 60s function limit;
+// the tab asks for the ones it is missing, a few at a time.
+router.post('/needs-answer/draft', async (req, res) => {
+  try {
+    const question = str((req.body || {}).question, 1000);
+    if (!question) return res.status(400).json({ error: 'question is required' });
+    const config = await NaukriConfig.getForUser(req.userId);
+    if (!config.aiDrafts) return res.status(409).json({ error: 'AI drafts are off — turn them on under Configuration → Answers' });
+
+    const job = await NaukriJob.findOne(
+      { userId: req.userId, unknownQuestion: question, ...BASE_FILTER },
+      { questionOptions: 1 },
+    ).sort({ updatedAt: -1 }).lean();
+    const options = (job && job.questionOptions) || [];
+
+    const out = await draftAnswer(question, {
+      resumeText: config.resume && config.resume.text, profile: config.profile, options, userId: req.userId,
+    });
+    const draft = { question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options, createdAt: new Date() };
+    // Atomic replace rather than config.save(): the tab drafts several
+    // questions in parallel, and concurrent document saves would conflict.
+    await NaukriConfig.updateOne({ userId: req.userId }, { $pull: { drafts: { question } } });
+    await NaukriConfig.updateOne({ userId: req.userId }, { $push: { drafts: { $each: [draft], $slice: -300 } } });
+    res.json({ draft: { answer: draft.answer, quote: draft.quote, source: draft.source, status: draft.status }, note: out.note || null });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/naukri/needs-answer/use { question, answer, pattern? } — turn an
+// answer (the AI's, or yours) into a rule, then put every job it unblocks back
+// in Waiting. THE step that makes an answer real; nothing else does.
+router.post('/needs-answer/use', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const question = str(body.question, 1000);
+    const answer = str(body.answer, 2000);
+    if (!question) return res.status(400).json({ error: 'question is required' });
+    if (!answer) return res.status(400).json({ error: 'Type an answer first' });
+    // The whole question by default, so the rule answers exactly this and not
+    // every question that happens to share a phrase with it.
+    const pattern = (str(body.pattern, 300) || matchable(question).slice(0, 300)).toLowerCase();
+
+    const config = await NaukriConfig.getForUser(req.userId);
+    const rule = { pattern, answer, kind: 'text', enabled: true };
+    if (!resolveAnswer(question, { answers: [rule], profile: config.profile }).matched) {
+      return res.status(400).json({ error: 'That pattern does not match the question — it would never be used' });
+    }
+    // At the TOP: first match wins, and a rule written for this exact question
+    // must beat a broader one further down.
+    config.answers.unshift(rule);
+    config.drafts = (config.drafts || []).filter(d => !sameQuestion(d.question, question));
+    await config.save();
+    const requeued = await requeueAnswered(req.userId, config);
+    res.json({ requeued, rule });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/naukri/needs-answer/ignore { question } — you will not answer this
+// one. Its jobs are dismissed (off every list and count), and the draft is
+// kept as ignored so it is not drafted again.
+router.post('/needs-answer/ignore', async (req, res) => {
+  try {
+    const question = str((req.body || {}).question, 1000);
+    if (!question) return res.status(400).json({ error: 'question is required' });
+    const now = new Date();
+    const result = await NaukriJob.updateMany(
+      { userId: req.userId, ...SKIP_BUCKETS['needs-answer'], unknownQuestion: question, ...BASE_FILTER },
+      { $set: { applyStatus: 'dismissed', retryable: false, priority: 0 },
+        $push: { applyHistory: { at: now, from: 'skipped', to: 'dismissed', note: 'question ignored by you' } } },
+    );
+    await NaukriConfig.updateOne({ userId: req.userId }, { $pull: { drafts: { question } } });
+    await NaukriConfig.updateOne({ userId: req.userId }, {
+      $push: { drafts: { $each: [{ question, status: 'ignored', createdAt: now }], $slice: -300 } },
+    });
+    res.json({ dismissed: result.modifiedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Plain text out of an uploaded resume, for AI drafts. PDF only — Word files
+// have no extractor here, and the Resume card says so and offers a paste box.
+// Never throws: a resume that will not parse is still a resume to attach.
+async function resumeText(file) {
+  if (!file || file.mimetype !== 'application/pdf') return '';
+  try {
+    const { getDocumentProxy, extractText } = await import('unpdf');
+    const pdf = await getDocumentProxy(new Uint8Array(file.buffer));
+    const { text } = await extractText(pdf, { mergePages: true });
+    return String(text || '').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim().slice(0, 20000);
+  } catch (_) {
+    return '';
+  }
+}
+
 // ── Resume ─────────────────────────────────────────────────────────────────
 
 router.post('/resume', (req, res) => {
@@ -458,15 +748,23 @@ router.post('/resume', (req, res) => {
       if (err) return res.status(400).json({ error: err.message });
       if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
       const config = await NaukriConfig.getForUser(req.userId);
+      const text = await resumeText(req.file);
       config.resume = {
         filename: req.file.originalname,
         contentType: req.file.mimetype,
         data: req.file.buffer,
         size: req.file.size,
         uploadedAt: new Date(),
+        // A new file replaces the text too — unless it yielded none (a Word
+        // file, a scanned PDF), in which case what you pasted before is kept.
+        text: text || (config.resume && config.resume.text) || '',
       };
       await config.save();
-      res.json({ resume: { filename: config.resume.filename, size: config.resume.size, uploadedAt: config.resume.uploadedAt } });
+      res.json({
+        resume: { filename: config.resume.filename, size: config.resume.size, uploadedAt: config.resume.uploadedAt },
+        resumeText: config.resume.text,
+        extracted: !!text,
+      });
     } catch (e) {
       res.status(500).json({ error: e.message });
     }
@@ -523,7 +821,7 @@ router.get('/runs', async (req, res) => {
 });
 
 // Shared by the manual button and by an approval, which queues an apply run.
-async function queueRun(userId, kind, trigger = 'manual') {
+async function queueRun(userId, kind, trigger = 'manual', { sources = null } = {}) {
   const [worker, config] = await Promise.all([
     NaukriWorker.getForUser(userId),
     NaukriConfig.getForUser(userId),
@@ -551,7 +849,11 @@ async function queueRun(userId, kind, trigger = 'manual') {
     return { error: `A Naukri ${active.kind} is already ${active.status}`, code: 409, run: serialize(active) };
   }
 
-  const run = await NaukriRun.create({ userId, kind, trigger, dryRun: !!config.safety.dryRun });
+  const run = await NaukriRun.create({
+    userId, kind, trigger, dryRun: !!config.safety.dryRun,
+    // A harvest can be pointed at one source for this run only.
+    sources: kind === 'harvest' && sources ? sources : null,
+  });
   return { run: run.toJSON() };
 }
 
@@ -561,7 +863,13 @@ router.post('/runs', async (req, res) => {
     if (!KINDS.includes(kind)) {
       return res.status(400).json({ error: `kind must be one of ${KINDS.join(', ')}` });
     }
-    const out = await queueRun(req.userId, kind, 'manual');
+    let sources = null;
+    if (kind === 'harvest' && (req.body || {}).sources) {
+      const cfg = await NaukriConfig.getForUser(req.userId);
+      sources = cleanSources(req.body.sources, cfg.sources);
+      if (!sources) return res.status(400).json({ error: 'Pick searches, recommended jobs, or both' });
+    }
+    const out = await queueRun(req.userId, kind, 'manual', { sources });
     if (out.error) return res.status(out.code).json(out);
     res.status(201).json({ run: out.run });
   } catch (err) {
@@ -606,6 +914,8 @@ router.get('/jobs', async (req, res) => {
     // `bucket=waiting` is the Waiting tab asking for exactly what its badge
     // counts, rather than reproducing the rule and hoping the two agree.
     if (req.query.bucket === 'waiting') Object.assign(filter, WAITING_FILTER);
+    else if (SKIP_BUCKETS[req.query.bucket]) Object.assign(filter, SKIP_BUCKETS[req.query.bucket]);
+    else if (req.query.bucket === 'skipped') Object.assign(filter, ALL_SKIPPED);
     else if (['pending', 'approved', 'rejected'].includes(req.query.approval)) filter.approval = req.query.approval;
     // 'sent' is what the Applied board asks for: things that actually went out.
     // 'any' is kept for anything that wants every outcome including skips.
@@ -625,6 +935,15 @@ router.get('/jobs', async (req, res) => {
     else if (req.query.applyType === 'native' || req.query.hideExternal === '1') {
       filter.likelyExternal = { $ne: true };
     }
+    // Where it was found. Rows harvested before origins existed came from a
+    // search, so 'search' also matches rows with no origins at all.
+    // Applied last (after the experience bands) via $and, so it never
+    // collides with the search box's $or; the chip counts are taken without it.
+    const ORIGIN = {
+      recommended: { origins: 'recommended' },
+      search: { $or: [{ origins: 'search' }, { origins: { $size: 0 } }] },
+    };
+    const originCond = ORIGIN[req.query.origin] || null;
     if (req.query.location) {
       // Naukri writes "Bengaluru"; people type "Bangalore". Matching literally
       // returned one row out of a hundred, which reads as a broken filter.
@@ -644,8 +963,14 @@ router.get('/jobs', async (req, res) => {
     if (maxExp != null) bands.push({ $or: [{ experienceMin: null }, { experienceMin: { $lte: maxExp } }] });
     if (minExp != null) bands.push({ $or: [{ experienceMax: null }, { experienceMax: { $gte: minExp } }] });
     if (bands.length) filter.$and = [...(filter.$and || []), ...bands];
+    const noOrigin = { ...filter };
+    if (originCond) filter.$and = [...(filter.$and || []), originCond];
 
     const SORTS = {
+      // Best fit first; unscored rows (harvested before scoring) last.
+      score: { score: -1, lastSeenAt: -1 },
+      // The order an apply run claims in, so Waiting's positions are true.
+      queue: { priority: -1, approvedAt: 1 },
       newest: { lastSeenAt: -1 },
       oldest: { lastSeenAt: 1 },
       experience: { experienceMin: 1, lastSeenAt: -1 },
@@ -670,14 +995,26 @@ router.get('/jobs', async (req, res) => {
       ]);
       return { all, external, native: all - external };
     };
+    // Same idea for the Searches / Recommended chips. A job found both ways
+    // counts under both, so the two can add up to more than All.
+    const originCounts = async () => {
+      const and = (c) => ({ ...noOrigin, $and: [...(noOrigin.$and || []), c] });
+      const [all, recommended, search] = await Promise.all([
+        NaukriJob.countDocuments(noOrigin),
+        NaukriJob.countDocuments(and(ORIGIN.recommended)),
+        NaukriJob.countDocuments(and(ORIGIN.search)),
+      ]);
+      return { all, recommended, search };
+    };
 
     if (!needsRefine) {
-      const [jobs, total, counts] = await Promise.all([
+      const [jobs, total, counts, origins] = await Promise.all([
         NaukriJob.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).lean(),
         NaukriJob.countDocuments(filter),
         typeCounts(),
+        originCounts(),
       ]);
-      return res.json({ jobs: jobs.map(serialize), total, page, limit, pages: Math.ceil(total / limit), typeCounts: counts });
+      return res.json({ jobs: jobs.map(serialize), total, page, limit, pages: Math.ceil(total / limit), typeCounts: counts, originCounts: origins });
     }
 
     // Salary and posted-age are parsed from Naukri's own words by the same lib
@@ -704,6 +1041,7 @@ router.get('/jobs', async (req, res) => {
       jobs: slice.map(serialize), total, page, limit, pages: Math.ceil(total / limit),
       truncated: rows.length >= REFINE_CAP,
       typeCounts: await typeCounts(),
+      originCounts: await originCounts(),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -764,7 +1102,7 @@ router.post('/jobs/decide', async (req, res) => {
     }
 
     const update = { approval: decision };
-    if (decision === 'approved') update.approvedAt = new Date();
+    if (decision === 'approved') { update.approvedAt = new Date(); update.approvedBy = 'you'; }
     if (decision === 'rejected') update.rejectedReason = str(reason, 300);
 
     const result = await NaukriJob.updateMany(
@@ -828,23 +1166,39 @@ router.post('/jobs/bulk', async (req, res) => {
       );
 
     } else if (action === 'requeue') {
-      // Back into the queue. Clears the outcome AND the note, so a row that
-      // said "applies on the company site" does not keep claiming that after
-      // you have decided to try it again.
-      result = await NaukriJob.updateMany(
-        { ...scope, applyStatus: { $in: ['skipped', 'failed'] } },
-        { $set: {
+      // Back into the queue. Clears the outcome and the note on the row, so a
+      // job that said "applies on the company site" does not keep claiming that
+      // after you decided to try again — but the old note goes into the
+      // history first. That history is also what /ingest reads to recognise
+      // company-site employers, so trying one again does not make the app
+      // forget that employer's other listings go off-site.
+      const rows = await NaukriJob.find({ ...scope, applyStatus: { $in: ['skipped', 'failed', 'dismissed'] } },
+        { applyStatus: 1, applyNote: 1, unknownQuestion: 1 }).lean();
+      for (const j of rows) {
+        await NaukriJob.updateOne({ _id: j._id }, {
+          $set: {
             applyStatus: 'none', retryable: true, approval: 'approved',
-            approvedAt: now, applyNote: '', unknownQuestion: '',
+            approvedAt: now, applyNote: '', unknownQuestion: '', questionOptions: [],
           },
-          $push: { applyHistory: { at: now, from: 'skipped', to: 'none', note: 'requeued by you' } },
-        }
-      );
+          $push: { applyHistory: { at: now, from: j.applyStatus, to: 'none',
+            note: `requeued by you${j.applyNote ? ` (was: ${String(j.applyNote).slice(0, 300)})` : ''}` } },
+        });
+      }
+      result = { modifiedCount: rows.length };
 
     } else if (action === 'dismiss') {
-      result = await NaukriJob.updateMany(scope, {
-        $set: { approval: 'rejected', rejectedReason: str(reason, 300) || 'dismissed' },
-      });
+      // Skips and failures become 'dismissed' — off every list and count. The
+      // old version only rejected them, which left them sitting in Skipped.
+      const outcome = await NaukriJob.updateMany(
+        { ...scope, applyStatus: { $in: ['skipped', 'failed'] } },
+        { $set: { applyStatus: 'dismissed', retryable: false, priority: 0 },
+          $push: { applyHistory: { at: now, from: 'skipped', to: 'dismissed', note: str(reason, 300) || 'dismissed by you' } } },
+      );
+      const proposal = await NaukriJob.updateMany(
+        { ...scope, applyStatus: 'none' },
+        { $set: { approval: 'rejected', rejectedReason: str(reason, 300) || 'dismissed' } },
+      );
+      result = { modifiedCount: outcome.modifiedCount + proposal.modifiedCount };
 
     } else {
       return res.status(400).json({ error: 'action must be apply-next, skip, requeue or dismiss' });
@@ -905,34 +1259,40 @@ router.post('/claim', async (req, res) => {
     if (prevSeenAt && Date.now() - new Date(prevSeenAt).getTime() > WORKER_OFFLINE_MS) await workerBack(req.userId, 'naukri', prevSeenAt);
 
     const config = await NaukriConfig.getForUser(req.userId);
-    if (config.safety.pauseAll) return res.json({ run: null, paused: true });
-    if (blockedUntilOf(worker)) return res.json({ run: null, blockedUntil: worker.blockedUntil });
+    // Sent on EVERY response, idle ones included, so a changed check-in
+    // interval reaches the worker without a restart.
+    const pollSeconds = (config.worker && config.worker.pollSeconds) || 20;
+    if (config.safety.pauseAll) return res.json({ run: null, paused: true, pollSeconds });
+    if (blockedUntilOf(worker)) return res.json({ run: null, blockedUntil: worker.blockedUntil, pollSeconds });
 
     // A heartbeat with no appetite for work. The worker sends this when the
     // LinkedIn harvest is holding the shared debug Chrome: it must keep the tab
     // saying "ready" for the length of that run — which can be an hour — but
     // must not claim a run it cannot execute, and must not fire the schedule
     // below on its behalf.
-    if (probeOnly) return res.json({ run: null, busy: true });
+    if (probeOnly) return res.json({ run: null, busy: true, pollSeconds });
 
     await failStaleRuns(req.userId);
 
     // Materialise the scheduled runs if an occurrence is due and nothing is
-    // already active. One occurrence fans out into up to three runs, created in
-    // execution order: refresh, then harvest, then apply.
-    const due = dueOccurrence(config.schedule, new Date());
+    // already active. One occurrence fans out into the runs its slot asks for,
+    // created in execution order: refresh, then harvest, then apply.
+    const due = dueSlot(config.schedule, new Date());
     if (due) {
       const active = await NaukriRun.findOne({ userId: req.userId, status: { $in: ACTIVE }, ...BASE_FILTER }).lean();
+      // A slot that comes due while a run is active WAITS for it rather than
+      // being spent: it fires on the first poll after the active run ends, as
+      // long as that is still inside catchUpHours. Spending it lost the whole
+      // day's scheduled work whenever a manual run overlapped the slot.
       if (!active) {
-        for (const kind of kindsFor(config.schedule)) {
+        for (const kind of due.kinds) {
           await NaukriRun.create({ userId: req.userId, kind, trigger: 'scheduled', dryRun: !!config.safety.dryRun });
         }
+        // Stamped to the OCCURRENCE, not to now, so a late catch-up doesn't
+        // drag the next slot forward.
+        config.schedule.lastFiredAt = due.at;
+        await config.save();
       }
-      // Stamped to the OCCURRENCE, not to now, so a late catch-up doesn't drag
-      // tomorrow's slot forward. Stamped even when a run was already active, so
-      // a busy slot is spent rather than retried in a loop.
-      config.schedule.lastFiredAt = due;
-      await config.save();
     }
 
     const run = await NaukriRun.findOneAndUpdate(
@@ -940,14 +1300,18 @@ router.post('/claim', async (req, res) => {
       { $set: { status: 'running', claimedAt: new Date(), workerHost: str(host, 200) } },
       { sort: { createdAt: 1 }, new: true }
     );
-    if (!run) return res.json({ run: null });
+    if (!run) return res.json({ run: null, pollSeconds });
 
     // Everything the worker needs to execute, in the same response — it must not
     // need a second round trip mid-run.
     const payload = {
       run: run.toJSON(),
+      pollSeconds,
       config: {
         searches: config.searches.filter(s => s.enabled),
+        searchLimits: config.searchLimits,
+        // This run's own choice if it made one, else the default.
+        sources: (run.sources && (run.sources.searches || run.sources.recommended)) ? run.sources : config.sources,
         useRecommended: config.useRecommended,
         filters: config.filters,
         profile: config.profile,
@@ -961,27 +1325,23 @@ router.post('/claim', async (req, res) => {
     };
 
     if (run.kind === 'apply') {
-      const doneToday = await appliedToday(req.userId);
+      const doneToday = await appliedToday(req.userId, config.schedule.timezone);
       const budget = Math.max(0, Math.min(
         config.apply.maxPerRun,
         config.apply.maxPerDay - doneToday
       ));
       payload.jobs = budget === 0 ? [] : await NaukriJob.find({
-        userId: req.userId, approval: 'approved',
-        // 'skipped' is retryable on purpose: a job skipped for an unanswered
-        // screening question succeeds once you add the rule, and that loop is
-        // the point of surfacing the question in Configuration. 'applied' is
-        // absent for the opposite reason — that one has left.
-        // Skips ARE still claimed: one whose question you have since answered
-        // succeeds on the next run. They are excluded from the waiting COUNT
-        // above (different state, different next action), not from the work.
-        applyStatus: { $in: ['none', 'failed', 'skipped'] },
-        // …but only the ones that CAN succeed. Skips marked terminal (applies on
-        // the company site, already applied) would otherwise be re-attempted
-        // every run, consuming the whole per-run budget and starving the queue
-        // behind them. `$ne: false` rather than `true` so rows written before
-        // this field existed still qualify.
-        retryable: { $ne: false },
+        userId: req.userId,
+        // Exactly what the Waiting tab lists, so "waiting" and "what the next
+        // run takes" cannot disagree. Skips are NOT claimed: one blocked on a
+        // question is moved back here by requeueAnswered the moment a rule
+        // answers it, and retrying it before then only re-asked the same
+        // question and spent the budget the jobs behind it needed.
+        ...WAITING_FILTER,
+        // Predicted company-site jobs are left out too — the worker would only
+        // skip them — unless you picked them yourself (priority), in which case
+        // you have asked for the attempt.
+        $or: [{ likelyExternal: { $ne: true } }, { priority: { $gt: 0 } }],
         ...BASE_FILTER,
       // Priority first, then oldest approval. Picking jobs in the UI sets
       // priority, so "apply to these" means these — not "these, eventually".
@@ -1016,17 +1376,23 @@ router.post('/ingest', async (req, res) => {
     const run = await NaukriRun.findOne({ _id: runId, userId: req.userId, ...BASE_FILTER });
     if (!run) return res.status(404).json({ error: 'No such run' });
 
-    let created = 0, updated = 0, skipped = 0;
+    let created = 0, updated = 0, skipped = 0, autoApproved = 0;
     const now = new Date();
+    const config = await NaukriConfig.getForUser(req.userId);
+    const auto = config.apply.autoApproveEnabled && !config.safety.pauseAll;
+    const minScore = config.apply.autoApproveMinScore ?? 80;
 
     // Employers already known to hand off to their own site. Apply type is a
     // property of the employer far more than the role, so this predicts most of
     // them for free — no extra page loads, no extra traffic to Naukri. Computed
-    // once per ingest call rather than per row.
+    // once per ingest call rather than per row. Read from the history as well
+    // as the current note, so requeueing one job does not erase what was
+    // learned about its employer.
     const externalCompanies = new Set(
       (await NaukriJob.distinct('company', {
-        userId: req.userId, retryable: false,
-        applyNote: TERMINAL_SKIP, ...BASE_FILTER,
+        userId: req.userId,
+        $or: [{ applyNote: EXTERNAL_SKIP }, { 'applyHistory.note': EXTERNAL_SKIP }],
+        ...BASE_FILTER,
       })).filter(Boolean).map(c => c.toLowerCase())
     );
 
@@ -1036,6 +1402,18 @@ router.post('/ingest', async (req, res) => {
       if (!sourceId || !title) { skipped++; continue; }
       const sourceKey = `naukri:${sourceId}`;
       const queries = cleanList(raw.queries, 20);
+      // Older workers send no origins; everything they harvested came from a search.
+      const origins = (Array.isArray(raw.origins) ? raw.origins : ['search']).filter(o => o === 'search' || o === 'recommended');
+      // Naukri's own feed (Recommended jobs) states it outright; otherwise it is
+      // predicted from employers already seen sending people off-site.
+      const likelyExternal = raw.companySite === true || externalCompanies.has(str(raw.company, 200).toLowerCase());
+      const postedAt = raw.postedAt && !isNaN(new Date(raw.postedAt)) ? new Date(raw.postedAt) : null;
+      // Scored on every harvest, so a change to your searches or skills is
+      // reflected the next time a job is seen.
+      const fit = scoreJob({
+        title, tags: raw.tags, description: raw.description, experienceMin: raw.experienceMin,
+        experienceMax: raw.experienceMax, salaryText: raw.salaryText, postedText: raw.postedText, likelyExternal, origins,
+      }, config);
 
       const result = await NaukriJob.updateOne(
         { userId: req.userId, sourceKey },
@@ -1054,7 +1432,10 @@ router.post('/ingest', async (req, res) => {
             lastSeenAt: now,
             // Re-evaluated on every harvest, so a company that turns out to be
             // external gets its other listings flagged next time round.
-            likelyExternal: externalCompanies.has(str(raw.company, 200).toLowerCase()),
+            likelyExternal,
+            ...(postedAt ? { postedAt } : {}),
+            score: fit.score,
+            scoreReasons: fit.reasons,
           },
           $setOnInsert: {
             userId: req.userId, sourceId, sourceKey,
@@ -1065,7 +1446,7 @@ router.post('/ingest', async (req, res) => {
             applyHistory: [],
           },
           $inc: { seenCount: 1 },
-          $addToSet: { queries: { $each: queries } },
+          $addToSet: { queries: { $each: queries }, origins: { $each: origins } },
         },
         { upsert: true }
       );
@@ -1073,13 +1454,26 @@ router.post('/ingest', async (req, res) => {
       if (result.upsertedCount) created++;
       else if (result.modifiedCount) updated++;
       else skipped++;
+
+      // Auto-approve: NEW rows only, so a job you moved back to Review by hand
+      // is never re-approved behind your back by the next harvest. Never a
+      // predicted company-site job. Approving only moves it to Waiting — it
+      // goes out at the next scheduled apply run, inside the daily cap; no run
+      // is queued from here.
+      if (auto && result.upsertedCount && !likelyExternal && fit.score >= minScore) {
+        const ok = await NaukriJob.updateOne(
+          { userId: req.userId, sourceKey, approval: 'pending', applyStatus: 'none' },
+          { $set: { approval: 'approved', approvedAt: now, approvedBy: 'auto' } },
+        );
+        if (ok.modifiedCount) autoApproved++;
+      }
     }
 
     await NaukriRun.updateOne({ _id: runId, userId: req.userId }, {
-      $inc: { 'stats.found': created + updated, 'stats.new': created, 'stats.updated': updated },
+      $inc: { 'stats.found': created + updated, 'stats.new': created, 'stats.updated': updated, 'stats.autoApproved': autoApproved },
     });
 
-    res.json({ created, updated, skipped });
+    res.json({ created, updated, skipped, autoApproved });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1127,7 +1521,7 @@ router.post('/progress', async (req, res) => {
 // truthful record of what it already sent.
 router.post('/result', async (req, res) => {
   try {
-    const { runId, jobId, outcome, reason, question, terminal } = req.body || {};
+    const { runId, jobId, outcome, reason, question, options, terminal } = req.body || {};
     if (!runId || !jobId) return res.status(400).json({ error: 'runId and jobId are required' });
     if (!['applied', 'skipped', 'failed', 'dry-run'].includes(outcome)) {
       return res.status(400).json({ error: 'outcome must be applied, skipped, failed or dry-run' });
@@ -1144,6 +1538,8 @@ router.post('/result', async (req, res) => {
       job.applyStatus = to;
       job.applyNote = str(reason, 500);
       job.unknownQuestion = outcome === 'skipped' ? str(question, 500) : '';
+      // What the question offered, so the AI draft picks one of these.
+      job.questionOptions = outcome === 'skipped' && job.unknownQuestion ? cleanList(options, 20, 200) : [];
       // A terminal skip can never succeed — an external ATS, or one Naukri says
       // is already applied to. Marking it keeps the next run from spending its
       // budget re-attempting it instead of reaching the jobs behind it.
@@ -1195,7 +1591,7 @@ router.post('/finish', async (req, res) => {
     if (stats && typeof stats === 'object') {
       // Merged, not replaced: /ingest has already been $inc-ing found/new/updated
       // across chunks, and overwriting them here would throw that away.
-      for (const k of ['applied', 'skipped', 'failed', 'rehearsed', 'searches']) {
+      for (const k of ['applied', 'skipped', 'failed', 'rehearsed', 'searches', 'recommended']) {
         if (stats[k] !== undefined) update[`stats.${k}`] = Number(stats[k]) || 0;
       }
     }

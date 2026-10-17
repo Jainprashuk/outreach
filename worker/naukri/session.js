@@ -20,7 +20,14 @@ const cdpUrl = (port) => `http://127.0.0.1:${port}`;
 // session; the others come and go across their redesigns, so any of them being
 // present is treated as "logged in" and the guard catches a stale session when a
 // page turns out to be the login wall anyway.
-const SESSION_COOKIES = ['nauk_at', 'NKAT', 'ninfo', 'nauk_uid'];
+//
+// `nauk_rt` is the refresh token. Seen live on 2026-10-17: `nauk_at` (the
+// short-lived access token) had expired between page loads while `nauk_rt`
+// and `nauk_sid` were still there — the account WAS logged in, and the next
+// page load would have renewed `nauk_at`. Checking only the access token
+// reported "logged out" and refused every run in that gap. A real logout still
+// fails loudly: the guard sees the login wall on the first navigation.
+const SESSION_COOKIES = ['nauk_at', 'NKAT', 'ninfo', 'nauk_uid', 'nauk_rt'];
 
 // 45s, not the 10s that looks sufficient in a quiet test. connectOverCDP
 // enumerates every target in the browser before it resolves, and this is your

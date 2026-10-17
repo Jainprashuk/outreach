@@ -39,6 +39,34 @@ const answerSchema = new mongoose.Schema({
   enabled: { type: Boolean, default: true },
 });
 
+// Extra times of day the schedule fires, beyond the original `time` (slot 1).
+// Each carries its own run kinds, so a 14:00 slot can be apply-only.
+const slotSchema = new mongoose.Schema({
+  _id: false,
+  time:       { type: String, required: true },   // 'HH:mm'
+  runRefresh: { type: Boolean, default: false },
+  runHarvest: { type: Boolean, default: false },
+  runApply:   { type: Boolean, default: true },
+});
+
+// An AI-drafted answer to a screening question the answer bank has no rule for.
+// A draft is never typed into a form: it becomes a rule only when you press
+// Use, which is what keeps every answer a recruiter sees one you have read.
+const draftSchema = new mongoose.Schema({
+  _id: false,
+  question: { type: String, required: true },
+  answer:   { type: String, default: '' },
+  // The resume or profile line the answer came from, shown beside it so you can
+  // check it at a glance.
+  quote:    { type: String, default: '' },
+  source:   { type: String, enum: ['resume', 'profile', ''], default: '' },
+  // ready = has an answer · unknown = the resume does not say · error = AI busy
+  // (retried later) · ignored = you dismissed it
+  status:   { type: String, enum: ['ready', 'unknown', 'error', 'ignored'], default: 'ready' },
+  options:  { type: [String], default: [] },
+  createdAt: { type: Date, default: Date.now },
+});
+
 const naukriConfigSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
 
@@ -55,11 +83,37 @@ const naukriConfigSchema = new mongoose.Schema({
     runRefresh: { type: Boolean, default: true },
     runHarvest: { type: Boolean, default: true },
     runApply:   { type: Boolean, default: false },
+    // Slots 2 and 3. Empty = the single daily time above, as before.
+    extraSlots: { type: [slotSchema], default: [] },
+  },
+
+  // How often the worker checks in. Sent back on every /claim, so a change
+  // takes effect on the next check-in without restarting the worker.
+  worker: {
+    pollSeconds: { type: Number, default: 20, min: 15, max: 120 },
+  },
+
+  // Harvest size. Clamped again in the worker to its hard caps (10 searches,
+  // 8 pages), so the UI can only ever lower them.
+  searchLimits: {
+    maxSearches: { type: Number, default: 10, min: 1, max: 10 },
+    maxPages:    { type: Number, default: 8, min: 1, max: 8 },
   },
 
   // ── what to harvest ────────────────────────────────────────────────────────
   searches:       { type: [searchSchema], default: [] },
+  // Legacy and unused: it was saved but never read by the worker. `sources`
+  // replaces it.
   useRecommended: { type: Boolean, default: true },
+  // Where a harvest looks, by default (scheduled runs, and Harvest with no
+  // choice made). The Harvest button can override it for one run.
+  sources: {
+    searches:    { type: Boolean, default: true },
+    recommended: { type: Boolean, default: false },
+    // Which Recommended-jobs tabs to read: apply (similar to your applies),
+    // profile, preference, similar_jobs ("You might like"). Empty = all.
+    recommendedTabs: { type: [String], default: ['apply', 'profile', 'preference', 'similar_jobs'] },
+  },
 
   // ── filters, applied before anything reaches the review queue ──────────────
   filters: {
@@ -99,6 +153,10 @@ const naukriConfigSchema = new mongoose.Schema({
   // 'skip' is the default and should stay it. Guessing at a screening question
   // is how you end up telling a recruiter something untrue in writing.
   onUnknownQuestion: { type: String, enum: ['skip', 'apply-anyway'], default: 'skip' },
+  // Draft answers from your resume for questions with no rule. Drafts only:
+  // see draftSchema.
+  aiDrafts: { type: Boolean, default: true },
+  drafts:   { type: [draftSchema], default: [] },
 
   // ── apply behaviour ────────────────────────────────────────────────────────
   apply: {
@@ -123,6 +181,9 @@ const naukriConfigSchema = new mongoose.Schema({
     data:        { type: Buffer, default: null },
     size:        { type: Number, default: 0 },
     uploadedAt:  { type: Date, default: null },
+    // Plain text pulled from the file at upload, editable in the Resume card.
+    // What the AI drafts answers from; the file itself is what gets attached.
+    text:        { type: String, default: '' },
   },
   // The daily refresh rotates through these, so the profile save is a real edit
   // rather than the same string written back. Empty = round-trip whatever is
