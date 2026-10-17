@@ -64,6 +64,10 @@ const draftSchema = new mongoose.Schema({
   // (retried later) · ignored = you dismissed it
   status:   { type: String, enum: ['ready', 'unknown', 'error', 'ignored'], default: 'ready' },
   options:  { type: [String], default: [] },
+  // Fingerprint of the resume text + profile the draft was written from. When
+  // either changes, the draft is stale and is written again — otherwise a
+  // question drafted before the resume was there stays "unknown" forever.
+  basis:    { type: String, default: '' },
   createdAt: { type: Date, default: Date.now },
 });
 

@@ -115,6 +115,14 @@ async function main() {
       `claimed ${(a2.claimed.jobs || []).length}`);
 
     console.log('\nNeeds answer → Use → requeue → applied');
+    // A draft written before the resume/profile it should have used is stale:
+    // reported as missing so the tab drafts it again.
+    const q0 = skipped[0].unknownQuestion;
+    await NaukriConfig.updateOne({ userId }, { $push: { drafts: { question: q0, status: 'unknown', basis: 'old-resume' } } });
+    ok('a stale "unknown" draft is not shown — it gets redrafted', (await call('GET', '/needs-answer')).questions[0].draft === null);
+    await NaukriConfig.updateOne({ userId }, { $set: { drafts: [{ question: q0, status: 'ignored' }] } });
+    ok('an ignored question stays ignored', (await call('GET', '/needs-answer')).questions[0].draft?.status === 'ignored');
+    await NaukriConfig.updateOne({ userId }, { $set: { drafts: [] } });
     const na = await call('GET', '/needs-answer');
     ok('one group for the one question', na.questions.length === 1 && na.questions[0].count === skipped.length, JSON.stringify(na.questions.map(q => q.count)));
     ok('group carries the options', na.questions[0].options.join() === 'Yes,No');

@@ -611,6 +611,13 @@ router.post('/config/starter-rules', async (req, res) => {
 
 const sameQuestion = (a, b) => matchable(a) === matchable(b);
 
+// What a draft was written from, as a short fingerprint. Ignored drafts are
+// your decision and never expire; every other draft is only good for the
+// resume text and profile it saw.
+const draftBasis = (resumeText, profile) => require('crypto').createHash('sha1')
+  .update(String(resumeText || '')).update(JSON.stringify(profile || {})).digest('hex').slice(0, 16);
+const draftStillGood = (d, basis) => d && (d.status === 'ignored' || (d.status !== 'error' && d.basis === basis));
+
 // GET /api/naukri/needs-answer
 router.get('/needs-answer', async (req, res) => {
   try {
@@ -631,11 +638,15 @@ router.get('/needs-answer', async (req, res) => {
       NaukriConfig.getForUser(req.userId),
     ]);
     const drafts = config.drafts || [];
+    const text = await resumeTextFor(req.userId, config);
+    const basis = draftBasis(text, config.profile && config.profile.toObject ? config.profile.toObject() : config.profile);
     res.json({
       aiDrafts: !!config.aiDrafts,
-      hasResumeText: !!(await resumeTextFor(req.userId, config)).trim(),
+      hasResumeText: !!text.trim(),
       questions: rows.map((r) => {
-        const d = drafts.find(x => sameQuestion(x.question, r._id));
+        // A stale draft (different resume or profile, or the AI was busy) is
+        // reported as missing, so the tab asks for a fresh one.
+        const d = drafts.find(x => sameQuestion(x.question, r._id) && draftStillGood(x, basis));
         return {
           question: r._id,
           count: r.count,
@@ -667,10 +678,13 @@ router.post('/needs-answer/draft', async (req, res) => {
     ).sort({ updatedAt: -1 }).lean();
     const options = (job && job.questionOptions) || [];
 
-    const out = await draftAnswer(question, {
-      resumeText: await resumeTextFor(req.userId, config), profile: config.profile, options, userId: req.userId,
-    });
-    const draft = { question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options, createdAt: new Date() };
+    const resumeTextNow = await resumeTextFor(req.userId, config);
+    const profile = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
+    const out = await draftAnswer(question, { resumeText: resumeTextNow, profile, options, userId: req.userId });
+    const draft = {
+      question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options,
+      basis: draftBasis(resumeTextNow, profile), createdAt: new Date(),
+    };
     // Atomic replace rather than config.save(): the tab drafts several
     // questions in parallel, and concurrent document saves would conflict.
     await NaukriConfig.updateOne({ userId: req.userId }, { $pull: { drafts: { question } } });
