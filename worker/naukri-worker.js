@@ -49,7 +49,10 @@ const CFG = {
 
 const LOCK_FILE = path.join(os.homedir(), '.job-leads', 'naukri-worker.lock');
 const CHUNK = 200;                       // jobs per /ingest call, well under Vercel's body cap
-const RUN_TIMEOUT_MS = 45 * 60 * 1000;
+// 80 minutes: a 40-job apply run at 30–60s a job needs room. Kept under the
+// server's 90-minute stale-run cutoff (routes/naukri.js STALE_RUN_MS), so the
+// worker always gives up first and says why.
+const RUN_TIMEOUT_MS = 80 * 60 * 1000;
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));

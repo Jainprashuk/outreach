@@ -83,7 +83,7 @@ export default function ApplyCard({ config, onSaved }: {
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
         <label style={{ fontSize: 13 }}>
           <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Max per run</div>
-          <input type="number" min={1} max={20} style={{ width: 100 }}
+          <input type="number" min={1} max={40} style={{ width: 100 }}
             value={a.maxPerRun} onChange={e => set('maxPerRun', Number(e.target.value))} />
         </label>
         <label style={{ fontSize: 13 }}>
@@ -103,7 +103,8 @@ export default function ApplyCard({ config, onSaved }: {
         </label>
       </div>
       <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 12 }}>
-        Max per run is capped at 20 and max per day at 50, whatever you type here. The gap is randomised
+        Max per run is capped at 40 and max per day at 50, whatever you type here. A run never takes more than what
+        is left of today&apos;s limit. Around 30–40 a day is a sensible ceiling — far more starts to look automated to Naukri. The gap is randomised
         between every job — a fixed interval is a signature.
       </div>
 

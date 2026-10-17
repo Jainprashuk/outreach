@@ -1908,13 +1908,15 @@ export const naukriNeedsAnswerApi = () =>
     autoAnswer: { enabled: boolean; minConfidence: number };
     /** Answers the AI gave live during applies, for review. */
     autoAnswered: NaukriAutoAnswer[];
+    /** Jobs sent back to Waiting just now because a draft was confident enough. */
+    autoRequeued?: number;
   }>('/api/naukri/needs-answer');
 
 export const reviewNaukriAutoAnswerApi = (pattern: string, action: 'keep' | 'edit' | 'remove', answer?: string) =>
   apiFetch<{ ok: true }>('/api/naukri/needs-answer/auto', { method: 'POST', body: JSON.stringify({ pattern, action, answer }) });
 
 export const draftNaukriAnswerApi = (question: string) =>
-  apiFetch<{ draft: NaukriDraft; note: string | null }>(
+  apiFetch<{ draft: NaukriDraft; note?: string | null; autoUsed?: boolean; requeued?: number }>(
     '/api/naukri/needs-answer/draft', { method: 'POST', body: JSON.stringify({ question }) });
 
 /** Make it a rule; every job blocked on it goes back to Waiting. */

@@ -32,7 +32,7 @@ const { resolveAnswer, pickOption } = require('../../lib/naukriAnswers');
 
 // Hard cap, module constant rather than config. The server also clamps, and
 // both matter: this one is the last line if a config ever arrives malformed.
-const MAX_PER_RUN = 20;
+const MAX_PER_RUN = 40;
 
 // One job's whole visit: navigate, classify, click, answer, confirm. Generous —
 // a slow listing with a five-question form is well inside it — but finite.

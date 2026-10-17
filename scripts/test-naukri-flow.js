@@ -321,13 +321,36 @@ async function main() {
       ok('70% sure (bar 85): the job is skipped', lowJobs.filter(j => j.applyStatus === 'skipped').length === 1);
       ok('…no rule saved, and the draft shows 70%', cfgLow.answers.length === 0 && cfgLow.drafts.some(d => d.question === QUESTION && d.confidence === 70));
 
+      // A job already parked (the 70% case above). With auto-answer OFF a new
+      // 95% draft just waits; switching auto-answer ON uses it on the next look.
+      await call('PATCH', '/config', { autoAnswer: { enabled: false }, aiDrafts: true });
+      aiReply = { status: 'ready', answer: 'No', quote: 'Skills: Node.js, MongoDB', source: 'resume', confidence: 95 };
+      const waitDraft = await call('POST', '/needs-answer/draft', { question: QUESTION });
+      ok('auto-answer off: a 95% draft just waits for you', !waitDraft.autoUsed
+        && (await NaukriJob.countDocuments({ _id: { $in: lowIds }, applyStatus: 'skipped' })) === 1);
+      await call('PATCH', '/config', { autoAnswer: { enabled: true, minConfidence: 85 } });
+      const promoted = await call('GET', '/needs-answer');
+      ok('switched on: the waiting 95% draft is used and its job goes back to Waiting',
+        promoted.autoRequeued === 1 && !promoted.questions.some(q => q.question === QUESTION)
+        && promoted.autoAnswered.some(x => x.confidence === 95)
+        && (await NaukriJob.countDocuments({ _id: { $in: lowIds }, applyStatus: 'none' })) === 1,
+        JSON.stringify({ autoRequeued: promoted.autoRequeued }));
+      // And a fresh draft written on the page while it is on is used at once.
+      await NaukriConfig.updateOne({ userId }, { $set: { answers: [], drafts: [] } });
+      await NaukriJob.updateMany({ _id: { $in: lowIds } }, { $set: { applyStatus: 'skipped', unknownQuestion: QUESTION, questionOptions: ['Yes', 'No'] } });
+      const now95 = await call('POST', '/needs-answer/draft', { question: QUESTION });
+      ok('on: a new 95% draft on the page is used straight away', now95.autoUsed === true && now95.requeued >= 1);
+      await NaukriJob.updateMany({ _id: { $in: lowIds } }, { $set: { applyStatus: 'applied' } });
+      await NaukriConfig.updateOne({ userId }, { $set: { answers: [], drafts: [] } });   // no rule for the next case
+
       // The AI failing outright: skipped, the run still finishes.
       aiReply = new Error('provider down');
       const errIds = await fresh(3);
       await call('POST', '/runs', { kind: 'apply' });
       const er = await runQuiet();
       ok('AI failing: the job is skipped and the run finishes', er.run.status === 'done'
-        && (await NaukriJob.countDocuments({ _id: { $in: errIds }, applyStatus: 'skipped' })) === 1, er.run.error);
+        && (await NaukriJob.countDocuments({ _id: { $in: errIds }, applyStatus: 'skipped' })) === 1,
+        `${er.run.status} ${er.run.error || ''} · ${(await NaukriJob.find({ _id: { $in: errIds } }).lean()).map(j => j.applyStatus).join()} · claimed ${(er.claimed.jobs || []).length}`);
 
       // The per-run cap.
       const capped = await NaukriRun.create({ userId, kind: 'apply', status: 'running', claimedAt: new Date(), 'stats.aiAsked': 15 });

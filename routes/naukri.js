@@ -29,7 +29,7 @@ const KINDS = ['refresh', 'harvest', 'apply', 'probe'];
 // A worker polls every 20s; 90s of silence means the Mac slept or the process died.
 const ONLINE_MS = 90_000;
 // A claimed run whose worker vanished mid-flight. Longer than the longest
-// plausible run (8 pages of harvest, or 20 applies with 4s gaps).
+// plausible run (8 pages of harvest, or 40 applies — the worker gives up at 80 min).
 const STALE_RUN_MS = 90 * 60_000;
 // Naukri showed a captcha. Same doctrine as the LinkedIn checkpoint: stop for a
 // week, and do not let a worker restart shrug it off.
@@ -640,8 +640,46 @@ const plainAnswers = (config) => (config.answers || []).map(a => (a.toObject ? a
 const draftStillGood = (d, basis) => d && (d.status === 'ignored' || (d.status !== 'error' && d.basis === basis));
 
 // GET /api/naukri/needs-answer
+// Save a confident AI answer as an 'auto' rule at the top of the bank and put
+// every job parked on its question back in Waiting. One place for it, used by
+// the live path (/ai-answer) and by drafts written or already sitting on the
+// Needs answer page while auto-answer is on — so "the AI is sure enough"
+// means the same thing wherever the draft came from. Returns jobs requeued.
+async function saveAutoRule(userId, { question, answer, options = [], confidence, quote }) {
+  const pattern = matchable(question).slice(0, 300);
+  const kind = options.length ? 'choice' : /^\d+(\.\d+)?$/.test(answer) ? 'number' : 'text';
+  const rule = { pattern, answer, kind, enabled: true, origin: 'auto', confidence, quote, createdAt: new Date() };
+  // Atomic, and only if no rule with this pattern exists yet — two jobs
+  // asking the same question at once must not add it twice.
+  await NaukriConfig.updateOne(
+    { userId, 'answers.pattern': { $ne: pattern } },
+    { $push: { answers: { $each: [rule], $position: 0 } }, $pull: { drafts: { question } } },
+  );
+  const fresh = await NaukriConfig.getForUser(userId);
+  return { rule, requeued: await requeueAnswered(userId, fresh) };
+}
+
+// With auto-answer on, a draft that passed every check and reached the bar is
+// used, not left waiting for a click. Covers jobs skipped before auto-answer
+// was switched on, whose drafts were written later on this page.
+async function promoteConfidentDrafts(userId, config) {
+  const auto = config.autoAnswer || {};
+  if (!auto.enabled) return 0;
+  const min = auto.minConfidence || 85;
+  const text = await resumeTextFor(userId, config);
+  const basis = draftBasis(text, config.profile && config.profile.toObject ? config.profile.toObject() : config.profile, plainAnswers(config));
+  let requeued = 0;
+  for (const d of config.drafts || []) {
+    if (d.status !== 'ready' || (d.confidence || 0) < min || !draftStillGood(d, basis)) continue;
+    requeued += (await saveAutoRule(userId, { question: d.question, answer: d.answer, options: d.options || [], confidence: d.confidence, quote: d.quote })).requeued;
+  }
+  return requeued;
+}
+
 router.get('/needs-answer', async (req, res) => {
   try {
+    // Confident drafts first, so the list below no longer shows what they solved.
+    const autoRequeued = await promoteConfidentDrafts(req.userId, await NaukriConfig.getForUser(req.userId));
     const [rows, config] = await Promise.all([
       NaukriJob.aggregate([
         { $match: { userId: req.userId, ...SKIP_BUCKETS['needs-answer'], deleted: { $ne: true } } },
@@ -679,6 +717,7 @@ router.get('/needs-answer', async (req, res) => {
       }),
       autoAnswer: { enabled: !!(config.autoAnswer && config.autoAnswer.enabled), minConfidence: (config.autoAnswer && config.autoAnswer.minConfidence) || 85 },
       // Answers the AI gave during applies, for you to keep, edit or remove.
+      autoRequeued,
       autoAnswered: (config.answers || []).filter(a => a.origin === 'auto').map(a => ({
         pattern: a.pattern, answer: a.answer, confidence: a.confidence, quote: a.quote || '', createdAt: a.createdAt,
       })),
@@ -717,6 +756,12 @@ router.post('/needs-answer/draft', async (req, res) => {
     };
     // Atomic replace rather than config.save(): the tab drafts several
     // questions in parallel, and concurrent document saves would conflict.
+    // Sure enough while auto-answer is on: used straight away, like a live answer.
+    const auto = config.autoAnswer || {};
+    if (auto.enabled && draft.status === 'ready' && draft.confidence >= (auto.minConfidence || 85)) {
+      const { requeued } = await saveAutoRule(req.userId, { question, answer: draft.answer, options, confidence: draft.confidence, quote: draft.quote });
+      return res.json({ draft: { answer: draft.answer, quote: draft.quote, source: draft.source, status: draft.status, confidence: draft.confidence }, autoUsed: true, requeued });
+    }
     await NaukriConfig.updateOne({ userId: req.userId }, { $pull: { drafts: { question } } });
     await NaukriConfig.updateOne({ userId: req.userId }, { $push: { drafts: { $each: [draft], $slice: -300 } } });
     res.json({ draft: { answer: draft.answer, quote: draft.quote, source: draft.source, status: draft.status, confidence: draft.confidence }, note: out.note || null });
@@ -822,18 +867,8 @@ router.post('/ai-answer', async (req, res) => {
     const confidence = out.confidence || 0;
 
     if (out.status === 'ready' && confidence >= min) {
-      const pattern = matchable(question).slice(0, 300);
-      const kind = options.length ? 'choice' : /^\d+(\.\d+)?$/.test(out.answer) ? 'number' : 'text';
-      const rule = { pattern, answer: out.answer, kind, enabled: true, origin: 'auto', confidence, quote: out.quote, createdAt: new Date() };
-      // Atomic, and only if no rule with this pattern exists yet — two jobs
-      // asking the same question at once must not add it twice.
-      await NaukriConfig.updateOne(
-        { userId: req.userId, 'answers.pattern': { $ne: pattern } },
-        { $push: { answers: { $each: [rule], $position: 0 } }, $pull: { drafts: { question } } },
-      );
+      const { rule } = await saveAutoRule(req.userId, { question, answer: out.answer, options, confidence, quote: out.quote });
       await NaukriRun.updateOne({ _id: runId, userId: req.userId }, { $inc: { 'stats.aiAnswered': 1 } });
-      const fresh = await NaukriConfig.getForUser(req.userId);
-      await requeueAnswered(req.userId, fresh);
       return res.json({ answer: out.answer, confidence, rule });
     }
 

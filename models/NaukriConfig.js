@@ -12,7 +12,9 @@ const mongoose = require('mongoose');
 // the rest of the app writes, and the scope rule for this feature is that it can
 // be deleted in one revert.
 
-const MAX_APPLIES_PER_RUN = 20;   // also enforced in the worker; see below
+// 40 so one scheduled run can reach a 40/day limit on its own (was 20). Also
+// enforced in the worker, and the worker's run time limit is sized for it.
+const MAX_APPLIES_PER_RUN = 40;
 
 const searchSchema = new mongoose.Schema({
   _id:     false,

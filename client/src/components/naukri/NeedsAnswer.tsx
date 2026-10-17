@@ -160,6 +160,10 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
       setGroups(r.questions);
       setMeta({ aiDrafts: r.aiDrafts, hasResumeText: r.hasResumeText, autoAnswer: r.autoAnswer || { enabled: false, minConfidence: 85 } });
       setAutoAnswered(r.autoAnswered || []);
+      if (r.autoRequeued) {
+        toast(`${r.autoRequeued} job${r.autoRequeued === 1 ? '' : 's'} back in Waiting — the AI was sure enough to answer for you.`, 'success');
+        onChanged();
+      }
     } catch (e: any) { toast(e?.message || 'Could not load', 'error'); }
   }, [toast]);
 
@@ -179,12 +183,21 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
     (async () => {
       const queue = [...todo];
       let noKey = false;
+      let autoChanged = false;
       const worker = async () => {
         for (let q = queue.shift(); q; q = queue.shift()) {
           const question = q;
           try {
             if (noKey) throw new Error('no key');
             const r = await draftNaukriAnswerApi(question);
+            if (r.autoUsed) {
+              // Sure enough with auto-answer on: already saved as an auto rule.
+              toast(`AI was ${r.draft.confidence}% sure — answered automatically`
+                + (r.requeued ? `, ${r.requeued} job${r.requeued === 1 ? '' : 's'} back in Waiting.` : '.'), 'success');
+              setGroups(gs => gs.filter(g => g.question !== question));
+              autoChanged = true;
+              continue;
+            }
             setGroups(gs => gs.map(g => (g.question === question ? { ...g, draft: r.draft, drafting: false } : g)));
           } catch (e) {
             // No AI key: say so once and stop asking — every other question would fail the same way.
@@ -196,6 +209,9 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
       };
       await Promise.all(Array.from({ length: DRAFT_CONCURRENCY }, worker));
       drafting.current = false;
+      // Auto-used answers moved jobs and added rules: refresh the counts and
+      // the Auto-answered list.
+      if (autoChanged) { onChanged(); load(); }
     })();
     // Runs once per load: errors are not retried in a loop, only on the next visit.
   }, [meta]); // eslint-disable-line react-hooks/exhaustive-deps
