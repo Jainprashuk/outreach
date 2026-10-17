@@ -457,6 +457,9 @@ router.patch('/config', async (req, res) => {
       // An AI-written rule stays 'auto' only while it is untouched; edit it
       // here and it is yours.
       const autoBefore = new Map((config.answers || []).filter(a => a.origin === 'auto').map(a => [a.pattern, a]));
+      // Every rule's age is kept unless its answer changes — an unchanged rule
+      // re-saved with the card must not look "new" and reopen drafts.
+      const before = new Map((config.answers || []).map(a => [a.pattern, a]));
       config.answers = (Array.isArray(body.answers) ? body.answers : []).slice(0, 200).map(a => {
         const rule = {
           pattern: str(a && a.pattern, 300).toLowerCase(),
@@ -467,7 +470,10 @@ router.patch('/config', async (req, res) => {
         const was = autoBefore.get(rule.pattern);
         return was && was.answer === rule.answer
           ? { ...rule, origin: 'auto', confidence: was.confidence, quote: was.quote, createdAt: was.createdAt }
-          : { ...rule, origin: 'you', createdAt: (was && was.createdAt) || new Date() };
+          : { ...rule, origin: 'you', createdAt: (() => {
+              const prev = before.get(rule.pattern);
+              return prev && prev.answer === rule.answer && prev.createdAt ? prev.createdAt : new Date();
+            })() };
       }).filter(a => a.pattern);
     }
     if (body.autoAnswer) {
@@ -627,17 +633,38 @@ router.post('/config/starter-rules', async (req, res) => {
 
 const sameQuestion = (a, b) => matchable(a) === matchable(b);
 
-// What a draft was written from, as a short fingerprint. Ignored drafts are
-// your decision and never expire; every other draft is only good for the
-// resume text and profile it saw.
-// Answers you have given count too: a new rule can answer a question that
-// was "unknown" before, so it makes the other drafts stale.
-const draftBasis = (resumeText, profile, answers = []) => require('crypto').createHash('sha1')
+// What a draft was written from, as a short fingerprint of the resume text
+// and profile. Ignored drafts are your decision and never expire; every other
+// draft is only good for the resume and profile it saw.
+//
+// Answers you give are NOT in it any more. They used to be, so every new rule
+// made every draft stale and the next visit redrafted all of them — on top of
+// live answering adding rules mid-run, that used up Groq's daily token limit.
+// Now a new answer only reopens the "don't say" drafts it could help: ones
+// sharing a word with it (draftStillGood).
+const draftBasis = (resumeText, profile) => require('crypto').createHash('sha1')
+  .update(String(resumeText || '')).update(JSON.stringify(profile || {}))
+  .digest('hex').slice(0, 16);
+// The previous formula, so drafts saved before this change are not all
+// treated as stale (and redrafted) at once.
+const legacyBasis = (resumeText, profile, answers = []) => require('crypto').createHash('sha1')
   .update(String(resumeText || '')).update(JSON.stringify(profile || {}))
   .update(JSON.stringify((answers || []).filter(a => a.enabled !== false).map(a => [a.pattern, a.answer])))
   .digest('hex').slice(0, 16);
 const plainAnswers = (config) => (config.answers || []).map(a => (a.toObject ? a.toObject() : a));
-const draftStillGood = (d, basis) => d && (d.status === 'ignored' || (d.status !== 'error' && d.basis === basis));
+const draftStillGood = (d, basis, rules = [], legacy = null) => {
+  if (!d) return false;
+  if (d.status === 'ignored') return true;
+  if (d.status === 'error') return false;
+  if (d.basis !== basis && d.basis !== legacy) return false;
+  // A "don't say" draft reopens when an answer given since could speak to it.
+  if (d.status === 'unknown' && d.createdAt) {
+    const since = new Date(d.createdAt).getTime();
+    const newer = (rules || []).filter(r => r && r.createdAt && new Date(r.createdAt).getTime() > since);
+    if (newer.length && naukriDraft.relevantRules(newer, d.question, 1).length) return false;
+  }
+  return true;
+};
 
 // GET /api/naukri/needs-answer
 // Save a confident AI answer as an 'auto' rule at the top of the bank and put
@@ -667,10 +694,13 @@ async function promoteConfidentDrafts(userId, config) {
   if (!auto.enabled) return 0;
   const min = auto.minConfidence || 85;
   const text = await resumeTextFor(userId, config);
-  const basis = draftBasis(text, config.profile && config.profile.toObject ? config.profile.toObject() : config.profile, plainAnswers(config));
+  const prof = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
+  const rules = plainAnswers(config);
+  const basis = draftBasis(text, prof);
+  const legacy = legacyBasis(text, prof, rules);
   let requeued = 0;
   for (const d of config.drafts || []) {
-    if (d.status !== 'ready' || (d.confidence || 0) < min || !draftStillGood(d, basis)) continue;
+    if (d.status !== 'ready' || (d.confidence || 0) < min || !draftStillGood(d, basis, rules, legacy)) continue;
     requeued += (await saveAutoRule(userId, { question: d.question, answer: d.answer, options: d.options || [], confidence: d.confidence, quote: d.quote })).requeued;
   }
   return requeued;
@@ -698,14 +728,17 @@ router.get('/needs-answer', async (req, res) => {
     ]);
     const drafts = config.drafts || [];
     const text = await resumeTextFor(req.userId, config);
-    const basis = draftBasis(text, config.profile && config.profile.toObject ? config.profile.toObject() : config.profile, plainAnswers(config));
+    const prof = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
+    const rulesNow = plainAnswers(config);
+    const basis = draftBasis(text, prof);
+    const legacy = legacyBasis(text, prof, rulesNow);
     res.json({
       aiDrafts: !!config.aiDrafts,
       hasResumeText: !!text.trim(),
       questions: rows.map((r) => {
         // A stale draft (different resume or profile, or the AI was busy) is
         // reported as missing, so the tab asks for a fresh one.
-        const d = drafts.find(x => sameQuestion(x.question, r._id) && draftStillGood(x, basis));
+        const d = drafts.find(x => sameQuestion(x.question, r._id) && draftStillGood(x, basis, rulesNow, legacy));
         return {
           question: r._id,
           count: r.count,
@@ -752,7 +785,7 @@ router.post('/needs-answer/draft', async (req, res) => {
     if (out.code === 'AI_KEY_REQUIRED') return res.status(409).json({ error: out.note, code: out.code });
     const draft = {
       question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options,
-      confidence: out.confidence || 0, basis: draftBasis(resumeTextNow, profile, rules), createdAt: new Date(),
+      confidence: out.confidence || 0, basis: draftBasis(resumeTextNow, profile), createdAt: new Date(),
     };
     // Atomic replace rather than config.save(): the tab drafts several
     // questions in parallel, and concurrent document saves would conflict.
@@ -876,7 +909,7 @@ router.post('/ai-answer', async (req, res) => {
     if (out.code !== 'AI_KEY_REQUIRED') {
       const draft = {
         question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options, confidence,
-        basis: draftBasis(text, profile, rules), createdAt: new Date(),
+        basis: draftBasis(text, profile), createdAt: new Date(),
       };
       await NaukriConfig.updateOne({ userId: req.userId }, { $pull: { drafts: { question } } });
       await NaukriConfig.updateOne({ userId: req.userId }, { $push: { drafts: { $each: [draft], $slice: -300 } } });

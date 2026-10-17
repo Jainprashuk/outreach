@@ -363,6 +363,32 @@ async function main() {
       naukriDraft.draftAnswer = realDraft;
     }
 
+    console.log('\nnew answers only reopen drafts they could help');
+    {
+      const naukriDraft = require('../lib/naukriDraft');
+      const real = naukriDraft.draftAnswer;
+      let calls = 0;
+      naukriDraft.draftAnswer = async () => { calls++; return { status: 'unknown', answer: '', quote: '', source: '', confidence: 0 }; };
+      try {
+        const Q = 'Do you have experience with SAP?';
+        await call('PATCH', '/config', { autoAnswer: { enabled: false }, aiDrafts: true, answers: [] });
+        await NaukriConfig.updateOne({ userId }, { $set: { drafts: [] } });
+        const [jid] = await fresh(1);
+        await NaukriJob.updateOne({ _id: jid }, { $set: { applyStatus: 'skipped', unknownQuestion: Q, questionOptions: ['Yes', 'No'] } });
+        await call('POST', '/needs-answer/draft', { question: Q });
+        const draftOf = async () => ((await call('GET', '/needs-answer')).questions.find(q => q.question === Q) || {}).draft;
+        await new Promise(r => setTimeout(r, 20));
+        await call('PATCH', '/config', { answers: [{ pattern: 'notice period', answer: '30' }] });
+        ok('an unrelated new answer leaves the draft alone (no AI call)', (await draftOf()) !== null && calls === 1);
+        await call('PATCH', '/config', { answers: [{ pattern: 'notice period', answer: '30' }] });
+        ok('re-saving unchanged answers does not reopen it either', (await draftOf()) !== null);
+        await call('PATCH', '/config', { answers: [{ pattern: 'notice period', answer: '30' }, { pattern: 'sap abap modules used', answer: 'None' }] });
+        ok('a related new answer reopens the "don\'t say" draft', (await draftOf()) === null);
+        await NaukriJob.updateOne({ _id: jid }, { $set: { applyStatus: 'applied' } });
+        await call('PATCH', '/config', { answers: [] });
+      } finally { naukriDraft.draftAnswer = real; }
+    }
+
     console.log('\ndaily limit used up');
     await call('PATCH', '/config', { apply: { maxPerDay: 1 } });
     let limit = null;

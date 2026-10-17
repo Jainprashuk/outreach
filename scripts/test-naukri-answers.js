@@ -6,7 +6,7 @@
 // No database, no network, no browser — every function here is pure.
 
 const { resolveAnswer, pickOption, matchable, STARTER_RULES } = require('../lib/naukriAnswers');
-const { parseDraft, quoteIsReal, ruleLines, readConfidence } = require('../lib/naukriDraft');
+const { parseDraft, quoteIsReal, ruleLines, readConfidence, relevantRules } = require('../lib/naukriDraft');
 
 let pass = 0, fail = 0;
 const ok = (label, cond, detail = '') => {
@@ -112,6 +112,17 @@ eq('a "No" from your own earlier answer keeps its %',
   parseDraft('{"answer":"No","source":"answer","quote":"how many years of react experience A: 4","confidence":95}',
     { ...ctx, rules: given, question: 'Are you new to React?' }).confidence, 95);
 eq('an option that does not fit → 0', parseDraft('{"answer":"Maybe","quote":"Node.js","confidence":97}', { ...ctx, options: ['Yes', 'No'] }).confidence, 0);
+
+console.log('\nonly relevant earlier answers go to the AI');
+const bank60 = Array.from({ length: 58 }, (_, i) => ({ pattern: `how many years of experience do you have in tool${i}`, answer: '1' }))
+  .concat([{ pattern: 'how many years of experience do you have in react', answer: '3' },
+           { pattern: 'are you willing to relocate to gurugram', answer: 'Yes' }]);
+eq('React.js question gets the React answer only', relevantRules(bank60, 'Years of experience in React.js?').map(r => r.answer), ['3']);
+eq('relocation question gets the relocation answer', relevantRules(bank60, 'Ready to relocate to Bengaluru?').map(r => r.pattern), ['are you willing to relocate to gurugram']);
+ok('never more than 12', relevantRules(bank60, 'tool1 tool2 tool3 tool4 tool5 tool6 tool7 tool8 tool9 tool10 tool11 tool12 tool13 tool14').length === 12);
+ok('a question about nothing in the bank sends none', relevantRules(bank60, 'What is your notice period?').length === 0);
+ok('the quote check still sees ALL answers', parseDraft('{"answer":"1","source":"answer","quote":"how many years of experience do you have in tool41 A: 1","confidence":90}',
+  { ...ctx, rules: bank60, question: 'Years in tool41?' }).status === 'ready');
 
 ok('quoteIsReal is loose on spacing', quoteIsReal('built  payment systems', [resumeText]));
 ok('quoteIsReal rejects tiny quotes', !quoteIsReal('a', [resumeText]));
