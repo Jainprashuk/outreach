@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { NaukriConfig, NaukriAnswer } from '../../../lib/api';
 import { Card, Hint } from '../ui';
-import { updateNaukriConfigApi, testNaukriAnswerApi, naukriUnknownQuestionsApi } from '../../../lib/api';
+import { updateNaukriConfigApi, testNaukriAnswerApi, naukriUnknownQuestionsApi, addNaukriStarterRulesApi } from '../../../lib/api';
 import { useToast } from '../../../context/ToastContext';
 
 // How the worker answers Naukri's screening questions.
@@ -11,8 +11,9 @@ import { useToast } from '../../../context/ToastContext';
 //
 //  1. FIRST MATCH WINS, so order is meaningful and you can reorder rows.
 //  2. NO MATCH MEANS SKIP. The job is left alone and the question is reported.
-//  3. The questions that caused skips appear at the top as one-click additions —
-//     the loop by which this bank fills itself over your first week.
+//  3. Reported questions are answered under Jobs → Needs answer, with an AI
+//     draft from your resume; Use there adds the rule here. Saving rules here
+//     re-queues any skipped job they now answer, too.
 //
 // The tester calls the same resolver the worker uses, so it cannot flatter you.
 
@@ -30,7 +31,7 @@ export default function AnswerBank({ config, onSaved }: {
 }) {
   const [rows, setRows] = useState<NaukriAnswer[]>(config.answers.length ? config.answers : [blank()]);
   const toast = useToast();
-  const [onUnknown, setOnUnknown] = useState(config.onUnknownQuestion);
+  const [aiDrafts, setAiDrafts] = useState(config.aiDrafts !== false);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [unknown, setUnknown] = useState<Array<{ question: string; count: number }>>([]);
@@ -61,11 +62,30 @@ export default function AnswerBank({ config, onSaved }: {
     setSaving(true); setMsg('');
     try {
       const usable = rows.filter(r => r.pattern.trim());
-      await updateNaukriConfigApi({ answers: usable, onUnknownQuestion: onUnknown });
+      const r = await updateNaukriConfigApi({ answers: usable, aiDrafts });
       setRows(usable.length ? usable : [blank()]);
-      { toast(`Saved ${usable.length} rule${usable.length === 1 ? '' : 's'}.`, 'success'); setMsg(`Saved ${usable.length} rule${usable.length === 1 ? '' : 's'}.`); };
+      const text = `Saved ${usable.length} rule${usable.length === 1 ? '' : 's'}.`
+        + (r.requeued ? ` ${r.requeued} skipped job${r.requeued === 1 ? '' : 's'} back in Waiting.` : '');
+      toast(text, 'success'); setMsg(text);
+      loadUnknown();
       onSaved();
     } catch (e: any) { toast(e?.message || 'Could not save', 'error'); setMsg(e?.message || 'Could not save'); }
+    finally { setSaving(false); }
+  };
+
+  const addCommon = async () => {
+    setSaving(true); setMsg('');
+    try {
+      const r = await addNaukriStarterRulesApi();
+      setRows(r.config.answers.length ? r.config.answers : [blank()]);
+      const text = r.added
+        ? `Added ${r.added} common rule${r.added === 1 ? '' : 's'} (notice period, CTC, experience…) at the bottom.`
+          + (r.requeued ? ` ${r.requeued} skipped job${r.requeued === 1 ? '' : 's'} back in Waiting.` : '')
+        : 'You already have all the common rules.';
+      toast(text, 'success'); setMsg(text);
+      loadUnknown();
+      onSaved();
+    } catch (e: any) { toast(e?.message || 'Could not add', 'error'); }
     finally { setSaving(false); }
   };
 
@@ -83,52 +103,33 @@ export default function AnswerBank({ config, onSaved }: {
     } catch (e: any) { setProbeResult(e?.message || 'Could not test'); }
   };
 
-  // A draft rule covers a question when its pattern appears in it — the same
-  // substring test the worker applies. Case-insensitive because patterns are
-  // stored lowercased.
-  const covered = (q: string) => rows.some(r =>
-    r.enabled !== false && r.pattern.trim() && q.toLowerCase().includes(r.pattern.trim().toLowerCase()));
-  const pending = unknown.filter(u => !covered(u.question));
+  const pending = unknown;
 
   return (
     <Card title="Answers" icon="ti-messages" collapsible id="answers" defaultOpen={false}
       badge={pending.length > 0
         ? <span className="contact-count-badge" style={{ marginLeft: 6 }}>{pending.length} unanswered</span>
         : null}
-      right={<button className="btn btn-xs" type="button" onClick={() => setRows(r => [...r, blank()])}>
-        <i className="ti ti-plus" /> Add rule
-      </button>}>
+      right={<span style={{ display: 'flex', gap: 6 }}>
+        <button className="btn btn-xs" type="button" onClick={addCommon} disabled={saving}
+          title="Notice period, current/expected CTC, total experience, location, relocation… answered from your Profile">
+          <i className="ti ti-wand" /> Add common rules
+        </button>
+        <button className="btn btn-xs" type="button" onClick={() => setRows(r => [...r, blank()])}>
+          <i className="ti ti-plus" /> Add rule
+        </button>
+      </span>}>
 
-      {/* The feedback loop: every skip becomes a one-click rule.
-          Filtered against the DRAFT rows as well as the saved ones, so a
-          question disappears the moment you add its rule rather than lingering
-          until you save — the list is a to-do, and a done item that stays on it
-          gets answered twice. */}
-      {pending.length === 0 && answeredCount > 0 && (
+      {pending.length > 0 ? (
+        <Hint style={{ marginTop: 0, marginBottom: 12 }}>
+          {pending.length} question{pending.length === 1 ? '' : 's'} stopped an application and still {pending.length === 1 ? 'has' : 'have'} no
+          rule. Answer {pending.length === 1 ? 'it' : 'them'} under Jobs → Needs answer, where each comes with an AI draft from your resume.
+        </Hint>
+      ) : answeredCount > 0 ? (
         <Hint style={{ marginTop: 0, marginBottom: 12 }}>
           All {answeredCount} question{answeredCount === 1 ? '' : 's'} that caused a skip now have a rule.
-          Those jobs retry on the next apply run.
         </Hint>
-      )}
-
-      {pending.length > 0 && (
-        <div style={{ padding: 10, background: 'var(--bg2)', borderRadius: 6, marginBottom: 12 }}>
-          <div style={{ fontSize: 13, marginBottom: 6 }}>Questions that caused a skip</div>
-          {pending.map((u, i) => (
-            <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12, padding: '3px 0' }}>
-              <span style={{ flex: 1 }}>{u.question}</span>
-              <span style={{ color: 'var(--text2)', fontSize: 12 }}>{u.count}×</span>
-              <button className="btn btn-sm" onClick={() => setRows(r => [
-                // Seeded with the question itself as the pattern. It is a
-                // substring match, so the full question is the safest possible
-                // starting point — you shorten it if you want it to catch more.
-                ...r.filter(x => x.pattern.trim()),
-                { pattern: u.question.toLowerCase(), answer: '', kind: 'text', enabled: true },
-              ])}>Add rule</button>
-            </div>
-          ))}
-        </div>
-      )}
+      ) : null}
 
       {rows.map((row, i) => (
         <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
@@ -154,16 +155,17 @@ export default function AnswerBank({ config, onSaved }: {
       ))}
 
       <div style={{ color: 'var(--text2)', fontSize: 11, margin: '8px 0' }}>
-        First matching rule wins, so order matters. Placeholders: {PLACEHOLDERS.map(p => `{{${p}}}`).join(' ')}
+        First matching rule wins, so order matters. Punctuation and case are ignored, and{' '}
+        <code>notice period|joining time</code> matches either phrase. For a choice question, the answer must name
+        one option (or, for a number, fall in its range). Placeholders: {PLACEHOLDERS.map(p => `{{${p}}}`).join(' ')}
       </div>
 
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, margin: '10px 0' }}>
-        <input type="checkbox" checked={onUnknown === 'apply-anyway'}
-          onChange={e => setOnUnknown(e.target.checked ? 'apply-anyway' : 'skip')} />
+        <input type="checkbox" checked={aiDrafts} onChange={e => setAiDrafts(e.target.checked)} />
         <span>
-          Apply even when a question has no rule
+          Draft answers from my resume with AI
           <div style={{ color: 'var(--text2)', fontSize: 11 }}>
-            Off is strongly recommended. On means the worker submits forms with unanswered questions.
+            Drafts appear under Jobs → Needs answer for you to check. Nothing is sent until you press Use.
           </div>
         </span>
       </label>

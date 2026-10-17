@@ -18,11 +18,13 @@ export interface Draft {
   sort: NonNullable<NaukriJobQuery['sort']>;
   /** '' = all. Otherwise only jobs of that apply type. */
   applyType: '' | 'native' | 'external';
+  /** '' = all. Otherwise only jobs found that way. */
+  origin: '' | 'search' | 'recommended';
 }
 
 export const EMPTY: Draft = {
-  q: '', location: '', minExp: '', maxExp: '', minSalary: '', maxAge: '', sort: 'newest',
-  applyType: '',
+  q: '', location: '', minExp: '', maxExp: '', minSalary: '', maxAge: '', sort: 'score',
+  applyType: '', origin: '',
 };
 
 // Draft -> query, dropping anything blank so the server sees only real filters.
@@ -33,23 +35,25 @@ export function toQuery(d: Draft): NaukriJobQuery {
     location: d.location.trim() || undefined,
     minExp: n(d.minExp), maxExp: n(d.maxExp),
     minSalary: n(d.minSalary), maxAge: n(d.maxAge),
-    sort: d.sort === 'newest' ? undefined : d.sort,
+    sort: d.sort,
     applyType: d.applyType || undefined,
+    origin: d.origin || undefined,
   };
 }
 
 export const activeCount = (d: Draft) =>
   (['q', 'location', 'minExp', 'maxExp', 'minSalary', 'maxAge'] as const)
     .filter(k => d[k].trim() !== '').length
-  + (d.sort !== 'newest' ? 1 : 0) + (d.applyType ? 1 : 0);
+  + (d.sort !== 'score' ? 1 : 0) + (d.applyType ? 1 : 0) + (d.origin ? 1 : 0);
 
-export default function JobFilters({ draft, onChange, total, showing, truncated, typeCounts }: {
+export default function JobFilters({ draft, onChange, total, showing, truncated, typeCounts, originCounts }: {
   draft: Draft;
   onChange: (next: Draft) => void;
   total: number;
   showing: number;
   truncated?: boolean;
   typeCounts?: { all: number; external: number; native: number };
+  originCounts?: { all: number; search: number; recommended: number };
 }) {
   const [open, setOpen] = useState(false);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => onChange({ ...draft, [k]: v });
@@ -69,6 +73,27 @@ export default function JobFilters({ draft, onChange, total, showing, truncated,
           It is the first thing worth filtering on — roughly half the board hands
           off to the employer's own site and the worker cannot apply to those —
           so hiding it behind a disclosure meant nobody found it. */}
+      {/* Where it came from. Only shown once something has come from
+          Recommended jobs — until then it would be a chip that always reads 0. */}
+      {originCounts && originCounts.recommended > 0 && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 9, flexWrap: 'wrap', alignItems: 'center' }}>
+          {([
+            ['', 'All sources', originCounts.all, 'ti-stack-2'],
+            ['search', 'My searches', originCounts.search, 'ti-search'],
+            ['recommended', 'Recommended', originCounts.recommended, 'ti-star'],
+          ] as const).map(([value, label, n, icon]) => (
+            <button
+              key={value || 'all'} type="button"
+              onClick={() => set('origin', value as Draft['origin'])}
+              className={`btn btn-sm${draft.origin === value ? ' btn-primary' : ''}`}
+            >
+              <i className={`ti ${icon}`} style={{ marginRight: 5 }} />{label}
+              <span className="contact-count-badge" style={{ marginLeft: 6 }}>{n}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {typeCounts && (
         <div style={{ display: 'flex', gap: 6, marginBottom: 9, flexWrap: 'wrap', alignItems: 'center' }}>
           {([
@@ -100,6 +125,7 @@ export default function JobFilters({ draft, onChange, total, showing, truncated,
           style={{ flex: 1, minWidth: 190 }}
         />
         <select value={draft.sort} onChange={e => set('sort', e.target.value as Draft['sort'])} style={{ width: 150 }}>
+          <option value="score">Best match</option>
           <option value="newest">Newest first</option>
           <option value="oldest">Oldest first</option>
           <option value="experience">Least experience</option>

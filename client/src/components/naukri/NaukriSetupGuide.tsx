@@ -90,11 +90,11 @@ function HowItWorks() {
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '14px 0' }}>
         {box('ti-download', '1. Harvest', 'Listings matching your searches and filters arrive here as “to review”.')}
         {arrow}
-        {box('ti-checks', '2. You approve', 'In Review you approve or skip each job. Nothing is applied to without this.')}
+        {box('ti-checks', '2. You approve', 'In the Inbox you approve or reject each job, best match first — or let auto-approve take the high scorers.')}
         {arrow}
         {box('ti-device-laptop', '3. Your computer applies', 'The worker opens each approved job in your own Chrome and applies.')}
         {arrow}
-        {box('ti-circle-check', '4. Results land here', 'Applied, or skipped with the reason — e.g. a question it had no answer for.')}
+        {box('ti-circle-check', '4. Results land here', 'Under Jobs: Applied, Needs answer (a question it had no rule for), or Skipped with the reason.')}
       </div>
 
       <H>Why it runs on your computer</H>
@@ -225,14 +225,14 @@ npm run naukri-worker`}</Code>
               <li><strong>Profile</strong> and <strong>Resume &amp; headline</strong> — what Refresh keeps up to date.</li>
               <li><strong>Answers</strong> — rules for screening questions (notice period, current CTC…). The more you add, the fewer jobs get skipped.</li>
               <li><strong>Apply behaviour &amp; safety</strong> — the daily cap, <strong>Dry run</strong>, auto-approve and <strong>Pause all</strong>.</li>
-              <li><strong>Schedule</strong> — optional: which days and time Refresh / Harvest run by themselves.</li>
+              <li><strong>Schedule</strong> — optional: up to three times a day, each running Refresh / Harvest / Apply by itself.</li>
             </Ul>
           </Step>
 
           <Step n={8} title="Do a safe first run">
             Turn <strong>Dry run</strong> on, then press <strong>Harvest</strong>, approve two or three jobs in
-            {' '}<strong>Review</strong>, and press <strong>Apply</strong>. A dry run fills every form and submits nothing —
-            check <strong>Skipped</strong> for questions that need an answer rule. When it looks right, turn Dry run off.
+            {' '}the <strong>Inbox</strong>, and press <strong>Apply</strong>. A dry run stops before the Apply click and submits
+            nothing. When it looks right, turn Dry run off.
           </Step>
 
           <Note>
@@ -250,10 +250,10 @@ function DailyUse({ os }: { os: Os }) {
       <H>A normal day</H>
       <ol style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.7, paddingLeft: 18, margin: '6px 0' }}>
         <li>Make sure the worker is running and the debug Chrome window is open.</li>
-        <li><strong>Harvest</strong> (or let the schedule do it) — new jobs appear under <strong>Review</strong>.</li>
-        <li>Approve the ones you want, skip the rest. Approved jobs wait under <strong>Waiting</strong>.</li>
-        <li>Press <strong>Apply</strong>. Progress shows under <strong>Activity</strong>; results under <strong>Applied</strong> and <strong>Skipped</strong>.</li>
-        <li>Check <strong>Skipped</strong> now and then: add an answer rule for any question that keeps coming up.</li>
+        <li><strong>Harvest</strong> (or let the schedule do it) — from your searches, Naukri&apos;s recommended jobs, or both (pick in the Harvest menu; the default is in Configuration → Searches). New jobs land in the <strong>Inbox</strong>, best match first. With auto-approve on, the high scorers skip it.</li>
+        <li>Approve the ones you want (<strong>a</strong>), reject the rest (<strong>r</strong>). Approved jobs wait under <strong>Jobs → Waiting</strong>.</li>
+        <li>They go out on the schedule&apos;s Apply time, or when you press <strong>Apply</strong>. Progress shows under <strong>Activity</strong>.</li>
+        <li>Open <strong>Jobs → Needs answer</strong> when it has a count: check each AI draft and press Use. Every job stuck on that question goes back to Waiting.</li>
       </ol>
 
       <H>Scheduling</H>
@@ -299,8 +299,8 @@ function Troubleshooting() {
       <>The worker tries to open it for you. If that fails, run <C>~/Desktop/linkdin-post/chrome-debug.sh</C> by hand and read its message.</>],
     ['“Naukri is logged out”',
       <>Log into naukri.com inside the <strong>debug</strong> Chrome window — the one <C>chrome-debug.sh</C> opened — not your normal Chrome.</>],
-    ['Jobs keep landing in Skipped',
-      <>Usually a screening question with no answer rule. Open the job in <strong>Skipped</strong> to see the question, then add a rule in <strong>Configuration → Answers</strong>.</>],
+    ['Jobs keep stopping on questions',
+      <>Answer them under <strong>Jobs → Needs answer</strong> — each comes with a draft from your resume. Press <strong>Add common rules</strong> in <strong>Configuration → Answers</strong> to cover notice period, CTC and experience in one go.</>],
     ['Apply ran but nothing was submitted',
       <><strong>Dry run</strong> is on (the top line says so). Turn it off in Apply behaviour &amp; safety.</>],
     ['“Naukri challenged the account”',

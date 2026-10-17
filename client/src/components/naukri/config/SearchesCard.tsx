@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import type { NaukriConfig, NaukriSearch } from '../../../lib/api';
+import type { NaukriConfig, NaukriSearch, NaukriRecommendedTab } from '../../../lib/api';
 import { Card } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 import { useToast } from '../../../context/ToastContext';
@@ -11,6 +11,15 @@ import { useToast } from '../../../context/ToastContext';
 // Naukri itself and it is used verbatim, which is the only way to express a
 // filter combination this form does not model.
 
+// Naukri's own tab names on the Recommended jobs page.
+const REC_TABS: Array<[NaukriRecommendedTab, string, string]> = [
+  ['apply', 'Applies', 'similar to jobs you applied to'],
+  ['profile', 'Profile', 'matching your profile'],
+  ['preference', 'Preferences', 'matching your job preferences'],
+  ['similar_jobs', 'You might like', 'broader suggestions'],
+];
+const ALL_TABS = REC_TABS.map(t => t[0]);
+
 const blank = (): NaukriSearch => ({
   label: '', keywords: '', location: '', experienceYears: null, url: '', enabled: true,
 });
@@ -20,7 +29,16 @@ export default function SearchesCard({ config, onSaved }: {
 }) {
   const [rows, setRows] = useState<NaukriSearch[]>(config.searches.length ? config.searches : [blank()]);
   const toast = useToast();
-  const [useRecommended, setUseRecommended] = useState(config.useRecommended);
+  const [limits, setLimits] = useState(config.searchLimits || { maxSearches: 10, maxPages: 8 });
+  const [sources, setSources] = useState({
+    searches: config.sources?.searches ?? true, recommended: config.sources?.recommended ?? false,
+    recommendedTabs: config.sources?.recommendedTabs?.length ? config.sources.recommendedTabs : ALL_TABS,
+  });
+  const toggleTab = (t: NaukriRecommendedTab) => setSources(s => {
+    const has = s.recommendedTabs.includes(t);
+    const next = has ? s.recommendedTabs.filter(x => x !== t) : [...s.recommendedTabs, t];
+    return { ...s, recommendedTabs: next.length ? next : s.recommendedTabs };   // never none
+  });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
 
@@ -33,7 +51,10 @@ export default function SearchesCard({ config, onSaved }: {
       // Rows with neither keywords nor a URL are dropped server-side; say so
       // rather than letting them vanish silently.
       const usable = rows.filter(r => r.keywords.trim() || r.url.trim());
-      await updateNaukriConfigApi({ searches: usable, useRecommended });
+      if (!sources.searches && !sources.recommended) throw new Error('Pick at least one: your searches or recommended jobs');
+      const r = await updateNaukriConfigApi({ searches: usable, searchLimits: limits, sources });
+      setLimits(r.config.searchLimits);
+      setSources(s => ({ ...s, ...r.config.sources, recommendedTabs: r.config.sources.recommendedTabs?.length ? r.config.sources.recommendedTabs : ALL_TABS }));
       setRows(usable.length ? usable : [blank()]);
       { toast(`Saved ${usable.length} search${usable.length === 1 ? '' : 'es'}.`, 'success'); setMsg(`Saved ${usable.length} search${usable.length === 1 ? '' : 'es'}.`); };
       onSaved();
@@ -84,10 +105,52 @@ export default function SearchesCard({ config, onSaved }: {
         </div>
       ))}
 
-      <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, margin: '12px 0' }}>
-        <input type="checkbox" checked={useRecommended} onChange={e => setUseRecommended(e.target.checked)} />
-        Also walk Naukri&apos;s recommended jobs
-      </label>
+      <div style={{ margin: '14px 0 6px' }}>
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 6 }}>Harvest from (default — scheduled harvests use this)</div>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, marginBottom: 6 }}>
+          <input type="checkbox" checked={sources.searches} style={{ marginTop: 3 }}
+            onChange={e => setSources(s => ({ ...s, searches: e.target.checked }))} />
+          <span>My searches<div style={{ color: 'var(--text2)', fontSize: 11 }}>The searches listed above.</div></span>
+        </label>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+          <input type="checkbox" checked={sources.recommended} style={{ marginTop: 3 }}
+            onChange={e => setSources(s => ({ ...s, recommended: e.target.checked }))} />
+          <span>
+            Naukri&apos;s recommended jobs
+            <div style={{ color: 'var(--text2)', fontSize: 11 }}>
+              The jobs Naukri picks for your profile. They go through the same filters, scoring, inbox and apply flow,
+              marked “Recommended”. The Harvest button can also pick a source for one run.
+            </div>
+            {sources.recommended && (
+              <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
+                {REC_TABS.map(([id, label, help]) => (
+                  <button key={id} type="button" title={help} onClick={() => toggleTab(id)}
+                    className={`btn btn-xs${sources.recommendedTabs.includes(id) ? ' btn-primary' : ''}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </span>
+        </label>
+      </div>
+
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', margin: '12px 0 4px' }}>
+        <label style={{ fontSize: 13 }}>
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Searches per harvest</div>
+          <input type="number" min={1} max={10} style={{ width: 90 }} value={limits.maxSearches}
+            onChange={e => setLimits(l => ({ ...l, maxSearches: Number(e.target.value) }))} />
+        </label>
+        <label style={{ fontSize: 13 }}>
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Pages per search</div>
+          <input type="number" min={1} max={8} style={{ width: 90 }} value={limits.maxPages}
+            onChange={e => setLimits(l => ({ ...l, maxPages: Number(e.target.value) }))} />
+        </label>
+      </div>
+      <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 12 }}>
+        20 listings a page. At most 10 searches × 8 pages — the worker&apos;s safety caps — so these can only be lowered.
+        Recommended jobs reads the tabs you pick above, each one page. Fewer means a quicker, lighter harvest.
+      </div>
 
       {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 8 }}>{msg}</div>}
       <button className="btn btn-primary btn-sm" onClick={save} disabled={saving}>

@@ -23,7 +23,7 @@ const aiCallSchema = new mongoose.Schema({
   // classify: sorting an inbound reply · draft: writing a reply · discover: reading
   // a team page for names · sources: reading job posts for the Leads sources
   // (paste / HN / hiring posts) · other: anything without a caller label (scripts)
-  feature: { type: String, enum: ['classify', 'draft', 'discover', 'sources', 'other'], default: 'other' },
+  feature: { type: String, enum: ['classify', 'draft', 'discover', 'sources', 'naukri', 'other'], default: 'other' },
   runId: { type: String, default: null },       // shared by every attempt of one feature call
   attempt: { type: Number, default: 1 },        // 1 = the first provider tried in that run
   provider: { type: String, required: true },   // gemini | groq | cerebras

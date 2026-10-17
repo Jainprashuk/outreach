@@ -1,35 +1,62 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshBar, Refreshing } from '../RefreshBar';
 import type { NaukriJob } from '../../lib/api';
 import { listNaukriJobsApi, decideNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty } from './ui';
 import JobFilters, { EMPTY, toQuery, activeCount, type Draft } from './JobFilters';
+import HoverCard from '../HoverCard';
 import { useToast } from '../../context/ToastContext';
 
-// The approval queue — the only place in this system that authorises an
-// application.
+// The inbox — new listings waiting for a yes or no.
 //
-// Built for skimming, not for reading: one row per job, the four facts you
-// actually decide on (title, company, experience band, how old), and two
-// buttons. Anything that needs real reading has a link out to the listing.
-// Approving is deliberately the heavier-weight action of the two.
+// Best match first: every job carries a 0–100 fit score (lib/naukriScore.js)
+// with its reasons on hover, so the top of the list is the part worth reading.
+// Each row has its own Approve / Reject, and the keyboard does the same
+// (j/k to move, a to approve, r to reject, x to tick) — a daily skim of forty
+// jobs should not take forty checkbox-then-button round trips.
+//
+// Approving is still the authorisation: it moves the job to Waiting and queues
+// an apply run. Jobs that auto-approve (Configuration → Apply) never come
+// through here — they go straight to Waiting and out on the schedule.
+
+const PAGE = 50;
 
 const ageTone = (s: string) =>
   /hour|today|just now/i.test(s) ? 'var(--green)' : 'var(--text2)';
 
-function Row({ job, selected, onToggle }: {
-  job: NaukriJob; selected: boolean; onToggle: () => void;
+export function FitBadge({ job }: { job: Pick<NaukriJob, 'score' | 'scoreReasons'> }) {
+  if (job.score == null) return null;
+  const cls = job.score >= 75 ? 'badge-approved' : job.score >= 50 ? 'badge-queued' : 'badge-seen';
+  return (
+    <HoverCard align="left" width={300}
+      trigger={<span className={`badge ${cls}`} style={{ fontWeight: 600, minWidth: 30, justifyContent: 'center' }}>{job.score}</span>}>
+      <div style={{ fontWeight: 600, marginBottom: 6 }}>Fit {job.score}/100</div>
+      {(job.scoreReasons || []).length
+        ? <ul style={{ margin: 0, paddingLeft: 16, color: 'var(--text2)' }}>{job.scoreReasons!.map((r, i) => <li key={i}>{r}</li>)}</ul>
+        : <div style={{ color: 'var(--text2)' }}>Nothing stood out either way.</div>}
+      <div style={{ marginTop: 6, color: 'var(--text3)' }}>From your searches, skills, experience and expected pay in Configuration.</div>
+    </HoverCard>
+  );
+}
+
+function Row({ job, selected, focused, busy, onToggle, onDecide, onFocus }: {
+  job: NaukriJob; selected: boolean; focused: boolean; busy: boolean;
+  onToggle: () => void; onDecide: (d: 'approved' | 'rejected') => void; onFocus: () => void;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (focused) ref.current?.scrollIntoView({ block: 'nearest' }); }, [focused]);
   const exp = job.experienceMin != null
     ? `${job.experienceMin}${job.experienceMax != null ? `-${job.experienceMax}` : '+'} yrs`
     : '';
 
   return (
-    <div style={{
+    <div ref={ref} onClick={onFocus} style={{
       display: 'flex', gap: 10, alignItems: 'flex-start',
-      padding: '9px 0', borderBottom: '1px solid var(--border)',
+      padding: '9px 8px', margin: '0 -8px', borderBottom: '1px solid var(--border)',
+      background: focused ? 'var(--bg2)' : 'transparent', borderRadius: focused ? 'var(--radius)' : 0,
     }}>
-      <input type="checkbox" checked={selected} onChange={onToggle} style={{ marginTop: 4 }} />
+      <input type="checkbox" checked={selected} onChange={onToggle} style={{ marginTop: 4 }} aria-label={`Select ${job.title}`} />
+      <div style={{ width: 34, flexShrink: 0, paddingTop: 1 }}><FitBadge job={job} /></div>
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
           <a href={job.url} target="_blank" rel="noreferrer"
@@ -37,6 +64,13 @@ function Row({ job, selected, onToggle }: {
             {job.title}
           </a>
           <span style={{ color: 'var(--text2)', fontSize: 12 }}>{job.company}</span>
+          {job.origins?.includes('recommended') && (
+            <span className="badge badge-seen" title={job.origins.includes('search')
+              ? 'Found by your searches and recommended by Naukri'
+              : 'From Naukri’s Recommended jobs for your profile'} style={{ fontSize: 10.5 }}>
+              <i className="ti ti-star" style={{ marginRight: 3 }} />Recommended
+            </span>
+          )}
         </div>
         <div style={{ color: 'var(--text2)', fontSize: 12, marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {exp && <span>{exp}</span>}
@@ -56,6 +90,16 @@ function Row({ job, selected, onToggle }: {
           </div>
         )}
       </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        <button className="btn btn-xs" type="button" disabled={busy} title="Reject (r)"
+          onClick={e => { e.stopPropagation(); onDecide('rejected'); }}>
+          <i className="ti ti-x" />
+        </button>
+        <button className="btn btn-xs btn-primary" type="button" disabled={busy} title="Approve (a)"
+          onClick={e => { e.stopPropagation(); onDecide('approved'); }}>
+          <i className="ti ti-check" /> Approve
+        </button>
+      </div>
     </div>
   );
 }
@@ -63,35 +107,43 @@ function Row({ job, selected, onToggle }: {
 export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
   const [truncated, setTruncated] = useState(false);
   const [typeCounts, setTypeCounts] = useState<{ all: number; external: number; native: number } | undefined>();
+  const [originCounts, setOriginCounts] = useState<{ all: number; search: number; recommended: number } | undefined>();
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const toast = useToast();
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [focus, setFocus] = useState(0);
+  const [minScore, setMinScore] = useState(75);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const load = useCallback(async (d: Draft) => {
+  const load = useCallback(async (d: Draft, p: number) => {
     setLoading(true);
     try {
-      const r = await listNaukriJobsApi({ approval: 'pending', limit: 100, ...toQuery(d) });
-      setJobs(r.jobs); setTotal(r.total); setTruncated(!!r.truncated); setTypeCounts(r.typeCounts);
+      const r = await listNaukriJobsApi({ approval: 'pending', limit: PAGE, page: p, ...toQuery(d) });
+      // Past the last page (everything after it was decided): go back to page 1.
+      if (!r.jobs.length && p > 1) { setPage(1); return; }
+      setJobs(r.jobs); setTotal(r.total); setPages(Math.max(1, r.pages)); setTruncated(!!r.truncated); setTypeCounts(r.typeCounts); setOriginCounts(r.originCounts);
       // Selection is cleared whenever the visible set changes. Keeping it would
       // mean approving rows you can no longer see, which is the one mistake this
       // screen must not make possible.
       setSel(new Set());
-    } catch (e: any) { setMsg(e?.message || 'Could not load the queue'); }
+      setFocus(0);
+    } catch (e: any) { setMsg(e?.message || 'Could not load the inbox'); }
     finally { setLoading(false); }
   }, []);
 
   // Debounced, because the search box refetches on every keystroke otherwise.
-  // The other controls are in the same effect so one change never fires two
-  // requests.
   useEffect(() => {
-    const t = setTimeout(() => load(draft), draft.q ? 300 : 0);
+    const t = setTimeout(() => load(draft, page), draft.q ? 300 : 0);
     return () => clearTimeout(t);
-  }, [draft, load]);
+  }, [draft, page, load]);
+
+  const changeDraft = (d: Draft) => { setPage(1); setDraft(d); };
 
   const toggle = (id: string) => setSel(s => {
     const next = new Set(s);
@@ -99,51 +151,73 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
     return next;
   });
 
-  const decide = async (decision: 'approved' | 'rejected') => {
-    if (!sel.size) return;
+  const decide = useCallback(async (ids: string[], decision: 'approved' | 'rejected') => {
+    if (!ids.length) return;
     setBusy(true); setMsg('');
     try {
-      const r = await decideNaukriJobsApi([...sel], decision);
+      const r = await decideNaukriJobsApi(ids, decision);
       // Approving queues the apply run server-side, and that can be refused
       // (paused, blocked, one already active). Say so — the approvals are saved
-      // either way, and silently doing nothing would look like a bug.
+      // either way, and silence would read as "nothing sent".
       const runErr = r.run && 'error' in r.run ? r.run.error : null;
-      // Approving is the single most consequential click on this screen, and the
-      // rows simply vanish from the list afterwards — so say what happened, and
-      // say it loudly when the run could NOT be queued, since the approvals are
-      // saved either way and silence would read as "nothing sent".
       const text = decision === 'approved'
         ? runErr
           ? `Approved ${r.updated}, but the apply run did not start: ${runErr}`
           : `Approved ${r.updated} — apply run queued.`
         : `Rejected ${r.updated}.`;
-      toast(text, decision === 'approved' && runErr ? 'error' : 'success');
+      if (ids.length > 1 || runErr) toast(text, decision === 'approved' && runErr ? 'error' : 'success');
       setMsg(text);
-      await load(draft);
+      // Out of the list at once, so the keyboard flow never waits on a reload.
+      const gone = new Set(ids);
+      const left = jobs.filter(j => !gone.has(j.id));
+      setJobs(left);
+      setTotal(t => Math.max(0, t - r.updated));
+      setSel(s => new Set([...s].filter(id => !gone.has(id))));
+      // The page emptied: fetch what comes next.
+      if (!left.length) load(draft, page);
       onChanged();
     } catch (e: any) {
       const m = e?.message || 'Could not save your decision';
       toast(m, 'error'); setMsg(m);
     } finally { setBusy(false); }
-  };
+  }, [onChanged, toast, jobs, load, draft, page]);
+
+  // Keep the focus on a real row after rows leave the list.
+  useEffect(() => { if (focus >= jobs.length && jobs.length) setFocus(jobs.length - 1); }, [jobs.length, focus]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement;
+      if (busy || e.metaKey || e.ctrlKey || e.altKey || /INPUT|TEXTAREA|SELECT/.test(t.tagName) || t.isContentEditable) return;
+      const job = jobs[focus];
+      if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setFocus(f => Math.min(jobs.length - 1, f + 1)); }
+      else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setFocus(f => Math.max(0, f - 1)); }
+      else if (e.key === 'a' && job) decide([job.id], 'approved');
+      else if (e.key === 'r' && job) decide([job.id], 'rejected');
+      else if (e.key === 'x' && job) toggle(job.id);
+      else if (e.key === 'o' && job) window.open(job.url, '_blank', 'noopener');
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [jobs, focus, busy, decide]);
 
   const allSelected = jobs.length > 0 && sel.size === jobs.length;
   const filtered = activeCount(draft) > 0;
+  const atOrAbove = jobs.filter(j => (j.score ?? -1) >= minScore && !j.likelyExternal);
 
   return (
     <Card>
       <JobFilters
-        draft={draft} onChange={setDraft}
-        total={total} showing={jobs.length} truncated={truncated} typeCounts={typeCounts}
+        draft={draft} onChange={changeDraft}
+        total={total} showing={jobs.length} truncated={truncated} typeCounts={typeCounts} originCounts={originCounts}
       />
 
-      {/* First load: a loader. After that a filter change keeps the list, dimmed. */}
       {loading && !jobs.length ? <Empty icon="ti-loader">Loading…</Empty> : <RefreshBar active={loading} />}
 
       {!loading && !jobs.length && (
         filtered
-          ? <Empty icon="ti-search-off">No jobs match these filters. Clear them to see the rest of the queue.</Empty>
-          : <Empty icon="ti-checklist">Nothing waiting. Run a harvest to collect new listings.</Empty>
+          ? <Empty icon="ti-search-off">No jobs match these filters. Clear them to see the rest of the inbox.</Empty>
+          : <Empty icon="ti-checklist">Inbox empty. New listings land here after each harvest.</Empty>
       )}
 
       <Refreshing active={loading}>
@@ -156,28 +230,47 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
           />
           Select all{filtered ? ' shown' : ''}
         </label>
-        {/* Counts live in the filter bar; this says only what is SELECTED, so
-            the two never disagree about what "all" means under a filter. */}
-        {sel.size > 0 && <Muted>{sel.size} selected</Muted>}
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          <button className="btn btn-sm" type="button" onClick={() => decide('rejected')} disabled={!sel.size || busy}>
-            Reject
-          </button>
-          <button className="btn btn-sm btn-primary" type="button" onClick={() => decide('approved')} disabled={!sel.size || busy}>
-            Approve &amp; apply
+        {sel.size > 0 && (<>
+          <Muted>{sel.size} selected</Muted>
+          <button className="btn btn-sm" type="button" onClick={() => decide([...sel], 'rejected')} disabled={busy}>Reject</button>
+          <button className="btn btn-sm btn-primary" type="button" onClick={() => decide([...sel], 'approved')} disabled={busy}>Approve</button>
+        </>)}
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
+          <Muted>Approve all scoring ≥</Muted>
+          <select value={minScore} onChange={e => setMinScore(Number(e.target.value))} style={{ width: 70 }}>
+            {[90, 85, 80, 75, 70, 60, 50].map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <button className="btn btn-sm btn-primary" type="button" disabled={busy || !atOrAbove.length}
+            onClick={() => decide(atOrAbove.map(j => j.id), 'approved')}
+            title="Only the jobs on this page, and never predicted company-site ones">
+            Approve {atOrAbove.length}
           </button>
         </div>
       </div>
 
       <Hint style={{ marginBottom: 10 }}>
-        Approving is the only thing that authorises an application. Nothing is sent until you click it.
+        Approving sends the job to Waiting and starts an apply run. Keys: <b>j</b>/<b>k</b> move · <b>a</b> approve ·
+        <b> r</b> reject · <b>x</b> tick · <b>o</b> open listing.
       </Hint>
 
       {msg && <div style={{ fontSize: 12, marginBottom: 8 }}>{msg}</div>}
 
-      {jobs.map(j => (
-        <Row key={j.id} job={j} selected={sel.has(j.id)} onToggle={() => toggle(j.id)} />
+      {jobs.map((j, i) => (
+        <Row key={j.id} job={j} selected={sel.has(j.id)} focused={i === focus} busy={busy}
+          onToggle={() => toggle(j.id)} onDecide={d => decide([j.id], d)} onFocus={() => setFocus(i)} />
       ))}
+
+      {pages > 1 && (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', justifyContent: 'center', marginTop: 12 }}>
+          <button className="btn btn-sm" type="button" disabled={page <= 1 || loading} onClick={() => setPage(p => p - 1)}>
+            <i className="ti ti-chevron-left" /> Prev
+          </button>
+          <Muted>Page {page} of {pages}</Muted>
+          <button className="btn btn-sm" type="button" disabled={page >= pages || loading} onClick={() => setPage(p => p + 1)}>
+            Next <i className="ti ti-chevron-right" />
+          </button>
+        </div>
+      )}
       </>)}
       </Refreshing>
     </Card>

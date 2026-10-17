@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { NaukriConfig } from '../../../lib/api';
-import { Card } from '../ui';
+import { Card, Notice } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 import { useToast } from '../../../context/ToastContext';
 
@@ -8,9 +8,11 @@ import { useToast } from '../../../context/ToastContext';
 //
 // autoApproveEnabled is THE gate. While it is off — the default — nothing can be
 // applied to without you clicking Approve on that specific job. Turning it on
-// means the worker decides, so it asks for a typed confirmation rather than a
-// click: an accidental toggle here has consequences an accidental toggle
-// elsewhere does not.
+// lets a harvest approve NEW jobs whose fit score reaches the threshold (never
+// predicted company-site ones); they wait in Waiting and go out on the
+// schedule's Apply runs. It asks for a typed confirmation rather than a click:
+// an accidental toggle here has consequences an accidental toggle elsewhere
+// does not.
 //
 // dryRun is the opposite: it makes an apply run rehearse everything and submit
 // nothing. It is how you verify a selector fix without spending a real
@@ -25,6 +27,20 @@ export default function ApplyCard({ config, onSaved }: {
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
+  const [scheduleApplies, setScheduleApplies] = useState(
+    !!config.schedule.enabled && (config.schedule.runApply || (config.schedule.extraSlots || []).some(s => s.runApply)),
+  );
+
+  const turnOnScheduledApply = async () => {
+    setBusy(true);
+    try {
+      await updateNaukriConfigApi({ schedule: { enabled: true, runApply: true } });
+      setScheduleApplies(true);
+      toast('Apply ticked on your schedule\'s first time.', 'success');
+      onSaved();
+    } catch (e: any) { toast(e?.message || 'Could not update the schedule', 'error'); }
+    finally { setBusy(false); }
+  };
 
   const set = <K extends keyof typeof a>(k: K, v: (typeof a)[K]) => setA(x => ({ ...x, [k]: v }));
 
@@ -72,7 +88,7 @@ export default function ApplyCard({ config, onSaved }: {
         </label>
         <label style={{ fontSize: 13 }}>
           <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Max per day</div>
-          <input type="number" min={1} max={200} style={{ width: 100 }}
+          <input type="number" min={1} max={50} style={{ width: 100 }}
             value={a.maxPerDay} onChange={e => set('maxPerDay', Number(e.target.value))} />
         </label>
         <label style={{ fontSize: 13 }}>
@@ -87,14 +103,17 @@ export default function ApplyCard({ config, onSaved }: {
         </label>
       </div>
       <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 12 }}>
-        Max per run is capped at 20 server-side whatever you type here. The gap is randomised between
-        every job — a fixed interval is a signature.
+        Max per run is capped at 20 and max per day at 50, whatever you type here. The gap is randomised
+        between every job — a fixed interval is a signature.
       </div>
 
       <label style={{ display: 'block', fontSize: 13, marginBottom: 12 }}>
-        <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Cover note, where Naukri offers one</div>
-        <textarea rows={3} style={{ width: '100%' }}
-          value={a.coverNote} onChange={e => set('coverNote', e.target.value)} />
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Auto-approve jobs scoring at least</div>
+        <input type="number" min={50} max={100} style={{ width: 100 }}
+          value={a.autoApproveMinScore} onChange={e => set('autoApproveMinScore', Number(e.target.value))} />
+        <div style={{ color: 'var(--text2)', fontSize: 11, marginTop: 3 }}>
+          50–100. The fit score is on every inbox row — hover it to see why. Only used while auto-approve is on.
+        </div>
       </label>
 
       <button className="btn btn-primary btn-sm" onClick={saveApply} disabled={busy} style={{ marginBottom: 16 }}>
@@ -131,9 +150,17 @@ export default function ApplyCard({ config, onSaved }: {
             </strong>
           </div>
           <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 8 }}>
-            While off, nothing is applied to unless you approve that specific job. Turning it on lets the
-            worker send applications on its own, including on a schedule while you are asleep.
+            While off, nothing is applied to unless you approve that specific job. While on, each harvest
+            approves new jobs scoring {a.autoApproveMinScore}+ (never likely company-site ones). They wait in
+            Jobs → Waiting — where you can un-approve any — and go out on the schedule&apos;s Apply runs.
           </div>
+          {a.autoApproveEnabled && !scheduleApplies && (
+            <Notice tone="warn" icon="ti-alert-triangle">
+              None of your schedule&apos;s times has Apply ticked, so auto-approved jobs will wait until you press
+              Apply.{' '}
+              <button className="btn btn-xs" type="button" disabled={busy} onClick={turnOnScheduledApply}>Tick Apply on the schedule</button>
+            </Notice>
+          )}
           {a.autoApproveEnabled ? (
             <button className="btn btn-sm" disabled={busy}
               onClick={async () => {

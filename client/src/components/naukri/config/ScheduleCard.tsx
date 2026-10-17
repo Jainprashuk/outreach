@@ -1,32 +1,62 @@
 import { useState } from 'react';
-import type { NaukriSchedule } from '../../../lib/api';
-import { Card, Muted } from '../ui';
+import type { NaukriSchedule, NaukriSlot, NaukriOccurrence } from '../../../lib/api';
+import { Card, Muted, Hint } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 import { fmtTime, DAY_LABELS } from '../format';
 import { useToast } from '../../../context/ToastContext';
 
 // When the worker does things on its own.
 //
-// The three kind toggles are the part worth reading carefully. Refresh and
-// harvest are safe to run on a clock — one re-saves your profile, the other only
-// reads. Apply is off by default and the UI says why: applying should follow
-// your approvals, not a timer. Turning it on means a scheduled wake will send
-// applications for anything approved and still waiting.
+// Up to three times a day, each with its own steps. The usual shape is one
+// morning wake that refreshes, harvests and applies, plus an afternoon
+// apply-only time — which is how auto-approved jobs reach the daily cap rather
+// than stopping at one run's worth. Apply is off on the first time by default:
+// applying should follow approvals, and ticking it means a scheduled wake sends
+// applications for anything approved and waiting.
+//
+// The first time is stored as the schedule's own time + toggles (as before);
+// times two and three are `extraSlots`. To the user they are just "times".
+
+const MAX_TIMES = 3;
+const KINDS = [
+  ['runRefresh', 'Refresh', 'Re-save your profile so recruiter search ranks you'],
+  ['runHarvest', 'Harvest', 'Collect new listings into the inbox (read-only)'],
+  ['runApply', 'Apply', 'Send applications for jobs in Waiting — unattended'],
+] as const;
+
+type Kind = typeof KINDS[number][0];
 
 export default function ScheduleCard({
-  schedule, nextOccurrence, onSaved,
+  schedule, upcoming, pollSeconds, onSaved,
 }: {
   schedule: NaukriSchedule;
-  nextOccurrence: string | null;
-  onSaved: (next: string | null) => void;
+  upcoming: NaukriOccurrence[];
+  pollSeconds: number;
+  onSaved: () => void;
 }) {
-  const [draft, setDraft] = useState<NaukriSchedule>(schedule);
+  const [draft, setDraft] = useState<NaukriSchedule>({ ...schedule, extraSlots: schedule.extraSlots || [] });
+  const [poll, setPoll] = useState(pollSeconds);
+  const [next, setNext] = useState<NaukriOccurrence[]>(upcoming);
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState('');
 
   const set = <K extends keyof NaukriSchedule>(k: K, v: NaukriSchedule[K]) =>
     setDraft(d => ({ ...d, [k]: v }));
+
+  // Times as one list for editing: index 0 is the schedule's own.
+  const times: NaukriSlot[] = [
+    { time: draft.time, runRefresh: draft.runRefresh, runHarvest: draft.runHarvest, runApply: draft.runApply },
+    ...draft.extraSlots,
+  ];
+  const setTime = (i: number, patch: Partial<NaukriSlot>) => {
+    if (i === 0) { setDraft(d => ({ ...d, ...patch })); return; }
+    setDraft(d => ({ ...d, extraSlots: d.extraSlots.map((s, j) => (j === i - 1 ? { ...s, ...patch } : s)) }));
+  };
+  const addTime = () => setDraft(d => ({
+    ...d, extraSlots: [...d.extraSlots, { time: d.extraSlots.length ? '18:00' : '14:00', runRefresh: false, runHarvest: false, runApply: true }],
+  }));
+  const removeTime = (i: number) => setDraft(d => ({ ...d, extraSlots: d.extraSlots.filter((_, j) => j !== i - 1) }));
 
   const toggleDay = (d: number) =>
     setDraft(s => ({
@@ -37,11 +67,14 @@ export default function ScheduleCard({
   const save = async () => {
     setSaving(true); setErr('');
     try {
-      const res = await updateNaukriConfigApi({ schedule: draft });
+      const { lastFiredAt: _ignored, ...schedulePatch } = draft;
+      const res = await updateNaukriConfigApi({ schedule: schedulePatch, worker: { pollSeconds: poll } });
+      setNext(res.upcoming || []);
+      setPoll(res.config.worker?.pollSeconds ?? poll);
       toast(draft.enabled && res.nextOccurrence
-        ? `Schedule saved — next run ${new Date(res.nextOccurrence).toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' })}.`
+        ? `Schedule saved — next run ${fmtTime(res.nextOccurrence)}.`
         : 'Schedule saved — automatic runs are off.', 'success');
-      onSaved(res.nextOccurrence);
+      onSaved();
     } catch (e: any) {
       const m = e?.message || 'Could not save the schedule';
       toast(m, 'error'); setErr(m);
@@ -50,12 +83,12 @@ export default function ScheduleCard({
     }
   };
 
-  const noKinds = !draft.runRefresh && !draft.runHarvest && !draft.runApply;
+  const nothingOn = times.every(t => !t.runRefresh && !t.runHarvest && !t.runApply);
+  const applyAnywhere = times.some(t => t.runApply);
 
   return (
     <Card title="Schedule" icon="ti-calendar-repeat" collapsible id="schedule"
-      right={nextOccurrence && !noKinds && draft.enabled
-        ? <Muted>Next: {fmtTime(nextOccurrence)}</Muted> : null}>
+      right={draft.enabled && next[0] ? <Muted>Next: {fmtTime(next[0].at)}</Muted> : null}>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
         <input type="checkbox" checked={draft.enabled} onChange={e => set('enabled', e.target.checked)} />
@@ -75,11 +108,39 @@ export default function ScheduleCard({
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 12 }}>
-        <label style={{ fontSize: 13 }}>
-          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Time</div>
-          <input type="time" value={draft.time} onChange={e => set('time', e.target.value)} />
-        </label>
+      <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 6 }}>Times, and what each one does</div>
+      {times.map((t, i) => (
+        <div key={i} style={{
+          display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap',
+          padding: '8px 10px', marginBottom: 6, background: 'var(--bg2)', borderRadius: 'var(--radius)',
+        }}>
+          <input type="time" value={t.time} onChange={e => setTime(i, { time: e.target.value })} style={{ width: 110 }} />
+          {KINDS.map(([key, label, help]) => (
+            <label key={key} title={help} style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 13 }}>
+              <input type="checkbox" checked={t[key as Kind]} onChange={e => setTime(i, { [key]: e.target.checked })} />
+              {label}
+            </label>
+          ))}
+          {i > 0 && (
+            <button className="btn btn-xs" type="button" onClick={() => removeTime(i)} style={{ marginLeft: 'auto' }}>
+              <i className="ti ti-trash" /> Remove
+            </button>
+          )}
+        </div>
+      ))}
+      {times.length < MAX_TIMES && (
+        <button className="btn btn-sm" type="button" onClick={addTime} style={{ marginBottom: 6 }}>
+          <i className="ti ti-plus" /> Add a time
+        </button>
+      )}
+      <Hint style={{ marginBottom: 12 }}>
+        Refresh re-saves your profile · Harvest fills the inbox (read-only) · Apply sends jobs in Waiting.
+        {applyAnywhere
+          ? ' Apply is ticked, so scheduled wakes send applications without you there — within the daily cap.'
+          : ' Apply is not ticked anywhere, so approved and auto-approved jobs only go out when you press Apply.'}
+      </Hint>
+
+      <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 6 }}>
         <label style={{ fontSize: 13 }}>
           <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Timezone</div>
           <input type="text" value={draft.timezone} onChange={e => set('timezone', e.target.value)} style={{ width: 160 }} />
@@ -87,43 +148,43 @@ export default function ScheduleCard({
         <label style={{ fontSize: 13 }}>
           <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Catch-up window (hours)</div>
           <input
-            type="number" min={0} max={24} value={draft.catchUpHours}
-            onChange={e => set('catchUpHours', Number(e.target.value))}
+            type="number" min={0} max={12} value={draft.catchUpHours}
+            onChange={e => set('catchUpHours', Math.min(12, Math.max(0, Number(e.target.value))))}
+            style={{ width: 90 }}
+          />
+        </label>
+        <label style={{ fontSize: 13 }}>
+          <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Worker check-in (seconds)</div>
+          <input
+            type="number" min={15} max={120} value={poll}
+            onChange={e => setPoll(Number(e.target.value))}
             style={{ width: 90 }}
           />
         </label>
       </div>
-      <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 14 }}>
-        A missed slot only runs if you open the Mac within the catch-up window — so a Mac opened on
-        Thursday does not fire Monday's runs.
-      </div>
+      <Hint style={{ marginBottom: 12 }}>
+        A missed time still runs if your Mac wakes within the catch-up window; if it slept through two, only the
+        later one runs. The check-in is how often the worker asks for work (15–120s) — it uses a new value from
+        its next check-in, no restart needed.
+      </Hint>
 
-      <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 6 }}>What fires on a scheduled wake</div>
-      {([
-        ['runRefresh', 'Refresh', 'Re-save your profile so recruiter search ranks you. Safe to run daily.'],
-        ['runHarvest', 'Harvest', 'Collect new listings into the review queue. Read-only.'],
-        ['runApply', 'Apply', 'Sends applications for anything already approved — without you being there.'],
-      ] as const).map(([key, label, help]) => (
-        <label key={key} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', marginBottom: 8, fontSize: 13 }}>
-          <input type="checkbox" checked={draft[key]} onChange={e => set(key, e.target.checked)} style={{ marginTop: 3 }} />
-          <span>
-            {label}
-            {key === 'runApply' && draft.runApply && (
-              <span style={{ color: 'var(--orange, var(--text2))' }}> — unattended</span>
-            )}
-            <div style={{ color: 'var(--text2)', fontSize: 12 }}>{help}</div>
-          </span>
-        </label>
-      ))}
+      {draft.enabled && next.length > 0 && (
+        <div style={{ fontSize: 12, marginBottom: 10 }}>
+          <div style={{ color: 'var(--text2)', marginBottom: 3 }}>Next runs (as saved)</div>
+          {next.slice(0, 4).map(o => (
+            <div key={o.at}>{fmtTime(o.at)} — {o.kinds.join(' + ')}</div>
+          ))}
+        </div>
+      )}
 
-      {noKinds && draft.enabled && (
+      {nothingOn && draft.enabled && (
         <div style={{ fontSize: 12, color: 'var(--orange, var(--text2))', marginTop: 8 }}>
-          Nothing is turned on, so the schedule will never fire.
+          Nothing is ticked, so the schedule will never fire.
         </div>
       )}
       {err && <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 8 }}>{err}</div>}
 
-      <button className="btn btn-primary btn-sm" onClick={save} disabled={saving} style={{ marginTop: 12 }}>
+      <button className="btn btn-primary btn-sm" onClick={save} disabled={saving} style={{ marginTop: 6 }}>
         {saving ? 'Saving…' : 'Save schedule'}
       </button>
     </Card>

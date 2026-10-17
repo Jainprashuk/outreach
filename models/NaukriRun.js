@@ -12,6 +12,9 @@ const mongoose = require('mongoose');
 const naukriRunSchema = new mongoose.Schema({
   userId:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   kind:    { type: String, enum: ['refresh', 'harvest', 'apply', 'probe'], required: true },
+  // Harvest only: which sources THIS run walks, when chosen on the Harvest
+  // button. Null = the config's default (always so for scheduled runs).
+  sources: { type: { searches: Boolean, recommended: Boolean, recommendedTabs: [String], _id: false }, default: null },
   status:  { type: String, enum: ['queued', 'running', 'done', 'failed', 'blocked', 'cancelled'], default: 'queued' },
   trigger: { type: String, enum: ['manual', 'scheduled'], default: 'manual' },
 
@@ -51,6 +54,10 @@ const naukriRunSchema = new mongoose.Schema({
     // `applied` would make the history claim work that never happened.
     rehearsed: { type: Number, default: 0 },
     searches: { type: Number, default: 0 },
+    // Harvest only: new jobs auto-approve moved straight to Waiting.
+    autoApproved: { type: Number, default: 0 },
+    // Harvest only: listings read off Recommended jobs.
+    recommended: { type: Number, default: 0 },
   },
 
   // Per-job outcomes for an apply run. This is the audit trail: what the worker

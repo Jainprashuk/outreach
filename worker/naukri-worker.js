@@ -225,13 +225,18 @@ async function executeRun(runDoc, config, openSession = null) {
       }
 
       if (runDoc.kind === 'harvest') {
-        const { jobs, searches } = await Promise.race([driver.harvest(session, { config, onProgress }), expired]);
+        const { jobs, searches, recommended = 0 } = await Promise.race([driver.harvest(session, { config, onProgress }), expired]);
         // Same doctrine as the LinkedIn harvest's zero-rendered check: a page
         // that painted nothing is a failure, never "no new jobs today".
         if (jobs.length === 0) {
+          const recOnly = config.sources && config.sources.recommended && config.sources.searches === false;
           return finish('failed', {
-            error: 'Zero cards rendered. Either the Chrome window was not visible (dark wake / minimised) '
-                 + 'or Naukri changed their DOM. Do not retry blindly — check the window first.',
+            error: recOnly
+              ? 'No jobs found on Recommended jobs. Either the Chrome window was not visible (dark wake / minimised), '
+                + 'Naukri has no recommendations for you right now, or the page changed — open '
+                + 'naukri.com/mnjuser/recommendedjobs in the debug Chrome and look before retrying.'
+              : 'Zero cards rendered. Either the Chrome window was not visible (dark wake / minimised) '
+                + 'or Naukri changed their DOM. Do not retry blindly — check the window first.',
           });
         }
         for (let i = 0; i < jobs.length; i += CHUNK) {
@@ -239,8 +244,8 @@ async function executeRun(runDoc, config, openSession = null) {
           const r = await api('/api/naukri/ingest', { runId: runDoc.id, jobs: chunk });
           log(`ingested ${i + chunk.length}/${jobs.length} — ${r.created} new, ${r.updated} updated`);
         }
-        await finish('done', { exitCode: 0, stats: { searches } });
-        log(`harvest done — ${jobs.length} jobs from ${searches} searches`);
+        await finish('done', { exitCode: 0, stats: { searches, recommended } });
+        log(`harvest done — ${jobs.length} jobs from ${searches} searches${recommended ? ` + ${recommended} recommended` : ''}`);
         return {};
       }
 
@@ -352,6 +357,15 @@ async function main() {
           // which can be an hour, without claiming work we cannot execute.
           probeOnly: !releaseChrome,
         });
+
+        // The check-in interval is a setting (Configuration → Schedule), sent
+        // back on every claim so a change applies without a restart. Clamped
+        // here too: a malformed value must not turn this into a tight loop.
+        const ps = Number(claimed.pollSeconds);
+        if (Number.isFinite(ps) && ps >= 15 && ps <= 120 && ps * 1000 !== CFG.pollMs) {
+          log(`check-in interval now ${ps}s (from Configuration)`);
+          CFG.pollMs = ps * 1000;
+        }
 
         if (claimed.paused) {
           log('Naukri is paused in Configuration — idling');
