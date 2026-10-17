@@ -363,6 +363,14 @@ async function main() {
       naukriDraft.draftAnswer = realDraft;
     }
 
+    console.log('\ndaily limit used up');
+    await call('PATCH', '/config', { apply: { maxPerDay: 1 } });
+    let limit = null;
+    try { await call('POST', '/runs', { kind: 'apply' }); } catch (e) { limit = e; }
+    ok('Apply says the daily limit is used up instead of starting an empty run',
+      limit && limit.status === 409 && limit.data.limitReached && /limit of 1/.test(limit.data.error), limit && limit.data.error);
+    await call('PATCH', '/config', { apply: { maxPerDay: 50 } });
+
     console.log('\nschedule slot during an active run waits');
     const now = new Date();
     const ist = new Date(now.getTime() - 60_000).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });

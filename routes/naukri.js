@@ -1066,6 +1066,19 @@ async function queueRun(userId, kind, trigger = 'manual', { sources = null } = {
     };
   }
 
+  // Today's limit already used: say so now, rather than queue a run that the
+  // worker can only finish empty ("nothing to do") a few seconds later.
+  if (kind === 'apply') {
+    const done = await appliedToday(userId, config.schedule.timezone);
+    if (done >= config.apply.maxPerDay) {
+      return {
+        error: `Today's limit of ${config.apply.maxPerDay} applications is used up (${done} sent). `
+             + 'Raise Max per day in Configuration → Apply behaviour & safety, or they go out tomorrow.',
+        code: 409, limitReached: true,
+      };
+    }
+  }
+
   await failStaleRuns(userId);
   const active = await NaukriRun.findOne({ userId, status: { $in: ACTIVE }, ...BASE_FILTER }).lean();
   if (active) {

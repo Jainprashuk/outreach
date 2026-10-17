@@ -326,7 +326,10 @@ async function executeRun(runDoc, config, openSession = null) {
           // approval that the previous run already worked through, or one whose
           // daily budget is spent.
           await finish('done', { exitCode: 0, stats: { applied: 0, skipped: 0, failed: 0 } });
-          log('apply: nothing approved and within budget — nothing to do');
+          const b = runDoc.budget;
+          log(b && b.granted === 0 && b.doneToday >= b.perDay
+            ? `apply: daily limit reached (${b.doneToday}/${b.perDay}) — nothing sent; raise Max per day or wait for tomorrow`
+            : 'apply: nothing approved and waiting — nothing to do');
           return {};
         }
         resumePath = await fetchResume(runDoc.id);
@@ -456,7 +459,7 @@ async function main() {
         } else if (claimed.blockedUntil) {
           log(`Naukri is blocked until ${claimed.blockedUntil} — idling`);
         } else if (claimed.run) {
-          const runDoc = { ...claimed.run, jobs: claimed.jobs || [] };
+          const runDoc = { ...claimed.run, jobs: claimed.jobs || [], budget: claimed.budget || null };
           log(`claimed ${runDoc.trigger} ${runDoc.kind} run ${runDoc.id}`
             + (claimed.budget ? ` — ${claimed.budget.granted} of ${claimed.budget.perRun} allowed` : ''));
           const { checkpoint } = await executeRun(runDoc, claimed.config || {}, session);
