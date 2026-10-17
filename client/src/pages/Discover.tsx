@@ -732,18 +732,21 @@ export default function Discover() {
 
   const inTab = (p: Prospect) =>
     tab === 'all' ? true : tab === 'open' ? OPEN.has(p.status) : p.status === tab;
-  const counts = useMemo(() => ({
-    open: prospects.filter(p => OPEN.has(p.status)).length,
-    moved: prospects.filter(p => p.status === 'moved').length,
-    discarded: prospects.filter(p => p.status === 'discarded').length,
-    all: prospects.length,
-  }), [prospects]);
-  const shown = useMemo(() => {
+  // The label filter and search box apply to every tab, so the tab counts are
+  // taken after them — the number on a tab is what clicking it would show.
+  const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
-    return prospects.filter(p => inTab(p)
-      && (!confidence || (confidence === 'none' ? !p.emailConfidence : p.emailConfidence === confidence))
+    return prospects.filter(p =>
+      (!confidence || (confidence === 'none' ? !p.emailConfidence : p.emailConfidence === confidence))
       && (!needle || `${p.name} ${p.title} ${p.email || ''} ${p.company} ${p.domain}`.toLowerCase().includes(needle)));
-  }, [prospects, tab, confidence, q]);
+  }, [prospects, confidence, q]);
+  const counts = useMemo(() => ({
+    open: filtered.filter(p => OPEN.has(p.status)).length,
+    moved: filtered.filter(p => p.status === 'moved').length,
+    discarded: filtered.filter(p => p.status === 'discarded').length,
+    all: filtered.length,
+  }), [filtered]);
+  const shown = useMemo(() => filtered.filter(inTab), [filtered, tab]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const selectable = shown.filter(p => p.status !== 'moved');
   const allChecked = selectable.length > 0 && selectable.every(p => selected.has(p.id));
