@@ -112,6 +112,8 @@ const WORKER_PATHS = new Set([
   // would hand a worker token the power to DELETE the resume too.
   '/api/naukri/claim', '/api/naukri/ingest', '/api/naukri/finish',
   '/api/naukri/progress', '/api/naukri/result', '/api/naukri/worker-resume',
+  // Live AI answers during an apply (only when the account switched it on).
+  '/api/naukri/ai-answer',
 ]);
 
 const isCron = (req) => {

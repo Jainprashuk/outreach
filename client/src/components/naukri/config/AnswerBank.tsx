@@ -32,6 +32,7 @@ export default function AnswerBank({ config, onSaved }: {
   const [rows, setRows] = useState<NaukriAnswer[]>(config.answers.length ? config.answers : [blank()]);
   const toast = useToast();
   const [aiDrafts, setAiDrafts] = useState(config.aiDrafts !== false);
+  const [autoAnswer, setAutoAnswer] = useState(config.autoAnswer || { enabled: false, minConfidence: 85 });
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [unknown, setUnknown] = useState<Array<{ question: string; count: number }>>([]);
@@ -62,7 +63,7 @@ export default function AnswerBank({ config, onSaved }: {
     setSaving(true); setMsg('');
     try {
       const usable = rows.filter(r => r.pattern.trim());
-      const r = await updateNaukriConfigApi({ answers: usable, aiDrafts });
+      const r = await updateNaukriConfigApi({ answers: usable, aiDrafts, autoAnswer: { ...autoAnswer, minConfidence: Math.min(100, Math.max(70, Math.round(autoAnswer.minConfidence || 85))) } });
       setRows(usable.length ? usable : [blank()]);
       const text = `Saved ${usable.length} rule${usable.length === 1 ? '' : 's'}.`
         + (r.requeued ? ` ${r.requeued} skipped job${r.requeued === 1 ? '' : 's'} back in Waiting.` : '');
@@ -134,6 +135,11 @@ export default function AnswerBank({ config, onSaved }: {
       {rows.map((row, i) => (
         <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
           <span style={{ color: 'var(--text2)', fontSize: 12, width: 18, textAlign: 'right' }}>{i + 1}</span>
+          {row.origin === 'auto' && (
+            <span className="badge badge-seen" title={row.quote ? `AI answer, from: “${row.quote}”` : 'Answered by AI during an apply'}>
+              auto{row.confidence != null ? ` · ${row.confidence}%` : ''}
+            </span>
+          )}
           <input type="text" placeholder="question contains…" value={row.pattern}
             onChange={e => patch(i, { pattern: e.target.value })} style={{ flex: 1, minWidth: 170 }} />
           <input type="text" placeholder="answer, may use {{expectedCtcLpa}}" value={row.answer}
@@ -169,6 +175,28 @@ export default function AnswerBank({ config, onSaved }: {
           </div>
         </span>
       </label>
+
+      <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, margin: '10px 0' }}>
+        <input type="checkbox" checked={autoAnswer.enabled} style={{ marginTop: 3 }}
+          onChange={e => setAutoAnswer(a => ({ ...a, enabled: e.target.checked }))} />
+        <span>
+          Let AI answer during apply when it is sure enough
+          <div style={{ color: 'var(--text2)', fontSize: 11 }}>
+            When a question has no rule, the AI answers it on the spot — from your resume, profile and earlier answers —
+            if it is that sure and it can point to the line it used. The answer is sent without you reading it first, then
+            saved as an “auto” rule you can review under Jobs → Needs answer. Below the bar, the job is skipped as before.
+            The % is the AI&apos;s own estimate, so a higher bar is safer. Off by default.
+          </div>
+        </span>
+      </label>
+      {autoAnswer.enabled && (
+        <div style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, margin: '-4px 0 10px 23px' }}>
+          Only when at least
+          <input type="number" min={70} max={100} value={autoAnswer.minConfidence} style={{ width: 64 }}
+            onChange={e => setAutoAnswer(a => ({ ...a, minConfidence: Number(e.target.value) }))} />
+          % sure <span style={{ color: 'var(--text2)', fontSize: 11 }}>(70–100)</span>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', margin: '10px 0', flexWrap: 'wrap' }}>
         <input type="text" placeholder="Test a question…" value={probe}

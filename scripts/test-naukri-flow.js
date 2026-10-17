@@ -268,6 +268,78 @@ async function main() {
     ok('…then delivered once the connection is back', readOutbox().length === 0
       && (await NaukriJob.countDocuments({ _id: { $in: last }, applyStatus: { $ne: 'none' } })) === 1);
 
+    console.log('\nlive AI answers during apply');
+    // A scripted AI, so each case is exact: the server's /ai-answer calls
+    // naukriDraft.draftAnswer through the module object.
+    const naukriDraft = require('../lib/naukriDraft');
+    const realDraft = naukriDraft.draftAnswer;
+    let aiCalls = 0, aiReply = null;
+    naukriDraft.draftAnswer = async () => { aiCalls++; if (aiReply instanceof Error) throw aiReply; return aiReply; };
+    const QUESTION = 'Do you have experience with SAP?';
+    try {
+      await NaukriConfig.updateOne({ userId }, { $set: { answers: [], drafts: [] } });
+      await NaukriJob.updateMany({ userId, approval: 'approved', applyStatus: { $in: ['none', 'failed'] } }, { $set: { approval: 'pending' } });
+
+      // Off: the question still skips the job, and the AI is never asked.
+      await call('PATCH', '/config', { autoAnswer: { enabled: false } });
+      const offIds = await fresh(3);
+      await call('POST', '/runs', { kind: 'apply' });
+      await runQuiet();
+      const offJobs = await NaukriJob.find({ _id: { $in: offIds } }).lean();
+      ok('auto-answer off: the question skips the job as before', offJobs.filter(j => j.applyStatus === 'skipped').length === 1 && aiCalls === 0,
+        offJobs.map(j => j.applyStatus).join() + ` · AI calls ${aiCalls}`);
+
+      // On, 92% sure: answered in the same run and saved as an auto rule.
+      await call('PATCH', '/config', { autoAnswer: { enabled: true, minConfidence: 85 } });
+      aiReply = { status: 'ready', answer: 'No', quote: 'Skills: Node.js, MongoDB', source: 'resume', confidence: 92 };
+      const onIds = await fresh(6);
+      await call('POST', '/runs', { kind: 'apply' });
+      const on = await runQuiet();
+      const onJobs = await NaukriJob.find({ _id: { $in: onIds } }).lean();
+      ok('92% sure: every job applied in the same run, none skipped', onJobs.every(j => j.applyStatus === 'applied'), onJobs.map(j => j.applyStatus).join());
+      ok('…the AI was asked once; the second job with the question reused the answer', aiCalls === 1, `AI calls ${aiCalls}`);
+      ok('…and the outcome says it was AI', on.run.results.some(r => /answered by AI \(92%\)/.test(r.reason)));
+      const cfgOn = await NaukriConfig.findOne({ userId }).lean();
+      ok('…saved at the top as an auto rule with its %', cfgOn.answers[0].origin === 'auto' && cfgOn.answers[0].confidence === 92 && cfgOn.answers[0].answer === 'No');
+      ok('…and the job parked on it earlier went back to Waiting',
+        (await NaukriJob.countDocuments({ _id: { $in: offIds }, applyStatus: 'skipped' })) === 0);
+      const na2 = await call('GET', '/needs-answer');
+      ok('…listed under Auto-answered for review', na2.autoAnswered.length === 1 && na2.autoAnswered[0].confidence === 92);
+      await call('POST', '/needs-answer/auto', { pattern: na2.autoAnswered[0].pattern, action: 'keep' });
+      ok('Keep makes it your answer', (await call('GET', '/needs-answer')).autoAnswered.length === 0
+        && (await NaukriConfig.findOne({ userId }).lean()).answers[0].origin === 'you');
+
+      // On, but only 70% sure: skipped, and the draft keeps its 70%.
+      await NaukriConfig.updateOne({ userId }, { $set: { answers: [], drafts: [] } });
+      aiCalls = 0;
+      aiReply = { status: 'ready', answer: 'No', quote: 'Skills: Node.js, MongoDB', source: 'resume', confidence: 70 };
+      const lowIds = await fresh(3);
+      await call('POST', '/runs', { kind: 'apply' });
+      await runQuiet();
+      const lowJobs = await NaukriJob.find({ _id: { $in: lowIds } }).lean();
+      const cfgLow = await NaukriConfig.findOne({ userId }).lean();
+      ok('70% sure (bar 85): the job is skipped', lowJobs.filter(j => j.applyStatus === 'skipped').length === 1);
+      ok('…no rule saved, and the draft shows 70%', cfgLow.answers.length === 0 && cfgLow.drafts.some(d => d.question === QUESTION && d.confidence === 70));
+
+      // The AI failing outright: skipped, the run still finishes.
+      aiReply = new Error('provider down');
+      const errIds = await fresh(3);
+      await call('POST', '/runs', { kind: 'apply' });
+      const er = await runQuiet();
+      ok('AI failing: the job is skipped and the run finishes', er.run.status === 'done'
+        && (await NaukriJob.countDocuments({ _id: { $in: errIds }, applyStatus: 'skipped' })) === 1, er.run.error);
+
+      // The per-run cap.
+      const capped = await NaukriRun.create({ userId, kind: 'apply', status: 'running', claimedAt: new Date(), 'stats.aiAsked': 15 });
+      aiReply = { status: 'ready', answer: 'No', quote: 'Skills: Node.js, MongoDB', source: 'resume', confidence: 99 };
+      aiCalls = 0;
+      const capRes = await call('POST', '/ai-answer', { runId: String(capped._id), question: QUESTION, options: ['Yes', 'No'] });
+      ok('the 16th AI question in one run is refused without calling the AI', capRes.answer === null && /limit/.test(capRes.reason) && aiCalls === 0);
+      await NaukriRun.updateOne({ _id: capped._id }, { $set: { status: 'done' } });
+    } finally {
+      naukriDraft.draftAnswer = realDraft;
+    }
+
     console.log('\nschedule slot during an active run waits');
     const now = new Date();
     const ist = new Date(now.getTime() - 60_000).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });

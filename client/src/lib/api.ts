@@ -1777,6 +1777,10 @@ export interface NaukriAnswer {
   answer: string;
   kind: 'text' | 'choice' | 'number' | 'yesno';
   enabled: boolean;
+  /** 'auto' = written by the AI during an apply; editing or keeping it makes it 'you'. */
+  origin?: 'you' | 'auto';
+  confidence?: number | null;
+  quote?: string;
 }
 
 export interface NaukriConfig {
@@ -1792,6 +1796,8 @@ export interface NaukriConfig {
   worker: { pollSeconds: number };
   /** Draft answers from the resume for questions with no rule. */
   aiDrafts: boolean;
+  /** Let the AI answer DURING an apply when at least minConfidence% sure. Off by default. */
+  autoAnswer: { enabled: boolean; minConfidence: number };
   filters: NaukriFilters;
   profile: NaukriProfileFields;
   answers: NaukriAnswer[];
@@ -1877,6 +1883,12 @@ export const addNaukriStarterRulesApi = () =>
 export interface NaukriDraft {
   answer: string; quote: string; source: 'resume' | 'profile' | 'answer' | '';
   status: 'ready' | 'unknown' | 'error' | 'ignored';
+  /** The model's own 0–100, kept only when every check passed. */
+  confidence?: number;
+}
+
+export interface NaukriAutoAnswer {
+  pattern: string; answer: string; confidence: number | null; quote: string; createdAt: string | null;
 }
 
 export interface NaukriQuestionGroup {
@@ -1891,7 +1903,15 @@ export interface NaukriQuestionGroup {
 }
 
 export const naukriNeedsAnswerApi = () =>
-  apiFetch<{ aiDrafts: boolean; hasResumeText: boolean; questions: NaukriQuestionGroup[] }>('/api/naukri/needs-answer');
+  apiFetch<{
+    aiDrafts: boolean; hasResumeText: boolean; questions: NaukriQuestionGroup[];
+    autoAnswer: { enabled: boolean; minConfidence: number };
+    /** Answers the AI gave live during applies, for review. */
+    autoAnswered: NaukriAutoAnswer[];
+  }>('/api/naukri/needs-answer');
+
+export const reviewNaukriAutoAnswerApi = (pattern: string, action: 'keep' | 'edit' | 'remove', answer?: string) =>
+  apiFetch<{ ok: true }>('/api/naukri/needs-answer/auto', { method: 'POST', body: JSON.stringify({ pattern, action, answer }) });
 
 export const draftNaukriAnswerApi = (question: string) =>
   apiFetch<{ draft: NaukriDraft; note: string | null }>(

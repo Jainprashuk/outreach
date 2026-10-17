@@ -10,6 +10,7 @@
  * Checks the prompt does what it promises: answers grounded in a real resume
  * line, `unknown` when the resume does not say, and choice answers always one
  * of the options. Pure parsing rules are covered in test-naukri-answers.js.
+ * Connects to the DEV database only to look up which AI key to use.
  */
 require('dotenv').config();
 const { draftAnswer } = require('../lib/naukriDraft');
@@ -30,15 +31,21 @@ const ok = (label, cond, detail = '') => {
   if (cond) { pass++; console.log('  ok   ' + label); }
   else { fail++; console.log('  FAIL ' + label + (detail ? '  << ' + detail : '')); }
 };
-const show = (d) => `${d.status} "${d.answer}" ← "${d.quote}"${d.note ? ` (${d.note})` : ''}`;
+const show = (d) => `${d.status} ${d.confidence || 0}% "${d.answer}" ← "${d.quote}"${d.note ? ` (${d.note})` : ''}`;
 
 (async () => {
+  // Which AI key pays is decided per account from the database (lib/ai/keys.js),
+  // so the dev DB must be connected — read only, nothing is written.
+  const mongoose = require('mongoose');
+  if (process.env.NODE_ENV === 'prod') { console.error('Run against dev only'); process.exit(1); }
+  await mongoose.connect(process.env.MONGODB_URI_DEV);
   const ask = (q, options = []) => draftAnswer(q, { resumeText, profile, options });
 
   console.log('\ngrounded answers');
   let d = await ask('Do you have experience with MongoDB?', ['Yes', 'No']);
   console.log('    ' + show(d));
   ok('choice from the resume → Yes', d.status === 'ready' && d.answer === 'Yes');
+  ok('…and the AI is confident about it (≥ 70%)', (d.confidence || 0) >= 70, show(d));
 
   d = await ask('What is your highest qualification?');
   console.log('    ' + show(d));
@@ -52,6 +59,7 @@ const show = (d) => `${d.status} "${d.answer}" ← "${d.quote}"${d.note ? ` (${d
   d = await ask('Do you have experience with SAP ABAP?', ['Yes', 'No']);
   console.log('    ' + show(d));
   ok('absent skill is not answered Yes', d.answer !== 'Yes');
+  ok('…and could never pass an 85% bar as a Yes', !(d.answer === 'Yes' && d.confidence >= 85));
 
   d = await ask('What is your current CTC in LPA?');
   console.log('    ' + show(d));
@@ -69,5 +77,6 @@ const show = (d) => `${d.status} "${d.answer}" ← "${d.quote}"${d.note ? ` (${d
   ok('a reworded question gets the answer you gave before', d.status === 'ready' && /^4\b/.test(d.answer) && d.source === 'answer', show(d));
 
   console.log(`\n${pass} passed, ${fail} failed`);
+  await mongoose.disconnect();
   process.exit(fail ? 1 : 0);
 })();

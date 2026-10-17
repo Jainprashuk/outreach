@@ -44,6 +44,9 @@ const MAX_PER_RUN = 20;
 // the worker sat at 0% CPU on job 18 of 20 for eight minutes, and because only
 // one run may be active, the whole feature was wedged behind it.
 const JOB_TIMEOUT_MS = 90 * 1000;
+// With live AI answers on, each unanswered question can add up to ~20s for the
+// AI on top of the form itself, so a job gets longer before it is abandoned.
+const JOB_TIMEOUT_AI_MS = 180 * 1000;
 
 // Reject after `ms` rather than waiting forever. The work carries on in the
 // background — we cannot cancel a hung protocol call — but the RUN moves on,
@@ -160,15 +163,34 @@ async function readOptions(page) {
 // 'unknown' is a decision, not a failure: the question has no rule, so the job
 // is abandoned with the question (and its options) reported so it can become
 // a rule.
-async function answerOne(page, question, config) {
+//
+// With auto-answer on, a question no rule answers is put to the AI (askAI) once.
+// Only an answer the server judged confident enough comes back; it is then
+// typed or picked through exactly the same code a rule's answer goes through,
+// so "the AI answered it" never means a looser path. Anything else — not sure
+// enough, AI busy, no connection — is the old 'unknown': the job is skipped.
+async function answerOne(page, question, config, askAI) {
   const radios = await firstVisible(page, [...BOT_RADIO, ...BOT_CHECKBOX], 1200);
   const options = radios ? await readOptions(page) : [];
   const labels = options.map(o => o.text);
 
   const resolved = resolveAnswer(question, config);
-  if (!resolved.matched) return { state: 'unknown', question, options: labels, reason: resolved.reason };
-
-  const value = String(resolved.answer);
+  let value;
+  let ai = null;
+  if (resolved.matched) {
+    value = String(resolved.answer);
+  } else {
+    const live = askAI && config.autoAnswer && config.autoAnswer.enabled
+      ? await askAI(question, labels).catch(() => null) : null;
+    if (!live || !live.answer) {
+      return { state: 'unknown', question, options: labels, reason: (live && live.reason) || resolved.reason };
+    }
+    value = String(live.answer);
+    ai = live.confidence || null;
+    // Reused by every later job in this run without asking again — the
+    // server has already saved it as an 'auto' rule for future runs.
+    if (live.rule) config.answers = [live.rule, ...(config.answers || [])];
+  }
 
   // Radio / checkbox questions: pick the option the answer names. Matched on
   // visible text rather than index — an index would silently choose the wrong
@@ -187,7 +209,7 @@ async function answerOne(page, question, config) {
     await jitter(300, 700);
     const send = await firstVisible(page, BOT_SEND, 1500);
     if (send) { await send.click(); await jitter(600, 1200); }
-    return { state: 'answered', question, typed: chosen };
+    return { state: 'answered', question, typed: chosen, ai };
   }
 
   const box = await firstVisible(page, BOT_TEXTAREA, 1500);
@@ -202,12 +224,12 @@ async function answerOne(page, question, config) {
   if (!send) return { state: 'stuck', question, reason: 'no send button for this question' };
   await send.click();
   await jitter(700, 1400);
-  return { state: 'answered', question, typed: value };
+  return { state: 'answered', question, typed: value, ai };
 }
 
 // Walk the questionnaire. Bounded: a chatbot that keeps asking is a loop we must
 // not ride, and a loop that applies 30 times is worse than one that gives up.
-async function runChatbot(page, config, onStep) {
+async function runChatbot(page, config, onStep, askAI) {
   const MAX_QUESTIONS = 12;
   const asked = [];
 
@@ -236,7 +258,7 @@ async function runChatbot(page, config, onStep) {
       return { state: 'stuck', asked, question, reason: 'the questionnaire repeated a question' };
     }
 
-    const result = await answerOne(page, question, config);
+    const result = await answerOne(page, question, config, askAI);
     asked.push(result);
     onStep && onStep(result);
     if (result.state !== 'answered') {
@@ -259,7 +281,7 @@ async function describePage(page) {
   return `page: ${url.slice(0, 120)} · buttons: ${offered.join(', ') || 'none'}`;
 }
 
-async function applyToOne(page, job, { config, dryRun, onStep }) {
+async function applyToOne(page, job, { config, dryRun, onStep, askAI }) {
   // In front, because Chrome slows background tabs to a crawl and the action
   // buttons hydrate late — a listing checked from behind another tab can look
   // like it has no Apply button at all.
@@ -336,7 +358,7 @@ async function applyToOne(page, job, { config, dryRun, onStep }) {
   await jitter(1500, 2600);
   await check(page, `the apply flow for "${job.title}"`);
 
-  const bot = await runChatbot(page, config, onStep);
+  const bot = await runChatbot(page, config, onStep, askAI);
 
   if (bot.state === 'unknown') {
     return {
@@ -359,7 +381,10 @@ async function applyToOne(page, job, { config, dryRun, onStep }) {
   }
   const after = await bodyText(page);
   if (SUCCESS_MARKERS.some(m => after.includes(m)) || await looksApplied(page)) {
-    return { outcome: 'applied', reason: bot.asked.length ? `Applied after ${bot.asked.length} question(s)` : 'Applied' };
+    const byAI = bot.asked.filter(a => a.ai);
+    const aiNote = byAI.length
+      ? ` · ${byAI.length} answered by AI (${byAI.map(a => `${a.ai}%`).join(', ')})` : '';
+    return { outcome: 'applied', reason: bot.asked.length ? `Applied after ${bot.asked.length} question(s)${aiNote}` : 'Applied' };
   }
 
   // Clicked, nothing threw, but nothing on the page says it worked. Recorded as
@@ -368,7 +393,8 @@ async function applyToOne(page, job, { config, dryRun, onStep }) {
   return { outcome: 'failed', reason: 'Clicked Apply but Naukri never confirmed. Check this one by hand before re-running.' };
 }
 
-async function apply(session, { config = {}, jobs = [], dryRun = false, onProgress = () => {}, onResult = async () => {} } = {}) {
+async function apply(session, { config = {}, jobs = [], dryRun = false, onProgress = () => {}, onResult = async () => {}, askAI = null } = {}) {
+  const jobTimeout = askAI && config.autoAnswer && config.autoAnswer.enabled ? JOB_TIMEOUT_AI_MS : JOB_TIMEOUT_MS;
   // `rehearsed` is counted separately and never folded into applied/skipped:
   // a dry run must not leave numbers that look like work was done.
   const stats = { applied: 0, skipped: 0, failed: 0, rehearsed: 0 };
@@ -389,8 +415,8 @@ async function apply(session, { config = {}, jobs = [], dryRun = false, onProgre
     let result;
     try {
       result = await withTimeout(
-        applyToOne(page, job, { config, dryRun, onProgress }),
-        JOB_TIMEOUT_MS,
+        applyToOne(page, job, { config, dryRun, onProgress, askAI }),
+        jobTimeout,
         `"${job.title}"`,
       );
     } catch (err) {

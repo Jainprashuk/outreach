@@ -37,6 +37,13 @@ const answerSchema = new mongoose.Schema({
   answer:  { type: String, default: '' },
   kind:    { type: String, enum: ['text', 'choice', 'number', 'yesno'], default: 'text' },
   enabled: { type: Boolean, default: true },
+  // 'auto' = written by the AI during an apply, at `confidence`% — listed under
+  // Needs answer → Auto-answered for you to keep, edit or remove. Saving it
+  // yourself (Use, Keep, or editing it in Answers) makes it 'you'.
+  origin:     { type: String, enum: ['you', 'auto'], default: 'you' },
+  confidence: { type: Number, default: null },
+  quote:      { type: String, default: '' },
+  createdAt:  { type: Date, default: null },
 });
 
 // Extra times of day the schedule fires, beyond the original `time` (slot 1).
@@ -60,6 +67,7 @@ const draftSchema = new mongoose.Schema({
   // check it at a glance.
   quote:    { type: String, default: '' },
   source:   { type: String, enum: ['resume', 'profile', 'answer', ''], default: '' },
+  confidence: { type: Number, default: 0 },
   // ready = has an answer · unknown = the resume does not say · error = AI busy
   // (retried later) · ignored = you dismissed it
   status:   { type: String, enum: ['ready', 'unknown', 'error', 'ignored'], default: 'ready' },
@@ -160,6 +168,13 @@ const naukriConfigSchema = new mongoose.Schema({
   // Draft answers from your resume for questions with no rule. Drafts only:
   // see draftSchema.
   aiDrafts: { type: Boolean, default: true },
+  // Let the AI answer a question with no rule DURING an apply, when it is at
+  // least `minConfidence`% sure and every check passes. Off by default: it
+  // sends an answer nobody read, so each account opts in.
+  autoAnswer: {
+    enabled:       { type: Boolean, default: false },
+    minConfidence: { type: Number, default: 85, min: 70, max: 100 },
+  },
   drafts:   { type: [draftSchema], default: [] },
 
   // ── apply behaviour ────────────────────────────────────────────────────────

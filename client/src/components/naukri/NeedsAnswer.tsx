@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NaukriQuestionGroup } from '../../lib/api';
-import { naukriNeedsAnswerApi, draftNaukriAnswerApi, useNaukriAnswerApi, ignoreNaukriQuestionApi, isAiKeyRequired } from '../../lib/api';
+import type { NaukriQuestionGroup, NaukriAutoAnswer } from '../../lib/api';
+import { naukriNeedsAnswerApi, draftNaukriAnswerApi, useNaukriAnswerApi, ignoreNaukriQuestionApi, isAiKeyRequired, reviewNaukriAutoAnswerApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty, Notice } from './ui';
 import { useToast } from '../../context/ToastContext';
 
@@ -14,9 +14,54 @@ import { useToast } from '../../context/ToastContext';
 
 const DRAFT_CONCURRENCY = 3;
 
-function QuestionCard({ group, busy, onUse, onIgnore }: {
+type AutoMeta = { enabled: boolean; minConfidence: number };
+
+// Answers the AI gave live during applies. Already sent — this is the review:
+// Keep makes it yours, Edit corrects it for next time, Remove deletes the rule.
+function AutoAnswered({ items, busy, onReview }: {
+  items: NaukriAutoAnswer[]; busy: boolean;
+  onReview: (pattern: string, action: 'keep' | 'edit' | 'remove', answer?: string) => void;
+}) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const [text, setText] = useState('');
+  return (
+    <Card title={`Auto-answered by AI · ${items.length}`} icon="ti-sparkles" style={{ marginBottom: 14 }}>
+      <Hint style={{ marginTop: 0, marginBottom: 8 }}>
+        The AI answered these during an apply because it was sure enough. They are saved as rules, so the same question
+        is answered the same way next time. Keep the right ones, fix any that are off.
+      </Hint>
+      {items.map(a => (
+        <div key={a.pattern} style={{ padding: '8px 0', borderTop: '0.5px solid var(--border)' }}>
+          <div style={{ fontSize: 13, fontWeight: 500 }}>{a.pattern}</div>
+          {editing === a.pattern ? (
+            <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+              <input type="text" value={text} onChange={e => setText(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
+              <button className="btn btn-sm btn-primary" type="button" disabled={busy || !text.trim()}
+                onClick={() => { onReview(a.pattern, 'edit', text.trim()); setEditing(null); }}>Save</button>
+              <button className="btn btn-sm" type="button" onClick={() => setEditing(null)}>Cancel</button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginTop: 3 }}>
+              <span style={{ fontSize: 13 }}>→ <strong>{a.answer}</strong></span>
+              {a.confidence != null && <span className="badge badge-seen">{a.confidence}% sure</span>}
+              <span style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                <button className="btn btn-xs btn-primary" type="button" disabled={busy} onClick={() => onReview(a.pattern, 'keep')}>Keep</button>
+                <button className="btn btn-xs" type="button" disabled={busy} onClick={() => { setEditing(a.pattern); setText(a.answer); }}>Edit</button>
+                <button className="btn btn-xs" type="button" disabled={busy} onClick={() => onReview(a.pattern, 'remove')}>Remove</button>
+              </span>
+            </div>
+          )}
+          {a.quote && <Hint>From: “{a.quote}”</Hint>}
+        </div>
+      ))}
+    </Card>
+  );
+}
+
+function QuestionCard({ group, busy, auto, onUse, onIgnore }: {
   group: NaukriQuestionGroup & { drafting?: boolean };
   busy: boolean;
+  auto: AutoMeta;
   onUse: (answer: string, pattern?: string) => void;
   onIgnore: () => void;
 }) {
@@ -63,7 +108,8 @@ function QuestionCard({ group, busy, onUse, onIgnore }: {
         {!group.drafting && d && d.status === 'ready' && d.quote && (
           <Hint>
             <i className="ti ti-sparkles" style={{ marginRight: 4 }} />
-            AI draft, from {d.source === 'answer' ? 'an answer you gave before' : `your ${d.source || 'resume'}`}: “{d.quote}” — check it before you use it.
+            AI draft{d.confidence ? ` (${d.confidence}% sure)` : ''}, from {d.source === 'answer' ? 'an answer you gave before' : `your ${d.source || 'resume'}`}: “{d.quote}” — check it before you use it.
+            {auto.enabled && (d.confidence || 0) < auto.minConfidence && ` Below your ${auto.minConfidence}% bar, so it was not used automatically.`}
           </Hint>
         )}
         {!group.drafting && d && d.status === 'unknown' && (
@@ -102,7 +148,8 @@ function QuestionCard({ group, busy, onUse, onIgnore }: {
 
 export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
   const [groups, setGroups] = useState<Array<NaukriQuestionGroup & { drafting?: boolean }>>([]);
-  const [meta, setMeta] = useState<{ aiDrafts: boolean; hasResumeText: boolean } | null>(null);
+  const [meta, setMeta] = useState<{ aiDrafts: boolean; hasResumeText: boolean; autoAnswer: AutoMeta } | null>(null);
+  const [autoAnswered, setAutoAnswered] = useState<NaukriAutoAnswer[]>([]);
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const drafting = useRef(false);
@@ -111,7 +158,8 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
     try {
       const r = await naukriNeedsAnswerApi();
       setGroups(r.questions);
-      setMeta({ aiDrafts: r.aiDrafts, hasResumeText: r.hasResumeText });
+      setMeta({ aiDrafts: r.aiDrafts, hasResumeText: r.hasResumeText, autoAnswer: r.autoAnswer || { enabled: false, minConfidence: 85 } });
+      setAutoAnswered(r.autoAnswered || []);
     } catch (e: any) { toast(e?.message || 'Could not load', 'error'); }
   }, [toast]);
 
@@ -176,14 +224,31 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
     finally { setBusy(false); }
   };
 
+  const review = async (pattern: string, action: 'keep' | 'edit' | 'remove', answer?: string) => {
+    setBusy(true);
+    try {
+      await reviewNaukriAutoAnswerApi(pattern, action, answer);
+      toast(action === 'remove' ? 'Removed — that question will need an answer again.' : 'Saved as your answer.', 'success');
+      await load();
+    } catch (e: any) { toast(e?.message || 'Could not save', 'error'); }
+    finally { setBusy(false); }
+  };
+
   if (!meta) return <Empty icon="ti-loader">Loading…</Empty>;
+  const autoCard = autoAnswered.length > 0 && <AutoAnswered items={autoAnswered} busy={busy} onReview={review} />;
   if (!groups.length) {
-    return <Empty icon="ti-circle-check">No questions waiting. Jobs stopped by a screening question show up here.</Empty>;
+    return (
+      <>
+        {autoCard}
+        <Empty icon="ti-circle-check">No questions waiting. Jobs stopped by a screening question show up here.</Empty>
+      </>
+    );
   }
 
   const blocked = groups.reduce((n, g) => n + g.count, 0);
   return (
     <>
+      {autoCard}
       {!meta.aiDrafts && (
         <Notice icon="ti-info-circle">AI drafts are off (Configuration → Answers). You can still answer each question below.</Notice>
       )}
@@ -198,7 +263,7 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
         Answer each once — it becomes a rule, and every job that asked it goes back to Waiting.
       </Hint>
       {groups.map(g => (
-        <QuestionCard key={g.question} group={g} busy={busy}
+        <QuestionCard key={g.question} group={g} busy={busy} auto={meta.autoAnswer}
           onUse={(a, p) => use(g.question, a, p)} onIgnore={() => ignore(g.question)} />
       ))}
     </>

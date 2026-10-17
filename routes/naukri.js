@@ -12,7 +12,9 @@ const Settings = require('../models/Settings');
 const { dueSlot, nextSlot, upcomingSlots, slotsOf, startOfDayIn, parseTime, MAX_SLOTS } = require('../lib/naukriSchedule');
 const { resolveAnswer, matchable, STARTER_RULES } = require('../lib/naukriAnswers');
 const { scoreJob } = require('../lib/naukriScore');
-const { draftAnswer } = require('../lib/naukriDraft');
+// Called through the module object (naukriDraft.draftAnswer), not a
+// destructured copy, so the end-to-end test can swap in a scripted AI.
+const naukriDraft = require('../lib/naukriDraft');
 const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = require('../lib/naukriFilters');
 const { reportIssue } = require('../lib/issues');
 const { notify } = require('../lib/notify');
@@ -452,12 +454,26 @@ router.patch('/config', async (req, res) => {
 
     const answersChanged = body.answers !== undefined || body.profile !== undefined;
     if (body.answers !== undefined) {
-      config.answers = (Array.isArray(body.answers) ? body.answers : []).slice(0, 200).map(a => ({
-        pattern: str(a && a.pattern, 300).toLowerCase(),
-        answer:  str(a && a.answer, 2000),
-        kind:    ['text', 'choice', 'number', 'yesno'].includes(a && a.kind) ? a.kind : 'text',
-        enabled: a && a.enabled !== false,
-      })).filter(a => a.pattern);
+      // An AI-written rule stays 'auto' only while it is untouched; edit it
+      // here and it is yours.
+      const autoBefore = new Map((config.answers || []).filter(a => a.origin === 'auto').map(a => [a.pattern, a]));
+      config.answers = (Array.isArray(body.answers) ? body.answers : []).slice(0, 200).map(a => {
+        const rule = {
+          pattern: str(a && a.pattern, 300).toLowerCase(),
+          answer:  str(a && a.answer, 2000),
+          kind:    ['text', 'choice', 'number', 'yesno'].includes(a && a.kind) ? a.kind : 'text',
+          enabled: a && a.enabled !== false,
+        };
+        const was = autoBefore.get(rule.pattern);
+        return was && was.answer === rule.answer
+          ? { ...rule, origin: 'auto', confidence: was.confidence, quote: was.quote, createdAt: was.createdAt }
+          : { ...rule, origin: 'you', createdAt: (was && was.createdAt) || new Date() };
+      }).filter(a => a.pattern);
+    }
+    if (body.autoAnswer) {
+      const x = body.autoAnswer;
+      if (x.enabled !== undefined) config.autoAnswer.enabled = !!x.enabled;
+      if (x.minConfidence !== undefined) config.autoAnswer.minConfidence = num(x.minConfidence, { min: 70, max: 100, integer: true }) ?? 85;
     }
     if (body.onUnknownQuestion !== undefined) {
       config.onUnknownQuestion = body.onUnknownQuestion === 'apply-anyway' ? 'apply-anyway' : 'skip';
@@ -658,9 +674,14 @@ router.get('/needs-answer', async (req, res) => {
           lastSeenAt: r.lastSeenAt,
           options: r.options || [],
           jobs: r.jobs.slice(0, 5),
-          draft: d ? { answer: d.answer, quote: d.quote, source: d.source, status: d.status } : null,
+          draft: d ? { answer: d.answer, quote: d.quote, source: d.source, status: d.status, confidence: d.confidence || 0 } : null,
         };
       }),
+      autoAnswer: { enabled: !!(config.autoAnswer && config.autoAnswer.enabled), minConfidence: (config.autoAnswer && config.autoAnswer.minConfidence) || 85 },
+      // Answers the AI gave during applies, for you to keep, edit or remove.
+      autoAnswered: (config.answers || []).filter(a => a.origin === 'auto').map(a => ({
+        pattern: a.pattern, answer: a.answer, confidence: a.confidence, quote: a.quote || '', createdAt: a.createdAt,
+      })),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -686,19 +707,19 @@ router.post('/needs-answer/draft', async (req, res) => {
     const resumeTextNow = await resumeTextFor(req.userId, config);
     const profile = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
     const rules = plainAnswers(config);
-    const out = await draftAnswer(question, { resumeText: resumeTextNow, profile, options, rules, userId: req.userId });
+    const out = await naukriDraft.draftAnswer(question, { resumeText: resumeTextNow, profile, options, rules, userId: req.userId });
     // Not saved as an 'error' draft: nothing is wrong with the question, and the
     // tab retries missing drafts on its next load once a key is added.
     if (out.code === 'AI_KEY_REQUIRED') return res.status(409).json({ error: out.note, code: out.code });
     const draft = {
       question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options,
-      basis: draftBasis(resumeTextNow, profile, rules), createdAt: new Date(),
+      confidence: out.confidence || 0, basis: draftBasis(resumeTextNow, profile, rules), createdAt: new Date(),
     };
     // Atomic replace rather than config.save(): the tab drafts several
     // questions in parallel, and concurrent document saves would conflict.
     await NaukriConfig.updateOne({ userId: req.userId }, { $pull: { drafts: { question } } });
     await NaukriConfig.updateOne({ userId: req.userId }, { $push: { drafts: { $each: [draft], $slice: -300 } } });
-    res.json({ draft: { answer: draft.answer, quote: draft.quote, source: draft.source, status: draft.status }, note: out.note || null });
+    res.json({ draft: { answer: draft.answer, quote: draft.quote, source: draft.source, status: draft.status, confidence: draft.confidence }, note: out.note || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -719,7 +740,7 @@ router.post('/needs-answer/use', async (req, res) => {
     const pattern = (str(body.pattern, 300) || matchable(question).slice(0, 300)).toLowerCase();
 
     const config = await NaukriConfig.getForUser(req.userId);
-    const rule = { pattern, answer, kind: 'text', enabled: true };
+    const rule = { pattern, answer, kind: 'text', enabled: true, origin: 'you', createdAt: new Date() };
     if (!resolveAnswer(question, { answers: [rule], profile: config.profile }).matched) {
       return res.status(400).json({ error: 'That pattern does not match the question — it would never be used' });
     }
@@ -730,6 +751,107 @@ router.post('/needs-answer/use', async (req, res) => {
     await config.save();
     const requeued = await requeueAnswered(req.userId, config);
     res.json({ requeued, rule });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/naukri/needs-answer/auto { pattern, action: 'keep'|'remove'|'edit', answer? }
+// Review an answer the AI gave during an apply. Keep or edit make it yours;
+// remove deletes the rule (the job it was used on has already gone out).
+router.post('/needs-answer/auto', async (req, res) => {
+  try {
+    const { pattern, action } = req.body || {};
+    const p = str(pattern, 300).toLowerCase();
+    const config = await NaukriConfig.getForUser(req.userId);
+    const rule = (config.answers || []).find(a => a.pattern === p && a.origin === 'auto');
+    if (!rule) return res.status(404).json({ error: 'No AI answer with that question' });
+    if (action === 'remove') {
+      config.answers = config.answers.filter(a => a !== rule);
+    } else if (action === 'keep' || action === 'edit') {
+      if (action === 'edit') {
+        const answer = str((req.body || {}).answer, 2000);
+        if (!answer) return res.status(400).json({ error: 'Type an answer first' });
+        rule.answer = answer;
+      }
+      rule.origin = 'you';
+    } else {
+      return res.status(400).json({ error: 'action must be keep, edit or remove' });
+    }
+    await config.save();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/naukri/ai-answer { runId, jobId, question, options } — worker
+// token. The live half of auto-answer: the worker is mid-questionnaire with a
+// question no rule answers, and asks whether the AI is sure enough to answer
+// it. Only a draft that passed every check in lib/naukriDraft.js AND reached
+// your threshold comes back as an answer; it is saved as an 'auto' rule at the
+// top of the bank (so the same question never stops a job again) and any job
+// already parked on it goes back to Waiting. Anything else is kept as a Needs
+// answer draft and the worker skips the job, as before.
+const MAX_AI_PER_RUN = 15;
+
+router.post('/ai-answer', async (req, res) => {
+  try {
+    const { runId, question: rawQ, options: rawOptions } = req.body || {};
+    const question = str(rawQ, 1000);
+    if (!runId || !question) return res.status(400).json({ error: 'runId and question are required' });
+    const options = cleanList(rawOptions, 20, 200);
+
+    const config = await NaukriConfig.getForUser(req.userId);
+    const auto = config.autoAnswer || {};
+    if (!auto.enabled) return res.json({ answer: null, reason: 'off' });
+    const min = auto.minConfidence || 85;
+
+    // Per-run cap, taken atomically so parallel calls cannot overshoot it.
+    const slot = await NaukriRun.findOneAndUpdate(
+      { _id: runId, userId: req.userId, status: 'running', 'stats.aiAsked': { $lt: MAX_AI_PER_RUN }, ...BASE_FILTER },
+      { $inc: { 'stats.aiAsked': 1 } },
+      { new: true, projection: { _id: 1 } },
+    );
+    if (!slot) return res.json({ answer: null, reason: `AI answer limit for this run (${MAX_AI_PER_RUN}) reached, or the run is not running` });
+
+    const text = await resumeTextFor(req.userId, config);
+    const profile = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
+    const rules = plainAnswers(config);
+    const out = await naukriDraft.draftAnswer(question, { resumeText: text, profile, options, rules, userId: req.userId });
+    const confidence = out.confidence || 0;
+
+    if (out.status === 'ready' && confidence >= min) {
+      const pattern = matchable(question).slice(0, 300);
+      const kind = options.length ? 'choice' : /^\d+(\.\d+)?$/.test(out.answer) ? 'number' : 'text';
+      const rule = { pattern, answer: out.answer, kind, enabled: true, origin: 'auto', confidence, quote: out.quote, createdAt: new Date() };
+      // Atomic, and only if no rule with this pattern exists yet — two jobs
+      // asking the same question at once must not add it twice.
+      await NaukriConfig.updateOne(
+        { userId: req.userId, 'answers.pattern': { $ne: pattern } },
+        { $push: { answers: { $each: [rule], $position: 0 } }, $pull: { drafts: { question } } },
+      );
+      await NaukriRun.updateOne({ _id: runId, userId: req.userId }, { $inc: { 'stats.aiAnswered': 1 } });
+      const fresh = await NaukriConfig.getForUser(req.userId);
+      await requeueAnswered(req.userId, fresh);
+      return res.json({ answer: out.answer, confidence, rule });
+    }
+
+    // Not sure enough: keep the draft (with its %) for Needs answer.
+    if (out.code !== 'AI_KEY_REQUIRED') {
+      const draft = {
+        question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options, confidence,
+        basis: draftBasis(text, profile, rules), createdAt: new Date(),
+      };
+      await NaukriConfig.updateOne({ userId: req.userId }, { $pull: { drafts: { question } } });
+      await NaukriConfig.updateOne({ userId: req.userId }, { $push: { drafts: { $each: [draft], $slice: -300 } } });
+    }
+    res.json({
+      answer: null, confidence,
+      reason: out.code === 'AI_KEY_REQUIRED' ? out.note
+        : out.status === 'ready' ? `AI was ${confidence}% sure — below your ${min}%`
+        : out.status === 'error' ? (out.note || 'AI busy') : 'Your resume and answers do not say',
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1386,6 +1508,9 @@ router.post('/claim', async (req, res) => {
         filters: config.filters,
         profile: config.profile,
         answers: config.answers.filter(a => a.enabled),
+        // Whether the worker may ask /ai-answer mid-questionnaire. The server
+        // re-checks it (and the threshold) on every call regardless.
+        autoAnswer: { enabled: !!(config.autoAnswer && config.autoAnswer.enabled) },
         onUnknownQuestion: config.onUnknownQuestion,
         apply: config.apply,
         headlineVariants: config.headlineVariants,

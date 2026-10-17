@@ -85,12 +85,12 @@ function claimLock() {
 // Vercel's 60s function cap, so a slow but live response is never cut off.
 const API_TIMEOUT_MS = 90 * 1000;
 
-async function api(pathname, body) {
+async function api(pathname, body, timeoutMs = API_TIMEOUT_MS) {
   const res = await fetch(CFG.outreachUrl + pathname, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Worker-Secret': CFG.workerSecret },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(API_TIMEOUT_MS),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   const text = await res.text();
   let data;
@@ -327,9 +327,20 @@ async function executeRun(runDoc, config, openSession = null) {
           return {};
         }
         resumePath = await fetchResume(runDoc.id);
+        // Live AI answers: one try, a short deadline, and any failure is "no
+        // answer" (the job is skipped as before). Never the long retry the
+        // result reports get — a Naukri form is open and waiting.
+        const askAI = async (question, options) => {
+          try {
+            return await api('/api/naukri/ai-answer', { runId: runDoc.id, question, options }, 30 * 1000);
+          } catch (err) {
+            log('AI answer unavailable:', err.message.split('\n')[0]);
+            return null;
+          }
+        };
         const out = await Promise.race([
           driver.apply(session, {
-            config, jobs, resumePath, dryRun: !!runDoc.dryRun, onProgress, onResult,
+            config, jobs, resumePath, dryRun: !!runDoc.dryRun, onProgress, onResult, askAI,
           }),
           expired,
         ]);

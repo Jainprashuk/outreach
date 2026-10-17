@@ -6,7 +6,7 @@
 // No database, no network, no browser — every function here is pure.
 
 const { resolveAnswer, pickOption, matchable, STARTER_RULES } = require('../lib/naukriAnswers');
-const { parseDraft, quoteIsReal, ruleLines } = require('../lib/naukriDraft');
+const { parseDraft, quoteIsReal, ruleLines, readConfidence } = require('../lib/naukriDraft');
 
 let pass = 0, fail = 0;
 const ok = (label, cond, detail = '') => {
@@ -94,6 +94,24 @@ eq('…and is labelled as coming from an answer',
 eq('a made-up earlier answer is rejected',
   parseDraft('{"answer":"7","source":"answer","quote":"how many years of angular experience A: 7"}',
     { ...ctx, rules: given, question: 'Years in Angular?' }).status, 'unknown');
+
+console.log('\nconfidence');
+eq('read as given', parseDraft('{"answer":"Yes","source":"resume","quote":"Built payment systems in Node.js","confidence":93}', ctx).confidence, 93);
+eq('a 0–1 scale is read as a percentage', readConfidence(0.88), 88);
+eq('"90%" is read', readConfidence('90%'), 90);
+eq('clamped to 100', readConfidence(250), 100);
+eq('missing → 0, never assumed', parseDraft('{"answer":"Yes","source":"resume","quote":"Built payment systems in Node.js"}', ctx).confidence, 0);
+eq('a failed check → 0 even at 99', parseDraft('{"answer":"Yes","source":"resume","quote":"10 years of SAP","confidence":99}', ctx).confidence, 0);
+eq('a "No" resting only on the skill being absent is capped at 60',
+  parseDraft('{"answer":"No","source":"resume","quote":"Built payment systems in Node.js","confidence":95}',
+    { ...ctx, options: ['Yes', 'No'], question: 'Do you have experience with SAP ABAP?' }).confidence, 60);
+eq('a "No" the quote actually speaks to keeps its %',
+  parseDraft('{"answer":"No","source":"resume","quote":"Built payment systems in Node.js","confidence":90}',
+    { ...ctx, options: ['Yes', 'No'], question: 'Have you built payment systems outside Node.js?' }).confidence, 90);
+eq('a "No" from your own earlier answer keeps its %',
+  parseDraft('{"answer":"No","source":"answer","quote":"how many years of react experience A: 4","confidence":95}',
+    { ...ctx, rules: given, question: 'Are you new to React?' }).confidence, 95);
+eq('an option that does not fit → 0', parseDraft('{"answer":"Maybe","quote":"Node.js","confidence":97}', { ...ctx, options: ['Yes', 'No'] }).confidence, 0);
 
 ok('quoteIsReal is loose on spacing', quoteIsReal('built  payment systems', [resumeText]));
 ok('quoteIsReal rejects tiny quotes', !quoteIsReal('a', [resumeText]));

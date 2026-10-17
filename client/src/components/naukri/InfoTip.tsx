@@ -71,7 +71,8 @@ export const JOBS_INFO: Record<string, ReactNode> = {
   waiting: <>Approved and queued to be sent, in the order the next apply run takes them. They go out when you press Apply,
     when you approve more, or at the schedule&apos;s Apply time — within the per-run and daily limits. Un-approve any you change your mind on.</>,
   answer: <>The worker stopped on a screening question it had no answer for, so it skipped the job rather than guess.
-    Each question comes with an AI draft from your resume. Answer it once (Use) — it becomes a rule, and every job that asked it goes back to Waiting.</>,
+    Each question comes with an AI draft from your resume, with how sure the AI is. Answer it once (Use) — it becomes a rule, and every job that asked it goes back to Waiting.
+    With “Let AI answer during apply” on (Configuration → Answers), confident answers are used on the spot instead and listed here under Auto-answered to review.</>,
   applied: <>Applications that actually went out. Update each one&apos;s status as recruiters respond (in review, interviewing, offer, rejected),
     and use Find people to reach someone at the company.</>,
   skipped: <>Jobs the worker can never apply to on Naukri: they apply on the company&apos;s own site, are walk-in drives, have closed,

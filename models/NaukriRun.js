@@ -58,6 +58,10 @@ const naukriRunSchema = new mongoose.Schema({
     autoApproved: { type: Number, default: 0 },
     // Harvest only: listings read off Recommended jobs.
     recommended: { type: Number, default: 0 },
+    // Apply only: AI calls made for live answers (capped per run), and how
+    // many of them were confident enough to use.
+    aiAsked:    { type: Number, default: 0 },
+    aiAnswered: { type: Number, default: 0 },
   },
 
   // Per-job outcomes for an apply run. This is the audit trail: what the worker

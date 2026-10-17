@@ -133,7 +133,7 @@ async function harvest(session, { config, onProgress }) {
 const STUB_QUESTION = 'Do you have experience with SAP?';
 const STUB_OPTIONS = ['Yes', 'No'];
 
-async function apply(session, { config = {}, jobs, dryRun, onProgress, onResult }) {
+async function apply(session, { config = {}, jobs, dryRun, onProgress, onResult, askAI = null }) {
   const { resolveAnswer, pickOption } = require('../../lib/naukriAnswers');
   maybeCheckpoint();
   maybeFail('apply');
@@ -154,7 +154,17 @@ async function apply(session, { config = {}, jobs, dryRun, onProgress, onResult 
     // runs end to end without a real screening form.
     const asks = i % 3 === 2;
     const resolved = asks ? resolveAnswer(STUB_QUESTION, config) : null;
-    const unanswerable = asks && !(resolved.matched && pickOption(resolved.answer, STUB_OPTIONS));
+    let aiPct = null;
+    let unanswerable = asks && !(resolved.matched && pickOption(resolved.answer, STUB_OPTIONS));
+    // Same live path as the real driver: no rule → ask the AI once.
+    if (unanswerable && !dryRun && askAI && config.autoAnswer && config.autoAnswer.enabled) {
+      const live = await askAI(STUB_QUESTION, STUB_OPTIONS).catch(() => null);
+      if (live && live.answer && pickOption(live.answer, STUB_OPTIONS)) {
+        unanswerable = false;
+        aiPct = live.confidence;
+        if (live.rule) config.answers = [live.rule, ...(config.answers || [])];
+      }
+    }
 
     if (dryRun) {
       // A rehearsal must leave no trace on the job — the server enforces that
@@ -178,7 +188,7 @@ async function apply(session, { config = {}, jobs, dryRun, onProgress, onResult 
     }
 
     stats.applied++;
-    await onResult({ jobId: job.id, outcome: 'applied', reason: 'Applied (stub)' });
+    await onResult({ jobId: job.id, outcome: 'applied', reason: aiPct ? `Applied (stub) · 1 answered by AI (${aiPct}%)` : 'Applied (stub)' });
   }
 
   onProgress({ phase: 'applying', label: 'done', page: jobs.length, pagesTotal: jobs.length, ...stats });
