@@ -78,11 +78,19 @@ function claimLock() {
 }
 
 // ── portal API ──────────────────────────────────────────────────────────────
+// Every portal call gets a deadline. Without one, a request whose connection
+// went quiet (Wi-Fi drop, sleep mid-request) never settles: the poll loop stops
+// for good while holding the shared Chrome lock, so neither worker runs again,
+// and the panel keeps showing the last heartbeat as "ready". Longer than
+// Vercel's 60s function cap, so a slow but live response is never cut off.
+const API_TIMEOUT_MS = 90 * 1000;
+
 async function api(pathname, body) {
   const res = await fetch(CFG.outreachUrl + pathname, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-Worker-Secret': CFG.workerSecret },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   const text = await res.text();
   let data;
@@ -97,6 +105,7 @@ async function api(pathname, body) {
 async function fetchResume(runId) {
   const res = await fetch(CFG.outreachUrl + '/api/naukri/worker-resume', {
     headers: { 'X-Worker-Secret': CFG.workerSecret },
+    signal: AbortSignal.timeout(API_TIMEOUT_MS),
   });
   if (!res.ok) return null;
   const disp = res.headers.get('content-disposition') || '';
