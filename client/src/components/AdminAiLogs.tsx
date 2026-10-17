@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useState } from 'react';
 import { fmtAgo } from '../lib/analytics';
 import { RefreshBar, Refreshing } from './RefreshBar';
+import AiKeysRollout from './AiKeysRollout';
 import {
   adminAiCallApi, adminAiCallsApi,
   type AiCallDetail, type AiCallRow, type AiCallsView, type AiFeature, type AiProviderStats,
@@ -51,6 +52,7 @@ export default function AdminAiLogs() {
   const [model, setModel] = useState('');
   const [slowMs, setSlowMs] = useState('');
   const [source, setSource] = useState('');
+  const [keySource, setKeySource] = useState('');
   const [runId, setRunId] = useState('');
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');   // q, debounced
@@ -74,10 +76,11 @@ export default function AdminAiLogs() {
     if (model) p.model = model;
     if (slowMs) p.slowMs = slowMs;
     if (source) p.source = source;
+    if (keySource) p.keySource = keySource;
     if (runId) p.runId = runId;
     if (query) p.q = query;
     return p;
-  }, [range, provider, feature, outcome, userId, model, slowMs, source, runId, query]);
+  }, [range, provider, feature, outcome, userId, model, slowMs, source, keySource, runId, query]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -109,9 +112,9 @@ export default function AdminAiLogs() {
     }
   };
 
-  const filtered = !!(provider || feature || outcome || userId || model || slowMs || source || runId || query);
+  const filtered = !!(provider || feature || outcome || userId || model || slowMs || source || keySource || runId || query);
   const clear = () => {
-    setProvider(''); setFeature(''); setOutcome(''); setUserId(''); setModel(''); setSlowMs(''); setSource(''); setRunId(''); setQ('');
+    setProvider(''); setFeature(''); setOutcome(''); setUserId(''); setModel(''); setSlowMs(''); setSource(''); setKeySource(''); setRunId(''); setQ('');
   };
 
   const totalCalls = (data?.providers || []).reduce((n, p) => n + p.calls, 0);
@@ -128,11 +131,12 @@ export default function AdminAiLogs() {
 
   return (
     <>
+      <AiKeysRollout />
       {data && (
         <div className="an-card" style={{ marginBottom: 16 }}>
           <div className="an-card-body" style={{ display: 'flex', gap: 18, flexWrap: 'wrap', alignItems: 'center', fontSize: 12.5 }}>
             <span>
-              <i className="ti ti-sparkles" /> Gemini today: <b style={{ color: data.geminiToday >= GEMINI_FREE_PER_DAY ? 'var(--red)' : undefined }}>
+              <i className="ti ti-sparkles" /> Gemini today (your key): <b style={{ color: data.geminiToday >= GEMINI_FREE_PER_DAY ? 'var(--red)' : undefined }}>
                 {data.geminiToday} / {GEMINI_FREE_PER_DAY}
               </b> free requests <span style={{ color: 'var(--text3)' }}>(resets at midnight Pacific · {data.geminiModel})</span>
             </span>
@@ -235,6 +239,11 @@ export default function AdminAiLogs() {
               <option value="live">Logged live (full detail)</option>
               <option value="history">From history (before this tab)</option>
             </select>
+            <select value={keySource} onChange={e => setKeySource(e.target.value)} aria-label="Whose key" style={{ width: 'auto' }}>
+              <option value="">Any key</option>
+              <option value="owner">Your keys</option>
+              <option value="user">Their own keys</option>
+            </select>
             {runId && (
               <span className="badge" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                 One request's attempts
@@ -287,6 +296,7 @@ export default function AdminAiLogs() {
                               <span className="badge">{featureLabel(r.feature)}</span>
                               {r.attempt > 1 && <span className="badge badge-pending" title="An earlier provider failed first">attempt {r.attempt}</span>}
                               {r.source === 'history' && <span className="badge" title={r.note || ''}>history</span>}
+                              {r.keySource === 'user' && <span className="badge badge-sent" title="Ran on the account's own key">own key</span>}
                             </div>
                             <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {r.userEmail || <span style={{ color: 'var(--text3)' }}>no account</span>}

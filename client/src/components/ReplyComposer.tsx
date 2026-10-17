@@ -9,7 +9,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
-import { draftReplyApi, sendReplyApi, type Contact } from '../lib/api';
+import { draftReplyApi, sendReplyApi, isAiKeyRequired, type Contact } from '../lib/api';
 
 const PLACEHOLDER = /\[[^\]\n]{2,40}\]/g;
 
@@ -26,6 +26,7 @@ export default function ReplyComposer({ contact }: { contact: Contact }) {
   const [sending, setSending] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState('');
+  const [needsKey, setNeedsKey] = useState(false);
   const [provider, setProvider] = useState('');
 
   const placeholders = body.match(PLACEHOLDER) || [];
@@ -34,6 +35,7 @@ export default function ReplyComposer({ contact }: { contact: Contact }) {
     setOpen(true);
     setDrafting(true);
     setError('');
+    setNeedsKey(false);
     setConfirming(false);
     try {
       // The draft is told whether a resume is attached, so it only says so when true.
@@ -42,6 +44,7 @@ export default function ReplyComposer({ contact }: { contact: Contact }) {
       setProvider(d.provider);
     } catch (err: any) {
       setError(err.message);
+      setNeedsKey(isAiKeyRequired(err));
     } finally {
       setDrafting(false);
     }
@@ -126,7 +129,12 @@ export default function ReplyComposer({ contact }: { contact: Contact }) {
           {' '}<Link to="/settings">Add it to your reply profile</Link> so it's there next time.
         </div>
       )}
-      {error && <div className="reply-composer-error"><i className="ti ti-alert-circle" /> {error}</div>}
+      {error && (
+        <div className="reply-composer-error">
+          <i className="ti ti-alert-circle" /> {error}
+          {needsKey && <> <Link to="/settings#ai-keys">Add your AI keys →</Link></>}
+        </div>
+      )}
 
       <div className="reply-composer-foot">
         {hasResume ? (

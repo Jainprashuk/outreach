@@ -449,6 +449,11 @@ export default function Admin() {
                           <div style={{ display: 'flex', gap: 5, marginTop: 3 }}>
                             {u.isAdmin && <span className="badge badge-approved">admin</span>}
                             {!u.isAdmin && u.libraryAccess && <span className="badge" title="Can see the shared Library">library</span>}
+                            {(u.config.aiKeyCount ?? 0) > 0
+                              ? <span className="badge" title="How many of their own AI keys are saved (Groq is the required one)">keys {u.config.aiKeyCount}/3</span>
+                              : u.aiOwnerFallback
+                                ? <span className="badge badge-queued" title="AI runs on your keys">AI fallback</span>
+                                : <span className="badge" title="No AI keys of their own and no fallback" style={{ opacity: 0.7 }}>no AI keys</span>}
                             {u.status === 'invited' && <span className="badge badge-pending">never signed in</span>}
                             {u.status === 'disabled' && <span className="badge badge-rejected">disabled</span>}
                             {isSelf && <span className="badge">you</span>}

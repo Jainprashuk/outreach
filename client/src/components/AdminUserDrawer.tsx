@@ -6,7 +6,7 @@ import Switch from './Switch';
 import { fmtAgo } from '../lib/analytics';
 import {
   adminCheckMailboxApi, adminPauseSendingApi, adminResumeSendingApi, adminRevokeSessionsApi,
-  adminSendEmailNowApi, adminSetLibraryAccessApi, adminUpdateUserApi, type AdminSendNowType, type AdminUserRow,
+  adminSendEmailNowApi, adminSetLibraryAccessApi, adminSetAiFallbackApi, adminUpdateUserApi, type AdminSendNowType, type AdminUserRow,
 } from '../lib/api';
 
 // Admin → Overview → click an account. Everything an admin can do to ONE
@@ -202,6 +202,23 @@ export default function AdminUserDrawer({ row, isSelf, onClose, onChanged, onOpe
               await adminSetLibraryAccessApi(id, on);
               return on ? 'Library turned on for them' : 'Library hidden for them';
             })} />
+        </div>
+        <div className="ud-action">
+          <div className="ud-action-text">
+            <div>Use my AI keys (fallback)</div>
+            <div>{(() => {
+              const n = row.config?.aiKeyCount ?? 0;
+              const own = n ? `Their own keys: ${n} of 3 (always used first).` : 'No AI keys of their own.';
+              return row.aiOwnerFallback
+                ? `${own} When they have none, AI runs on your keys.`
+                : `${own} Turn on to let AI run on your keys when they have none.`;
+            })()}</div>
+          </div>
+          <Switch label="Use my AI keys (fallback)" checked={row.aiOwnerFallback === true} disabled={!!busy}
+            onChange={on => run('aifallback', async () => {
+              await adminSetAiFallbackApi(id, on);
+              return on ? 'They can now use your AI keys as a fallback' : 'Your AI keys are off for them';
+            }, on ? { confirm: `Let ${row.email} use your AI keys when they have none of their own? Their usage counts against your free limits.` } : undefined)} />
         </div>
         <div className="ud-action">
           <div className="ud-action-text">

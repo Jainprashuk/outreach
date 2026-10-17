@@ -7,6 +7,7 @@ const { COOLDOWN_LABEL, inCooldown, cooldownRemaining } = require('../lib/cooldo
 const { loadInterviewSets, isInInterview } = require('../lib/interviewGuard');
 const { importContacts } = require('../lib/contactImport');
 const { classifyReply } = require('../lib/replyClassifier');
+const { chainFor } = require('../lib/classify/providers');
 const { deadline } = require('../lib/http');
 const actionQueue = require('../lib/actionQueue');
 const contactList = require('../lib/contactList');
@@ -434,10 +435,22 @@ const needsBackfillFilter = {
   ],
 };
 
+// The backlog for one account. Without an AI key it may use (lib/ai/keys.js), a reply
+// that still needs sorting can't be sorted — matching it anyway would hand the Mailbox
+// loop and the cron the same contacts forever. They come back the moment a key is added.
+const backfillFilterFor = async (userId) => {
+  if ((await chainFor(userId)).length) return { ...needsBackfillFilter, userId };
+  return {
+    ...needsBackfillFilter,
+    $or: needsBackfillFilter.$or.filter(c => !('replyClassifierOk' in c)),
+    userId,
+  };
+};
+
 // GET /api/contacts/backfill-replies/count — how many legacy sends/replies still need backfilling
 router.get('/backfill-replies/count', async (req, res) => {
   try {
-    const count = await Contact.countDocuments({ ...needsBackfillFilter, userId: req.userId });
+    const count = await Contact.countDocuments(await backfillFilterFor(req.userId));
     res.json({ count });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -457,7 +470,8 @@ router.get('/backfill-replies/count', async (req, res) => {
 const BACKFILL_BUDGET_MS = 20_000;
 
 const runBackfillBatch = async (limit, userId) => {
-  const contacts = await Contact.find({ ...needsBackfillFilter, userId }).limit(limit);
+  const filter = await backfillFilterFor(userId);
+  const contacts = await Contact.find(filter).limit(limit);
   const budget = deadline(BACKFILL_BUDGET_MS);
   let processed = 0;
 
@@ -503,7 +517,7 @@ const runBackfillBatch = async (limit, userId) => {
     processed++;
   }
 
-  const remaining = await Contact.countDocuments({ ...needsBackfillFilter, userId });
+  const remaining = await Contact.countDocuments(filter);
   return { processed, remaining };
 };
 
@@ -536,6 +550,7 @@ router.post('/:id/classify-reply', async (req, res) => {
     applyVerdict(contact, verdict);
     await contact.save();
 
+    if (verdict.noKey) return res.status(409).json({ error: 'Sorting replies with AI needs your own free AI key. Add one in Settings → AI keys.', code: 'AI_KEY_REQUIRED' });
     if (!verdict.success) return res.status(502).json({ error: 'Every classifier provider failed — they may all still be rate-limited. Try again shortly.' });
     res.json(serialize(contact.toObject()));
   } catch (err) {

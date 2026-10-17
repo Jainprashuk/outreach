@@ -35,6 +35,16 @@ const settingsSchema = new mongoose.Schema({
   // period, locations. The model is told to use only these, so they are what stops it
   // inventing an answer.
   replyProfile: { type: String, default: '', maxlength: 2000 },
+  // This user's own AI keys (lib/ai/keys.js), AES-256-GCM like the Gmail app
+  // password and stripped in toJSON the same way. aiKeyStatus is what the last
+  // real call with each key said: 'ok', 'invalid' (rejected) or 'quota' (out of
+  // today's free allowance).
+  aiKeys: {
+    geminiEnc:   { type: String, default: '' },
+    groqEnc:     { type: String, default: '' },
+    cerebrasEnc: { type: String, default: '' },
+  },
+  aiKeyStatus: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
 
   // ── Job-posting sync (see lib/postingSync.js) ────────────────────────────
   // Scalars, so the singleton is the right home; the boards themselves are a
@@ -62,6 +72,11 @@ settingsSchema.set('toJSON', {
     // The client only ever needs to know whether one is set, never its value.
     ret.hasGmailAppPassword = !!ret.gmailAppPasswordEnc;
     delete ret.gmailAppPasswordEnc;
+    const ai = ret.aiKeys || {};
+    ret.hasGeminiKey = !!ai.geminiEnc;
+    ret.hasGroqKey = !!ai.groqEnc;
+    ret.hasCerebrasKey = !!ai.cerebrasEnc;
+    delete ret.aiKeys;
     if (ret.resume) {
       ret.resume = {
         filename: ret.resume.filename,

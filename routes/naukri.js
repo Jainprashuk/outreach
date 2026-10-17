@@ -687,6 +687,9 @@ router.post('/needs-answer/draft', async (req, res) => {
     const profile = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
     const rules = plainAnswers(config);
     const out = await draftAnswer(question, { resumeText: resumeTextNow, profile, options, rules, userId: req.userId });
+    // Not saved as an 'error' draft: nothing is wrong with the question, and the
+    // tab retries missing drafts on its next load once a key is added.
+    if (out.code === 'AI_KEY_REQUIRED') return res.status(409).json({ error: out.note, code: out.code });
     const draft = {
       question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options,
       basis: draftBasis(resumeTextNow, profile, rules), createdAt: new Date(),

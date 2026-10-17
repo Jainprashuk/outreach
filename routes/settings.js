@@ -3,6 +3,15 @@ const multer = require('multer');
 const Settings = require('../models/Settings');
 const User = require('../models/User');
 const { PREFS, PREF_KEYS, isPref } = require('../lib/lifecycle/types');
+const credentials = require('../lib/credentials');
+const aiKeys = require('../lib/ai/keys');
+const { KIND } = require('../lib/classify/providers/kinds');
+// The bare adapters, not the logged chain: checking a key is not an AI call worth a log row.
+const RAW_PROVIDERS = {
+  gemini: require('../lib/classify/providers/gemini'),
+  groq: require('../lib/classify/providers/groq'),
+  cerebras: require('../lib/classify/providers/cerebras'),
+};
 
 const router = express.Router();
 
@@ -195,6 +204,82 @@ router.put('/library-sharing', async (req, res) => {
     if (typeof sharing !== 'boolean') return res.status(400).json({ error: 'Expected { sharing: true|false }' });
     await User.updateOne({ _id: req.userId }, { $set: { libraryOptOut: !sharing } });
     res.json({ sharing });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Your own AI keys ─────────────────────────────────────────────────────────
+// Gemini, Groq and Cerebras keys this account's AI runs on (lib/ai/keys.js).
+// Separate from /api/settings for the same reason as /library-sharing.
+
+/** One tiny real call, so a mistyped key is caught on Save rather than at 2 AM. */
+async function checkKey(provider, key) {
+  const model = provider === 'gemini' ? (process.env.GEMINI_USER_MODEL || undefined) : undefined;
+  const res = await RAW_PROVIDERS[provider].complete(
+    { system: 'Answer with the single word OK.', prompt: 'Say OK.', maxTokens: 16, temperature: 0 },
+    { apiKey: key, model, timeoutMs: 15_000 },
+  );
+  // A cut-off or odd answer still proves the key was accepted.
+  if (res.kind === KIND.OK || res.kind === KIND.BAD_OUTPUT) return { ok: true, state: 'ok' };
+  if (res.kind === KIND.RATE_LIMITED) return { ok: true, state: 'quota' };
+  if (res.kind === KIND.AUTH) return { ok: false, status: 400, error: `${aiKeys.LABEL[provider]} rejected this key. Check you copied all of it.` };
+  return { ok: false, status: 502, error: `Couldn't reach ${aiKeys.LABEL[provider]} to check the key. Try again in a minute.` };
+}
+
+router.get('/ai-keys', async (req, res) => {
+  try {
+    res.json(await aiKeys.aiAccess(req.userId));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /api/settings/ai-keys { provider, key } — checks the key, then stores it encrypted.
+router.put('/ai-keys', async (req, res) => {
+  try {
+    const provider = String((req.body || {}).provider || '');
+    const key = String((req.body || {}).key || '').trim();
+    if (!aiKeys.PROVIDERS.includes(provider)) return res.status(400).json({ error: 'Unknown provider' });
+    if (!key) return res.status(400).json({ error: 'Paste your key first' });
+    if (key.length > 300 || /\s/.test(key)) return res.status(400).json({ error: "That doesn't look like an API key" });
+    if (!credentials.isConfigured()) {
+      return res.status(503).json({ error: 'CREDENTIAL_KEY is not set, so a key cannot be stored safely.' });
+    }
+    // Groq is required; the others are backups to it, never a substitute.
+    if (provider !== 'groq') {
+      const s = await Settings.findOne({ userId: req.userId }, { 'aiKeys.groqEnc': 1 }).lean();
+      if (!(s && s.aiKeys && s.aiKeys.groqEnc)) {
+        return res.status(400).json({ error: 'Add your Groq key first — it does the work. Gemini and Cerebras are backups to it.' });
+      }
+    }
+    const check = await checkKey(provider, key);
+    if (!check.ok) return res.status(check.status).json({ error: check.error });
+
+    await Settings.getForUser(req.userId);
+    await Settings.updateOne({ userId: req.userId }, {
+      $set: {
+        [`aiKeys.${provider}Enc`]: credentials.encrypt(key),
+        [`aiKeyStatus.${provider}`]: { state: check.state, checkedAt: new Date(), error: null },
+      },
+    });
+    aiKeys.forget(req.userId);
+    res.json(await aiKeys.aiAccess(req.userId));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.delete('/ai-keys/:provider', async (req, res) => {
+  try {
+    const provider = req.params.provider;
+    if (!aiKeys.PROVIDERS.includes(provider)) return res.status(404).json({ error: 'Unknown provider' });
+    await Settings.updateOne({ userId: req.userId }, {
+      $set: { [`aiKeys.${provider}Enc`]: '' },
+      $unset: { [`aiKeyStatus.${provider}`]: '' },
+    });
+    aiKeys.forget(req.userId);
+    res.json(await aiKeys.aiAccess(req.userId));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -28,6 +28,9 @@ const aiCallSchema = new mongoose.Schema({
   attempt: { type: Number, default: 1 },        // 1 = the first provider tried in that run
   provider: { type: String, required: true },   // gemini | groq | cerebras
   model: { type: String, default: null },
+  // Whose key paid for it: 'user' (their own, lib/ai/keys.js) or 'owner' (the env
+  // keys). Null on rows written before per-user keys existed — those were all owner.
+  keySource: { type: String, enum: ['user', 'owner', null], default: null },
   method: { type: String, enum: ['classify', 'complete'], required: true },
   // ok · rate-limited · auth · transient · bad-output · aborted (lib/classify/providers/kinds.js)
   outcome: { type: String, required: true },

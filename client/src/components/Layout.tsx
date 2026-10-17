@@ -8,6 +8,7 @@ import SendJobWidget from './SendJobWidget';
 import NavTip from './NavTip';
 import NotificationBell from './NotificationBell';
 import UserMenu from './UserMenu';
+import AiKeyBanner from './AiKeyBanner';
 
 /** One sidebar link. The label sits in its own span so the collapsed rail can hide it
  *  with CSS, and carries a native tooltip while collapsed since the text is gone. */
@@ -172,6 +173,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
             </div>
           )}
         </div>
+        {owner && !minimal && <AiKeyBanner />}
         <main id="main">{wide ? children : <div className="section" style={{ flex: 1 }}>{children}</div>}</main>
       </div>
       <SendJobWidget />

@@ -44,6 +44,9 @@ const userSchema = new mongoose.Schema({
   // checks are written so that undefined means the default.
   libraryAccess: { type: Boolean, default: false },
   libraryOptOut: { type: Boolean, default: false },
+  // An admin let this account use the owner's AI keys when it has none of its
+  // own (lib/ai/keys.js). Off unless turned on; check `=== true`.
+  aiOwnerFallback: { type: Boolean, default: false },
 
   // invited  — an admin whitelisted the address; has never signed in
   // active   — has completed at least one sign-in

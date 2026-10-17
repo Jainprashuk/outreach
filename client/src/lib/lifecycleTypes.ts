@@ -44,6 +44,16 @@ export const EMAIL_TYPES: EmailTypeMeta[] = [
     what: "What happened across every account today: sends, replies (and how many interested), bounces, contacts added, finished campaigns, plus anything that needs a look. Counts only, no contact details.",
     when: 'Every day at 21:00 IST, to admins only. "Send today\'s digest now" sends it to you at any time.',
   },
+  {
+    key: 'ai-key-announce', label: 'AI keys: rollout notice', icon: 'ti-key', pref: null,
+    what: 'AI is moving to their own free keys (Gemini, Groq, Cerebras): where to get each, and what happens if they don\'t.',
+    when: 'Once, when you turn on the AI keys rollout, to accounts with no key and no fallback. Hourly check.',
+  },
+  {
+    key: 'ai-key-ended', label: 'AI keys: AI is now off', icon: 'ti-key-off', pref: null,
+    what: 'The grace period is over and AI is off for them until they add a key. Sending is not affected.',
+    when: 'Once, after the grace date, to accounts that still have no key and no fallback. Hourly check.',
+  },
 ];
 
 export type EffectiveTone = 'on' | 'off' | 'blocked' | 'optout' | 'test';

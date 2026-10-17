@@ -567,7 +567,7 @@ app.get('/api/share-link', requireDb, attachUser, async (req, res) => {
 const { serve } = require('inngest/express');
 const { inngest } = require('./inngest');
 const { sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, reportFailedFunctions } = require('./inngest-fns');
-const { lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver } = require('./lib/lifecycle/inngest');
+const { lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, aiKeysSweep } = require('./lib/lifecycle/inngest');
 const { prospectsSearch } = require('./lib/prospectSearch');
 const { companiesEnrich, companiesEnrichDaily } = require('./lib/discovery/enrich');
 const { sourcesHn, sourcesHnDaily, sourcesWeb, sourcesWebDaily } = require('./lib/sources/inngest');
@@ -576,7 +576,7 @@ const { campaignsRunDue } = require('./lib/campaigns/inngest');
 const { mailboxSweep, mailboxCheckUser } = require('./lib/mailbox/inngest').createMailboxFunctions({ checkMailboxForUser });
 app.use('/api/inngest', serve({
   client: inngest,
-  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, prospectsSearch, companiesEnrich, companiesEnrichDaily, sourcesHn, sourcesHnDaily, sourcesWeb, sourcesWebDaily, reportFailedFunctions, campaignsRunDue, mailboxSweep, mailboxCheckUser],
+  functions: [sendEmailBatch, sendSingleEmail, sendEmailBulk, sendEmailDrip, resumeAfterQuota, quotaWatcher, lifecycleDailySweep, weeklyReportSweep, adminDigestSweep, lifecycleDeliver, aiKeysSweep, prospectsSearch, companiesEnrich, companiesEnrichDaily, sourcesHn, sourcesHnDaily, sourcesWeb, sourcesWebDaily, reportFailedFunctions, campaignsRunDue, mailboxSweep, mailboxCheckUser],
 }));
 
 // Sign-in is an emailed one-time code; see routes/auth.js and lib/loginCode.js.

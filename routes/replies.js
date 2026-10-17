@@ -55,6 +55,7 @@ router.post('/:id/draft', async (req, res) => {
       attachResume,
       userId: req.userId,
     });
+    if (!out.ok && out.code === 'AI_KEY_REQUIRED') return res.status(409).json({ error: out.error, code: out.code });
     if (!out.ok) return res.status(502).json({ error: out.error });
 
     logEvent({ userId: req.userId, category: 'email', action: 'reply_drafted', message: `Drafted a reply to ${contact.name} with ${out.provider}`, meta: { contactId: String(contact._id), provider: out.provider } })

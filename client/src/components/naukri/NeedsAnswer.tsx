@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NaukriQuestionGroup } from '../../lib/api';
-import { naukriNeedsAnswerApi, draftNaukriAnswerApi, useNaukriAnswerApi, ignoreNaukriQuestionApi } from '../../lib/api';
+import { naukriNeedsAnswerApi, draftNaukriAnswerApi, useNaukriAnswerApi, ignoreNaukriQuestionApi, isAiKeyRequired } from '../../lib/api';
 import { Card, Muted, Hint, Empty, Notice } from './ui';
 import { useToast } from '../../context/ToastContext';
 
@@ -130,13 +130,17 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
     setGroups(gs => gs.map(g => (todo.includes(g.question) ? { ...g, drafting: true } : g)));
     (async () => {
       const queue = [...todo];
+      let noKey = false;
       const worker = async () => {
         for (let q = queue.shift(); q; q = queue.shift()) {
           const question = q;
           try {
+            if (noKey) throw new Error('no key');
             const r = await draftNaukriAnswerApi(question);
             setGroups(gs => gs.map(g => (g.question === question ? { ...g, draft: r.draft, drafting: false } : g)));
-          } catch {
+          } catch (e) {
+            // No AI key: say so once and stop asking — every other question would fail the same way.
+            if (isAiKeyRequired(e) && !noKey) { noKey = true; toast((e as Error).message, 'error'); }
             setGroups(gs => gs.map(g => (g.question === question
               ? { ...g, draft: { answer: '', quote: '', source: '', status: 'error' }, drafting: false } : g)));
           }

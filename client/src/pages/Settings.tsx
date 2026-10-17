@@ -14,6 +14,7 @@ import EmailPrefsCard from '../components/EmailPrefsCard';
 import LibrarySharingCard from '../components/LibrarySharingCard';
 import ReplyProfileCard from '../components/ReplyProfileCard';
 import DiscoveryKeysCard from '../components/DiscoveryKeysCard';
+import AiKeysCard from '../components/AiKeysCard';
 
 const VARIABLE_KEY_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
@@ -241,6 +242,8 @@ export default function Settings() {
           </div>
         </div>
       </div>
+
+      <AiKeysCard />
 
       <DiscoveryKeysCard />
 

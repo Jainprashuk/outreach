@@ -38,6 +38,7 @@ const mongoose = require('mongoose');
 const User = require('../models/User');
 const Session = require('../models/Session');
 const Settings = require('../models/Settings');
+const aiKeys = require('../lib/ai/keys');
 const Template = require('../models/Template');
 const Contact = require('../models/Contact');
 const Campaign = require('../models/Campaign');
@@ -137,7 +138,7 @@ router.get('/users', async (req, res) => {
       User.find({}, {
         email: 1, name: 1, createdAt: 1, lastLoginAt: 1, isAdmin: 1, status: 1,
         onboarding: 1, workerTokenHash: 1, shareTokenHash: 1, libraryAccess: 1, libraryOptOut: 1,
-        lastActiveAt: 1, emailOptOut: 1, emailBlockedByAdmin: 1,
+        lastActiveAt: 1, emailOptOut: 1, emailBlockedByAdmin: 1, aiOwnerFallback: 1,
       }).sort({ createdAt: 1 }).lean(),
 
       countByUserAnd(Contact, 'status',
@@ -184,6 +185,9 @@ router.get('/users', async (req, res) => {
           docs: { $sum: 1 },
           hasGmail: { $max: { $cond: [{ $gt: [{ $strLenCP: { $ifNull: ['$gmailAppPasswordEnc', ''] } }, 0] }, 1, 0] } },
           hasResume: { $max: { $cond: [{ $ifNull: ['$resume.filename', false] }, 1, 0] } },
+          // How many of their own AI keys are saved (0–3) — a count, never a key.
+          aiKeyCount: { $max: { $add: ['geminiEnc', 'groqEnc', 'cerebrasEnc'].map(f =>
+            ({ $cond: [{ $gt: [{ $strLenCP: { $ifNull: [`$aiKeys.${f}`, ''] } }, 0] }, 1, 0] })) } },
           lastMailboxCheckAt: { $max: '$lastMailboxCheckAt' },
         } },
       ]),
@@ -273,6 +277,8 @@ router.get('/users', async (req, res) => {
         // Booleans only: can they see the shared Library, and do they share into it.
         libraryAccess: u.libraryAccess === true,
         librarySharing: u.libraryOptOut !== true,
+        // May this account run on the owner's AI keys when it has none (lib/ai/keys.js).
+        aiOwnerFallback: u.aiOwnerFallback === true,
         status: u.status || 'active',
         createdAt: u.createdAt || null,
         lastLoginAt: u.lastLoginAt || null,
@@ -292,6 +298,7 @@ router.get('/users', async (req, res) => {
         config: {
           hasGmail: !!set.hasGmail,
           hasResume: !!set.hasResume,
+          aiKeyCount: set.aiKeyCount || 0,
           settingsDocs: set.docs || 0,
           templates: (tMap.get(key) || {}).total || 0,
           // Mapped to booleans and the hashes dropped in the same breath. This
@@ -536,6 +543,36 @@ router.post('/users/:id/library-access', async (req, res) => {
       meta: { targetUserId: String(target._id), targetEmail: target.email, libraryAccess: on },
     }).catch(() => {});
     res.json({ ok: true, libraryAccess: on });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * Let one account use the owner's AI keys when it has none of its own
+ * (lib/ai/keys.js). Off by default. Its own keys, if any, still come first.
+ */
+router.post('/users/:id/ai-fallback', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(400).json({ error: 'Not a valid account id' });
+    const on = req.body && req.body.on;
+    if (typeof on !== 'boolean') return res.status(400).json({ error: 'Expected { on: true|false }' });
+    const target = await User.findById(req.params.id, { email: 1 }).lean();
+    if (!target) return res.status(404).json({ error: 'No such account' });
+    await User.updateOne({ _id: target._id }, { $set: { aiOwnerFallback: on } });
+    aiKeys.forget(target._id);
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'ai-fallback',
+      message: `${target.email}: shared AI keys -> ${on}`,
+      meta: { targetUserId: String(target._id), targetEmail: target.email, aiOwnerFallback: on },
+    }).catch(() => {});
+    logEvent({
+      userId: target._id, category: 'account', action: 'changed-by-admin',
+      message: on ? 'An admin let your account use the shared AI keys when you have none of your own'
+                  : 'An admin turned off the shared AI keys for your account — AI now runs on your own keys only',
+      meta: { aiOwnerFallback: on },
+    }).catch(() => {});
+    res.json({ ok: true, aiOwnerFallback: on });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1532,6 +1569,66 @@ function pacificMidnight(now) {
   return new Date(Date.UTC(+parts.year, +parts.month - 1, +parts.day) - offset);
 }
 
+// ── AI keys rollout ──────────────────────────────────────────────────────────
+// The switch that moves everyone onto their own AI keys (lib/ai/keys.js), the
+// grace date, and how many accounts are ready.
+
+async function aiRolloutView() {
+  const cfg = await aiKeys.getAiKeysConfig({ fresh: true });
+  const [users, keyed] = await Promise.all([
+    User.find({ status: 'active' }, { aiOwnerFallback: 1 }).lean(),
+    Settings.find({ $or: aiKeys.PROVIDERS.map(p => ({ [`aiKeys.${p}Enc`]: { $nin: ['', null] } })) }, { userId: 1, aiKeys: 1 }).lean(),
+  ]);
+  const keysOf = new Map(keyed.map(s => [id(s.userId), s.aiKeys || {}]));
+  // Groq is required; Gemini/Cerebras are backups. A backup without Groq is "no key".
+  let withBackup = 0, groqOnly = 0, fallback = 0, none = 0;
+  for (const u of users) {
+    const k = keysOf.get(id(u._id)) || {};
+    if (k.groqEnc && (k.geminiEnc || k.cerebrasEnc)) withBackup++;
+    else if (k.groqEnc) groqOnly++;
+    else if (u.aiOwnerFallback === true) fallback++;
+    else none++;
+  }
+  return {
+    enforce: cfg.enforce, graceUntil: cfg.graceUntil, enforcedAt: cfg.enforcedAt,
+    inGrace: cfg.enforce && aiKeys.inGrace(cfg),
+    counts: { active: users.length, withBackup, groqOnly, fallback, none },
+  };
+}
+
+router.get('/ai-keys/rollout', async (req, res) => {
+  try { res.json(await aiRolloutView()); } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /api/admin/ai-keys/rollout { enforce?: boolean, graceUntil?: iso|null }
+router.put('/ai-keys/rollout', async (req, res) => {
+  try {
+    const body = req.body || {};
+    const change = {};
+    if (body.enforce !== undefined) {
+      if (typeof body.enforce !== 'boolean') return res.status(400).json({ error: 'enforce must be true or false' });
+      change.enforce = body.enforce;
+    }
+    if (body.graceUntil !== undefined) {
+      const d = body.graceUntil === null ? null : new Date(body.graceUntil);
+      if (d && Number.isNaN(d.getTime())) return res.status(400).json({ error: 'graceUntil is not a date' });
+      change.graceUntil = d;
+    }
+    const admin = await User.findById(req.userId, { email: 1 }).lean();
+    await aiKeys.setAiKeysConfig({ ...change, admin: { id: req.userId, email: admin ? admin.email : '' } });
+    // Announce now rather than at the next hourly sweep. Best-effort: the sweep catches up.
+    require('../inngest').inngest.send({ name: 'ai-keys/sweep', data: {} })
+      .catch(err => console.error('[ai-keys] sweep event failed:', err.message));
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'ai-keys-rollout',
+      message: `AI keys rollout: ${JSON.stringify(change)}`, meta: change,
+    }).catch(() => {});
+    res.json(await aiRolloutView());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /**
  * GET /api/admin/ai-calls?range=1h|24h|7d|30d&provider=&feature=&outcome=ok|failed|<kind>
  *   &userId=|none&model=&source=live|history&runId=&q=&slowMs=&before=<iso>&limit=
@@ -1556,6 +1653,9 @@ router.get('/ai-calls', async (req, res) => {
     const filter = { ...base };
     if (req.query.runId) { delete filter.createdAt; filter.runId = String(req.query.runId).slice(0, 40); }
     if (req.query.provider) filter.provider = String(req.query.provider).slice(0, 40);
+    // 'owner' includes rows from before keySource existed: those were all the owner's keys.
+    if (req.query.keySource === 'user') filter.keySource = 'user';
+    else if (req.query.keySource === 'owner') filter.keySource = { $ne: 'user' };
     if (req.query.model) filter.model = String(req.query.model).slice(0, 120);
     if (['live', 'history'].includes(req.query.source)) filter.source = req.query.source === 'live' ? { $ne: 'history' } : 'history';
     if (req.query.outcome === 'failed') filter.outcome = { $ne: 'ok' };
@@ -1600,7 +1700,8 @@ router.get('/ai-calls', async (req, res) => {
         { $match: base },
         { $group: { _id: '$feature', calls: { $sum: 1 }, ok: sum({ $eq: ['$outcome', 'ok'] }) } },
       ]),
-      AiCall.countDocuments({ provider: 'gemini', createdAt: { $gte: pacificMidnight(new Date()) } }),
+      // The OWNER key's allowance only — a user's own Gemini key has its own.
+      AiCall.countDocuments({ provider: 'gemini', keySource: { $ne: 'user' }, createdAt: { $gte: pacificMidnight(new Date()) } }),
       AiCall.distinct('model', { createdAt: { $gte: since } }),
       User.find({}, { email: 1 }).lean(),
     ]);
@@ -1613,6 +1714,7 @@ router.get('/ai-calls', async (req, res) => {
         userId: id(r.userId), userEmail: r.userId ? (emailOf.get(id(r.userId)) || '(deleted account)') : null,
         feature: r.feature, runId: r.runId, attempt: r.attempt, provider: r.provider, model: r.model, method: r.method,
         outcome: r.outcome, status: r.status, latencyMs: r.latencyMs, error: r.error,
+        keySource: r.keySource || 'owner',
         finishReason: r.finishReason, tokens: r.tokens || {}, result: r.result || null, context: r.context || {},
         promptPreview: preview(r.prompt, 160), outputPreview: preview(r.output, 200),
         source: r.source || 'live', note: r.note || null,

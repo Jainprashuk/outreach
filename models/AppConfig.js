@@ -2,7 +2,7 @@ const mongoose = require('mongoose');
 
 // App-wide switches that an admin flips at runtime, one document per `key`.
 //
-// Only one key exists today ('lifecycle'). THE ABSENCE OF THE DOCUMENT MEANS
+// Keys: 'lifecycle' (lib/lifecycle/config.js) and 'aiKeys' (lib/ai/keys.js). THE ABSENCE OF THE DOCUMENT MEANS
 // "EVERYTHING OFF": a database that has never had the admin panel opened — prod
 // on the day this ships — sends no lifecycle email at all. Nothing may treat a
 // missing row as a default-on, which is why lib/lifecycle/config.js reads it
@@ -30,6 +30,16 @@ const appConfigSchema = new mongoose.Schema({
     testRecipient: { type: String, default: '' },
     // Per email type. Opt-in: only an explicit `true` is on; missing = off.
     types: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
+  },
+  // Users bring their own AI keys (lib/ai/keys.js). A missing row, or enforce
+  // not exactly true, means the old behaviour: everyone runs on the owner's env
+  // keys. graceUntil keeps the owner keys on for everyone until that moment.
+  aiKeys: {
+    enforce:      { type: Boolean, default: false },
+    graceUntil:   { type: Date, default: null },
+    // When enforce first went on — the announcement email is sent once per user
+    // after this. Kept so a re-enable doesn't look like a fresh rollout.
+    enforcedAt:   { type: Date, default: null },
   },
   changes: { type: [changeSchema], default: [] },
 }, { timestamps: true });

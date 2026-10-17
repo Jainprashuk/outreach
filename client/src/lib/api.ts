@@ -173,12 +173,21 @@ export async function apiFetch<T = any>(path: string, opts?: RequestInit): Promi
     reportClientIssue('network_error', `${method} ${path}: HTTP ${res.status} with no readable response`, { url: path, method });
     throw err;
   }
-  if (!res.ok) throw new Error((data as any).error || `Request to ${path} failed`);
+  if (!res.ok) {
+    const e: any = new Error((data as any).error || `Request to ${path} failed`);
+    // A machine-readable reason when the server gave one (e.g. 'AI_KEY_REQUIRED').
+    e.code = (data as any).code || null;
+    e.status = res.status;
+    throw e;
+  }
   if (method !== 'GET' && JOB_WRITE_PATH.test(path) && typeof window !== 'undefined') {
     window.dispatchEvent(new Event(JOBS_CHANGED_EVENT));
   }
   return data as T;
 }
+
+/** True when a request failed because this account has no AI key it may use. */
+export const isAiKeyRequired = (e: any) => !!e && e.code === 'AI_KEY_REQUIRED';
 
 // ── Endpoint wrappers (1:1 with window._app) ─────────────────────────────────
 export const loadContactsApi = () => apiFetch<Contact[]>('/api/contacts');
@@ -1450,6 +1459,8 @@ export interface AdminUserRow {
   isAdmin: boolean;
   /** Can see the shared Library tab (admins always can). */
   libraryAccess?: boolean;
+  /** May run on the owner's AI keys when they have none of their own. */
+  aiOwnerFallback?: boolean;
   /** Their data is part of the shared Library (they have not opted out). */
   librarySharing?: boolean;
   status: 'active' | 'invited' | 'disabled' | 'n/a';
@@ -1463,6 +1474,8 @@ export interface AdminUserRow {
   onboarding: { completedAt: string | null; step: number; skipped: string[]; current: boolean };
   config: {
     hasGmail: boolean; hasResume: boolean; settingsDocs: number; templates: number;
+    /** How many of their own AI keys are saved, 0–3. */
+    aiKeyCount?: number;
     hasWorkerToken: boolean; hasShareToken: boolean; lastMailboxCheckAt: string | null;
   };
   contacts: AdminCount & { everSent: number; everReplied: number; everFollowedUp: number; lastSentAt: string | null };
@@ -1995,7 +2008,8 @@ export const deleteNaukriResumeApi = () =>
 
 // ── Lifecycle emails & reports ───────────────────────────────────────────────
 
-export type LifecycleType = 'welcome' | 'setup-reminder' | 'inactive' | 'weekly-report' | 'manual-report' | 'admin-daily';
+export type LifecycleType = 'welcome' | 'setup-reminder' | 'inactive' | 'weekly-report' | 'manual-report' | 'admin-daily'
+  | 'ai-key-announce' | 'ai-key-ended';
 
 export interface LifecycleConfig {
   enabled: boolean;
@@ -2542,6 +2556,8 @@ export interface AiCallRow {
   outcome: AiOutcome | string; status: number | null; latencyMs: number | null; error: string | null;
   finishReason: string | null; tokens: AiTokens; result: { category?: string; reasoning?: string } | null; context: AiContext;
   promptPreview: string; outputPreview: string;
+  /** Whose key paid: the account's own, or the owner's env keys. */
+  keySource?: 'user' | 'owner';
   /** 'history': rebuilt from the activity log for a call made before this log existed. */
   source: 'live' | 'history'; note: string | null;
 }
@@ -2621,3 +2637,41 @@ export const importLibraryApi = (tab: LibraryTab, keys: string[], template: stri
 export const librarySharingApi = () => apiFetch<{ sharing: boolean }>('/api/settings/library-sharing');
 export const setLibrarySharingApi = (sharing: boolean) =>
   apiFetch<{ sharing: boolean }>('/api/settings/library-sharing', { method: 'PUT', body: JSON.stringify({ sharing }) });
+
+// ── Your own AI keys (routes/settings.js → lib/ai/keys.js) ─────────────────
+export type AiProvider = 'gemini' | 'groq' | 'cerebras';
+export interface AiKeyStatus { state: 'ok' | 'invalid' | 'quota'; checkedAt: string; error: string | null }
+export interface AiAccess {
+  enforce: boolean;
+  graceUntil: string | null;
+  inGrace: boolean;
+  ownerFallback: boolean;
+  has: Record<AiProvider, boolean>;
+  keyCount: number;
+  /** Has the required Groq key. */
+  ready: boolean;
+  status: Partial<Record<AiProvider, AiKeyStatus>>;
+  /** Is any AI available to this account right now? */
+  aiOn: boolean;
+}
+export const aiAccessApi = () => apiFetch<AiAccess>('/api/settings/ai-keys');
+export const saveAiKeyApi = (provider: AiProvider, key: string) =>
+  apiFetch<AiAccess>('/api/settings/ai-keys', { method: 'PUT', body: JSON.stringify({ provider, key }) });
+export const removeAiKeyApi = (provider: AiProvider) =>
+  apiFetch<AiAccess>(`/api/settings/ai-keys/${provider}`, { method: 'DELETE' });
+/** Fired after a key is saved or removed, so the banner re-checks without a reload. */
+export const AI_KEYS_CHANGED_EVENT = 'outreach:ai-keys-changed';
+
+// Admin: the rollout switch and the per-user fallback.
+export interface AiRollout {
+  enforce: boolean;
+  graceUntil: string | null;
+  enforcedAt: string | null;
+  inGrace: boolean;
+  counts: { active: number; withBackup: number; groqOnly: number; fallback: number; none: number };
+}
+export const adminAiRolloutApi = () => apiFetch<AiRollout>('/api/admin/ai-keys/rollout');
+export const adminSetAiRolloutApi = (change: { enforce?: boolean; graceUntil?: string | null }) =>
+  apiFetch<AiRollout>('/api/admin/ai-keys/rollout', { method: 'PUT', body: JSON.stringify(change) });
+export const adminSetAiFallbackApi = (id: string, on: boolean) =>
+  apiFetch<{ ok: true; aiOwnerFallback: boolean }>(`/api/admin/users/${id}/ai-fallback`, { method: 'POST', body: JSON.stringify({ on }) });
