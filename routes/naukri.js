@@ -8,6 +8,7 @@ const NaukriWorker = require('../models/NaukriWorker');
 const ProspectSearch = require('../models/ProspectSearch');
 const Prospect = require('../models/Prospect');
 const Contact = require('../models/Contact');
+const Settings = require('../models/Settings');
 const { dueSlot, nextSlot, upcomingSlots, slotsOf, startOfDayIn, parseTime, MAX_SLOTS } = require('../lib/naukriSchedule');
 const { resolveAnswer, matchable, STARTER_RULES } = require('../lib/naukriAnswers');
 const { scoreJob } = require('../lib/naukriScore');
@@ -310,12 +311,17 @@ router.get('/overview', async (req, res) => {
 router.get('/config', async (req, res) => {
   try {
     const config = await NaukriConfig.getForUser(req.userId);
+    const [eff, text] = await Promise.all([effectiveResume(req.userId, config), resumeTextFor(req.userId, config)]);
+    const json = config.toJSON();
+    // The resume the card shows is the one Naukri will USE — the Settings one
+    // when no Naukri-only file was uploaded.
+    json.resume = eff
+      ? { filename: eff.filename, size: eff.size, uploadedAt: eff.uploadedAt, source: eff.source, text }
+      : { filename: '', size: 0, uploadedAt: null, source: null, text };
     res.json({
-      config: config.toJSON(),
+      config: json,
       ...scheduleView(config.schedule),
-      resume: config.resume && config.resume.size
-        ? { filename: config.resume.filename, size: config.resume.size, uploadedAt: config.resume.uploadedAt }
-        : null,
+      resume: eff ? { filename: eff.filename, size: eff.size, uploadedAt: eff.uploadedAt, source: eff.source } : null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -411,7 +417,11 @@ router.patch('/config', async (req, res) => {
       config.worker.pollSeconds = num(body.worker.pollSeconds, { min: 15, max: 120, integer: true }) ?? 20;
     }
     if (body.aiDrafts !== undefined) config.aiDrafts = !!body.aiDrafts;
-    if (body.resumeText !== undefined) config.resume.text = str(body.resumeText, 20000);
+    if (body.resumeText !== undefined) {
+      config.resume.text = str(body.resumeText, 20000);
+      // Cleared = go back to reading the resume file; anything typed is kept as yours.
+      config.resume.textFrom = config.resume.text ? 'manual' : '';
+    }
 
     if (body.filters) {
       const f = body.filters;
@@ -623,7 +633,7 @@ router.get('/needs-answer', async (req, res) => {
     const drafts = config.drafts || [];
     res.json({
       aiDrafts: !!config.aiDrafts,
-      hasResumeText: !!(config.resume && config.resume.text && config.resume.text.trim()),
+      hasResumeText: !!(await resumeTextFor(req.userId, config)).trim(),
       questions: rows.map((r) => {
         const d = drafts.find(x => sameQuestion(x.question, r._id));
         return {
@@ -658,7 +668,7 @@ router.post('/needs-answer/draft', async (req, res) => {
     const options = (job && job.questionOptions) || [];
 
     const out = await draftAnswer(question, {
-      resumeText: config.resume && config.resume.text, profile: config.profile, options, userId: req.userId,
+      resumeText: await resumeTextFor(req.userId, config), profile: config.profile, options, userId: req.userId,
     });
     const draft = { question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options, createdAt: new Date() };
     // Atomic replace rather than config.save(): the tab drafts several
@@ -758,6 +768,7 @@ router.post('/resume', (req, res) => {
         // A new file replaces the text too — unless it yielded none (a Word
         // file, a scanned PDF), in which case what you pasted before is kept.
         text: text || (config.resume && config.resume.text) || '',
+        textFrom: text ? 'naukri' : ((config.resume && config.resume.textFrom) || ''),
       };
       await config.save();
       res.json({
@@ -771,15 +782,51 @@ router.post('/resume', (req, res) => {
   });
 });
 
+// The resume Naukri uses: a Naukri-only upload if there is one, otherwise the
+// one in Settings — so nobody has to upload the same file twice. `withData`
+// loads the bytes; without it only the facts are read.
+async function effectiveResume(userId, config, { withData = false } = {}) {
+  if (config && config.resume && config.resume.size > 0) {
+    const r = config.resume;
+    return { source: 'naukri', filename: r.filename, contentType: r.contentType, size: r.size, uploadedAt: r.uploadedAt, data: withData ? r.data : undefined };
+  }
+  const s = await Settings.findOne({ userId }, withData ? { resume: 1 } : { 'resume.data': 0 }).lean();
+  if (!s || !s.resume || !s.resume.size) return null;
+  const r = s.resume;
+  return { source: 'settings', filename: r.filename, contentType: r.contentType, size: r.size, uploadedAt: r.uploadedAt, data: withData ? r.data : undefined };
+}
+
+// The text AI drafts are written from. Typed/pasted text and text from a
+// Naukri-only upload are kept as they are. Otherwise it is read from the
+// Settings resume the first time it is needed, and read again whenever that
+// file has been replaced. '' when there is nothing readable.
+async function resumeTextFor(userId, config) {
+  const r = config.resume || {};
+  const from = r.textFrom || (r.text ? 'manual' : '');
+  if (from === 'manual' || from === 'naukri') return r.text || '';
+  const eff = await effectiveResume(userId, config);
+  if (!eff || eff.source !== 'settings') return r.text || '';
+  const stamp = `settings:${eff.uploadedAt ? new Date(eff.uploadedAt).toISOString() : eff.size}`;
+  if (from === stamp && r.text) return r.text;
+  const full = await effectiveResume(userId, config, { withData: true });
+  const data = full && full.data && (full.data.buffer ? Buffer.from(full.data.buffer) : Buffer.from(full.data));
+  const text = data ? await resumeText({ mimetype: full.contentType, buffer: data }) : '';
+  await NaukriConfig.updateOne({ userId }, { $set: { 'resume.text': text, 'resume.textFrom': stamp } });
+  if (config.resume) { config.resume.text = text; config.resume.textFrom = stamp; }
+  return text;
+}
+
 async function sendResume(req, res) {
   try {
     const config = await NaukriConfig.findOne({ userId: req.userId });
-    if (!config || !config.resume || !config.resume.size) {
-      return res.status(404).json({ error: 'No resume uploaded' });
+    const r = await effectiveResume(req.userId, config, { withData: true });
+    if (!r || !r.data) {
+      return res.status(404).json({ error: 'No resume uploaded — add one in Settings' });
     }
-    res.set('Content-Type', config.resume.contentType);
-    res.set('Content-Disposition', `attachment; filename="${String(config.resume.filename).replace(/"/g, '')}"`);
-    res.send(config.resume.data);
+    const data = r.data.buffer && !Buffer.isBuffer(r.data) ? Buffer.from(r.data.buffer) : r.data;
+    res.set('Content-Type', r.contentType);
+    res.set('Content-Disposition', `attachment; filename="${String(r.filename).replace(/"/g, '')}"`);
+    res.send(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

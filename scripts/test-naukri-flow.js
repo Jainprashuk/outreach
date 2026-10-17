@@ -182,6 +182,27 @@ async function main() {
     ok('a company-site recommended job is held back like any other', recNow.filter(j => j.likelyExternal).every(j => !claimedIds.includes(String(j._id))));
     ok('and they come out applied or parked on the question', recNow.filter(j => !j.likelyExternal).every(j => ['applied', 'skipped'].includes(j.applyStatus)), recNow.map(j => j.applyStatus).join());
 
+    console.log('\nresume: the one in Settings is used');
+    const Settings = require('../models/Settings');
+    const pdf = await new Promise((resolve) => {
+      const PDF = require('pdfkit'); const d = new PDF(); const parts = [];
+      d.on('data', c => parts.push(c)); d.on('end', () => resolve(Buffer.concat(parts)));
+      d.text('Senior Engineer at Acme (2019 - 2024). Skills: Node.js, MongoDB.'); d.end();
+    });
+    await Settings.updateOne({ userId }, { $set: { userId, resume: { filename: 'cv.pdf', contentType: 'application/pdf', data: pdf, size: pdf.length, uploadedAt: new Date('2026-10-01') } } }, { upsert: true });
+    let g = await call('GET', '/config');
+    ok('card shows the Settings resume', g.config.resume.source === 'settings' && g.config.resume.filename === 'cv.pdf');
+    ok('its text is read for AI drafts', /Acme/.test(g.config.resume.text), JSON.stringify(g.config.resume.text).slice(0, 80));
+    const dl = await fetch(base + '/api/naukri/worker-resume');
+    ok('the worker downloads the Settings file', dl.ok && (await dl.arrayBuffer()).byteLength === pdf.length);
+    await call('PATCH', '/config', { resumeText: 'Typed by me: 6 years React.' });
+    await Settings.updateOne({ userId }, { $set: { 'resume.uploadedAt': new Date('2026-10-05') } });
+    g = await call('GET', '/config');
+    ok('typed text is kept even when the Settings file changes', g.config.resume.text === 'Typed by me: 6 years React.');
+    await call('PATCH', '/config', { resumeText: '' });
+    g = await call('GET', '/config');
+    ok('clearing the text reads the file again', /Acme/.test(g.config.resume.text));
+
     console.log('\nschedule slot during an active run waits');
     const now = new Date();
     const ist = new Date(now.getTime() - 60_000).toLocaleTimeString('en-GB', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -200,7 +221,7 @@ async function main() {
   } finally {
     server.close();
     const db = mongoose.connection.db;
-    for (const c of ['naukrijobs', 'naukriruns', 'naukriconfigs', 'naukriworkers', 'notifications', 'issues']) {
+    for (const c of ['naukrijobs', 'naukriruns', 'naukriconfigs', 'naukriworkers', 'notifications', 'issues', 'settings']) {
       await db.collection(c).deleteMany({ userId }).catch(() => {});
     }
     await mongoose.disconnect();

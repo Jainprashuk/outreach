@@ -1797,7 +1797,9 @@ export interface NaukriConfig {
     /** Walk the whole apply flow, fill everything, submit nothing. */
     dryRun: boolean;
   };
-  resume?: { filename: string; size: number; uploadedAt: string | null; text?: string };
+  /** The resume Naukri will use: a Naukri-only upload ('naukri'), else the
+      one from Settings ('settings'). size 0 = none anywhere. */
+  resume?: { filename: string; size: number; uploadedAt: string | null; text?: string; source?: 'naukri' | 'settings' | null };
 }
 
 export interface NaukriWorkerState {

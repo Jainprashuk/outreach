@@ -184,6 +184,10 @@ const naukriConfigSchema = new mongoose.Schema({
     // Plain text pulled from the file at upload, editable in the Resume card.
     // What the AI drafts answers from; the file itself is what gets attached.
     text:        { type: String, default: '' },
+    // Where `text` came from: 'naukri' (the file above), 'manual' (typed or
+    // pasted), or 'settings:<uploadedAt>' (read from the Settings resume — and
+    // read again when that file is replaced). '' = nothing yet.
+    textFrom:    { type: String, default: '' },
   },
   // The daily refresh rotates through these, so the profile save is a real edit
   // rather than the same string written back. Empty = round-trip whatever is
