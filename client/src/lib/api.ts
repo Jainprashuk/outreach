@@ -217,7 +217,7 @@ export interface AnalyticsSummary {
   tz: string;
   metrics: {
     total: number; sentCount: number; repliedCount: number; fuCount: number; bouncedCount: number;
-    afterFuCount: number; beforeFuCount: number; inReviewEver: number; closedEver: number; queuedNow: number;
+    afterFuCount: number; beforeFuCount: number; inReviewEver: number; closedEver: number; queuedNow: number; inCampaignNow: number;
     replyRate: number; bounceRate: number;
   };
   statusCurrent: Array<{ s: string; n: number }>;
@@ -1555,9 +1555,10 @@ export interface AdminUserAnalytics {
     upcomingInterviewCount: number;
   };
   discover: Omit<DiscoverAnalytics, 'topRoles' | 'companies'>;
+  naukri?: NaukriAnalytics | null;
   pipeline: {
     contacts: Record<string, number>; approval: Record<string, number>; replies: Record<string, number>;
-    leads: Record<string, number>; interviews: Record<string, number>;
+    leads: Record<string, number>; leadsByApply?: Record<string, number>; interviews: Record<string, number>;
   };
   sending: {
     jobs: Record<string, number>; campaigns: Record<string, number>;
@@ -2187,7 +2188,8 @@ export interface ReportStats {
   waiting: { count: number; items: Array<{ name: string; company: string; categoryLabel: string; repliedAt: string }> };
   upcomingInterviews: Array<{ name: string; company: string; role: string; round: string; interviewAt: string }>;
   /** First sends / replies / bounces by where the contact came from. Absent on older servers. */
-  bySource?: Array<{ key: 'outreach' | 'lead' | 'discover' | 'naukri'; label: string; sent: number; replies: number; bounced: number; replyRate: number }>;
+  naukri?: { applied: number; skipped: number; failed: number; autoApproved: number; aiAsked: number; aiAnswered: number; viewed: number; shortlisted: number; notShortlisted: number };
+  bySource?: Array<{ key: 'outreach' | 'lead' | 'discover' | 'library' | 'naukri'; label: string; sent: number; replies: number; bounced: number; replyRate: number }>;
 }
 
 export const reportQueryString = (q: ReportPeriodQuery) => new URLSearchParams(q as Record<string, string>).toString();
@@ -2475,8 +2477,8 @@ export interface DiscoverAnalytics {
   };
   byLabel: DiscoverLabelRow[];
   status: { open: number; moved: number; discarded: number };
-  via: { search: number; github: number; website: number };
-  runs: { done: number; failed: number; cancelled: number; running: number };
+  via: { search: number; github: number; website: number; other?: number };
+  runs: { done: number; failed: number; cancelled: number; running: number; queued?: number };
   searchesPerDay: { day: string; n: number }[];
   topRoles: { role: string; n: number }[];
   companies: DiscoverCompanyRow[];
@@ -2484,6 +2486,33 @@ export interface DiscoverAnalytics {
   month: string;
 }
 export const discoverAnalyticsApi = (days = 30) => apiFetch<DiscoverAnalytics>(`/api/prospects/analytics?days=${days}`);
+
+/** Analytics → Naukri (lib/naukriAnalytics.js). State is all-time; flows cover `days`. */
+export interface NaukriAnalytics {
+  days: number;
+  timezone: string;
+  totals: {
+    found: number; scored: number; pending: number; approved: number; approvedAuto: number; rejected: number; tidied: number;
+    waiting: number; applied: number; appliedToday: number; responded: number; shortlisted: number; tracked: number;
+    interviewing: number; offer: number; employerRejected: number; skipped: number; failed: number; dismissed: number;
+  };
+  limits: { maxPerDay: number; autoApproveEnabled: boolean; autoApproveMinScore: number; tidyEnabled: boolean };
+  scores: Array<{ from: number; to: number; n: number; applied: number }>;
+  unscored: number;
+  stages: Array<{ stage: 'applied' | 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted' | 'unknown'; n: number }>;
+  responseMedianHours: number | null;
+  perDay: Array<{ day: string; applied: number; skipped: number; failed: number }>;
+  reasons: Array<{ key: string; label: string; skipped: number; failed: number }>;
+  origins: { search: number; recommended: number; searchApplied: number; recommendedApplied: number };
+  /** Your saved searches — not sent to admins. */
+  queries?: Array<{ query: string; found: number; applied: number; responded: number }>;
+  runs: Array<{ kind: string; total: number; done: number; failed: number; blocked: number; cancelled: number; scheduled: number }>;
+  blocked: { runs: number; lastAt: string | null };
+  autoApproved: number;
+  ai: { asked: number; answered: number; drafts: Record<'ready' | 'unknown' | 'error' | 'ignored', number>; answers: { you: number; auto: number } };
+  tidy: Record<'stale' | 'low-fit' | 'company-site' | 'other', number>;
+}
+export const naukriAnalyticsApi = (days = 30) => apiFetch<NaukriAnalytics>(`/api/naukri/analytics?days=${days}`);
 export interface HiringCompany {
   key: string;
   company: string;

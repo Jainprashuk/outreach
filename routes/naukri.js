@@ -47,18 +47,9 @@ const BLOCK_MS = 7 * 24 * 3600 * 1000;
 // can act on them.
 const SENT_STATUSES = ['applied', 'in-review', 'interviewing', 'offer', 'rejected'];
 
-// Skips that no future run can turn into an application.
-//
-// The worker also sends `terminal: true` for these, but the SERVER decides,
-// because the worker is a separate process on a machine you update by hand. A
-// worker running last week's code kept reporting company-site skips as ordinary
-// ones, and they went straight back into the queue to be attempted again. The
-// rule belongs where it cannot drift.
-const TERMINAL_SKIP = /applies on the company site|already applied|walk-in drive|listing closed or removed/i;
-// Only this one says anything about the EMPLOYER. "Already applied" is about
-// you and that one listing, and counting it here flagged every other job from
-// a company you had applied to once as company-site.
-const EXTERNAL_SKIP = /applies on the company site/i;
+// Skips no future run can turn into an application, and the company-site one.
+const { TERMINAL_SKIP, EXTERNAL_SKIP } = require('../lib/naukriReasons');
+const { naukriAnalytics } = require('../lib/naukriAnalytics');
 
 // "Approved and still queued to be sent", in ONE place.
 //
@@ -335,6 +326,17 @@ async function setupChecklist(userId, config, worker) {
 // ── Owner endpoints ────────────────────────────────────────────────────────
 // IMPORTANT: literal paths are declared before any /:id route, or Express
 // matches them as an id.
+
+// GET /api/naukri/analytics?days=30 — Analytics → Naukri (lib/naukriAnalytics.js).
+router.get('/analytics', async (req, res) => {
+  try {
+    const days = Math.min(90, Math.max(7, Number(req.query.days) || 30));
+    res.json(await naukriAnalytics(req.userId, { days }));
+  } catch (err) {
+    console.error('[naukri] analytics:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /api/naukri/overview — one call drives the whole tab. The worker fields
 // exist so the UI can say "your Mac is asleep, this runs at 09:25" BEFORE you

@@ -22,6 +22,7 @@ const STAGE_FILL: Record<OutcomeStage, () => string> = {
   'replied':           () => cvar('--green') || '#1a7a4a',
   'bounced':           () => cvar('--red') || '#c0392b',
   'failed':            () => cvar('--red') || '#c0392b',
+  'blocked':           () => cvar('--text3') || '#8a8a8a',
 };
 
 const fmtDate = (t: number | null) =>

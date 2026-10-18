@@ -22,7 +22,13 @@ const URI = PROD ? process.env.MONGODB_URI_PROD : process.env.MONGODB_URI_DEV;
 const ROOT = path.join(__dirname, '..');
 const TMP = path.join(ROOT, 'lib', '.reportStats.parity.js');
 
-const strip = (s) => { const o = JSON.parse(JSON.stringify(s)); delete o.bySource; delete o.generatedAt; return o; };
+// interviewMoves: `followed-up` is no longer counted as a move (a nudge, not a stage),
+// and $group gives no order — so compare it sorted, without that row.
+const strip = (s) => {
+  const o = JSON.parse(JSON.stringify(s)); delete o.bySource; delete o.naukri; delete o.generatedAt;
+  o.pipeline.interviewMoves = o.pipeline.interviewMoves.filter(r => r.status !== 'followed-up').sort((a, b) => a.status.localeCompare(b.status));
+  return o;
+};
 
 async function main() {
   fs.writeFileSync(TMP, execSync('git show 0006811:lib/reportStats.js', { cwd: ROOT }));

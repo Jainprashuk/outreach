@@ -6,6 +6,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import ReportsPanel from './ReportsPanel';
+import { NaukriAnalyticsView } from './NaukriAnalytics';
 import { Card, HBar } from './AnalyticsCards';
 import { Skeleton } from './Skeleton';
 import { cvar, STATUS_META } from '../lib/analytics';
@@ -13,7 +14,7 @@ import {
   adminUserAnalyticsApi, type AdminUserAnalytics as Data, type ReportPeriodQuery, type ReportStats,
 } from '../lib/api';
 
-type Tab = 'report' | 'pipeline' | 'discover';
+type Tab = 'report' | 'pipeline' | 'discover' | 'naukri';
 
 const n = (v: number) => (v || 0).toLocaleString('en-IN');
 const pretty = (k: string) => (k === 'none' ? 'Not set' : k.replace(/-/g, ' ').replace(/^./, c => c.toUpperCase()));
@@ -61,7 +62,7 @@ export default function AdminUserAnalytics({ userId }: { userId: string }) {
     <>
       <div className="section-head" style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div className="nav-tabs">
-          {([['report', 'ti-file-analytics', 'Report'], ['pipeline', 'ti-list-check', 'Pipeline'], ['discover', 'ti-compass', 'Discover']] as const).map(([k, icon, label]) => (
+          {([['report', 'ti-file-analytics', 'Report'], ['pipeline', 'ti-list-check', 'Pipeline'], ['discover', 'ti-compass', 'Discover'], ['naukri', 'ti-briefcase', 'Naukri']] as const).map(([k, icon, label]) => (
             <button key={k} type="button" className={`nav-tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>
               <i className={`ti ${icon}`} /> {label}
             </button>
@@ -119,6 +120,11 @@ export default function AdminUserAnalytics({ userId }: { userId: string }) {
             <Card title="Leads by status" icon="ti-target-arrow" sub="Harvested leads">
               <Breakdown rows={data.pipeline.leads} color={accent} />
             </Card>
+            {data.pipeline.leadsByApply && (
+              <Card title="Direct applications" icon="ti-briefcase" sub="Leads by apply status">
+                <Breakdown rows={data.pipeline.leadsByApply} color={teal} />
+              </Card>
+            )}
             <Card title="Sending" icon="ti-send"
               sub={data.sending.lastMailboxCheckAt ? `Mailbox last checked ${new Date(data.sending.lastMailboxCheckAt).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' })}` : 'Mailbox never checked'}>
               <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>Batches</div>
@@ -176,6 +182,9 @@ export default function AdminUserAnalytics({ userId }: { userId: string }) {
             </Card>
           </div>
         </>
+      )}
+      {tab === 'naukri' && data && (
+        data.naukri ? <NaukriAnalyticsView data={data.naukri} admin /> : <div className="an-empty">No Naukri numbers for this account.</div>
       )}
     </>
   );

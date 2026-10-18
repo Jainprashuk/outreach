@@ -67,6 +67,7 @@ const { USER_FIELDS } = require('../lib/lifecycle/candidates');
 const systemMail = require('../lib/systemMail');
 const { buildReportStats } = require('../lib/reportStats');
 const { discoverAnalytics } = require('../lib/prospectAnalytics');
+const { naukriAnalytics } = require('../lib/naukriAnalytics');
 const { istMidnight, resolvePeriod, labelFor } = require('../lib/reportPeriod');
 const { pauseAllForUser, resumeAllForUser, adminPausedCounts } = require('../lib/userSending');
 const unsubscribe = require('../lib/lifecycle/unsubscribe');
@@ -204,28 +205,29 @@ router.get('/users', async (req, res) => {
         } },
       ]),
 
-      // Fleet trend. Uses the scalar timestamps rather than statusHistory:
-      // $unwind-ing that array across every tenant is the one query here that
-      // could genuinely exceed the platform time limit.
-      //
-      // CAVEAT, and the reason the chart says "trend": lastSentAt is
-      // OVERWRITTEN by a follow-up, so this undercounts initial sends for
-      // contacts that were later followed up. client/src/lib/analytics.ts gets
-      // it exactly right per-user because it has the full history to work from.
+      // Fleet trend: every send and reply in the window, from statusHistory —
+      // the same events lib/reportStats.js counts, so a follow-up no longer hides
+      // the first send it overwrote in lastSentAt. Only contacts with history in
+      // the window are unwound, which keeps this bounded by recent activity.
       Contact.aggregate([
+        { $match: { deleted: { $ne: true }, statusHistory: { $elemMatch: { changedAt: { $gte: since } } } } },
+        { $project: { statusHistory: { status: 1, changedAt: 1 } } },
+        { $unwind: '$statusHistory' },
         { $match: {
-          deleted: { $ne: true },
-          $or: [{ lastSentAt: { $gte: since } }, { repliedAt: { $gte: since } }],
+          'statusHistory.changedAt': { $gte: since },
+          'statusHistory.status': { $in: ['sent', 'follow-up-sent', 'replied', 'follow-up-replied'] },
         } },
-        { $facet: {
-          sent: [
-            { $match: { lastSentAt: { $gte: since } } },
-            { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$lastSentAt', timezone: 'Asia/Kolkata' } }, n: { $sum: 1 } } },
-          ],
-          replied: [
-            { $match: { repliedAt: { $gte: since } } },
-            { $group: { _id: { $dateToString: { format: '%Y-%m-%d', date: '$repliedAt', timezone: 'Asia/Kolkata' } }, n: { $sum: 1 } } },
-          ],
+        { $group: {
+          _id: {
+            k: { $cond: [{ $in: ['$statusHistory.status', ['sent', 'follow-up-sent']] }, 'sent', 'replied'] },
+            d: { $dateToString: { format: '%Y-%m-%d', date: '$statusHistory.changedAt', timezone: 'Asia/Kolkata' } },
+          },
+          n: { $sum: 1 },
+        } },
+        { $group: { _id: null, rows: { $push: { k: '$_id.k', _id: '$_id.d', n: '$n' } } } },
+        { $project: {
+          sent: { $filter: { input: '$rows', cond: { $eq: ['$$this.k', 'sent'] } } },
+          replied: { $filter: { input: '$rows', cond: { $eq: ['$$this.k', 'replied'] } } },
         } },
       ]),
 
@@ -1020,7 +1022,7 @@ router.patch('/users/:id/emails', async (req, res) => {
  * Keeps an allowlist rather than deleting known keys, so a field added to
  * buildReportStats later stays out until someone decides it is a count.
  */
-function sanitizeForAdmin(report, discover) {
+function sanitizeForAdmin(report, discover, naukri) {
   const r = report ? {
     period: report.period,
     previous: report.previous,
@@ -1038,6 +1040,7 @@ function sanitizeForAdmin(report, discover) {
     waiting: { count: (report.waiting && report.waiting.count) || 0 },
     upcomingInterviewCount: (report.upcomingInterviews || []).length,
     bySource: report.bySource,
+    naukri: report.naukri && Object.fromEntries(Object.entries(report.naukri).map(([k, v]) => [k, Number(v) || 0])),
   } : null;
   const d = discover ? {
     days: discover.days,
@@ -1050,7 +1053,26 @@ function sanitizeForAdmin(report, discover) {
     allowance: discover.allowance,
     month: discover.month,
   } : null;
-  return { report: r, discover: d };
+  // Naukri: counts only. `queries` (your saved search text) is dropped; reason
+  // labels are the app's own (lib/naukriReasons.js), never the worker's text.
+  const k = naukri ? {
+    days: naukri.days,
+    totals: naukri.totals,
+    limits: naukri.limits,
+    scores: naukri.scores,
+    unscored: naukri.unscored,
+    stages: naukri.stages,
+    responseMedianHours: naukri.responseMedianHours,
+    perDay: naukri.perDay,
+    reasons: (naukri.reasons || []).map(r => ({ key: r.key, label: r.label, skipped: r.skipped, failed: r.failed })),
+    origins: naukri.origins,
+    runs: naukri.runs,
+    blocked: naukri.blocked,
+    autoApproved: naukri.autoApproved,
+    ai: naukri.ai,
+    tidy: naukri.tidy,
+  } : null;
+  return { report: r, discover: d, naukri: k };
 }
 
 const countBy = async (Model, match, field) => {
@@ -1094,13 +1116,15 @@ router.get('/users/:id/analytics', async (req, res) => {
     const days = Math.min(90, Math.max(1, Number(req.query.days) || 30));
     const userId = target._id;
 
-    const [report, discover, contactsByStatus, approval, replies, leadsByStatus, interviewsByStatus, jobsByStatus, campaignsByStatus, paused, settings] = await Promise.all([
+    const [report, discover, naukri, contactsByStatus, approval, replies, leadsByStatus, leadsByApply, interviewsByStatus, jobsByStatus, campaignsByStatus, paused, settings] = await Promise.all([
       buildReportStats(userId, p),
       discoverAnalytics(userId, { days }),
+      naukriAnalytics(userId, { days }),
       countBy(Contact, { userId }, 'status'),
       countBy(Contact, { userId }, 'approvalStatus'),
       countBy(Contact, { userId, repliedAt: { $ne: null } }, 'replyCategory'),
       countBy(Lead, { userId }, 'status'),
+      countBy(Lead, { userId }, 'applyStatus'),
       countBy(Interview, { userId }, 'status'),
       countBy(SendJob, { userId }, 'status'),
       countBy(Campaign, { userId }, 'status'),
@@ -1117,7 +1141,7 @@ router.get('/users/:id/analytics', async (req, res) => {
     }, { _id: 1 }).lean();
     if (!recent) auditAction(req, target, 'read-user-analytics', 'viewed analytics (numbers only)');
 
-    const clean = sanitizeForAdmin(report, discover);
+    const clean = sanitizeForAdmin(report, discover, naukri);
     res.json({
       user: {
         id: id(userId), email: target.email, name: target.name || '', status: target.status,
@@ -1126,9 +1150,10 @@ router.get('/users/:id/analytics', async (req, res) => {
       label: labelFor(p),
       report: clean.report,
       discover: clean.discover,
+      naukri: clean.naukri,
       pipeline: {
         contacts: contactsByStatus, approval, replies,
-        leads: leadsByStatus, interviews: interviewsByStatus,
+        leads: leadsByStatus, leadsByApply, interviews: interviewsByStatus,
       },
       sending: {
         jobs: jobsByStatus, campaigns: campaignsByStatus, pausedByAdmin: paused,

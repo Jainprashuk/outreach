@@ -7,6 +7,7 @@ import { useToast } from '../context/ToastContext';
 import { Card, HBar } from '../components/AnalyticsCards';
 import LeadsAnalytics from '../components/LeadsAnalytics';
 import DiscoverAnalytics from '../components/DiscoverAnalytics';
+import NaukriAnalytics from '../components/NaukriAnalytics';
 import ReportsPanel from '../components/ReportsPanel';
 import AdminUserAnalytics from '../components/AdminUserAnalytics';
 import { useSession } from '../context/SessionContext';
@@ -414,7 +415,7 @@ const EMPTY_ACTIVITY: AnalyticsActivity = { now: 0, counts: {}, feeds: {} };
 const EMPTY_SUMMARY: AnalyticsSummary = {
   now: 0, tz: 'UTC',
   metrics: { total: 0, sentCount: 0, repliedCount: 0, fuCount: 0, bouncedCount: 0, afterFuCount: 0,
-    beforeFuCount: 0, inReviewEver: 0, closedEver: 0, queuedNow: 0, replyRate: 0, bounceRate: 0 },
+    beforeFuCount: 0, inReviewEver: 0, closedEver: 0, queuedNow: 0, inCampaignNow: 0, replyRate: 0, bounceRate: 0 },
   statusCurrent: [], statusEver: [], journey: [], templates: [], companies: [], pairs: [],
   series: { 30: [], 90: [] }, weekday: { sends: [0, 0, 0, 0, 0, 0, 0], replies: [0, 0, 0, 0, 0, 0, 0] },
   replyWd: [0, 0, 0, 0, 0, 0, 0], replyHr: new Array(24).fill(0), week: { s1: 0, s2: 0, r1: 0, r2: 0 },
@@ -443,12 +444,13 @@ export default function Analytics() {
     if (id) next.set('user', id); else next.delete('user');
     setSearch(next, { replace: true });
   };
-  const [view, setView] = useState<'outreach' | 'leads' | 'discover' | 'reports'>(() => {
+  const [view, setView] = useState<'outreach' | 'leads' | 'discover' | 'naukri' | 'reports'>(() => {
     const v = search.get('view');
-    return v === 'leads' || v === 'reports' || v === 'discover' ? v : 'outreach';
+    return v === 'leads' || v === 'reports' || v === 'discover' || v === 'naukri' ? v : 'outreach';
   });
   const [leadsRefresh, setLeadsRefresh] = useState(0);
   const [discoverRefresh, setDiscoverRefresh] = useState(0);
+  const [naukriRefresh, setNaukriRefresh] = useState(0);
   const [range, setRange] = useState(30);
   const [statusMode, setStatusMode] = useState<'current' | 'ever'>('current');
   const [refreshing, setRefreshing] = useState(false);
@@ -464,6 +466,7 @@ export default function Analytics() {
     try {
       if (view === 'leads') setLeadsRefresh(n => n + 1);
       else if (view === 'discover') setDiscoverRefresh(n => n + 1);
+      else if (view === 'naukri') setNaukriRefresh(n => n + 1);
       else {
         await Promise.all([loadAnalyticsSummaryApi().then(setSummary), app.loadTemplates()]);
         setContactsLoaded(true);
@@ -498,7 +501,7 @@ export default function Analytics() {
   const median = sortedPairs.length ? sortedPairs[Math.floor(sortedPairs.length / 2)] : null;
 
   const kpis = [
-    { label: 'Total contacts', value: m.total.toLocaleString(), sub: `${m.queuedNow} still queued`, cls: '' },
+    { label: 'Total contacts', value: m.total.toLocaleString(), sub: m.inCampaignNow ? `${m.queuedNow} queued · ${m.inCampaignNow} in campaigns` : `${m.queuedNow} still queued`, cls: '' },
     { label: 'Contacts emailed', value: m.sentCount.toLocaleString(), sub: `${m.fuCount} got a follow-up`, cls: '' },
     { label: 'Ever replied', value: String(m.repliedCount), sub: `${m.replyRate}% of emailed`, cls: 'green' },
     { label: 'Bounce rate', value: `${m.bounceRate}%`, sub: `${m.bouncedCount} ever bounced`, cls: m.bounceRate > 10 ? 'red' : '' },
@@ -566,6 +569,9 @@ export default function Analytics() {
         </button>
         <button type="button" className={`nav-tab${view === 'discover' ? ' active' : ''}`} onClick={() => setView('discover')}>
           <i className="ti ti-compass" /> Discover
+        </button>
+        <button type="button" className={`nav-tab${view === 'naukri' ? ' active' : ''}`} onClick={() => setView('naukri')}>
+          <i className="ti ti-briefcase" /> Naukri
         </button>
         <button type="button" className={`nav-tab${view === 'reports' ? ' active' : ''}`} onClick={() => setView('reports')}>
           <i className="ti ti-file-analytics" /> Reports
@@ -637,6 +643,20 @@ export default function Analytics() {
         }>
         {switcher}
         <DiscoverAnalytics refreshToken={discoverRefresh} />
+      </Layout>
+    );
+  }
+
+  if (view === 'naukri') {
+    return (
+      <Layout title="Analytics" subtitle="Naukri: what was applied to, why the rest stopped, and what recruiters did"
+        actions={
+          <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
+            <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} /> Refresh
+          </button>
+        }>
+        {switcher}
+        <NaukriAnalytics refreshToken={naukriRefresh} />
       </Layout>
     );
   }
