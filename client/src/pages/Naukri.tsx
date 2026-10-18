@@ -128,7 +128,15 @@ export default function Naukri() {
   const busyRun = !!overview && (!!overview.activeRun || overview.queuedRuns.length > 0);
   useAdaptiveInterval(load, { fastMs: POLL_MS, slowMs: IDLE_POLL_MS, fast: busyRun });
 
-  useEffect(() => { if (view === 'config' && !config) loadConfig(); }, [view, config, loadConfig]);
+  // Fetched EVERY time Configuration opens, and again after every save. It
+  // used to be fetched once per visit: a card saved, left and reopened was
+  // rebuilt from that first copy and showed the old values — and pressing its
+  // Save then wrote those old values back over what you had saved. Cards keep
+  // their own state while open, so a refetch never resets what you are typing.
+  // On opening, the old copy is dropped first so the cards are built from the
+  // fresh one (they read their values once, when they mount).
+  useEffect(() => { if (view === 'config') { setConfig(null); loadConfig(); } }, [view, loadConfig]);
+  const onConfigSaved = useCallback(() => { load(); loadConfig(); }, [load, loadConfig]);
   useEffect(() => {
     if (view !== 'config' || !config || !pendingCard) return;
     const t = setTimeout(() => { openNaukriCard(pendingCard); setPendingCard(null); }, 80);
@@ -330,13 +338,13 @@ export default function Naukri() {
         config ? (
           <>
             <ConnectionCard overview={overview} onChanged={load} />
-            <ScheduleCard schedule={overview.schedule} upcoming={overview.upcoming} pollSeconds={config.worker?.pollSeconds ?? 20} onSaved={load} />
-            <SearchesCard config={config} onSaved={load} />
-            <FiltersCard config={config} onSaved={load} />
-            <ProfileCard config={config} onSaved={load} />
-            <AnswerBank config={config} onSaved={load} />
-            <ResumeCard config={config} onSaved={load} />
-            <ApplyCard config={config} onSaved={load} />
+            <ScheduleCard schedule={overview.schedule} upcoming={overview.upcoming} pollSeconds={config.worker?.pollSeconds ?? 20} onSaved={onConfigSaved} />
+            <SearchesCard config={config} onSaved={onConfigSaved} />
+            <FiltersCard config={config} onSaved={onConfigSaved} />
+            <ProfileCard config={config} onSaved={onConfigSaved} />
+            <AnswerBank config={config} onSaved={onConfigSaved} />
+            <ResumeCard config={config} onSaved={onConfigSaved} />
+            <ApplyCard config={config} onSaved={onConfigSaved} />
           </>
         ) : <Empty icon="ti-loader">Loading configuration…</Empty>
       )}

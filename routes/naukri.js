@@ -1397,6 +1397,25 @@ router.get('/jobs', async (req, res) => {
       company: { company: 1, lastSeenAt: -1 },
     };
     const sort = SORTS[req.query.sort] || SORTS.newest;
+    // Applied, by what the recruiter did (furthest stage from the track run).
+    // 'none' = no recruiter action seen yet.
+    const STAGE_FILTER = {
+      none: { $or: [{ naukriStage: null }, { naukriStage: 'applied' }] },
+      viewed: { naukriStage: 'viewed' },
+      shortlisted: { naukriStage: 'shortlisted' },
+      contacted: { naukriStage: 'contacted' },
+      'not-shortlisted': { naukriStage: 'not-shortlisted' },
+    };
+    const stageBase = { ...filter };
+    if (STAGE_FILTER[req.query.stage]) filter.$and = [...(filter.$and || []), STAGE_FILTER[req.query.stage]];
+    // Chip counts, taken without the stage filter so every chip shows its own size.
+    const stageCounts = req.query.applyStatus !== 'sent' ? null : async () => {
+      const out = {};
+      await Promise.all(Object.entries(STAGE_FILTER).map(async ([k, f]) => {
+        out[k] = await NaukriJob.countDocuments({ ...stageBase, $and: [...(stageBase.$and || []), f] });
+      }));
+      return out;
+    };
     // Jobs the inbox tidy cleared away, for "Show tidied" and Restore.
     if (req.query.tidied === '1') { filter.approval = 'rejected'; filter.tidiedAt = { $ne: null }; }
 
@@ -1442,13 +1461,14 @@ router.get('/jobs', async (req, res) => {
     }
 
     if (!needsRefine) {
-      const [jobs, total, counts, origins] = await Promise.all([
+      const [jobs, total, counts, origins, stages] = await Promise.all([
         NaukriJob.find(filter).sort(sort).skip((page - 1) * limit).limit(limit).lean(),
         NaukriJob.countDocuments(filter),
         typeCounts(),
         originCounts(),
+        stageCounts ? stageCounts() : null,
       ]);
-      return res.json({ jobs: jobs.map(serialize), total, page, limit, pages: Math.ceil(total / limit), typeCounts: counts, originCounts: origins });
+      return res.json({ jobs: jobs.map(serialize), total, page, limit, pages: Math.ceil(total / limit), typeCounts: counts, originCounts: origins, stageCounts: stages });
     }
 
     // Salary and posted-age are parsed from Naukri's own words by the same lib

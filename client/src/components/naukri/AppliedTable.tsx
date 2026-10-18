@@ -42,18 +42,23 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
   // Per job: whether people at the company were found from it, and how that went.
   const [outreach, setOutreach] = useState<Record<string, NaukriJobOutreach>>({});
 
+  // Filter by what the recruiter did (read daily from Naukri's My applies).
+  const [stage, setStage] = useState<'' | 'none' | 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted'>('');
+  const [stageCounts, setStageCounts] = useState<Record<string, number> | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     // 'sent', not 'any': a board called Applied must not list jobs the worker
     // skipped or failed on. Those have their own tab.
     try {
-      const list = (await listNaukriJobsApi({ applyStatus: 'sent', limit: 200 })).jobs;
-      setJobs(list);
+      const r = await listNaukriJobsApi({ applyStatus: 'sent', limit: 200, stage: stage || undefined });
+      const list = r.jobs;
+      setJobs(list); setStageCounts(r.stageCounts || null);
       if (list.length) naukriJobsOutreachApi(list.map(j => j.id)).then(r => setOutreach(r.jobs)).catch(() => { /* badges stay hidden */ });
     }
     catch (e: any) { setMsg(e?.message || 'Could not load'); }
     finally { setLoading(false); setLoadedOnce(true); }
-  }, []);
+  }, [stage]);
 
   const { findPeople, finding } = useFindPeople();
 
@@ -69,7 +74,9 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
   };
 
   if (loading && !loadedOnce) return <Empty icon="ti-loader">Loading…</Empty>;
-  if (!jobs.length) {
+  // Only when nothing has been sent at all; a status filter with no matches
+  // keeps its chips (and says so in the list below).
+  if (!jobs.length && !stage) {
     return (
       <Empty icon="ti-send">
         Nothing applied yet. Jobs the worker skipped or failed on are in Waiting, not here.
@@ -82,7 +89,26 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
       <RefreshBar active={loading} />
       <Refreshing active={loading}>
     <Card title={`${jobs.length} application${jobs.length === 1 ? '' : 's'}`} icon="ti-send">
+      {stageCounts && (
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          {([
+            ['', 'All', Object.values(stageCounts).reduce((a, b) => a + b, 0), 'ti-list'],
+            ['contacted', 'Contacted', stageCounts.contacted, 'ti-mail'],
+            ['shortlisted', 'Shortlisted', stageCounts.shortlisted, 'ti-star'],
+            ['viewed', 'Viewed', stageCounts.viewed, 'ti-eye'],
+            ['not-shortlisted', 'Not shortlisted', stageCounts['not-shortlisted'], 'ti-x'],
+            ['none', 'No response yet', stageCounts.none, 'ti-clock'],
+          ] as const).map(([value, label, n, icon]) => (
+            <button key={value || 'all'} type="button" onClick={() => setStage(value)}
+              className={`btn btn-sm${stage === value ? ' btn-primary' : ''}`}>
+              <i className={`ti ${icon}`} style={{ marginRight: 5 }} />{label}
+              <span className="contact-count-badge" style={{ marginLeft: 6 }}>{n}</span>
+            </button>
+          ))}
+        </div>
+      )}
       {msg && <Muted style={{ display: 'block', marginBottom: 8 }}>{msg}</Muted>}
+      {!jobs.length && <Muted style={{ display: 'block' }}>No applications at this stage.</Muted>}
       {jobs.map(job => (
         <div key={job.id} style={{
           display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',

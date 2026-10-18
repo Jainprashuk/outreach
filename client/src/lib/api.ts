@@ -2023,6 +2023,8 @@ export interface NaukriJobQuery {
   origin?: 'search' | 'recommended';
   /** '1' = only jobs the inbox tidy cleared away. */
   tidied?: '1';
+  /** Applied only: by what the recruiter did. 'none' = no action seen yet. */
+  stage?: 'none' | 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted';
   page?: number;
   limit?: number;
 }
@@ -2040,6 +2042,8 @@ export const listNaukriJobsApi = (params: NaukriJobQuery = {}) => {
     typeCounts?: { all: number; external: number; native: number };
     /** Sizes for the Searches / Recommended chips. A job found both ways counts in both. */
     originCounts?: { all: number; search: number; recommended: number };
+    /** Applied only: how many sit at each recruiter stage. */
+    stageCounts?: Record<'none' | 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted', number> | null;
   }>(`/api/naukri/jobs?${qs.toString()}`);
 };
 

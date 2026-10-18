@@ -422,6 +422,10 @@ async function main() {
         && sh.applyHistory.some(h => /Naukri: shortlisted/.test(h.note)));
       ok('your own pipeline edit is never overwritten', mine.naukriStage === 'not-shortlisted' && mine.applyStatus === 'interviewing');
       ok('timeline kept with real dates', sh.naukriTimeline.length >= 3 && sh.naukriTimeline.every(t => t.at instanceof Date));
+      const byStage = await call('GET', '/jobs?applyStatus=sent&stage=shortlisted&limit=200');
+      ok('Applied filters by recruiter stage', byStage.jobs.some(j => j.id === String(shortId)) && byStage.jobs.every(j => j.naukriStage === 'shortlisted'));
+      ok('…with a count for every stage', byStage.stageCounts && byStage.stageCounts.shortlisted >= 1 && byStage.stageCounts.viewed >= 1 && typeof byStage.stageCounts.none === 'number',
+        JSON.stringify(byStage.stageCounts));
       const ov = await call('GET', '/overview');
       ok('results: sent / viewed / shortlisted add up', ov.results.viewed >= 3 && ov.results.shortlisted >= 1 && ov.results.lastTracked,
         JSON.stringify({ sent: ov.results.sent, viewed: ov.results.viewed, shortlisted: ov.results.shortlisted }));
@@ -473,6 +477,16 @@ async function main() {
       ok('Waiting lists them in the same order', JSON.stringify(w.jobs.map(j => j.id).filter(id => order.includes(id))) === JSON.stringify(order));
       await NaukriRun.updateMany({ userId, status: 'running' }, { $set: { status: 'done' } });
       await NaukriJob.updateMany({ _id: { $in: [oldBest, freshOk, freshBest] } }, { $set: { deleted: true } });
+    }
+
+    console.log('\nsettings saved are settings kept');
+    {
+      await call('PATCH', '/config', { profile: { fullName: 'Prashuk Test', skills: ['React', 'Node.js'], totalExperienceMonths: 26, expectedCtcLpa: 14 } });
+      const back = (await call('GET', '/config')).config.profile;
+      ok('a saved profile comes back on the next load', back.fullName === 'Prashuk Test' && back.skills.join() === 'React,Node.js'
+        && back.totalExperienceMonths === 26 && back.expectedCtcLpa === 14, JSON.stringify(back));
+      await call('PATCH', '/config', { filters: { maxPostedAgeDays: 10 } });
+      ok('…and saving another card leaves it alone', (await call('GET', '/config')).config.profile.fullName === 'Prashuk Test');
     }
 
     console.log('\nsetup progress');
