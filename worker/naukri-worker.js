@@ -473,7 +473,9 @@ async function main() {
         if (releaseChrome) releaseChrome();
       }
     } catch (err) {
-      log('poll failed:', err.message);
+      // "fetch failed" alone hides the reason; the cause names it
+      // (UND_ERR_CONNECT_TIMEOUT = the network dropped the connection attempt).
+      log('poll failed:', err.message + (err.cause && (err.cause.code || err.cause.message) ? ` (${err.cause.code || err.cause.message})` : ''));
     }
 
     // Re-stamped AFTER the work, not before it. A run takes minutes; if the gap

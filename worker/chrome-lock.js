@@ -46,7 +46,15 @@ function acquire(label) {
   fs.mkdirSync(path.dirname(LOCK_FILE), { recursive: true });
 
   const held = read();
-  if (held) {
+  // Our own leftover. Each worker polls one step at a time, so a lock in THIS
+  // process's name found at the top of a poll can only be one an earlier poll
+  // failed to give back. Seen live (2026-10-18): a network blip made the
+  // LinkedIn worker skip its release, after which it read its own lock as
+  // "someone else is driving" and locked itself — and the Naukri worker — out
+  // until the 90-minute stale rule. Take it back instead of waiting it out.
+  if (held && held.pid === process.pid) {
+    console.log(new Date().toISOString(), `taking back our own leftover chrome lock (${held.label})`);
+  } else if (held) {
     const dead = !alive(held.pid);
     const stale = Date.now() - held.at > STALE_MS;
     if (!dead && !stale) return null;

@@ -419,19 +419,23 @@ async function main() {
       // /claim only ever hands out queued rows.
       const releaseChrome = chromeLock.acquire('linkedin-harvest');
 
-      const { run: runDoc, blockedUntil } = await api('/api/scrapes/claim', {
-        host: os.hostname(),
-        chromeUp: chrome,
-        linkedinLoggedIn: loggedIn,
-        nextWakeAt: wake,
-        defaultQueries: defaultQueries(),
-        // Still heartbeat while the other worker has the browser, so the panel
-        // keeps saying "ready" instead of "your Mac is asleep" for the length
-        // of someone else's run. The server hands back no work for these.
-        probeOnly: !releaseChrome,
-      });
-
+      // The claim sits INSIDE the try, so the lock is given back even when the
+      // claim itself fails. It used to sit just above it: one "fetch failed"
+      // on a network blip skipped the release and kept Chrome locked — for
+      // this worker and the Naukri one — until the lock went stale 90 min later.
       try {
+        const { run: runDoc, blockedUntil } = await api('/api/scrapes/claim', {
+          host: os.hostname(),
+          chromeUp: chrome,
+          linkedinLoggedIn: loggedIn,
+          nextWakeAt: wake,
+          defaultQueries: defaultQueries(),
+          // Still heartbeat while the other worker has the browser, so the panel
+          // keeps saying "ready" instead of "your Mac is asleep" for the length
+          // of someone else's run. The server hands back no work for these.
+          probeOnly: !releaseChrome,
+        });
+
         if (blockedUntil) {
           log(`harvesting is blocked until ${blockedUntil} — idling`);
         } else if (runDoc) {
@@ -446,7 +450,9 @@ async function main() {
         if (releaseChrome) releaseChrome();
       }
     } catch (err) {
-      log('poll failed:', err.message);
+      // "fetch failed" alone hides the reason; the cause names it
+      // (UND_ERR_CONNECT_TIMEOUT = the network dropped the connection attempt).
+      log('poll failed:', err.message + (err.cause && (err.cause.code || err.cause.message) ? ` (${err.cause.code || err.cause.message})` : ''));
     }
 
     await sleep(CFG.pollMs);
