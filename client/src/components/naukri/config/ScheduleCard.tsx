@@ -88,7 +88,7 @@ export default function ScheduleCard({
   const applyAnywhere = times.some(t => t.runApply);
 
   return (
-    <Card title="Schedule" icon="ti-calendar-repeat" collapsible id="schedule"
+    <Card title="Schedule" icon="ti-calendar-repeat" collapsible id="schedule" defaultOpen={false}
       right={draft.enabled && next[0] ? <Muted>Next: {fmtTime(next[0].at)}</Muted> : null}>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>

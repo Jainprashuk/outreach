@@ -28,22 +28,16 @@ export function Card({ title, icon, right, badge, children, style, collapsible, 
   style?: React.CSSProperties;
   /** Give the header a disclosure control. Needs `id` to remember its state. */
   collapsible?: boolean;
-  /** Stable key for remembering open/closed. Without it the card stays open. */
+  /** Lets the setup checklist open this card from elsewhere (openNaukriCard). */
   id?: string;
   defaultOpen?: boolean;
 }) {
-  // Remembered per card, because the Configuration tab is eight of these and
-  // scrolling past the seven you are not editing is most of the work. Kept in
-  // localStorage rather than server state: it is a per-browser convenience, not
-  // a setting, and it must not fail if storage is blocked.
-  const key = id ? `naukri-card-${id}` : null;
-  const [open, setOpen] = useState(() => {
-    if (!collapsible || !key) return true;
-    try {
-      const saved = localStorage.getItem(key);
-      return saved === null ? defaultOpen : saved === '1';
-    } catch { return defaultOpen; }
-  });
+  // Collapsible cards start collapsed every time — you open the ones you
+  // want. Not remembered between visits: a card left open last time used to
+  // stay open, so the Configuration tab drifted into a long wall of forms.
+  const [open, setOpen] = useState(() => (collapsible ? defaultOpen : true));
+
+  const toggle = () => setOpen(o => !o);
 
   // Opened from elsewhere (the setup checklist): open, then bring into view.
   const ref = useRef<HTMLDivElement>(null);
@@ -58,11 +52,6 @@ export function Card({ title, icon, right, badge, children, style, collapsible, 
     return () => window.removeEventListener('naukri-open-card', onOpen);
   }, [id]);
 
-  const toggle = () => {
-    const next = !open;
-    setOpen(next);
-    if (key) { try { localStorage.setItem(key, next ? '1' : '0'); } catch { /* private window */ } }
-  };
 
   return (
     <div ref={ref} style={{
