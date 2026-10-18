@@ -222,6 +222,8 @@ export interface AnalyticsSummary {
   };
   statusCurrent: Array<{ s: string; n: number }>;
   statusEver: Array<{ s: string; n: number }>;
+  /** The Mailbox Needs you queue (lib/queueAnalytics.js). */
+  queue?: QueueAnalytics;
   journey: Array<[string, number]>;
   /** Template key → contacts emailed / ever replied, in the page's table order before its sort. */
   templates: Array<[string, { sent: number; replied: number }]>;
@@ -2513,6 +2515,39 @@ export interface NaukriAnalytics {
   tidy: Record<'stale' | 'low-fit' | 'company-site' | 'other', number>;
 }
 export const naukriAnalyticsApi = (days = 30) => apiFetch<NaukriAnalytics>(`/api/naukri/analytics?days=${days}`);
+
+export interface QueueAnalytics {
+  days: number;
+  buckets: Record<'needs-you' | 'follow-up' | 'waiting' | 'snoozed' | 'done', number>;
+  reasons: Array<{ bucket: 'needs-you' | 'follow-up'; reason: string; label: string; n: number }>;
+  resolved: { total: number; by: Array<{ key: string; label: string; n: number }> };
+}
+
+/** Analytics → Outreach's Campaigns card (lib/campaignAnalytics.js). */
+export interface CampaignAnalytics {
+  days: number;
+  campaigns: Array<{
+    id: string; name: string; status: string; pausedByAdmin: boolean;
+    origin: string | null; originLabel: string | null; actionKind: string | null;
+    total: number; released: number; skipped: number; pending: number; replied: number; replyRate: number;
+    createdAt: string; completedAt: string | null;
+  }>;
+  totals: { campaigns: number; running: number; released: number; skipped: number; replied: number };
+  skipReasons: Array<{ key: string; label: string; n: number }>;
+  quota: { pauses: number; lastPausedAt: string | null; pausedNow: { gmailLimit: number; admin: number; you: number } };
+}
+export const campaignAnalyticsApi = (days = 30) => apiFetch<CampaignAnalytics>(`/api/campaigns/analytics?days=${days}`);
+
+/** Analytics → Leads: automatic source runs (GET /api/sources/analytics). */
+export interface SourceAnalytics {
+  days: number;
+  runs: Array<{
+    source: 'web' | 'hn'; trigger: 'cron' | 'manual'; runs: number; failed: number;
+    read: number; withEmail: number; matched: number; created: number; duplicates: number; rejected: number;
+    credits: number; lastAt: string | null;
+  }>;
+}
+export const sourceAnalyticsApi = (days = 30) => apiFetch<SourceAnalytics>(`/api/sources/analytics?days=${days}`);
 export interface HiringCompany {
   key: string;
   company: string;

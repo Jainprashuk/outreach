@@ -146,6 +146,37 @@ export const sourceBreakdown = (leads: Lead[]) => {
   return [...m.entries()].map(([source, n]) => ({ source, n })).sort((a, b) => b.n - a.n);
 };
 
+export interface SourceStat {
+  source: string;     // Lead.source, '' for older harvester rows
+  n: number;
+  withEmail: number;
+  moved: number;      // promoted to outreach from the board
+  emailed: number;
+  replied: number;
+  bounced: number;
+  applied: number;    // applied directly, or anything beyond
+}
+
+/** Each lead source end to end: harvested → has an email → emailed → replied. */
+export function sourceStats(leads: Lead[], outcomes: LeadOutcomeMap = {}): SourceStat[] {
+  const BEYOND = ['applied', 'in-review', 'interviewing', 'offer', 'rejected'];
+  const groups = new Map<string, Lead[]>();
+  leads.forEach(l => { const k = l.source || ''; if (!groups.has(k)) groups.set(k, []); groups.get(k)!.push(l); });
+  return [...groups.entries()].map(([source, rows]) => {
+    const stages = rows.map(l => stageOf(outcomeOf(l, outcomes)));
+    return {
+      source,
+      n: rows.length,
+      withEmail: rows.filter(l => l.email).length,
+      moved: rows.filter(l => l.status === 'added-to-outreach').length,
+      emailed: stages.filter(st => st === 'emailed' || st === 'replied' || st === 'bounced').length,
+      replied: stages.filter(st => st === 'replied').length,
+      bounced: stages.filter(st => st === 'bounced').length,
+      applied: rows.filter(l => BEYOND.includes(l.applyStatus || '')).length,
+    };
+  }).sort((a, b) => b.replied - a.replied || b.n - a.n);
+}
+
 export interface QueryStat {
   query: string;
   n: number;          // leads credited to this query

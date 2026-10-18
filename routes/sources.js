@@ -5,6 +5,7 @@
 // run in Inngest (lib/sources/inngest.js).
 
 const express = require('express');
+const mongoose = require('mongoose');
 const { inngest } = require('../inngest');
 const Lead = require('../models/Lead');
 const SourceConfig = require('../models/SourceConfig');
@@ -83,6 +84,28 @@ router.get('/runs', async (req, res) => {
         .map(({ _id, __v, userId, ...r }) => ({ id: String(_id), ...r }));
     }
     res.json(out);
+  } catch (err) { err500(res, err); }
+});
+
+// GET /api/sources/analytics?days=30 — Analytics → Leads: each automatic source's
+// runs over the window, by trigger, with what they found and what they cost.
+router.get('/analytics', async (req, res) => {
+  try {
+    const days = Math.min(90, Math.max(7, Number(req.query.days) || 30));
+    const since = new Date(Date.now() - days * 864e5);
+    const rows = await SourceRun.aggregate([
+      { $match: { userId: new mongoose.Types.ObjectId(String(req.userId)), startedAt: { $gte: since } } },
+      { $group: {
+        _id: { source: '$source', trigger: '$trigger' },
+        runs: { $sum: 1 },
+        failed: { $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] } },
+        read: { $sum: '$read' }, withEmail: { $sum: '$withEmail' }, matched: { $sum: '$matched' },
+        created: { $sum: '$created' }, duplicates: { $sum: '$duplicates' }, rejected: { $sum: '$rejected' },
+        credits: { $sum: '$credits' }, lastAt: { $max: '$startedAt' },
+      } },
+      { $sort: { '_id.source': 1, '_id.trigger': 1 } },
+    ]);
+    res.json({ days, runs: rows.map(({ _id, ...r }) => ({ source: _id.source, trigger: _id.trigger, ...r })) });
   } catch (err) { err500(res, err); }
 });
 

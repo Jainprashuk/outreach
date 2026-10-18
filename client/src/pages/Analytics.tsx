@@ -13,6 +13,7 @@ import AdminUserAnalytics from '../components/AdminUserAnalytics';
 import { useSession } from '../context/SessionContext';
 import { Skeleton } from '../components/Skeleton';
 import InterviewFunnelCard from '../components/InterviewFunnelCard';
+import { CampaignsCard, NeedsYouCard } from '../components/OutreachExtraCards';
 import { useInterviews } from '../context/InterviewContext';
 import {
   EMPTY_FUNNEL, indexInterviews, interviewFunnel, type InterviewFunnel,
@@ -451,6 +452,7 @@ export default function Analytics() {
   const [leadsRefresh, setLeadsRefresh] = useState(0);
   const [discoverRefresh, setDiscoverRefresh] = useState(0);
   const [naukriRefresh, setNaukriRefresh] = useState(0);
+  const [outreachRefresh, setOutreachRefresh] = useState(0);
   const [range, setRange] = useState(30);
   const [statusMode, setStatusMode] = useState<'current' | 'ever'>('current');
   const [refreshing, setRefreshing] = useState(false);
@@ -470,6 +472,7 @@ export default function Analytics() {
       else {
         await Promise.all([loadAnalyticsSummaryApi().then(setSummary), app.loadTemplates()]);
         setContactsLoaded(true);
+        setOutreachRefresh(n => n + 1);
       }
     } catch (err: any) {
       toast('Could not load analytics: ' + err.message, 'error');
@@ -837,6 +840,11 @@ export default function Analytics() {
             </>
           )}
         </Card>
+      </div>
+
+      <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
+        <NeedsYouCard queue={S.queue} delay=".38s" />
+        <CampaignsCard refreshToken={outreachRefresh} delay=".39s" />
       </div>
 
       <div className="an-card" style={{ marginBottom: 14, animationDelay: '.4s' }}>

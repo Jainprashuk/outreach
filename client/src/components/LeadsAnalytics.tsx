@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, HBar } from './AnalyticsCards';
 import { SkeletonRows } from './Skeleton';
-import { loadLeadsApi, loadLeadOutcomesApi, type Lead, type LeadOutcomeMap } from '../lib/api';
+import { loadLeadsApi, loadLeadOutcomesApi, sourceAnalyticsApi, type Lead, type LeadOutcomeMap, type SourceAnalytics } from '../lib/api';
+import { sourceLabel } from '../lib/leads';
 import { cvar, pct } from '../lib/analytics';
 import {
   computeLeadMetrics, fitBuckets, harvestRuns, importsByDay,
-  applyFunnel, outcomeFunnel, queryStats, sourceBreakdown, topDomains, topMultiAddress, unattributed,
+  applyFunnel, outcomeFunnel, queryStats, sourceBreakdown, sourceStats, topDomains, topMultiAddress, unattributed,
 } from '../lib/leadAnalytics';
 import { stageCounts, STAGE_LABELS, STAGE_PIPELINE, type OutcomeStage } from '../lib/leadOutcome';
 import { EMPTY_FUNNEL, indexInterviews, interviewFunnel } from '../lib/interviewAnalytics';
@@ -98,6 +99,13 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
   const series = useMemo(() => importsByDay(leads), [leads]);
   const sources = useMemo(() => sourceBreakdown(leads), [leads]);
   const queries = useMemo(() => queryStats(leads, outcomes), [leads, outcomes]);
+  const bySource = useMemo(() => sourceStats(leads, outcomes), [leads, outcomes]);
+  const [sourceRuns, setSourceRuns] = useState<SourceAnalytics | null>(null);
+  useEffect(() => {
+    let alive = true;
+    sourceAnalyticsApi(30).then(d => { if (alive) setSourceRuns(d); }).catch(() => { /* card stays hidden */ });
+    return () => { alive = false; };
+  }, [refreshToken]);
   const funnel2 = useMemo(() => outcomeFunnel(leads, outcomes), [leads, outcomes]);
   const af = useMemo(() => applyFunnel(leads), [leads]);
   const stages = useMemo(() => stageCounts(leads, outcomes), [leads, outcomes]);
@@ -226,6 +234,44 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
         </div>
         <div className="an-card-body"><ImportChart series={series} /></div>
       </div>
+
+      {bySource.length > 0 && (
+        <div className="an-card" style={{ marginBottom: 14, animationDelay: '.12s' }}>
+          <div className="an-card-head">
+            <div>
+              <div className="an-card-title"><i className="ti ti-arrows-split" /> Results by source</div>
+              <div className="an-card-sub">Every lead source end to end — which ones turn into replies, not just rows</div>
+            </div>
+          </div>
+          <div className="an-card-body" style={{ overflowX: 'auto' }}>
+            <table className="an-table">
+              <thead><tr><th>Source</th><th className="num">Leads</th><th className="num">With email</th><th className="num">Moved</th><th className="num">Emailed</th><th className="num">Replied</th><th className="num">Bounced</th><th className="num">Applied</th></tr></thead>
+              <tbody>
+                {bySource.map(r => (
+                  <tr key={r.source || 'old'}>
+                    <td style={{ fontWeight: 500 }}>{r.source ? sourceLabel(r.source) : 'LinkedIn (older rows)'}</td>
+                    <td className="num">{r.n.toLocaleString()}</td>
+                    <td className="num" style={{ color: 'var(--text2)' }}>{r.withEmail.toLocaleString()}</td>
+                    <td className="num" style={{ color: 'var(--text2)' }}>{r.moved.toLocaleString()}</td>
+                    <td className="num">{r.emailed.toLocaleString()}</td>
+                    <td className="num"><b>{r.replied}</b>{r.emailed ? <span style={{ color: 'var(--text3)', fontSize: 11 }}> {Math.round((r.replied / r.emailed) * 1000) / 10}%</span> : null}</td>
+                    <td className="num" style={{ color: 'var(--text2)' }}>{r.bounced}</td>
+                    <td className="num" style={{ color: 'var(--text2)' }}>{r.applied}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {sourceRuns && sourceRuns.runs.length > 0 && (
+              <div className="an-card-sub" style={{ marginTop: 10 }}>
+                Automatic searches, last {sourceRuns.days} days:{' '}
+                {sourceRuns.runs.map(r => `${r.source === 'web' ? 'hiring posts' : 'HN'} (${r.trigger === 'cron' ? 'daily' : 'by hand'}) ${r.runs} run${r.runs === 1 ? '' : 's'}`
+                  + ` → ${r.created} new, ${r.duplicates} already here, ${r.rejected} rejected`
+                  + (r.failed ? `, ${r.failed} failed` : '') + (r.credits ? `, ${r.credits} credits` : '')).join(' · ')}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {queries.length > 0 && (
         <div className="an-card" style={{ marginBottom: 14, animationDelay: '.14s' }}>
@@ -363,7 +409,7 @@ export default function LeadsAnalytics({ refreshToken }: { refreshToken: number 
             ))}
           {sources.length > 0 && (
             <div className="an-card-sub" style={{ marginTop: 10 }}>
-              Source: {sources.map(s => `${s.source} (${s.n})`).join(' · ')}
+              Source: {sources.map(s => `${s.source === 'unknown' ? 'LinkedIn (older rows)' : sourceLabel(s.source)} (${s.n})`).join(' · ')}
             </div>
           )}
         </Card>
