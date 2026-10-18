@@ -12,9 +12,6 @@ const mongoose = require('mongoose');
 // the rest of the app writes, and the scope rule for this feature is that it can
 // be deleted in one revert.
 
-// 40 so one scheduled run can reach a 40/day limit on its own (was 20). Also
-// enforced in the worker, and the worker's run time limit is sized for it.
-const MAX_APPLIES_PER_RUN = 40;
 
 const searchSchema = new mongoose.Schema({
   _id:     false,
@@ -181,9 +178,10 @@ const naukriConfigSchema = new mongoose.Schema({
 
   // ── apply behaviour ────────────────────────────────────────────────────────
   apply: {
-    // Clamped to MAX_APPLIES_PER_RUN on save. The cap is not negotiable from the
-    // UI, because the thing it protects against is your own enthusiasm at 2am.
-    maxPerRun: { type: Number, default: 20, min: 1, max: MAX_APPLIES_PER_RUN },
+    // No ceiling in code: yours to set (2026-10-18). A run still never takes
+    // more than what is left of maxPerDay, and the worker's time limit grows
+    // with the size of the run.
+    maxPerRun: { type: Number, default: 20, min: 1 },
     maxPerDay: { type: Number, default: 40, min: 1 },
     // THE GATE. While false, nothing is applied to without an explicit approval
     // click. Everything else in this file is a preference; this is the safety
@@ -244,6 +242,5 @@ naukriConfigSchema.set('toJSON', {
   }
 });
 
-naukriConfigSchema.statics.MAX_APPLIES_PER_RUN = MAX_APPLIES_PER_RUN;
 
 module.exports = mongoose.model('NaukriConfig', naukriConfigSchema);

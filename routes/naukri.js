@@ -28,9 +28,12 @@ const KINDS = ['refresh', 'harvest', 'apply', 'probe'];
 
 // A worker polls every 20s; 90s of silence means the Mac slept or the process died.
 const ONLINE_MS = 90_000;
-// A claimed run whose worker vanished mid-flight. Longer than the longest
-// plausible run (8 pages of harvest, or 40 applies — the worker gives up at 80 min).
-const STALE_RUN_MS = 90 * 60_000;
+// A claimed run whose worker vanished mid-flight: nothing from it — no
+// progress, no result — for this long. Measured from its LAST sign of life,
+// not from when it started, so a long run that is still working is never cut
+// off now that run size has no ceiling. Every job and every page posts
+// progress; the slowest single step (a job with live AI answers) is ~3 min.
+const STALE_RUN_MS = 30 * 60_000;
 // Naukri showed a captcha. Same doctrine as the LinkedIn checkpoint: stop for a
 // week, and do not let a worker restart shrug it off.
 const BLOCK_MS = 7 * 24 * 3600 * 1000;
@@ -175,7 +178,11 @@ const cleanSources = (input, fallback = {}) => {
 const failStaleRuns = (userId) => {
   const now = new Date();
   return NaukriRun.updateMany(
-    { userId, status: 'running', claimedAt: { $lt: new Date(Date.now() - STALE_RUN_MS) }, ...BASE_FILTER },
+    {
+      userId, status: 'running', claimedAt: { $lt: new Date(Date.now() - STALE_RUN_MS) },
+      $or: [{ 'progress.updatedAt': null }, { 'progress.updatedAt': { $lt: new Date(Date.now() - STALE_RUN_MS) } }],
+      ...BASE_FILTER,
+    },
     { $set: { status: 'failed', error: 'Worker stopped responding mid-run', finishedAt: now } }
   ).then(r => reportStaleRuns(NaukriRun, 'naukri', userId, now, r));
 };
@@ -487,10 +494,9 @@ router.patch('/config', async (req, res) => {
 
     if (body.apply) {
       const a = body.apply;
-      // Clamped to the model's cap regardless of what the client sends. The cap
-      // is not negotiable from the UI — see NaukriConfig.
-      if (a.maxPerRun !== undefined) config.apply.maxPerRun = num(a.maxPerRun, { min: 1, max: NaukriConfig.MAX_APPLIES_PER_RUN, integer: true });
-      if (a.maxPerDay !== undefined) config.apply.maxPerDay = num(a.maxPerDay, { min: 1, max: 50, integer: true });
+      // No ceilings: the numbers are yours. Only "a whole number, at least 1".
+      if (a.maxPerRun !== undefined) config.apply.maxPerRun = num(a.maxPerRun, { min: 1, integer: true }) ?? config.apply.maxPerRun;
+      if (a.maxPerDay !== undefined) config.apply.maxPerDay = num(a.maxPerDay, { min: 1, integer: true }) ?? config.apply.maxPerDay;
       if (a.autoApproveEnabled !== undefined) config.apply.autoApproveEnabled = !!a.autoApproveEnabled;
       // Floor of 50: below that, "auto-approve" is approving jobs that match
       // under half of what you asked for.

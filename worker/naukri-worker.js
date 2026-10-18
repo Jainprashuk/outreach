@@ -49,10 +49,20 @@ const CFG = {
 
 const LOCK_FILE = path.join(os.homedir(), '.job-leads', 'naukri-worker.lock');
 const CHUNK = 200;                       // jobs per /ingest call, well under Vercel's body cap
-// 80 minutes: a 40-job apply run at 30–60s a job needs room. Kept under the
-// server's 90-minute stale-run cutoff (routes/naukri.js STALE_RUN_MS), so the
-// worker always gives up first and says why.
+// At least 80 minutes; an apply run gets more as it grows — room for every
+// job at its own worst case (a job is abandoned after 90s, or 180s with live
+// AI answers) plus the gaps. There is no ceiling on run size, so the limit
+// follows the run rather than capping it. The server's stale-run check is by
+// time since the last progress, so a long run that keeps reporting is safe.
 const RUN_TIMEOUT_MS = 80 * 60 * 1000;
+function runTimeoutFor(runDoc, config) {
+  if (runDoc.kind !== 'apply') return RUN_TIMEOUT_MS;
+  const { JOB_TIMEOUT_MS, JOB_TIMEOUT_AI_MS } = require('./naukri/apply');
+  const perJob = (config.autoAnswer && config.autoAnswer.enabled ? JOB_TIMEOUT_AI_MS : JOB_TIMEOUT_MS)
+    + (Number(config.apply && config.apply.delayMaxMs) || 4000);
+  const jobs = Array.isArray(runDoc.jobs) ? runDoc.jobs.length : 0;
+  return Math.max(RUN_TIMEOUT_MS, jobs * perJob + 10 * 60 * 1000);
+}
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -240,9 +250,10 @@ async function executeRun(runDoc, config, openSession = null) {
   // cancelled, but it stops being everyone else's problem.
   // Rendered once, so the log line and the error the UI shows agree — and so a
   // short limit set for a test does not print "0.1333 minutes".
-  const humanLimit = RUN_TIMEOUT_MS >= 60000
-    ? `${Math.round(RUN_TIMEOUT_MS / 60000)}-minute`
-    : `${Math.round(RUN_TIMEOUT_MS / 1000)}-second`;
+  const limitMs = runTimeoutFor(runDoc, config);
+  const humanLimit = limitMs >= 60000
+    ? `${Math.round(limitMs / 60000)}-minute`
+    : `${Math.round(limitMs / 1000)}-second`;
   let timedOut = false;
   const expired = new Promise((_, reject) => {
     deadlineTimer = setTimeout(() => {
@@ -250,7 +261,7 @@ async function executeRun(runDoc, config, openSession = null) {
       log(`run exceeded ${humanLimit} — abandoning it`);
       reject(new Error(`The ${runDoc.kind} run passed its ${humanLimit} limit and was abandoned. `
         + 'Anything it had already reported is recorded.'));
-    }, RUN_TIMEOUT_MS);
+    }, limitMs);
   });
   // Never rejects on its own; only the race below observes it.
   expired.catch(() => {});

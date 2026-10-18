@@ -389,6 +389,21 @@ async function main() {
       } finally { naukriDraft.draftAnswer = real; }
     }
 
+    console.log('\nno ceilings on run size or daily total');
+    const big = await call('PATCH', '/config', { apply: { maxPerRun: 120, maxPerDay: 300 } });
+    ok('Max per run 120 and per day 300 are saved as typed', big.config.apply.maxPerRun === 120 && big.config.apply.maxPerDay === 300,
+      JSON.stringify(big.config.apply));
+    const zero = await call('PATCH', '/config', { apply: { maxPerRun: 0 } });
+    ok('…but never below 1', zero.config.apply.maxPerRun === 1);
+    await call('PATCH', '/config', { apply: { maxPerRun: 20, maxPerDay: 50 } });
+    const hourAgo2 = new Date(Date.now() - 2 * 3600e3);
+    const working = await NaukriRun.create({ userId, kind: 'apply', status: 'running', claimedAt: hourAgo2, progress: { phase: 'applying', updatedAt: new Date() } });
+    const silent = await NaukriRun.create({ userId, kind: 'apply', status: 'running', claimedAt: hourAgo2, progress: { phase: 'applying', updatedAt: new Date(Date.now() - 45 * 60e3) } });
+    await call('GET', '/overview');   // runs the stale sweep
+    ok('a 2-hour run still reporting progress is left running', (await NaukriRun.findById(working._id).lean()).status === 'running');
+    ok('a run silent for 45 min is marked as stopped', (await NaukriRun.findById(silent._id).lean()).status === 'failed');
+    await NaukriRun.updateOne({ _id: working._id }, { $set: { status: 'done' } });
+
     console.log('\ndaily limit used up');
     await call('PATCH', '/config', { apply: { maxPerDay: 1 } });
     let limit = null;

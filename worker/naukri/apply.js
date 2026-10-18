@@ -30,9 +30,6 @@ const { check, jitter } = require('./guard');
 const { newPage } = require('./session');
 const { resolveAnswer, pickOption } = require('../../lib/naukriAnswers');
 
-// Hard cap, module constant rather than config. The server also clamps, and
-// both matter: this one is the last line if a config ever arrives malformed.
-const MAX_PER_RUN = 40;
 
 // One job's whole visit: navigate, classify, click, answer, confirm. Generous —
 // a slow listing with a five-question form is well inside it — but finite.
@@ -398,7 +395,10 @@ async function apply(session, { config = {}, jobs = [], dryRun = false, onProgre
   // `rehearsed` is counted separately and never folded into applied/skipped:
   // a dry run must not leave numbers that look like work was done.
   const stats = { applied: 0, skipped: 0, failed: 0, rehearsed: 0 };
-  const list = jobs.slice(0, Math.min(MAX_PER_RUN, Number(config.apply && config.apply.maxPerRun) || MAX_PER_RUN));
+  // The server already handed over at most maxPerRun (and what is left of
+  // today's limit); this only guards against a config that arrives malformed.
+  const perRun = Math.floor(Number(config.apply && config.apply.maxPerRun));
+  const list = Number.isFinite(perRun) && perRun >= 1 ? jobs.slice(0, perRun) : jobs;
   const delayMin = Number(config.apply && config.apply.delayMinMs) || 1500;
   const delayMax = Math.max(delayMin, Number(config.apply && config.apply.delayMaxMs) || 4000);
 
@@ -454,4 +454,4 @@ async function apply(session, { config = {}, jobs = [], dryRun = false, onProgre
   return stats;
 }
 
-module.exports = { apply, MAX_PER_RUN, APPLY_BUTTON, COMPANY_SITE_BUTTON };
+module.exports = { apply, APPLY_BUTTON, COMPANY_SITE_BUTTON, JOB_TIMEOUT_MS, JOB_TIMEOUT_AI_MS };
