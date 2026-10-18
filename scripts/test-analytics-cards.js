@@ -100,6 +100,14 @@ async function main() {
     { userId: me, status: 'paused', pauseReason: 'admin', items: [] },
     { userId: me, status: 'paused', items: [] },
     { userId: other, status: 'paused', pauseReason: 'gmail_daily_limit', items: [] },
+    // A step-wise batch the Action Center started: two sent, one failed.
+    { userId: me, status: 'done', origin: 'action-center', actionKind: 'ready', items: [
+      { contactId: String(replied._id), to: replied.email, name: 'a', subject: 's', body: 'b', status: 'sent' },
+      { contactId: String(quiet._id), to: quiet.email, name: 'b', subject: 's', body: 'b', status: 'sent' },
+      { contactId: String(new mongoose.Types.ObjectId()), to: 'f@example.invalid', name: 'c', subject: 's', body: 'b', status: 'failed' },
+    ] },
+    { userId: me, status: 'done', items: [] }, // not from the Action Center
+    { userId: other, status: 'done', origin: 'action-center', actionKind: 'ready', items: [] },
   ]);
   await ActivityLog.insertMany([
     { userId: me, category: 'email', action: 'quota_paused', message: 'x' },
@@ -118,6 +126,18 @@ async function main() {
   ok(skip('duplicate_contact') === 2 && skip('invalid_email') === 1, 'skip reasons, mine only', JSON.stringify(c.skipReasons));
   ok(c.quota.pauses === 1 && c.quota.lastPausedAt, 'Gmail-limit pauses in the window');
   ok(c.quota.pausedNow.gmailLimit === 1 && c.quota.pausedNow.admin === 1 && c.quota.pausedNow.you === 1, 'paused right now, by why');
+
+  const acKind = (k) => c.actionCenter.find(a => a.kind === k) || {};
+  ok(acKind('followup').campaigns === 1 && acKind('followup').contacts === 3 && acKind('followup').replied === 1,
+    'Action Center campaigns, per action', JSON.stringify(c.actionCenter));
+  ok(acKind('ready').batches === 1 && acKind('ready').contacts === 2 && acKind('ready').replied === 1,
+    'Action Center step-wise batches count sent contacts only, mine only', JSON.stringify(acKind('ready')));
+
+  const { campaignOrigin } = require('../routes/campaigns')._test;
+  ok(JSON.stringify(campaignOrigin({ origin: 'action-center', actionKind: 'leads' })) === '{"origin":"action-center","actionKind":"leads"}',
+    'from-contacts records an Action Center campaign and its action');
+  ok(campaignOrigin({ origin: 'action-center', actionKind: 'drop table' }).actionKind === null, 'an unknown action is not stored');
+  ok(campaignOrigin({}).origin === 'contacts' && campaignOrigin({ origin: 'upload' }).origin === 'contacts', 'anything else is "contacts"');
 
   const none = await campaignAnalytics(new mongoose.Types.ObjectId());
   ok(none.campaigns.length === 0 && none.skipReasons.length === 0, 'an account with no campaigns gets empty lists');

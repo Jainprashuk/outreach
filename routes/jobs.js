@@ -19,6 +19,9 @@ const serialize = (doc) => {
   return obj;
 };
 
+// The Action Center's actions, when a batch says it came from one (Analytics only).
+const AC_KINDS = ['followup', 'ready', 'pending', 'leads', 'prospects'];
+
 // Create a new send job and trigger Inngest orchestrator
 router.post('/', requireOnboarded, async (req, res) => {
   try {
@@ -50,6 +53,10 @@ router.post('/', requireOnboarded, async (req, res) => {
       sendMode:          mode,
       chunkSize:         (mode === 'bulk' && Number(chunkSize) > 0) ? Number(chunkSize) : 20,
       ratePerHour:       (mode === 'drip' && Number(req.body.ratePerHour) > 0) ? Number(req.body.ratePerHour) : 5,
+      ...(req.body.origin === 'action-center' ? {
+        origin: 'action-center',
+        actionKind: AC_KINDS.includes(req.body.actionKind) ? req.body.actionKind : null,
+      } : {}),
     });
 
     const eventName = mode === 'bulk' ? 'email/bulk.start' : mode === 'drip' ? 'email/drip.start' : 'email/batch.start';

@@ -134,7 +134,39 @@ async function main() {
       status === 404 ? ok(`${method} ${path} -> 404`) : bad(`${method} ${path} -> ${status} (expected 404)`);
     }
 
-    // 4. The database is the final word: nothing may have been mutated.
+    // 4. Analytics endpoints count your rows only. Each is read, the intruder gets
+    // rows every one of them would count, and the second read must be identical.
+    console.log('\nAnalytics endpoints ignore the intruder:');
+    const analytics = ['/api/naukri/analytics', '/api/campaigns/analytics', '/api/sources/analytics', '/api/settings/ai-usage'];
+    const before = {};
+    for (const path of analytics) {
+      const r = await api(path);
+      r.status === 200 ? ok(`${path} -> 200`) : bad(`${path} -> ${r.status} (expected 200)`);
+      before[path] = r.body;
+    }
+    const extra = {
+      naukrijobs: { userId: INTRUDER, sourceId: 'intr1', sourceKey: 'naukri:intr1', title: 'Intruder Job', approval: 'approved', applyStatus: 'applied',
+        appliedAt: now, applyHistory: [{ at: now, from: 'none', to: 'applied', note: 'Applied' }], deleted: false, createdAt: now, updatedAt: now },
+      naukriruns: { userId: INTRUDER, kind: 'apply', status: 'done', stats: { aiAsked: 5, aiAnswered: 5 }, deleted: false, createdAt: now, updatedAt: now },
+      campaigns: { userId: INTRUDER, name: 'Intruder Campaign', templateKey: 'x', status: 'running', origin: 'action-center', actionKind: 'ready',
+        stats: { total: 3, released: 3 }, createdAt: now, updatedAt: now },
+      sourceruns: { userId: INTRUDER, source: 'web', trigger: 'manual', status: 'done', startedAt: now, created: 7, createdAt: now, updatedAt: now },
+      aicalls: { userId: INTRUDER, feature: 'classify', provider: 'groq', outcome: 'ok', source: 'live', tokens: { total: 999 }, createdAt: now },
+    };
+    const extraIds = {};
+    for (const [col, doc] of Object.entries(extra)) extraIds[col] = (await db.collection(col).insertOne(doc)).insertedId;
+    try {
+      for (const path of analytics) {
+        const after = (await api(path)).body;
+        const strip = (b) => JSON.stringify(b, (k, v) => (k === 'generatedAt' ? undefined : v));
+        strip(after) === strip(before[path]) && !strip(after).includes('Intruder')
+          ? ok(`${path} unchanged by the intruder's rows`) : bad(`${path} counted the intruder's rows\n    before ${strip(before[path]).slice(0, 600)}\n    after  ${strip(after).slice(0, 600)}`);
+      }
+    } finally {
+      for (const [col, id] of Object.entries(extraIds)) await db.collection(col).deleteOne({ _id: id });
+    }
+
+    // 5. The database is the final word: nothing may have been mutated.
     console.log('\nIntruder rows untouched in the database:');
     for (const [col, id] of Object.entries(ids)) {
       const doc = await db.collection(col).findOne({ _id: new mongoose.Types.ObjectId(id) });

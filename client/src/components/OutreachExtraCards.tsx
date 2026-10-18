@@ -79,10 +79,10 @@ export function CampaignsCard({ refreshToken, delay }: { refreshToken?: number; 
         : undefined}>
       {error ? <div className="an-empty"><i className="ti ti-alert-triangle" />{error}</div>
         : !data ? [0, 1, 2, 3].map(r => <Skeleton key={r} w={`${90 - r * 12}%`} h={11} style={{ marginBottom: 10 }} />)
-        : data.campaigns.length === 0 ? <div className="an-empty"><i className="ti ti-send-off" />No campaigns in the last {data.days} days</div>
+          : data.campaigns.length === 0 && data.actionCenter.length === 0 ? <div className="an-empty"><i className="ti ti-send-off" />No campaigns in the last {data.days} days</div>
         : (
           <>
-            <div style={{ overflowX: 'auto' }}>
+            {data.campaigns.length > 0 && <div style={{ overflowX: 'auto' }}>
               <table className="an-table">
                 <thead><tr><th>Campaign</th><th>Status</th><th className="num">Released</th><th className="num">Skipped</th><th className="num">Left</th><th className="num">Replied</th></tr></thead>
                 <tbody>
@@ -105,7 +105,7 @@ export function CampaignsCard({ refreshToken, delay }: { refreshToken?: number; 
                   ))}
                 </tbody>
               </table>
-            </div>
+            </div>}
             {data.campaigns.length > 12 && <div className="an-card-sub" style={{ marginTop: 6 }}>And {data.campaigns.length - 12} more on the <Link to="/campaigns">Campaigns</Link> page.</div>}
             {data.skipReasons.length > 0 && (
               <div style={{ marginTop: 14 }}>
@@ -114,6 +114,25 @@ export function CampaignsCard({ refreshToken, delay }: { refreshToken?: number; 
                   <HBar key={r.key} label={r.label} n={r.n} d={data.totals.skipped || 1}
                     fill={r.key === 'bounced' || r.key === 'invalid_email' ? red : muted} />
                 ))}
+              </div>
+            )}
+            {data.actionCenter.length > 0 && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}><i className="ti ti-bolt" /> Started from the Action Center</div>
+                <table className="an-table">
+                  <thead><tr><th>Action</th><th className="num">Campaigns</th><th className="num">Step-wise</th><th className="num">Reached</th><th className="num">Replied</th></tr></thead>
+                  <tbody>
+                    {data.actionCenter.map(a => (
+                      <tr key={a.kind}>
+                        <td>{AC_KIND[a.kind] || 'Other'}</td>
+                        <td className="num">{a.campaigns}</td>
+                        <td className="num">{a.batches}</td>
+                        <td className="num">{a.contacts.toLocaleString()}</td>
+                        <td className="num">{a.replied}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
             <div className="an-card-sub" style={{ marginTop: 10 }}>

@@ -5,6 +5,7 @@ const User = require('../models/User');
 const { PREFS, PREF_KEYS, isPref } = require('../lib/lifecycle/types');
 const credentials = require('../lib/credentials');
 const aiKeys = require('../lib/ai/keys');
+const { aiUsage } = require('../lib/aiUsage');
 const { KIND } = require('../lib/classify/providers/kinds');
 // The bare adapters, not the logged chain: checking a key is not an AI call worth a log row.
 const RAW_PROVIDERS = {
@@ -230,6 +231,15 @@ async function checkKey(provider, key) {
 router.get('/ai-keys', async (req, res) => {
   try {
     res.json(await aiKeys.aiAccess(req.userId));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/settings/ai-usage?days=30 — your own AI calls, as counts (lib/aiUsage.js).
+router.get('/ai-usage', async (req, res) => {
+  try {
+    res.json(await aiUsage(req.userId, { days: Number(req.query.days) || 30 }));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

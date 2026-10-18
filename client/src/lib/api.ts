@@ -1258,10 +1258,32 @@ export const createCampaignApi = (body: {
   columnMap: CampaignColumnMap; sourceColumns: string[]; headerRow: number; fileName: string;
 }) => apiFetch<Campaign>('/api/campaigns', { method: 'POST', body: JSON.stringify(body) });
 
+/** The Action Center's send actions, recorded on what they start (Analytics). */
+export type ActionKind = 'followup' | 'ready' | 'pending' | 'leads' | 'prospects';
+// A step-wise send from the Action Center crosses three wizard pages; Step 3 reads
+// this back when it creates the batch, if it is fresh and for the same contacts.
+const SEND_ORIGIN_KEY = 'outreach.sendOrigin';
+export function rememberSendOrigin(actionKind: ActionKind, ids: string[]) {
+  try { sessionStorage.setItem(SEND_ORIGIN_KEY, JSON.stringify({ actionKind, ids: [...ids].sort(), at: Date.now() })); } catch { /* optional */ }
+}
+export function takeSendOrigin(ids: string[]): { origin: 'action-center'; actionKind: ActionKind } | null {
+  try {
+    const raw = sessionStorage.getItem(SEND_ORIGIN_KEY);
+    sessionStorage.removeItem(SEND_ORIGIN_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    const sent = new Set(ids);
+    // Within an hour, and the batch is (a subset of) what the Action Center offered.
+    if (Date.now() - o.at > 3600000 || !ids.length || !ids.every(id => o.ids.includes(id)) || !o.ids.some((id: string) => sent.has(id))) return null;
+    return { origin: 'action-center', actionKind: o.actionKind };
+  } catch { return null; }
+}
+
 /** Create a campaign that sends to existing Contacts without re-importing them. */
 export const createCampaignFromContactsApi = (body: {
   name: string; templateKey: string; contactIds: string[]; contactsPerDay: number;
   ratePerHour: number; runHourIst: number; attachResume: boolean;
+  origin?: 'action-center'; actionKind?: ActionKind;
 }) => apiFetch<Campaign>('/api/campaigns/from-contacts', {
   method: 'POST', body: JSON.stringify(body),
 });
@@ -2533,6 +2555,8 @@ export interface CampaignAnalytics {
     createdAt: string; completedAt: string | null;
   }>;
   totals: { campaigns: number; running: number; released: number; skipped: number; replied: number };
+  /** What the Action Center started in the window, per action. */
+  actionCenter: Array<{ kind: ActionKind | 'other'; campaigns: number; batches: number; contacts: number; replied: number }>;
   skipReasons: Array<{ key: string; label: string; n: number }>;
   quota: { pauses: number; lastPausedAt: string | null; pausedNow: { gmailLimit: number; admin: number; you: number } };
 }
@@ -2548,6 +2572,17 @@ export interface SourceAnalytics {
   }>;
 }
 export const sourceAnalyticsApi = (days = 30) => apiFetch<SourceAnalytics>(`/api/sources/analytics?days=${days}`);
+
+/** Settings → AI usage: your own AI calls as counts (GET /api/settings/ai-usage). */
+export interface AiUsage {
+  days: number;
+  totals: { calls: number; ok: number; tokens: number; yourKey: number; adminKey: number };
+  features: Array<{ key: string; label: string; calls: number; ok: number; tokens: number }>;
+  outcomes: Array<{ key: string; label: string; n: number }>;
+  providers: Array<{ provider: string; calls: number; ok: number }>;
+  lastFailure: { at: string; provider: string; outcome: string; label: string } | null;
+}
+export const aiUsageApi = (days = 30) => apiFetch<AiUsage>(`/api/settings/ai-usage?days=${days}`);
 export interface HiringCompany {
   key: string;
   company: string;

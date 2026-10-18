@@ -164,6 +164,7 @@ export default function ActionCenter() {
       run: async () => {
         const { ids } = await actionCenterIdsApi('followup');
         openSheet({
+          actionKind: 'followup',
           contactIds: ids, title: `Follow up ${plural(ids.length, 'contact')}`,
           subtitle: 'No reply in 3+ days', initialTemplateKey: 'follow-up', initialName: `Follow-ups — ${today()}`,
           stepHref: (x) => `/send/step1?followup=1&ids=${idsParam(x)}`,
@@ -179,6 +180,7 @@ export default function ActionCenter() {
       run: async () => {
         const { ids } = await actionCenterIdsApi('ready');
         openSheet({
+          actionKind: 'ready',
           contactIds: ids, title: `Send to ${plural(ids.length, 'ready contact')}`, subtitle: 'Approved, never emailed',
           initialName: `Ready contacts — ${today()}`,
           stepHref: (x) => `/send/step3?ids=${idsParam(x)}`,
@@ -194,6 +196,7 @@ export default function ActionCenter() {
       run: async () => {
         const { ids } = await actionCenterIdsApi('pending');
         openSheet({
+          actionKind: 'pending',
           contactIds: ids, title: `Approve & send ${plural(ids.length, 'contact')}`, subtitle: 'Waiting for approval',
           initialName: `New contacts — ${today()}`,
           stepHref: (x) => `/send/step2?from=contacts&ids=${idsParam(x)}`,
@@ -209,6 +212,7 @@ export default function ActionCenter() {
       run: async () => {
         const { ids } = await actionCenterIdsApi('leads');
         openSheet({
+          actionKind: 'leads',
           count: ids.length, title: `Start outreach to ${plural(ids.length, 'lead')}`,
           subtitle: `${plural(ids.length, 'lead')} with an email · moved to Contacts when you continue`,
           initialName: `Leads — ${today()}`,
@@ -226,6 +230,7 @@ export default function ActionCenter() {
       run: async () => {
         const { ids } = await actionCenterIdsApi('prospects');
         openSheet({
+          actionKind: 'prospects',
           count: ids.length, title: `Reach ${plural(ids.length, 'person', 'people')} from Discover`,
           subtitle: 'High-confidence addresses · moved to Contacts when you continue',
           initialName: `Discover — ${today()}`,
