@@ -217,11 +217,13 @@ export interface AnalyticsSummary {
   tz: string;
   metrics: {
     total: number; sentCount: number; repliedCount: number; fuCount: number; bouncedCount: number;
-    afterFuCount: number; beforeFuCount: number; inReviewEver: number; closedEver: number; queuedNow: number;
+    afterFuCount: number; beforeFuCount: number; inReviewEver: number; closedEver: number; queuedNow: number; inCampaignNow: number;
     replyRate: number; bounceRate: number;
   };
   statusCurrent: Array<{ s: string; n: number }>;
   statusEver: Array<{ s: string; n: number }>;
+  /** The Mailbox Needs you queue (lib/queueAnalytics.js). */
+  queue?: QueueAnalytics;
   journey: Array<[string, number]>;
   /** Template key → contacts emailed / ever replied, in the page's table order before its sort. */
   templates: Array<[string, { sent: number; replied: number }]>;
@@ -1256,10 +1258,32 @@ export const createCampaignApi = (body: {
   columnMap: CampaignColumnMap; sourceColumns: string[]; headerRow: number; fileName: string;
 }) => apiFetch<Campaign>('/api/campaigns', { method: 'POST', body: JSON.stringify(body) });
 
+/** The Action Center's send actions, recorded on what they start (Analytics). */
+export type ActionKind = 'followup' | 'ready' | 'pending' | 'leads' | 'prospects';
+// A step-wise send from the Action Center crosses three wizard pages; Step 3 reads
+// this back when it creates the batch, if it is fresh and for the same contacts.
+const SEND_ORIGIN_KEY = 'outreach.sendOrigin';
+export function rememberSendOrigin(actionKind: ActionKind, ids: string[]) {
+  try { sessionStorage.setItem(SEND_ORIGIN_KEY, JSON.stringify({ actionKind, ids: [...ids].sort(), at: Date.now() })); } catch { /* optional */ }
+}
+export function takeSendOrigin(ids: string[]): { origin: 'action-center'; actionKind: ActionKind } | null {
+  try {
+    const raw = sessionStorage.getItem(SEND_ORIGIN_KEY);
+    sessionStorage.removeItem(SEND_ORIGIN_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    const sent = new Set(ids);
+    // Within an hour, and the batch is (a subset of) what the Action Center offered.
+    if (Date.now() - o.at > 3600000 || !ids.length || !ids.every(id => o.ids.includes(id)) || !o.ids.some((id: string) => sent.has(id))) return null;
+    return { origin: 'action-center', actionKind: o.actionKind };
+  } catch { return null; }
+}
+
 /** Create a campaign that sends to existing Contacts without re-importing them. */
 export const createCampaignFromContactsApi = (body: {
   name: string; templateKey: string; contactIds: string[]; contactsPerDay: number;
   ratePerHour: number; runHourIst: number; attachResume: boolean;
+  origin?: 'action-center'; actionKind?: ActionKind;
 }) => apiFetch<Campaign>('/api/campaigns/from-contacts', {
   method: 'POST', body: JSON.stringify(body),
 });
@@ -1555,9 +1579,10 @@ export interface AdminUserAnalytics {
     upcomingInterviewCount: number;
   };
   discover: Omit<DiscoverAnalytics, 'topRoles' | 'companies'>;
+  naukri?: NaukriAnalytics | null;
   pipeline: {
     contacts: Record<string, number>; approval: Record<string, number>; replies: Record<string, number>;
-    leads: Record<string, number>; interviews: Record<string, number>;
+    leads: Record<string, number>; leadsByApply?: Record<string, number>; interviews: Record<string, number>;
   };
   sending: {
     jobs: Record<string, number>; campaigns: Record<string, number>;
@@ -2187,7 +2212,8 @@ export interface ReportStats {
   waiting: { count: number; items: Array<{ name: string; company: string; categoryLabel: string; repliedAt: string }> };
   upcomingInterviews: Array<{ name: string; company: string; role: string; round: string; interviewAt: string }>;
   /** First sends / replies / bounces by where the contact came from. Absent on older servers. */
-  bySource?: Array<{ key: 'outreach' | 'lead' | 'discover' | 'naukri'; label: string; sent: number; replies: number; bounced: number; replyRate: number }>;
+  naukri?: { applied: number; skipped: number; failed: number; autoApproved: number; aiAsked: number; aiAnswered: number; viewed: number; shortlisted: number; notShortlisted: number };
+  bySource?: Array<{ key: 'outreach' | 'lead' | 'discover' | 'library' | 'naukri'; label: string; sent: number; replies: number; bounced: number; replyRate: number }>;
 }
 
 export const reportQueryString = (q: ReportPeriodQuery) => new URLSearchParams(q as Record<string, string>).toString();
@@ -2475,8 +2501,8 @@ export interface DiscoverAnalytics {
   };
   byLabel: DiscoverLabelRow[];
   status: { open: number; moved: number; discarded: number };
-  via: { search: number; github: number; website: number };
-  runs: { done: number; failed: number; cancelled: number; running: number };
+  via: { search: number; github: number; website: number; other?: number };
+  runs: { done: number; failed: number; cancelled: number; running: number; queued?: number };
   searchesPerDay: { day: string; n: number }[];
   topRoles: { role: string; n: number }[];
   companies: DiscoverCompanyRow[];
@@ -2484,6 +2510,79 @@ export interface DiscoverAnalytics {
   month: string;
 }
 export const discoverAnalyticsApi = (days = 30) => apiFetch<DiscoverAnalytics>(`/api/prospects/analytics?days=${days}`);
+
+/** Analytics → Naukri (lib/naukriAnalytics.js). State is all-time; flows cover `days`. */
+export interface NaukriAnalytics {
+  days: number;
+  timezone: string;
+  totals: {
+    found: number; scored: number; pending: number; approved: number; approvedAuto: number; rejected: number; tidied: number;
+    waiting: number; applied: number; appliedToday: number; responded: number; shortlisted: number; tracked: number;
+    interviewing: number; offer: number; employerRejected: number; skipped: number; failed: number; dismissed: number;
+  };
+  limits: { maxPerDay: number; autoApproveEnabled: boolean; autoApproveMinScore: number; tidyEnabled: boolean };
+  scores: Array<{ from: number; to: number; n: number; applied: number }>;
+  unscored: number;
+  stages: Array<{ stage: 'applied' | 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted' | 'unknown'; n: number }>;
+  responseMedianHours: number | null;
+  perDay: Array<{ day: string; applied: number; skipped: number; failed: number }>;
+  reasons: Array<{ key: string; label: string; skipped: number; failed: number }>;
+  origins: { search: number; recommended: number; searchApplied: number; recommendedApplied: number };
+  /** Your saved searches — not sent to admins. */
+  queries?: Array<{ query: string; found: number; applied: number; responded: number }>;
+  runs: Array<{ kind: string; total: number; done: number; failed: number; blocked: number; cancelled: number; scheduled: number }>;
+  blocked: { runs: number; lastAt: string | null };
+  autoApproved: number;
+  ai: { asked: number; answered: number; drafts: Record<'ready' | 'unknown' | 'error' | 'ignored', number>; answers: { you: number; auto: number } };
+  tidy: Record<'stale' | 'low-fit' | 'company-site' | 'other', number>;
+}
+export const naukriAnalyticsApi = (days = 30) => apiFetch<NaukriAnalytics>(`/api/naukri/analytics?days=${days}`);
+
+export interface QueueAnalytics {
+  days: number;
+  buckets: Record<'needs-you' | 'follow-up' | 'waiting' | 'snoozed' | 'done', number>;
+  reasons: Array<{ bucket: 'needs-you' | 'follow-up'; reason: string; label: string; n: number }>;
+  resolved: { total: number; by: Array<{ key: string; label: string; n: number }> };
+}
+
+/** Analytics → Outreach's Campaigns card (lib/campaignAnalytics.js). */
+export interface CampaignAnalytics {
+  days: number;
+  campaigns: Array<{
+    id: string; name: string; status: string; pausedByAdmin: boolean;
+    origin: string | null; originLabel: string | null; actionKind: string | null;
+    total: number; released: number; skipped: number; pending: number; replied: number; replyRate: number;
+    createdAt: string; completedAt: string | null;
+  }>;
+  totals: { campaigns: number; running: number; released: number; skipped: number; replied: number };
+  /** What the Action Center started in the window, per action. */
+  actionCenter: Array<{ kind: ActionKind | 'other'; campaigns: number; batches: number; contacts: number; replied: number }>;
+  skipReasons: Array<{ key: string; label: string; n: number }>;
+  quota: { pauses: number; lastPausedAt: string | null; pausedNow: { gmailLimit: number; admin: number; you: number } };
+}
+export const campaignAnalyticsApi = (days = 30) => apiFetch<CampaignAnalytics>(`/api/campaigns/analytics?days=${days}`);
+
+/** Analytics → Leads: automatic source runs (GET /api/sources/analytics). */
+export interface SourceAnalytics {
+  days: number;
+  runs: Array<{
+    source: 'web' | 'hn'; trigger: 'cron' | 'manual'; runs: number; failed: number;
+    read: number; withEmail: number; matched: number; created: number; duplicates: number; rejected: number;
+    credits: number; lastAt: string | null;
+  }>;
+}
+export const sourceAnalyticsApi = (days = 30) => apiFetch<SourceAnalytics>(`/api/sources/analytics?days=${days}`);
+
+/** Settings → AI usage: your own AI calls as counts (GET /api/settings/ai-usage). */
+export interface AiUsage {
+  days: number;
+  totals: { calls: number; ok: number; tokens: number; yourKey: number; adminKey: number };
+  features: Array<{ key: string; label: string; calls: number; ok: number; tokens: number }>;
+  outcomes: Array<{ key: string; label: string; n: number }>;
+  providers: Array<{ provider: string; calls: number; ok: number }>;
+  lastFailure: { at: string; provider: string; outcome: string; label: string } | null;
+}
+export const aiUsageApi = (days = 30) => apiFetch<AiUsage>(`/api/settings/ai-usage?days=${days}`);
 export interface HiringCompany {
   key: string;
   company: string;

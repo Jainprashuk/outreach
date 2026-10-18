@@ -109,7 +109,8 @@ async function main() {
   // of the content that must not leak.
   const SECRET_NAME = `ZZIntruder-${Date.now()}`;
   const SECRET_COMPANY = `ZZSecretCorp-${Date.now()}`;
-  SECRETS = [SECRET_NAME, SECRET_COMPANY];
+  const SECRET_QUERY = `ZZSecretSearch-${Date.now()}`;
+  SECRETS = [SECRET_NAME, SECRET_COMPANY, SECRET_QUERY];
   const outsider = await users.insertOne({
     email: `admin-isolation-${Date.now()}@example.invalid`,
     name: '', isAdmin: false, status: 'active',
@@ -135,6 +136,18 @@ async function main() {
   const plantedInterview = await db.collection('interviews').insertOne({
     userId: outsiderId, name: SECRET_NAME, company: SECRET_COMPANY, status: 'initial-discussion',
     interviewAt: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000), createdAt: new Date(), updatedAt: new Date(),
+  });
+
+  // A Naukri job: its title, company, saved search and the worker's reason text
+  // are all the user's — the Naukri numbers must count it without showing any.
+  const plantedNaukri = await db.collection('naukrijobs').insertOne({
+    userId: outsiderId, sourceId: `zz${Date.now()}`, sourceKey: `naukri:zz${Date.now()}`,
+    title: SECRET_NAME, company: SECRET_COMPANY, queries: [SECRET_QUERY], origins: ['search'],
+    approval: 'approved', approvedBy: 'you', applyStatus: 'applied', appliedAt: new Date(),
+    naukriStage: 'viewed', naukriStageAt: new Date(),
+    applyHistory: [{ at: new Date(), from: 'none', to: 'applied', note: `Applied to ${SECRET_COMPANY}` },
+      { at: new Date(), from: 'none', to: 'failed', note: `${SECRET_NAME} broke` }],
+    deleted: false, createdAt: new Date(), updatedAt: new Date(),
   });
 
   try {
@@ -189,6 +202,12 @@ async function main() {
       ? ok('the reply was counted as waiting') : bad('the reply was not counted as waiting');
     d.report && d.report.campaigns && d.report.campaigns.length >= 1
       ? ok('its campaign was listed (by position)') : bad('its campaign was not listed');
+    d.naukri && d.naukri.totals && d.naukri.totals.applied >= 1 && d.naukri.reasons.some(r => r.failed >= 1)
+      ? ok('its Naukri application and failed attempt were counted') : bad('its Naukri job was not counted — the leak checks would prove nothing');
+    d.naukri && !('queries' in d.naukri)
+      ? ok('its saved Naukri searches are not sent') : bad('its saved Naukri searches were sent');
+    d.report && d.report.naukri && d.report.naukri.applied >= 1
+      ? ok('the report counted the Naukri application') : bad('the report did not count the Naukri application');
     expectNoContent(d);
     const bad1 = await call('GET', '/api/admin/users/not-an-id/analytics', adminCookie);
     bad1.status === 400 ? ok('a malformed id -> 400') : bad(`a malformed id -> ${bad1.status}`);
@@ -210,6 +229,7 @@ async function main() {
     await contacts.deleteOne({ _id: plantedContact.insertedId });
     await db.collection('campaigns').deleteOne({ _id: plantedCampaign.insertedId });
     await db.collection('interviews').deleteOne({ _id: plantedInterview.insertedId });
+    await db.collection('naukrijobs').deleteOne({ _id: plantedNaukri.insertedId });
     await users.deleteOne({ _id: outsiderId });
     await db.collection('sessions').deleteMany({ userId: outsiderId });
     await db.collection('logincodes').deleteMany({ email: outsiderDoc.email });

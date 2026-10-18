@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
-import { createCampaignFromContactsApi, previewCampaignFromContactsApi, type CampaignContactsPreview } from '../lib/api';
+import { createCampaignFromContactsApi, previewCampaignFromContactsApi, rememberSendOrigin, type ActionKind, type CampaignContactsPreview } from '../lib/api';
 
 type SendWay = 'step' | 'campaign';
 
@@ -31,7 +31,7 @@ const SKIP_LABEL: Record<keyof CampaignContactsPreview['skipped'], string> = {
  */
 export default function CreateContactCampaignModal({
   contactIds: givenIds, onClose, title, subtitle, count, initialTemplateKey, initialName,
-  prepare, stepHref, defaultMode, onDone,
+  prepare, stepHref, defaultMode, onDone, actionKind,
 }: {
   contactIds?: string[];
   onClose: () => void;
@@ -46,6 +46,8 @@ export default function CreateContactCampaignModal({
   stepHref?: (ids: string[]) => string;
   defaultMode?: SendWay;
   onDone?: () => void;
+  /** Set by the Action Center: recorded on the campaign or batch this starts. */
+  actionKind?: ActionKind;
 }) {
   const app = useApp();
   const toast = useToast();
@@ -109,6 +111,7 @@ export default function CreateContactCampaignModal({
           setError(`Step-wise handles up to ${STEP_MAX} at a time — use a campaign for ${sendIds.length}.`);
           setSaving(false); return;
         }
+        if (actionKind) rememberSendOrigin(actionKind, sendIds);
         onDone?.();
         onClose();
         navigate(stepHref(sendIds));
@@ -117,6 +120,7 @@ export default function CreateContactCampaignModal({
 
       const campaign = await createCampaignFromContactsApi({
         name: name.trim(), templateKey, contactIds: sendIds, contactsPerDay, ratePerHour, runHourIst, attachResume,
+        ...(actionKind ? { origin: 'action-center' as const, actionKind } : {}),
       });
       const accepted = campaign.stats?.total ?? sendIds.length;
       const left = sendIds.length - accepted;

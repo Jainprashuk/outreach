@@ -134,12 +134,12 @@ export default function DiscoverAnalytics({ refreshToken }: { refreshToken: numb
   ];
 
   const rows = data.byLabel.filter(r => r.found || r.moved);
-  const viaTotal = data.via.search + data.via.github + data.via.website;
+  const viaTotal = data.via.search + data.via.github + data.via.website + (data.via.other || 0);
   const statusTotal = data.status.open + data.status.moved + data.status.discarded;
   const accent = cvar('--accent') || '#4f46e5';
   const teal = cvar('--teal') || '#085041';
   const muted = cvar('--text3') || '#8a8a8a';
-  const runsTotal = data.runs.done + data.runs.failed + data.runs.cancelled + data.runs.running;
+  const runsTotal = data.runs.done + data.runs.failed + data.runs.cancelled + data.runs.running + (data.runs.queued || 0);
 
   return (
     <>
@@ -210,6 +210,7 @@ export default function DiscoverAnalytics({ refreshToken }: { refreshToken: numb
                 <HBar label="Web search" n={data.via.search} d={viaTotal} fill={accent} />
                 <HBar label="GitHub" n={data.via.github} d={viaTotal} fill={accent} />
                 <HBar label="Company website" n={data.via.website} d={viaTotal} fill={accent} />
+                {(data.via.other || 0) > 0 && <HBar label="Other" n={data.via.other || 0} d={viaTotal} fill={accent} />}
               </>
             )}
         </Card>
@@ -235,6 +236,7 @@ export default function DiscoverAnalytics({ refreshToken }: { refreshToken: numb
               {data.runs.failed > 0 && <span className="badge badge-rejected">{data.runs.failed} failed</span>}
               {data.runs.cancelled > 0 && <span className="badge badge-closed">{data.runs.cancelled} cancelled</span>}
               {data.runs.running > 0 && <span className="badge badge-queued">{data.runs.running} running</span>}
+              {(data.runs.queued || 0) > 0 && <span className="badge badge-queued">{data.runs.queued} waiting to start</span>}
             </div>
           }>
           {runsTotal === 0 ? <div className="an-empty"><i className="ti ti-search" />No searches yet</div> : <SearchChart series={data.searchesPerDay} />}

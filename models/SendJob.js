@@ -34,6 +34,10 @@ const sendJobSchema = new mongoose.Schema({
   pauseReason:       { type: String, default: null },
   pausedUntil:       { type: Date, default: null },
   quotaProbe:        { type: Boolean, default: false },
+  // Started step-wise from the Action Center (⚡), and which of its actions — for
+  // Analytics. Null for every other batch.
+  origin:     { type: String, enum: ['action-center', null], default: null },
+  actionKind: { type: String, enum: ['followup', 'ready', 'pending', 'leads', 'prospects', null], default: null },
 }, { timestamps: true });
 
 // Per-user list index — built on prod by scripts/build-perf-indexes.js.

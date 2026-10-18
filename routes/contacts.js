@@ -13,6 +13,7 @@ const actionQueue = require('../lib/actionQueue');
 const contactList = require('../lib/contactList');
 const contactListDb = require('../lib/contactListDb');
 const analyticsSummary = require('../lib/analyticsSummary');
+const { queueAnalytics } = require('../lib/queueAnalytics');
 const Interview = require('../models/Interview');
 
 const router = express.Router();
@@ -164,7 +165,12 @@ const validTz = (tz) => {
 };
 router.get('/analytics-summary', async (req, res) => {
   try {
-    res.json(await analyticsSummary.summary(Contact, Interview, req.userId, { tz: validTz(req.query.tz) }));
+    const [summary, queue] = await Promise.all([
+      analyticsSummary.summary(Contact, Interview, req.userId, { tz: validTz(req.query.tz) }),
+      // The Needs you queue, for its own card. Added beside the summary, not inside it.
+      queueAnalytics(Contact, req.userId),
+    ]);
+    res.json({ ...summary, queue });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

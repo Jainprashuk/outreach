@@ -16,6 +16,7 @@ const mailer = require('../lib/mailer');
 
 const { requireOnboarded } = require('../lib/onboardingGuard');
 const { checkWorkersOffline } = require('../lib/workerWatch');
+const { campaignAnalytics } = require('../lib/campaignAnalytics');
 
 const router = express.Router();
 
@@ -125,6 +126,17 @@ router.post('/run-due', requireOnboarded, async (req, res) => {
     res.json(report);
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /api/campaigns/analytics?days=30 — Analytics → Outreach's Campaigns card
+// (lib/campaignAnalytics.js).
+router.get('/analytics', async (req, res) => {
+  try {
+    const days = Math.min(90, Math.max(7, Number(req.query.days) || 30));
+    res.json(await campaignAnalytics(req.userId, { days }));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -286,6 +298,7 @@ router.post('/', async (req, res) => {
       sourceColumns: Array.isArray(b.sourceColumns) ? b.sourceColumns.map(String) : [],
       headerRow: Number.isInteger(Number(b.headerRow)) ? Number(b.headerRow) : 0,
       status: 'draft',
+      origin: 'upload',
     });
 
     res.status(201).json(serialize(campaign.toObject()));
@@ -293,6 +306,13 @@ router.post('/', async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Where a from-contacts campaign was started, for Analytics. Only the Action Center
+// says so; anything else (the Contacts page) is "contacts".
+const AC_KINDS = ['followup', 'ready', 'pending', 'leads', 'prospects'];
+const campaignOrigin = (b) => (b.origin === 'action-center'
+  ? { origin: 'action-center', actionKind: AC_KINDS.includes(b.actionKind) ? b.actionKind : null }
+  : { origin: 'contacts' });
 
 // POST /api/campaigns/from-contacts — a campaign whose rows point at existing
 // contacts. This is intentionally separate from the spreadsheet endpoint: the
@@ -333,6 +353,7 @@ router.post('/from-contacts', async (req, res) => {
       columnMap: { name: 'Contact name', email: 'Contact email', company: 'Contact company', role: 'Contact role' },
       sourceColumns: ['Contact'], headerRow: -1, status: 'running',
       stats: { total: contacts.length, pending: contacts.length, released: 0, skipped: 0, removed: 0 },
+      ...campaignOrigin(b),
     });
     await CampaignRow.insertMany(contacts.map((c, rowIndex) => ({
       userId: req.userId,
@@ -790,3 +811,4 @@ router.delete('/:id', async (req, res) => {
 });
 
 module.exports = router;
+module.exports._test = { campaignOrigin };

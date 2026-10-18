@@ -280,6 +280,8 @@ export default function Contacts() {
           <option value="">All sources</option>
           <option value="lead">From a lead</option>
           <option value="discover">From Discover</option>
+          <option value="naukri">From a Naukri job</option>
+          <option value="library">From the Shared Library</option>
           <option value="outreach">Added directly</option>
         </select>
         <div style={{ position: 'relative' }}>

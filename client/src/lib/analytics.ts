@@ -6,6 +6,7 @@ import { FOLLOWED_UP, INTERVIEW_STATUS_LABELS, INTERVIEW_STATUS_ORDER } from './
 
 export const STATUS_META: Record<string, { label: string; c: string }> = {
   queued: { label: 'Queued', c: '--blue' },
+  'in-campaign': { label: 'In a campaign', c: '--blue' },
   sent: { label: 'Sent', c: '--green' },
   'follow-up-sent': { label: 'Follow-up Sent', c: '--amber' },
   replied: { label: 'Replied', c: '--teal' },
@@ -18,6 +19,7 @@ export const STATUS_META: Record<string, { label: string; c: string }> = {
   blocked: { label: 'Blocked', c: '--red' },
 };
 
+// Server copy: lib/statusSets.js (scripts/test-status-sets.js keeps the two in step).
 export const EMAILED = new Set(['sent', 'follow-up-sent', 'replied', 'follow-up-replied', 'bounced', 'closed', 'no-openings', 'in-review']);
 
 export const pct = (n: number, d: number) => (d > 0 ? Math.round((n / d) * 1000) / 10 : 0);
@@ -86,7 +88,7 @@ export interface Metrics {
   total: number; sentCount: number; repliedCount: number;
   fuCount: number; bouncedCount: number;
   afterFuCount: number; beforeFuCount: number;
-  inReviewEver: number; closedEver: number; queuedNow: number;
+  inReviewEver: number; closedEver: number; queuedNow: number; inCampaignNow: number;
   replyRate: number; bounceRate: number;
 }
 
@@ -107,6 +109,7 @@ export function computeMetrics(A: Analyzed[]): Metrics {
     inReviewEver: A.filter(a => a.ever.has('in-review')).length,
     closedEver: A.filter(a => a.ever.has('closed')).length,
     queuedNow: A.filter(a => a.c.status === 'queued').length,
+    inCampaignNow: A.filter(a => a.c.status === 'in-campaign').length,
     replyRate: pct(replied.length, sent.length),
     bounceRate: pct(bounced.length, sent.length),
   };
@@ -155,6 +158,7 @@ export const ACTIVITY_META: Array<{ type: string; label: string; c: string; icon
   { type: 'closed', label: 'Closed', c: '--slate', icon: 'ti-circle-check' },
   { type: 'no-openings', label: 'No openings', c: '--purple', icon: 'ti-door-off' },
   { type: 'queued', label: 'Queued for sending', c: '--blue', icon: 'ti-clock' },
+  { type: 'in-campaign', label: 'Added to a campaign', c: '--blue', icon: 'ti-route' },
   { type: 'blocked', label: 'Blocked (blocklisted)', c: '--red', icon: 'ti-ban' },
   // Interviews are a separate store, so their events are prefixed to keep them
   // from colliding with the identically-named contact statuses.

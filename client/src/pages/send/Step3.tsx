@@ -6,7 +6,7 @@ import Stepper from './Stepper';
 import ModePicker, { type SendMode } from './ModePicker';
 import { useApp } from '../../context/AppContext';
 import { useToast } from '../../context/ToastContext';
-import { API_BASE, loadSendContactsApi, type Contact, type SendJob } from '../../lib/api';
+import { API_BASE, loadSendContactsApi, takeSendOrigin, type Contact, type SendJob } from '../../lib/api';
 import { renderTemplate } from '../../lib/format';
 
 export default function Step3() {
@@ -140,6 +140,7 @@ export default function Step3() {
           sendMode: mode,
           chunkSize: mode === 'bulk' ? chunkSize : undefined,
           ratePerHour: mode === 'drip' ? dripRate : undefined,
+          ...(takeSendOrigin(items.map(i => i.contactId)) || {}),
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error || 'Failed to create job');

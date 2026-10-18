@@ -108,7 +108,7 @@ function dateSamples(cs) {
       for (const v of opts('approvalStatus')) queries.push({ tab, approval: v });
       for (const v of opts('template')) queries.push({ tab, template: v }, { tab, template: v, sort: 'lastSentAt', dir: 'desc' });
       for (const v of opts('replyCategory')) queries.push({ tab, category: v });
-      for (const v of ['outreach', 'lead', 'discover', 'nope']) queries.push({ tab, source: v });
+      for (const v of ['outreach', 'lead', 'discover', 'library', 'naukri', 'nope']) queries.push({ tab, source: v });
       for (const v of tab === 'all' ? companies : companies.slice(0, 6)) queries.push({ tab, company: v });
       for (const [from, to] of dates) for (const f of ['created', 'sent', 'replied']) {
         queries.push({ tab, [`${f}From`]: from, [`${f}To`]: to });

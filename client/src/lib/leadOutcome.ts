@@ -4,7 +4,7 @@ import { BADGE_CLASS, STATUS_LABELS } from './format';
 /** Coarse stage, for filtering and for the funnel. Derived, never stored. */
 export type OutcomeStage =
   | 'not-in-outreach' | 'awaiting-approval' | 'queued' | 'emailed'
-  | 'bounced' | 'replied' | 'failed';
+  | 'bounced' | 'replied' | 'failed' | 'blocked';
 
 export const STAGE_LABELS: Record<OutcomeStage, string> = {
   'not-in-outreach':   'Not in outreach',
@@ -14,16 +14,17 @@ export const STAGE_LABELS: Record<OutcomeStage, string> = {
   'bounced':           'Bounced',
   'replied':           'Replied',
   'failed':            'Send failed',
+  'blocked':           'Blocked (blocklist)',
 };
 
 // Most-interesting-first, for the filter dropdown.
 export const STAGE_ORDER: OutcomeStage[] = [
-  'replied', 'emailed', 'bounced', 'failed', 'queued', 'awaiting-approval', 'not-in-outreach',
+  'replied', 'emailed', 'bounced', 'failed', 'blocked', 'queued', 'awaiting-approval', 'not-in-outreach',
 ];
 
 // Lifecycle order, for reading a distribution top to bottom.
 export const STAGE_PIPELINE: OutcomeStage[] = [
-  'not-in-outreach', 'awaiting-approval', 'queued', 'emailed', 'replied', 'bounced', 'failed',
+  'not-in-outreach', 'awaiting-approval', 'queued', 'emailed', 'replied', 'bounced', 'failed', 'blocked',
 ];
 
 /** How many leads sit at each stage. */
@@ -50,8 +51,9 @@ export function stageOf(outcome: LeadOutcome | null): OutcomeStage {
   if (outcome.status === 'bounced') return 'bounced';
   if (outcome.status === 'failed') return 'failed';
   if (outcome.lastSentAt || outcome.status === 'sent' || outcome.status === 'follow-up-sent') return 'emailed';
+  if (outcome.status === 'blocked') return 'blocked'; // blocklisted before any email went out
   if (outcome.approvalStatus === 'pending') return 'awaiting-approval';
-  return 'queued';
+  return 'queued'; // queued, or in-campaign: waiting for a campaign release
 }
 
 export const stageStage = (lead: Lead, map: LeadOutcomeMap) => stageOf(outcomeOf(lead, map));
@@ -68,4 +70,5 @@ export const STAGE_BADGE: Record<OutcomeStage, string> = {
   'bounced':           'badge-bounced',
   'replied':           'badge-replied',
   'failed':            'badge-rejected',
+  'blocked':           'badge-blocked',
 };

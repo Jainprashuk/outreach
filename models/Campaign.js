@@ -72,6 +72,12 @@ const campaignSchema = new mongoose.Schema({
   // admin's resume brings back exactly what it paused. Any resume clears it.
   pausedByAdmin: { type: Boolean, default: false },
 
+  // How it was started, for Analytics: a spreadsheet upload, selected contacts, or
+  // the Action Center (⚡) — with which of its actions. Null on campaigns made
+  // before this was recorded.
+  origin:     { type: String, enum: ['upload', 'contacts', 'action-center', null], default: null },
+  actionKind: { type: String, enum: ['followup', 'ready', 'pending', 'leads', 'prospects', null], default: null },
+
   // Campaign operational updates are mailed back to the sender account. Keeping
   // the first Message-ID lets every update use one Gmail conversation.
   notificationThreadMessageId: { type: String, default: null },
