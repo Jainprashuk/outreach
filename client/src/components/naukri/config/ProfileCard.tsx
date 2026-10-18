@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { NaukriConfig, NaukriProfileFields } from '../../../lib/api';
 import { Card } from '../ui';
-import { updateNaukriConfigApi } from '../../../lib/api';
+import { updateNaukriConfigApi, naukriProfileFromResumeApi, isAiKeyRequired } from '../../../lib/api';
 import { useToast } from '../../../context/ToastContext';
 
 // You, in the form the screening questions ask for.
@@ -12,6 +12,14 @@ import { useToast } from '../../../context/ToastContext';
 // exists separately from the answer bank.
 
 const toList = (s: string) => s.split(',').map(x => x.trim()).filter(Boolean);
+
+type Suggested = Awaited<ReturnType<typeof naukriProfileFromResumeApi>>['suggested'];
+type Pick = 'skills' | 'totalExperienceMonths' | 'currentDesignation' | 'currentCompany' | 'currentLocation' | 'highestQualification';
+const PICK_LABEL: Record<Pick, string> = {
+  skills: 'Skills', totalExperienceMonths: 'Total experience', currentDesignation: 'Current designation',
+  currentCompany: 'Current company', currentLocation: 'Current location', highestQualification: 'Highest qualification',
+};
+const yrs = (m: number | null | undefined) => (m == null ? '' : `${Math.floor(m / 12)} yrs ${m % 12} mo`);
 
 export default function ProfileCard({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
@@ -25,6 +33,44 @@ export default function ProfileCard({ config, onSaved }: {
     setP(x => ({ ...x, [k]: v }));
 
   const num = (v: string) => (v === '' ? null : Number(v));
+
+  // Fill from resume: AI reads the resume and SUGGESTS values; you tick which
+  // to take. Empty fields are ticked for you; ones you already filled are not.
+  const [reading, setReading] = useState(false);
+  const [sugg, setSugg] = useState<Suggested | null>(null);
+  const [take, setTake] = useState<Record<Pick, boolean>>({} as Record<Pick, boolean>);
+  const newSkills = sugg ? sugg.skills.filter(s => !p.skills.some(x => x.toLowerCase() === s.toLowerCase())) : [];
+
+  const fillFromResume = async () => {
+    setReading(true);
+    try {
+      const { suggested } = await naukriProfileFromResumeApi();
+      const empty = (v: unknown) => v == null || v === '' || (Array.isArray(v) && !v.length);
+      const t = {} as Record<Pick, boolean>;
+      (Object.keys(PICK_LABEL) as Pick[]).forEach((k) => {
+        const has = k === 'skills' ? suggested.skills.length > 0 : !empty(suggested[k]);
+        t[k] = has && (k === 'skills' || empty(p[k]));
+      });
+      setSugg(suggested); setTake(t);
+    } catch (e: any) {
+      toast(isAiKeyRequired(e) ? e.message : (e?.message || 'Could not read the resume'), 'error');
+    } finally { setReading(false); }
+  };
+
+  const applySuggestions = () => {
+    if (!sugg) return;
+    setP((x) => {
+      const next = { ...x };
+      if (take.skills) next.skills = [...x.skills, ...newSkills];
+      if (take.totalExperienceMonths && sugg.totalExperienceMonths != null) next.totalExperienceMonths = sugg.totalExperienceMonths;
+      for (const k of ['currentDesignation', 'currentCompany', 'currentLocation', 'highestQualification'] as const) {
+        if (take[k] && sugg[k]) next[k] = sugg[k];
+      }
+      return next;
+    });
+    setSugg(null);
+    toast('Filled in — check it, add CTC and notice period, then Save profile.', 'success');
+  };
 
   const save = async () => {
     setSaving(true); setMsg('');
@@ -49,7 +95,40 @@ export default function ProfileCard({ config, onSaved }: {
   );
 
   return (
-    <Card title="Profile" icon="ti-user" collapsible id="profile" defaultOpen={false}>
+    <Card title="Profile" icon="ti-user" collapsible id="profile" defaultOpen={false}
+      right={<button className="btn btn-xs" type="button" onClick={fillFromResume} disabled={reading}
+        title="Read skills, experience and current role from your resume — you choose what to keep">
+        {reading ? <><i className="ti ti-loader-2 tc-spin" /> Reading…</> : <><i className="ti ti-sparkles" /> Fill from resume</>}
+      </button>}>
+
+      {sugg && (
+        <div style={{ padding: 10, background: 'var(--bg2)', borderRadius: 'var(--radius)', marginBottom: 12 }}>
+          <div style={{ fontSize: 13, fontWeight: 500, marginBottom: 6 }}>From your resume — tick what to use</div>
+          {(Object.keys(PICK_LABEL) as Pick[]).map((k) => {
+            const value = k === 'skills'
+              ? (newSkills.length ? `add ${newSkills.length}: ${newSkills.join(', ')}` : '')
+              : k === 'totalExperienceMonths' ? yrs(sugg.totalExperienceMonths) : (sugg[k] as string);
+            if (!value) return null;
+            const now = k === 'skills' ? '' : k === 'totalExperienceMonths' ? yrs(p.totalExperienceMonths) : (p[k] as string);
+            return (
+              <label key={k} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, padding: '3px 0' }}>
+                <input type="checkbox" checked={!!take[k]} onChange={e => setTake(t => ({ ...t, [k]: e.target.checked }))} style={{ marginTop: 3 }} />
+                <span>
+                  <strong>{PICK_LABEL[k]}:</strong> {value}
+                  {now && now !== value && <span style={{ color: 'var(--text2)' }}> (now: {now})</span>}
+                </span>
+              </label>
+            );
+          })}
+          <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <button className="btn btn-sm btn-primary" type="button" onClick={applySuggestions}>Use ticked</button>
+            <button className="btn btn-sm" type="button" onClick={() => setSugg(null)}>Cancel</button>
+          </div>
+          <div style={{ color: 'var(--text2)', fontSize: 11, marginTop: 6 }}>
+            Only skills that appear in your resume are suggested. Nothing is saved until you press Save profile.
+          </div>
+        </div>
+      )}
 
       <div>
         <Field label="Full name" k="fullName" />

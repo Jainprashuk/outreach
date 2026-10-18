@@ -118,6 +118,24 @@ const naukriJobSchema = new mongoose.Schema({
   // scoring existed.
   score:        { type: Number, default: null },
   scoreReasons: { type: [String], default: [] },
+
+  // ── tidied out of the inbox ────────────────────────────────────────────────
+  // Set when the inbox tidy rules (Configuration → Filters) cleared a job you
+  // had not looked at yet. It is 'rejected' with this reason; Restore puts it
+  // back and marks it exempt, so the rules never clear it again.
+  tidiedAt:   { type: Date, default: null },
+  tidyReason: { type: String, default: '' },
+  tidyExempt: { type: Boolean, default: false },
+
+  // ── what the recruiter did ─────────────────────────────────────────────────
+  // Read daily from Naukri's own application history (the "track" run). The
+  // furthest stage reached — applied, viewed, shortlisted, contacted,
+  // not-shortlisted — when, and every status as Naukri printed it.
+  naukriStage:    { type: String, enum: ['applied', 'viewed', 'shortlisted', 'contacted', 'not-shortlisted', null], default: null },
+  naukriStageAt:  { type: Date, default: null },
+  naukriTimeline: { type: [{ _id: false, id: Number, value: String, at: Date }], default: [] },
+  listingOpen:    { type: Boolean, default: null },
+  trackedAt:      { type: Date, default: null },
   applyHistory: {
     type: [{
       _id:  false,

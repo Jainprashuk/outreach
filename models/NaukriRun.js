@@ -11,7 +11,8 @@ const mongoose = require('mongoose');
 //   apply   — act on jobs YOU approved, and only those
 const naukriRunSchema = new mongoose.Schema({
   userId:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
-  kind:    { type: String, enum: ['refresh', 'harvest', 'apply', 'probe'], required: true },
+  // track = read recruiter actions from Naukri's application history (read-only).
+  kind:    { type: String, enum: ['refresh', 'harvest', 'apply', 'probe', 'track'], required: true },
   // Harvest only: which sources THIS run walks, when chosen on the Harvest
   // button. Null = the config's default (always so for scheduled runs).
   sources: { type: { searches: Boolean, recommended: Boolean, recommendedTabs: [String], _id: false }, default: null },
@@ -62,6 +63,9 @@ const naukriRunSchema = new mongoose.Schema({
     // many of them were confident enough to use.
     aiAsked:    { type: Number, default: 0 },
     aiAnswered: { type: Number, default: 0 },
+    // Track only: applications read from Naukri, and how many of ours moved.
+    tracked:    { type: Number, default: 0 },
+    moved:      { type: Number, default: 0 },
   },
 
   // Per-job outcomes for an apply run. This is the audit trail: what the worker

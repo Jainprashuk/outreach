@@ -404,6 +404,84 @@ async function main() {
     ok('a run silent for 45 min is marked as stopped', (await NaukriRun.findById(silent._id).lean()).status === 'failed');
     await NaukriRun.updateOne({ _id: working._id }, { $set: { status: 'done' } });
 
+    console.log('\ntrack replies');
+    {
+      const mk = async (sourceId, extra = {}) => (await NaukriJob.create({ userId, sourceId, sourceKey: `naukri:${sourceId}`,
+        title: `Tracked ${sourceId}`, company: 'TrackCo', url: `https://www.naukri.com/job-listings-${sourceId}`,
+        approval: 'approved', applyStatus: 'applied', appliedAt: new Date(), ...extra }))._id;
+      const viewedId = await mk('trk-1');
+      const shortId = await mk('trk-2', { origins: ['recommended'], score: 82 });
+      const mineId = await mk('trk-3', { applyStatus: 'interviewing' });
+      process.env.NAUKRI_STUB_TRACK = 'trk-1:4,trk-2:6,trk-3:7,not-ours-9:9';
+      await call('POST', '/runs', { kind: 'track' });
+      const tr = await runQuiet();
+      ok('track run done', tr.run && tr.run.status === 'done' && tr.run.stats.tracked === 3, JSON.stringify(tr.run && tr.run.stats));
+      const [v, sh, mine] = await Promise.all([viewedId, shortId, mineId].map(id => NaukriJob.findById(id).lean()));
+      ok('viewed recorded, pipeline left at applied', v.naukriStage === 'viewed' && v.applyStatus === 'applied');
+      ok('shortlisted recorded and moved to in review', sh.naukriStage === 'shortlisted' && sh.applyStatus === 'in-review'
+        && sh.applyHistory.some(h => /Naukri: shortlisted/.test(h.note)));
+      ok('your own pipeline edit is never overwritten', mine.naukriStage === 'not-shortlisted' && mine.applyStatus === 'interviewing');
+      ok('timeline kept with real dates', sh.naukriTimeline.length >= 3 && sh.naukriTimeline.every(t => t.at instanceof Date));
+      const ov = await call('GET', '/overview');
+      ok('results: sent / viewed / shortlisted add up', ov.results.viewed >= 3 && ov.results.shortlisted >= 1 && ov.results.lastTracked,
+        JSON.stringify({ sent: ov.results.sent, viewed: ov.results.viewed, shortlisted: ov.results.shortlisted }));
+      ok('results split by source', ov.results.bySource.recommended.shortlisted >= 1);
+      ok('a bell notice says a recruiter is interested',
+        await mongoose.connection.db.collection('notifications').countDocuments({ userId, title: /Recruiter interest|shortlisted or contacted/ }) >= 1);
+      await NaukriJob.updateMany({ _id: { $in: [viewedId, shortId, mineId] } }, { $set: { deleted: true } });
+      delete process.env.NAUKRI_STUB_TRACK;
+    }
+
+    console.log('\ninbox tidy');
+    {
+      await call('PATCH', '/config', { inboxTidy: { enabled: false } });
+      const mk = async (sourceId, extra) => String((await NaukriJob.create({ userId, sourceId, sourceKey: `naukri:${sourceId}`,
+        title: `Tidy ${sourceId}`, company: 'TidyCo', url: `https://www.naukri.com/job-listings-${sourceId}`,
+        approval: 'pending', applyStatus: 'none', lastSeenAt: new Date(), ...extra }))._id);
+      const oldId = await mk('tidy-old', { postedText: '30+ days ago', score: 85 });
+      const lowId = await mk('tidy-low', { postedText: '1 day ago', score: 20 });
+      const goodId = await mk('tidy-good', { postedText: '1 day ago', score: 85 });
+      const t1 = await call('PATCH', '/config', { inboxTidy: { enabled: true, maxAgeDays: 21, minScore: 40, companySite: false } });
+      const state = async (id) => (await NaukriJob.findById(id).lean());
+      ok('turning tidy on clears old and poor-fit jobs now', t1.tidied >= 2 && (await state(oldId)).approval === 'rejected' && (await state(lowId)).approval === 'rejected');
+      ok('…with the reason', /posted 30 days ago/.test((await state(oldId)).tidyReason) && /fit 20/.test((await state(lowId)).tidyReason));
+      ok('a good fresh job stays in the inbox', (await state(goodId)).approval === 'pending');
+      const shown = await call('GET', '/jobs?tidied=1&limit=200');
+      ok('"Show tidied" lists them', [oldId, lowId].every(id => shown.jobs.some(j => j.id === id)));
+      await call('POST', '/jobs/bulk', { ids: [oldId], action: 'restore' });
+      ok('Restore puts it back', (await state(oldId)).approval === 'pending');
+      await call('POST', '/inbox/tidy');
+      ok('…and the rules leave it alone afterwards', (await state(oldId)).approval === 'pending');
+      await call('PATCH', '/config', { inboxTidy: { enabled: false } });
+      await NaukriJob.updateMany({ _id: { $in: [oldId, lowId, goodId] } }, { $set: { deleted: true } });
+    }
+
+    console.log('\napply early: fresh first');
+    {
+      await NaukriJob.updateMany({ userId, ...{ approval: 'approved', applyStatus: { $in: ['none', 'failed'] } } }, { $set: { approval: 'pending' } });
+      const mk = async (sourceId, extra) => String((await NaukriJob.create({ userId, sourceId, sourceKey: `naukri:${sourceId}`,
+        title: `Order ${sourceId}`, company: `OrderCo ${sourceId}`, url: `https://www.naukri.com/job-listings-${sourceId}`,
+        approval: 'approved', approvedAt: new Date(Date.now() - 86400e3), applyStatus: 'none', lastSeenAt: new Date(), ...extra }))._id);
+      const oldBest = await mk('ord-old', { postedText: '20 days ago', score: 99, approvedAt: new Date(Date.now() - 9 * 86400e3) });
+      const freshOk = await mk('ord-fresh-ok', { postedText: 'Just now', score: 60 });
+      const freshBest = await mk('ord-fresh-best', { postedText: '1 day ago', score: 90 });
+      await call('POST', '/runs', { kind: 'apply' });
+      const c = await call('POST', '/claim', { host: 'test' });
+      const order = (c.jobs || []).map(j => j.id).filter(id => [oldBest, freshOk, freshBest].includes(id));
+      ok('the run takes the freshest first, best fit first within them', JSON.stringify(order) === JSON.stringify([freshBest, freshOk, oldBest]), JSON.stringify(order));
+      const w = await call('GET', '/jobs?bucket=waiting&sort=queue&limit=50');
+      ok('Waiting lists them in the same order', JSON.stringify(w.jobs.map(j => j.id).filter(id => order.includes(id))) === JSON.stringify(order));
+      await NaukriRun.updateMany({ userId, status: 'running' }, { $set: { status: 'done' } });
+      await NaukriJob.updateMany({ _id: { $in: [oldBest, freshOk, freshBest] } }, { $set: { deleted: true } });
+    }
+
+    console.log('\nsetup progress');
+    {
+      const ov = await call('GET', '/overview');
+      ok('overview carries the checklist', ov.setup && ov.setup.total === 8 && ov.setup.items.every(i => typeof i.done === 'boolean' && i.label));
+      ok('…and items point at the card that fixes them', ov.setup.items.filter(i => i.key !== 'worker').every(i => i.card));
+    }
+
     console.log('\ndaily limit used up');
     await call('PATCH', '/config', { apply: { maxPerDay: 1 } });
     let limit = null;

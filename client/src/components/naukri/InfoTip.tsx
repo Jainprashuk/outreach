@@ -73,8 +73,10 @@ export const JOBS_INFO: Record<string, ReactNode> = {
   answer: <>The worker stopped on a screening question it had no answer for, so it skipped the job rather than guess.
     Each question comes with an AI draft from your resume, with how sure the AI is. Answer it once (Use) — it becomes a rule, and every job that asked it goes back to Waiting.
     With “Let AI answer during apply” on (Configuration → Answers), confident answers are used on the spot instead and listed here under Auto-answered to review.</>,
-  applied: <>Applications that actually went out. Update each one&apos;s status as recruiters respond (in review, interviewing, offer, rejected),
-    and use Find people to reach someone at the company.</>,
+  applied: <>Applications that actually went out. What the recruiter did — viewed, shortlisted, contacted, not shortlisted — is read
+    from Naukri once a day and shown on each row; shortlisted or contacted ones move to “in review” for you. Use Find people to reach
+    someone at the company.</>,
   skipped: <>Jobs the worker can never apply to on Naukri: they apply on the company&apos;s own site, are walk-in drives, have closed,
-    were already applied to, or you set them aside. Open the listing to apply yourself if you want one.</>,
+    were already applied to, or you set them aside. Each row says why and offers the next step — apply on their site, find a
+    recruiter to email, try again, or dismiss.</>,
 };

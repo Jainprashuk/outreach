@@ -9,6 +9,8 @@ import RunTimeline, { ActiveRun } from '../components/naukri/RunTimeline';
 import ReviewQueue from '../components/naukri/ReviewQueue';
 import JobsTab, { type JobsView } from '../components/naukri/JobsTab';
 import InfoTip, { TAB_INFO } from '../components/naukri/InfoTip';
+import { SetupCard, ResultsCard } from '../components/naukri/SetupAndResults';
+import { openNaukriCard } from '../components/naukri/ui';
 import ConnectionCard from '../components/naukri/config/ConnectionCard';
 import { useAdaptiveInterval } from '../hooks/useAdaptiveInterval';
 import ScheduleCard from '../components/naukri/config/ScheduleCard';
@@ -47,7 +49,7 @@ const TABS: Array<[View, string, string]> = [
   ['config', 'Configuration', 'ti-settings'],
 ];
 
-const KIND_LABEL: Record<string, string> = { refresh: 'refresh', harvest: 'harvest', apply: 'apply' };
+const KIND_LABEL: Record<string, string> = { refresh: 'refresh', harvest: 'harvest', apply: 'apply', track: 'check replies' };
 
 // Harvest, with a choice of where to look for this one run. The tick marks the
 // default from Configuration → Searches, which is what scheduled harvests use.
@@ -105,6 +107,9 @@ export default function Naukri() {
   const [view, setView] = useState<View>('activity');
   const [jobsView, setJobsView] = useState<JobsView>('waiting');
   const openJobs = (v: JobsView) => { setJobsView(v); setView('jobs'); };
+  // A setup item's "Fix": go to Configuration and open that card once it exists.
+  const [pendingCard, setPendingCard] = useState<string | null>(null);
+  const fix = (card: string | null) => { if (!card) return; setPendingCard(card); setView('config'); };
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const toast = useToast();
@@ -124,9 +129,15 @@ export default function Naukri() {
   useAdaptiveInterval(load, { fastMs: POLL_MS, slowMs: IDLE_POLL_MS, fast: busyRun });
 
   useEffect(() => { if (view === 'config' && !config) loadConfig(); }, [view, config, loadConfig]);
+  useEffect(() => {
+    if (view !== 'config' || !config || !pendingCard) return;
+    const t = setTimeout(() => { openNaukriCard(pendingCard); setPendingCard(null); }, 80);
+    return () => clearTimeout(t);
+  }, [view, config, pendingCard]);
 
   const KIND_TOAST: Record<string, string> = {
     refresh: 'Refresh queued — your profile will be re-saved on the next worker poll.',
+    track: 'Checking replies — the worker reads My applies on its next poll (read-only).',
     harvest: 'Harvest queued — new listings will land in the Inbox.',
     apply: 'Apply run queued — approved jobs go out on the next worker poll.',
     probe: 'Probe queued.',
@@ -220,6 +231,8 @@ export default function Naukri() {
 
       {view === 'activity' && (
         <>
+          <SetupCard overview={overview} onFix={fix} />
+          <ResultsCard overview={overview} busy={busy || !r.canRun} onCheck={() => start('track')} />
           {/* The week in one line, each number a link to the list behind it. */}
           <Card>
             <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', fontSize: 13 }}>

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { RefreshBar, Refreshing } from '../RefreshBar';
 import type { NaukriJob, NaukriApplyStatus, NaukriJobOutreach } from '../../lib/api';
-import { listNaukriJobsApi, updateNaukriJobApi, lookupCompanyApi, startProspectSearchApi, naukriJobsOutreachApi } from '../../lib/api';
-import { autoPick } from '../../lib/prospects';
+import { listNaukriJobsApi, updateNaukriJobApi, naukriJobsOutreachApi } from '../../lib/api';
+import { useFindPeople } from './useFindPeople';
 import { Card, Muted, Empty } from './ui';
 import { fmtRunTime } from './format';
 import { useToast } from '../../context/ToastContext';
@@ -25,6 +25,13 @@ const BADGE: Partial<Record<NaukriApplyStatus, string>> = {
   offer: 'badge-sent', rejected: 'badge-rejected',
 };
 
+const STAGE_TEXT: Record<string, string> = {
+  viewed: 'Viewed by recruiter', shortlisted: 'Shortlisted', contacted: 'Recruiter contacted you', 'not-shortlisted': 'Not shortlisted',
+};
+const STAGE_BADGE: Record<string, string> = {
+  viewed: 'badge-queued', shortlisted: 'badge-approved', contacted: 'badge-approved', 'not-shortlisted': 'badge-seen',
+};
+
 export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -32,10 +39,8 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [msg, setMsg] = useState('');
   const toast = useToast();
-  const navigate = useNavigate();
   // Per job: whether people at the company were found from it, and how that went.
   const [outreach, setOutreach] = useState<Record<string, NaukriJobOutreach>>({});
-  const [finding, setFinding] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -50,25 +55,7 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
     finally { setLoading(false); setLoadedOnce(true); }
   }, []);
 
-  // Find the recruiters and hiring manager at the company you applied to. Starts the
-  // Discover search straight away when the company's website is certain; otherwise
-  // Discover opens with the name filled in so you pick which company it is.
-  const findPeople = async (job: NaukriJob) => {
-    setFinding(job.id);
-    try {
-      const r = await lookupCompanyApi(job.company);
-      const sure = autoPick(r.candidates);
-      if (!sure) {
-        navigate(`/discover?find=${encodeURIComponent(job.company)}&job=${job.id}`);
-        return;
-      }
-      const s = await startProspectSearchApi({ domain: sure.domain, companyName: sure.name || job.company, naukriJobId: job.id });
-      toast(s.reused ? 'Searched recently — opening those people' : `Finding people at ${sure.name || job.company}…`, 'info');
-      navigate(`/discover?domain=${encodeURIComponent(s.search.domain)}`);
-    } catch (e: any) {
-      toast(e?.message || 'Could not start the search', 'error');
-    } finally { setFinding(null); }
-  };
+  const { findPeople, finding } = useFindPeople();
 
   useEffect(() => { load(); }, [load]);
 
@@ -112,6 +99,13 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
                 nothing on this board was skipped. */}
             {job.applyNote && <Muted style={{ display: 'block' }}>{job.applyNote}</Muted>}
           </div>
+          {/* What the recruiter did, read daily from Naukri's own history. */}
+          {job.naukriStage && job.naukriStage !== 'applied' && (
+            <span className={`badge ${STAGE_BADGE[job.naukriStage]}`}
+              title={(job.naukriTimeline || []).map(t => `${t.value}${t.at ? ` · ${fmtRunTime(t.at)}` : ''}`).join('\n')}>
+              {STAGE_TEXT[job.naukriStage]}{job.naukriStageAt ? ` · ${fmtRunTime(job.naukriStageAt)}` : ''}
+            </span>
+          )}
           {(() => {
             const o = outreach[job.id];
             if (o && o.searched) {

@@ -22,6 +22,7 @@ const KINDS = [
   ['runRefresh', 'Refresh', 'Re-save your profile so recruiter search ranks you'],
   ['runHarvest', 'Harvest', 'Collect new listings into the inbox (read-only)'],
   ['runApply', 'Apply', 'Send applications for jobs in Waiting — unattended'],
+  ['runTrack', 'Track replies', 'Read what recruiters did (viewed, shortlisted, contacted) from Naukri — read-only'],
 ] as const;
 
 type Kind = typeof KINDS[number][0];
@@ -46,7 +47,7 @@ export default function ScheduleCard({
 
   // Times as one list for editing: index 0 is the schedule's own.
   const times: NaukriSlot[] = [
-    { time: draft.time, runRefresh: draft.runRefresh, runHarvest: draft.runHarvest, runApply: draft.runApply },
+    { time: draft.time, runRefresh: draft.runRefresh, runHarvest: draft.runHarvest, runApply: draft.runApply, runTrack: draft.runTrack !== false },
     ...draft.extraSlots,
   ];
   const setTime = (i: number, patch: Partial<NaukriSlot>) => {
@@ -54,7 +55,7 @@ export default function ScheduleCard({
     setDraft(d => ({ ...d, extraSlots: d.extraSlots.map((s, j) => (j === i - 1 ? { ...s, ...patch } : s)) }));
   };
   const addTime = () => setDraft(d => ({
-    ...d, extraSlots: [...d.extraSlots, { time: d.extraSlots.length ? '18:00' : '14:00', runRefresh: false, runHarvest: false, runApply: true }],
+    ...d, extraSlots: [...d.extraSlots, { time: d.extraSlots.length ? '18:00' : '14:00', runRefresh: false, runHarvest: false, runApply: true, runTrack: false }],
   }));
   const removeTime = (i: number) => setDraft(d => ({ ...d, extraSlots: d.extraSlots.filter((_, j) => j !== i - 1) }));
 
@@ -83,7 +84,7 @@ export default function ScheduleCard({
     }
   };
 
-  const nothingOn = times.every(t => !t.runRefresh && !t.runHarvest && !t.runApply);
+  const nothingOn = times.every(t => !t.runRefresh && !t.runHarvest && !t.runApply && !t.runTrack);
   const applyAnywhere = times.some(t => t.runApply);
 
   return (
@@ -117,7 +118,7 @@ export default function ScheduleCard({
           <input type="time" value={t.time} onChange={e => setTime(i, { time: e.target.value })} style={{ width: 110 }} />
           {KINDS.map(([key, label, help]) => (
             <label key={key} title={help} style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 13 }}>
-              <input type="checkbox" checked={t[key as Kind]} onChange={e => setTime(i, { [key]: e.target.checked })} />
+              <input type="checkbox" checked={!!t[key as Kind]} onChange={e => setTime(i, { [key]: e.target.checked })} />
               {label}
             </label>
           ))}
@@ -134,7 +135,9 @@ export default function ScheduleCard({
         </button>
       )}
       <Hint style={{ marginBottom: 12 }}>
-        Refresh re-saves your profile · Harvest fills the inbox (read-only) · Apply sends jobs in Waiting.
+        Refresh re-saves your profile · Harvest fills the inbox (read-only) · Apply sends jobs in Waiting, freshest
+        postings first · Track replies reads recruiter actions (read-only). A second Apply time (e.g. 14:00) gets the
+        day&apos;s new listings out while they are fresh.
         {applyAnywhere
           ? ' Apply is ticked, so scheduled wakes send applications without you there — within the daily cap.'
           : ' Apply is not ticked anywhere, so approved and auto-approved jobs only go out when you press Apply.'}

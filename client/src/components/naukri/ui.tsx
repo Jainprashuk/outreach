@@ -1,4 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+
+/** Open a collapsible config card by its id and scroll to it — used by the
+    setup checklist's "Fix" links. */
+export const openNaukriCard = (id: string) =>
+  window.dispatchEvent(new CustomEvent('naukri-open-card', { detail: id }));
 
 // Small shared primitives for the Naukri tab.
 //
@@ -40,6 +45,19 @@ export function Card({ title, icon, right, badge, children, style, collapsible, 
     } catch { return defaultOpen; }
   });
 
+  // Opened from elsewhere (the setup checklist): open, then bring into view.
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!id) return;
+    const onOpen = (e: Event) => {
+      if ((e as CustomEvent).detail !== id) return;
+      setOpen(true);
+      setTimeout(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+    };
+    window.addEventListener('naukri-open-card', onOpen);
+    return () => window.removeEventListener('naukri-open-card', onOpen);
+  }, [id]);
+
   const toggle = () => {
     const next = !open;
     setOpen(next);
@@ -47,7 +65,7 @@ export function Card({ title, icon, right, badge, children, style, collapsible, 
   };
 
   return (
-    <div style={{
+    <div ref={ref} style={{
       background: 'var(--bg)',
       border: '0.5px solid var(--border)',
       borderRadius: 'var(--radius-lg)',

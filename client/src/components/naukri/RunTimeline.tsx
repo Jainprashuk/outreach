@@ -26,6 +26,7 @@ function summary(run: NaukriRun): string {
   if (run.status === 'failed' || run.status === 'blocked') return run.error ? '' : 'no detail recorded';
   switch (run.kind) {
     case 'refresh': return 'profile updated';
+    case 'track': return `${s.tracked || 0} reply update${s.tracked === 1 ? '' : 's'} read${s.moved ? ` · ${s.moved} moved in your pipeline` : ''}`;
     case 'harvest': return `${s.found} found · ${s.new} new${s.updated ? ` · ${s.updated} updated` : ''}`
       + `${s.recommended ? ` · ${s.recommended} from recommended` : ''}`
       + `${s.autoApproved ? ` · ${s.autoApproved} auto-approved` : ''}`;

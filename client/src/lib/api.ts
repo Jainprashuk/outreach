@@ -1649,7 +1649,9 @@ export const revokeWorkerTokenApi = () =>
 // create a job as `pending`. Approving is the ONLY thing that authorises an
 // application, which is why decideNaukriJobsApi is also what queues the run.
 
-export type NaukriRunKind = 'refresh' | 'harvest' | 'apply' | 'probe';
+export type NaukriRunKind = 'refresh' | 'harvest' | 'apply' | 'probe' | 'track';
+/** What a recruiter did, read from Naukri's application history. */
+export type NaukriStage = 'applied' | 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted';
 export type NaukriRunStatus = 'queued' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled';
 export type NaukriApproval = 'pending' | 'approved' | 'rejected';
 export type NaukriApplyStatus =
@@ -1682,6 +1684,9 @@ export interface NaukriRun {
     autoApproved?: number;
     /** Harvest only: listings read off Recommended jobs. */
     recommended?: number;
+    /** Track only: recruiter actions read, and jobs moved in your pipeline. */
+    tracked?: number;
+    moved?: number;
   };
   results: Array<{
     jobId: string; title: string; company: string;
@@ -1717,6 +1722,14 @@ export interface NaukriJob {
   approvedAt: string | null;
   /** 'auto' when auto-approve moved it to Waiting on its score. */
   approvedBy?: 'you' | 'auto' | null;
+  /** Furthest recruiter action Naukri reports, and when. */
+  naukriStage?: NaukriStage | null;
+  naukriStageAt?: string | null;
+  naukriTimeline?: Array<{ id: number; value: string; at: string | null }>;
+  listingOpen?: boolean | null;
+  /** Cleared out of the inbox by the tidy rules; Restore brings it back. */
+  tidiedAt?: string | null;
+  tidyReason?: string;
   /** 0–100 fit (lib/naukriScore.js). Null for rows harvested before scoring. */
   score?: number | null;
   scoreReasons?: string[];
@@ -1745,6 +1758,8 @@ export interface NaukriSchedule {
   runHarvest: boolean;
   /** Off by default: applying should follow your approvals, not a clock. */
   runApply: boolean;
+  /** Read recruiter actions from Naukri (read-only). On by default. */
+  runTrack?: boolean;
   /** Times 2 and 3, each with its own kinds. Empty = the single time above. */
   extraSlots: NaukriSlot[];
 }
@@ -1756,7 +1771,20 @@ export interface NaukriSources {
   recommendedTabs?: NaukriRecommendedTab[];
 }
 
-export interface NaukriSlot { time: string; runRefresh: boolean; runHarvest: boolean; runApply: boolean }
+export interface NaukriSlot { time: string; runRefresh: boolean; runHarvest: boolean; runApply: boolean; runTrack?: boolean }
+
+export interface NaukriInboxTidy { enabled: boolean; maxAgeDays: number; minScore: number; companySite: boolean }
+
+export interface NaukriStageTally { sent: number; viewed: number; shortlisted: number; contacted: number; notShortlisted: number }
+
+export interface NaukriResults extends NaukriStageTally {
+  days: number;
+  lastTracked: string | null;
+  bySource: { search: NaukriStageTally; recommended: NaukriStageTally };
+  byScore: Record<string, NaukriStageTally>;
+}
+
+export interface NaukriSetupItem { key: string; label: string; done: boolean; hint: string; card: string | null }
 
 /** A scheduled wake: when, and which runs it starts. */
 export interface NaukriOccurrence { at: string; kinds: NaukriRunKind[] }
@@ -1812,6 +1840,8 @@ export interface NaukriConfig {
   aiDrafts: boolean;
   /** Let the AI answer DURING an apply when at least minConfidence% sure. Off by default. */
   autoAnswer: { enabled: boolean; minConfidence: number };
+  /** Clear old / poor-fit / company-site jobs out of the inbox automatically. */
+  inboxTidy: NaukriInboxTidy;
   filters: NaukriFilters;
   profile: NaukriProfileFields;
   answers: NaukriAnswer[];
@@ -1863,6 +1893,11 @@ export interface NaukriOverview {
   perDay: number;
   /** The default harvest sources, for the Harvest menu's tick. */
   sources: NaukriSources;
+  /** What still needs setting up — each item names the card that fixes it. */
+  setup: { items: NaukriSetupItem[]; done: number; total: number };
+  /** What recruiters did with the last 30 days of applications. */
+  results: NaukriResults;
+  inboxTidy: NaukriInboxTidy;
   appliedCount: number;
   appliedToday: number;
   /** Approved and still actionable — what a future apply run will draw from. */
@@ -1886,8 +1921,19 @@ export const naukriConfigApi = () =>
 /** Partial save — send only the section a card owns, so two open cards can't clobber each other.
     `requeued` counts skipped jobs a changed answer (or profile field) just moved back to Waiting. */
 export const updateNaukriConfigApi = (patch: Record<string, unknown>) =>
-  apiFetch<{ config: NaukriConfig; nextOccurrence: string | null; upcoming: NaukriOccurrence[]; requeued: number }>(
+  apiFetch<{ config: NaukriConfig; nextOccurrence: string | null; upcoming: NaukriOccurrence[]; requeued: number; tidied?: number }>(
     '/api/naukri/config', { method: 'PATCH', body: JSON.stringify(patch) });
+
+/** Run the inbox tidy rules now. */
+export const tidyNaukriInboxApi = () =>
+  apiFetch<{ tidied: number }>('/api/naukri/inbox/tidy', { method: 'POST' });
+
+/** SUGGESTED profile values read from the resume by AI — nothing is saved. */
+export const naukriProfileFromResumeApi = () =>
+  apiFetch<{ suggested: {
+    skills: string[]; totalExperienceMonths: number | null; currentDesignation: string;
+    currentCompany: string; currentLocation: string; highestQualification: string;
+  } }>('/api/naukri/config/profile-from-resume', { method: 'POST' });
 
 /** "Add common rules" — appends the starter rules you don't already have. */
 export const addNaukriStarterRulesApi = () =>
@@ -1975,6 +2021,8 @@ export interface NaukriJobQuery {
   applyType?: 'native' | 'external';
   /** Where it was found. 'search' includes rows from before origins were recorded. */
   origin?: 'search' | 'recommended';
+  /** '1' = only jobs the inbox tidy cleared away. */
+  tidied?: '1';
   page?: number;
   limit?: number;
 }
@@ -2007,7 +2055,7 @@ export const decideNaukriJobsApi = (ids: string[], decision: NaukriApproval, rea
  */
 export const bulkNaukriJobsApi = (
   ids: string[],
-  action: 'apply-next' | 'skip' | 'requeue' | 'dismiss',
+  action: 'apply-next' | 'skip' | 'requeue' | 'dismiss' | 'restore',
   reason?: string,
 ) => apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
   '/api/naukri/jobs/bulk', { method: 'POST', body: JSON.stringify({ ids, action, reason }) });

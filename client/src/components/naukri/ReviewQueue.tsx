@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshBar, Refreshing } from '../RefreshBar';
 import type { NaukriJob } from '../../lib/api';
-import { listNaukriJobsApi, decideNaukriJobsApi } from '../../lib/api';
+import { listNaukriJobsApi, decideNaukriJobsApi, bulkNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty } from './ui';
 import JobFilters, { EMPTY, toQuery, activeCount, type Draft } from './JobFilters';
 import HoverCard from '../HoverCard';
@@ -39,9 +39,11 @@ export function FitBadge({ job }: { job: Pick<NaukriJob, 'score' | 'scoreReasons
   );
 }
 
-function Row({ job, selected, focused, busy, onToggle, onDecide, onFocus }: {
+function Row({ job, selected, focused, busy, onToggle, onDecide, onFocus, onRestore }: {
   job: NaukriJob; selected: boolean; focused: boolean; busy: boolean;
   onToggle: () => void; onDecide: (d: 'approved' | 'rejected') => void; onFocus: () => void;
+  /** Set when listing tidied jobs: the row offers Restore instead of a decision. */
+  onRestore?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => { if (focused) ref.current?.scrollIntoView({ block: 'nearest' }); }, [focused]);
@@ -90,6 +92,14 @@ function Row({ job, selected, focused, busy, onToggle, onDecide, onFocus }: {
           </div>
         )}
       </div>
+      {onRestore ? (
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
+          {job.tidyReason && <span style={{ color: 'var(--text2)', fontSize: 11 }}>tidied: {job.tidyReason}</span>}
+          <button className="btn btn-xs" type="button" disabled={busy} onClick={e => { e.stopPropagation(); onRestore(); }}>
+            <i className="ti ti-arrow-back-up" /> Restore
+          </button>
+        </div>
+      ) : (
       <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
         <button className="btn btn-xs" type="button" disabled={busy} title="Reject (r)"
           onClick={e => { e.stopPropagation(); onDecide('rejected'); }}>
@@ -100,6 +110,7 @@ function Row({ job, selected, focused, busy, onToggle, onDecide, onFocus }: {
           <i className="ti ti-check" /> Approve
         </button>
       </div>
+      )}
     </div>
   );
 }
@@ -121,10 +132,15 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
   const [msg, setMsg] = useState('');
   const [loading, setLoading] = useState(true);
 
+  // "Show tidied": the jobs the inbox tidy cleared away, each with Restore.
+  const [tidiedView, setTidiedView] = useState(false);
+
   const load = useCallback(async (d: Draft, p: number) => {
     setLoading(true);
     try {
-      const r = await listNaukriJobsApi({ approval: 'pending', limit: PAGE, page: p, ...toQuery(d) });
+      const r = await listNaukriJobsApi(tidiedView
+        ? { tidied: '1', limit: PAGE, page: p, ...toQuery(d) }
+        : { approval: 'pending', limit: PAGE, page: p, ...toQuery(d) });
       // Past the last page (everything after it was decided): go back to page 1.
       if (!r.jobs.length && p > 1) { setPage(1); return; }
       setJobs(r.jobs); setTotal(r.total); setPages(Math.max(1, r.pages)); setTruncated(!!r.truncated); setTypeCounts(r.typeCounts); setOriginCounts(r.originCounts);
@@ -135,7 +151,7 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
       setFocus(0);
     } catch (e: any) { setMsg(e?.message || 'Could not load the inbox'); }
     finally { setLoading(false); }
-  }, []);
+  }, [tidiedView]);
 
   // Debounced, because the search box refetches on every keystroke otherwise.
   useEffect(() => {
@@ -192,14 +208,25 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
       const job = jobs[focus];
       if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); setFocus(f => Math.min(jobs.length - 1, f + 1)); }
       else if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); setFocus(f => Math.max(0, f - 1)); }
-      else if (e.key === 'a' && job) decide([job.id], 'approved');
-      else if (e.key === 'r' && job) decide([job.id], 'rejected');
+      else if (e.key === 'a' && job && !tidiedView) decide([job.id], 'approved');
+      else if (e.key === 'r' && job && !tidiedView) decide([job.id], 'rejected');
       else if (e.key === 'x' && job) toggle(job.id);
       else if (e.key === 'o' && job) window.open(job.url, '_blank', 'noopener');
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [jobs, focus, busy, decide]);
+  }, [jobs, focus, busy, decide, tidiedView]);
+
+  const restore = async (id: string) => {
+    setBusy(true);
+    try {
+      await bulkNaukriJobsApi([id], 'restore');
+      setJobs(js => js.filter(j => j.id !== id)); setTotal(t => Math.max(0, t - 1));
+      toast('Back in the inbox — the tidy rules will leave it alone now.', 'success');
+      onChanged();
+    } catch (e: any) { toast(e?.message || 'Could not restore', 'error'); }
+    finally { setBusy(false); }
+  };
 
   const allSelected = jobs.length > 0 && sel.size === jobs.length;
   const filtered = activeCount(draft) > 0;
@@ -211,6 +238,14 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
         draft={draft} onChange={changeDraft}
         total={total} showing={jobs.length} truncated={truncated} typeCounts={typeCounts} originCounts={originCounts}
       />
+
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
+        <button className={`btn btn-xs${tidiedView ? ' btn-primary' : ''}`} type="button"
+          onClick={() => { setPage(1); setTidiedView(v => !v); }}>
+          <i className="ti ti-clear-all" /> {tidiedView ? 'Back to the inbox' : 'Show tidied'}
+        </button>
+        {tidiedView && <Muted>Jobs the inbox tidy cleared away (Configuration → Filters). Restore puts one back for good.</Muted>}
+      </div>
 
       {loading && !jobs.length ? <Empty icon="ti-loader">Loading…</Empty> : <RefreshBar active={loading} />}
 
@@ -257,7 +292,8 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
 
       {jobs.map((j, i) => (
         <Row key={j.id} job={j} selected={sel.has(j.id)} focused={i === focus} busy={busy}
-          onToggle={() => toggle(j.id)} onDecide={d => decide([j.id], d)} onFocus={() => setFocus(i)} />
+          onToggle={() => toggle(j.id)} onDecide={d => decide([j.id], d)} onFocus={() => setFocus(i)}
+          onRestore={tidiedView ? () => restore(j.id) : undefined} />
       ))}
 
       {pages > 1 && (

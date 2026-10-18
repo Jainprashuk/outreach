@@ -195,4 +195,25 @@ async function apply(session, { config = {}, jobs, dryRun, onProgress, onResult,
   return stats;
 }
 
-module.exports = { connect, disconnect, loggedIn, refresh, harvest, apply, Checkpoint };
+// Recruiter actions on the jobs this stub applied to: one viewed, one
+// shortlisted — enough to exercise /track end to end.
+async function track(session, { onProgress }) {
+  maybeCheckpoint();
+  maybeFail('track');
+  onProgress({ phase: 'tracking', label: 'Reading recruiter actions', page: 1, pagesTotal: 1, found: 2 });
+  await sleep(150);
+  const st = (id, value) => ({ statusId: id, statusValue: value, dateTime: '2026-10-18 10:00:00' });
+  const rows = (process.env.NAUKRI_STUB_TRACK || 'stub-0:4,stub-1:6').split(',').map((pair) => {
+    const [jobId, top] = pair.split(':');
+    const n = Number(top);
+    const status = [st(1, 'Applied'), st(2, 'Application Sent')];
+    if (n === 4 || n === 6 || n === 9 || n === 7) status.push(st(4, 'Application Viewed'));
+    if (n === 6) status.push(st(6, 'Shortlisted'));
+    if (n === 9) status.push(st(9, 'Contacted By Email'));
+    if (n === 7) status.push(st(7, 'Not Shortlisted'));
+    return { jobId, status, isOpen: 'true' };
+  });
+  return { rows, expected: rows.length, sawFeed: true };
+}
+
+module.exports = { connect, disconnect, loggedIn, refresh, harvest, apply, track, Checkpoint };

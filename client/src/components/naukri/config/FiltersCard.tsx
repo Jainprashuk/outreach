@@ -18,6 +18,8 @@ export default function FiltersCard({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
 }) {
   const [f, setF] = useState<NaukriFilters>(config.filters);
+  // Inbox tidy: clears jobs waiting for review that nobody will apply to.
+  const [tidy, setTidy] = useState(config.inboxTidy || { enabled: false, maxAgeDays: 21, minScore: 40, companySite: false });
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -41,7 +43,11 @@ export default function FiltersCard({ config, onSaved }: {
 
   const save = async () => {
     setSaving(true); setMsg('');
-    try { await updateNaukriConfigApi({ filters: f }); { toast('Saved.', 'success'); setMsg('Saved.'); }; onSaved(); }
+    try {
+      const r = await updateNaukriConfigApi({ filters: f, inboxTidy: tidy });
+      const text = r.tidied ? `Saved — ${r.tidied} job${r.tidied === 1 ? '' : 's'} tidied out of the inbox.` : 'Saved.';
+      toast(text, 'success'); setMsg(text); onSaved();
+    }
     catch (e: any) { toast(e?.message || 'Could not save', 'error'); setMsg(e?.message || 'Could not save'); }
     finally { setSaving(false); }
   };
@@ -115,6 +121,33 @@ export default function FiltersCard({ config, onSaved }: {
           ))}
         </div>
       )}
+
+      <div style={{ borderTop: '1px solid var(--border)', margin: '12px 0', paddingTop: 12 }}>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+          <input type="checkbox" checked={tidy.enabled} style={{ marginTop: 3 }}
+            onChange={e => setTidy(t => ({ ...t, enabled: e.target.checked }))} />
+          <span>
+            Tidy the inbox automatically
+            <div style={{ color: 'var(--text2)', fontSize: 11 }}>
+              After every harvest, jobs waiting for review that match a rule below are cleared away, so the inbox only
+              holds what is worth a decision. Nothing is deleted: “Show tidied” in the Inbox lists them, and Restore
+              brings one back for good.
+            </div>
+          </span>
+        </label>
+        {tidy.enabled && (
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', fontSize: 13, margin: '8px 0 0 23px' }}>
+            <span>Older than <input type="number" min={1} value={tidy.maxAgeDays} style={{ width: 64 }}
+              onChange={e => setTidy(t => ({ ...t, maxAgeDays: Number(e.target.value) }))} /> days</span>
+            <span>Fit below <input type="number" min={0} max={100} value={tidy.minScore} style={{ width: 64 }}
+              onChange={e => setTidy(t => ({ ...t, minScore: Number(e.target.value) }))} /></span>
+            <label style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <input type="checkbox" checked={tidy.companySite} onChange={e => setTidy(t => ({ ...t, companySite: e.target.checked }))} />
+              Applies on the company site
+            </label>
+          </div>
+        )}
+      </div>
 
       {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 8 }}>{msg}</div>}
       <div style={{ display: 'flex', gap: 8 }}>

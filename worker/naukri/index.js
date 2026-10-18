@@ -17,6 +17,7 @@ const { Checkpoint } = require('./guard');
 const { refresh } = require('./refresh');
 const { harvest } = require('./harvest');
 const { apply } = require('./apply');
+const { track } = require('./track');
 
 module.exports = {
   connect,
@@ -25,5 +26,6 @@ module.exports = {
   refresh,
   harvest,
   apply,
+  track,
   Checkpoint,
 };

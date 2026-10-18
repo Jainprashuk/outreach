@@ -24,7 +24,9 @@ const router = express.Router();
 
 const BASE_FILTER = { deleted: { $ne: true } };
 const ACTIVE = ['queued', 'running'];
-const KINDS = ['refresh', 'harvest', 'apply', 'probe'];
+const KINDS = ['refresh', 'harvest', 'apply', 'probe', 'track'];
+const { queueOrder, tidyReason, readStatus, STAGE_RANK } = require('../lib/naukriQueue');
+const { profileFromResume } = require('../lib/naukriProfile');
 
 // A worker polls every 20s; 90s of silence means the Mac slept or the process died.
 const ONLINE_MS = 90_000;
@@ -233,6 +235,103 @@ const scheduleView = (schedule) => {
   };
 };
 
+// ── Inbox tidy ─────────────────────────────────────────────────────────────
+// Clears jobs nobody will apply to out of the review queue, by the rules in
+// Configuration → Filters (lib/naukriQueue.js tidyReason). They become
+// 'rejected' with the reason; Restore puts one back for good. Runs after every
+// harvest and whenever the rules are saved. Returns how many were cleared.
+async function tidyInbox(userId, config) {
+  const rules = config.inboxTidy || {};
+  if (!rules.enabled) return 0;
+  const pending = await NaukriJob.find(
+    { userId, approval: 'pending', applyStatus: 'none', tidyExempt: { $ne: true }, ...BASE_FILTER },
+    { postedAt: 1, postedText: 1, lastSeenAt: 1, score: 1, likelyExternal: 1, tidyExempt: 1 },
+  ).lean();
+  const now = new Date();
+  let n = 0;
+  for (const j of pending) {
+    const why = tidyReason(j, rules, now);
+    if (!why) continue;
+    await NaukriJob.updateOne({ _id: j._id, approval: 'pending' }, {
+      $set: { approval: 'rejected', rejectedReason: `Tidied: ${why}`, tidiedAt: now, tidyReason: why },
+    });
+    n++;
+  }
+  return n;
+}
+
+// ── Results: what recruiters did ───────────────────────────────────────────
+// Over applications sent in the last `days`, from the daily track run: how
+// many were viewed, shortlisted, contacted — overall, by where the job came
+// from, and by fit score — so you can see what is actually working.
+async function resultsSummary(userId, days = 30) {
+  const since = new Date(Date.now() - days * 86400000);
+  const rows = await NaukriJob.find(
+    { userId, appliedAt: { $gte: since }, ...BASE_FILTER },
+    { naukriStage: 1, origins: 1, score: 1, trackedAt: 1 },
+  ).lean();
+  const tally = (list) => {
+    const t = { sent: list.length, viewed: 0, shortlisted: 0, contacted: 0, notShortlisted: 0 };
+    for (const r of list) {
+      const st = r.naukriStage;
+      if (st && STAGE_RANK[st] >= STAGE_RANK.viewed) t.viewed++;
+      if (st === 'shortlisted') t.shortlisted++;
+      if (st === 'contacted') t.contacted++;
+      if (st === 'not-shortlisted') t.notShortlisted++;
+    }
+    return t;
+  };
+  const isRec = (r) => (r.origins || []).includes('recommended');
+  const band = (r) => (r.score == null ? 'unscored' : r.score >= 75 ? '75+' : r.score >= 50 ? '50-74' : 'under 50');
+  const byBand = {};
+  for (const b of ['75+', '50-74', 'under 50', 'unscored']) byBand[b] = tally(rows.filter(r => band(r) === b));
+  const lastTracked = rows.reduce((m, r) => (r.trackedAt && (!m || r.trackedAt > m) ? r.trackedAt : m), null);
+  return {
+    days, ...tally(rows), lastTracked,
+    bySource: { search: tally(rows.filter(r => !isRec(r))), recommended: tally(rows.filter(isRec)) },
+    byScore: byBand,
+  };
+}
+
+// ── Setup progress ─────────────────────────────────────────────────────────
+// What a new (or half-set-up) account still needs, each with the card that
+// fixes it. Every item is something that changes results, not busywork.
+async function setupChecklist(userId, config, worker) {
+  const eff = await effectiveResume(userId, config);
+  const text = await resumeTextFor(userId, config);
+  const p = config.profile || {};
+  const slots = slotsOf(config.schedule);
+  const answers = (config.answers || []).filter(a => a.enabled !== false);
+  const src = config.sources || {};
+  const items = [
+    { key: 'worker', card: null, label: 'Worker running and logged in to Naukri',
+      done: !!(worker && worker.lastSeenAt && worker.naukriLoggedIn),
+      hint: 'Run `bash worker/start-all.sh` on your Mac and log in to Naukri in the debug Chrome.' },
+    { key: 'resume', card: 'resume', label: 'Resume with readable text',
+      done: !!(eff && text && text.trim().length > 200),
+      hint: 'Upload a PDF resume in Settings (or paste its text in Resume & headline) — AI answers and your profile come from it.' },
+    { key: 'profile', card: 'profile', label: 'Profile: skills, experience, CTC, notice period',
+      done: (p.skills || []).length >= 3 && p.totalExperienceMonths != null && p.expectedCtcLpa != null && p.noticePeriodDays != null,
+      hint: 'Use "Fill from resume", then add CTC and notice period. Skills and years drive the fit score.' },
+    { key: 'sources', card: 'searches', label: 'Where to find jobs: searches or Recommended',
+      done: (config.searches || []).some(s => s.enabled !== false && (s.keywords || s.url)) || !!src.recommended,
+      hint: 'Add a search or two, or tick Naukri\'s recommended jobs.' },
+    { key: 'answers', card: 'answers', label: 'Common screening answers',
+      done: answers.length >= 5,
+      hint: 'Press "Add common rules" in Answers — notice period, CTC, experience, location in one go.' },
+    { key: 'schedule', card: 'schedule', label: 'Daily schedule that applies',
+      done: !!config.schedule.enabled && slots.some(s => s.kinds.includes('apply')),
+      hint: 'Turn on the schedule with Apply ticked — a second apply time (e.g. 14:00) gets fresh jobs out the same day.' },
+    { key: 'autoAnswer', card: 'answers', label: 'AI answers screening questions it is sure of',
+      done: !!(config.autoAnswer && config.autoAnswer.enabled),
+      hint: 'Turn on "Let AI answer during apply" in Answers so fewer jobs stop on a question.' },
+    { key: 'tidy', card: 'filters', label: 'Inbox tidies itself',
+      done: !!(config.inboxTidy && config.inboxTidy.enabled),
+      hint: 'Turn on inbox tidy in Filters so old and poor-fit jobs clear themselves away.' },
+  ];
+  return { items, done: items.filter(i => i.done).length, total: items.length };
+}
+
 // ── Owner endpoints ────────────────────────────────────────────────────────
 // IMPORTANT: literal paths are declared before any /:id route, or Express
 // matches them as an id.
@@ -298,6 +397,10 @@ router.get('/overview', async (req, res) => {
       perRun: config.apply.maxPerRun,
       perDay: config.apply.maxPerDay,
       sources: config.sources,
+      // What still needs setting up, and what recruiters did with what was sent.
+      setup: await setupChecklist(req.userId, config, worker),
+      results: await resultsSummary(req.userId, 30),
+      inboxTidy: config.inboxTidy,
       appliedCount,
       appliedToday: todayCount,
       waitingCount,
@@ -366,7 +469,7 @@ router.patch('/config', async (req, res) => {
         if (n == null) return res.status(400).json({ error: 'catchUpHours must be between 0 and 12' });
         config.schedule.catchUpHours = n;
       }
-      for (const k of ['runRefresh', 'runHarvest', 'runApply']) {
+      for (const k of ['runRefresh', 'runHarvest', 'runApply', 'runTrack']) {
         if (s[k] !== undefined) config.schedule[k] = !!s[k];
       }
       // Slots 2 and 3. Each needs a valid time and at least one kind, and no
@@ -381,8 +484,8 @@ router.patch('/config', async (req, res) => {
           if (!parseTime(time)) return res.status(400).json({ error: `Each time must be HH:mm (got "${time}")` });
           if (seen.has(time)) return res.status(400).json({ error: `${time} is listed twice` });
           seen.add(time);
-          const slot = { time, runRefresh: !!(x && x.runRefresh), runHarvest: !!(x && x.runHarvest), runApply: !!(x && x.runApply) };
-          if (!slot.runRefresh && !slot.runHarvest && !slot.runApply) {
+          const slot = { time, runRefresh: !!(x && x.runRefresh), runHarvest: !!(x && x.runHarvest), runApply: !!(x && x.runApply), runTrack: !!(x && x.runTrack) };
+          if (!slot.runRefresh && !slot.runHarvest && !slot.runApply && !slot.runTrack) {
             return res.status(400).json({ error: `The ${time} slot has nothing to do — tick refresh, harvest or apply` });
           }
           clean.push(slot);
@@ -426,6 +529,15 @@ router.patch('/config', async (req, res) => {
       config.worker.pollSeconds = num(body.worker.pollSeconds, { min: 15, max: 120, integer: true }) ?? 20;
     }
     if (body.aiDrafts !== undefined) config.aiDrafts = !!body.aiDrafts;
+    let tidyChanged = false;
+    if (body.inboxTidy) {
+      const t = body.inboxTidy;
+      if (t.enabled !== undefined) config.inboxTidy.enabled = !!t.enabled;
+      if (t.maxAgeDays !== undefined) config.inboxTidy.maxAgeDays = num(t.maxAgeDays, { min: 1, integer: true }) ?? config.inboxTidy.maxAgeDays;
+      if (t.minScore !== undefined) config.inboxTidy.minScore = num(t.minScore, { min: 0, max: 100, integer: true }) ?? config.inboxTidy.minScore;
+      if (t.companySite !== undefined) config.inboxTidy.companySite = !!t.companySite;
+      tidyChanged = true;
+    }
     if (body.resumeText !== undefined) {
       config.resume.text = str(body.resumeText, 20000);
       // Cleared = go back to reading the resume file; anything typed is kept as yours.
@@ -523,7 +635,10 @@ router.patch('/config', async (req, res) => {
     await config.save();
     // A new rule — or a profile field a rule quotes — can unblock skipped jobs.
     const requeued = answersChanged ? await requeueAnswered(req.userId, config) : 0;
-    res.json({ config: config.toJSON(), ...scheduleView(config.schedule), requeued });
+    // New tidy rules apply to what is already in the inbox, not just to the
+    // next harvest.
+    const tidied = tidyChanged ? await tidyInbox(req.userId, config) : 0;
+    res.json({ config: config.toJSON(), ...scheduleView(config.schedule), requeued, tidied });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -619,6 +734,32 @@ router.get('/config/unknown-questions', async (req, res) => {
 // POST /api/naukri/config/starter-rules — "Add common rules". Appends the
 // starter rules (lib/naukriAnswers.js STARTER_RULES) you do not already have,
 // at the END, so any rule you wrote yourself still wins.
+// POST /api/naukri/inbox/tidy — run the tidy rules over the inbox now.
+router.post('/inbox/tidy', async (req, res) => {
+  try {
+    const config = await NaukriConfig.getForUser(req.userId);
+    if (!config.inboxTidy || !config.inboxTidy.enabled) return res.status(409).json({ error: 'Inbox tidy is off — turn it on in Configuration → Filters' });
+    res.json({ tidied: await tidyInbox(req.userId, config) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/naukri/config/profile-from-resume — SUGGESTED profile values read
+// from the resume by AI (lib/naukriProfile.js). Nothing is saved here: the
+// Profile card shows them beside what you have, and you apply the ones you want.
+router.post('/config/profile-from-resume', async (req, res) => {
+  try {
+    const config = await NaukriConfig.getForUser(req.userId);
+    const text = await resumeTextFor(req.userId, config);
+    const out = await profileFromResume(text, { userId: req.userId });
+    if (!out.ok) return res.status(out.code === 'AI_KEY_REQUIRED' ? 409 : 422).json({ error: out.error, code: out.code || null });
+    res.json({ suggested: out.profile });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.post('/config/starter-rules', async (req, res) => {
   try {
     const config = await NaukriConfig.getForUser(req.userId);
@@ -1256,6 +1397,8 @@ router.get('/jobs', async (req, res) => {
       company: { company: 1, lastSeenAt: -1 },
     };
     const sort = SORTS[req.query.sort] || SORTS.newest;
+    // Jobs the inbox tidy cleared away, for "Show tidied" and Restore.
+    if (req.query.tidied === '1') { filter.approval = 'rejected'; filter.tidiedAt = { $ne: null }; }
 
     const minSalaryLpa = num(req.query.minSalary, { min: 0, max: 1000 });
     const maxPostedAgeDays = num(req.query.maxAge, { min: 1, max: 365, integer: true });
@@ -1285,6 +1428,18 @@ router.get('/jobs', async (req, res) => {
       ]);
       return { all, recommended, search };
     };
+
+    // The Waiting list in exactly the order the next run takes them.
+    if (req.query.sort === 'queue' && !needsRefine) {
+      const [all, counts, origins] = await Promise.all([
+        NaukriJob.find(filter).limit(5000).lean(), typeCounts(), originCounts(),
+      ]);
+      const ordered = queueOrder(all);
+      return res.json({
+        jobs: ordered.slice((page - 1) * limit, page * limit).map(serialize),
+        total: ordered.length, page, limit, pages: Math.ceil(ordered.length / limit), typeCounts: counts, originCounts: origins,
+      });
+    }
 
     if (!needsRefine) {
       const [jobs, total, counts, origins] = await Promise.all([
@@ -1465,6 +1620,13 @@ router.post('/jobs/bulk', async (req, res) => {
       }
       result = { modifiedCount: rows.length };
 
+    } else if (action === 'restore') {
+      // Back from the tidy, for good: tidyExempt keeps the rules off it.
+      result = await NaukriJob.updateMany(
+        { ...scope, approval: 'rejected', tidiedAt: { $ne: null } },
+        { $set: { approval: 'pending', tidiedAt: null, tidyReason: '', rejectedReason: '', tidyExempt: true } },
+      );
+
     } else if (action === 'dismiss') {
       // Skips and failures become 'dismissed' — off every list and count. The
       // old version only rejected them, which left them sitting in Skipped.
@@ -1480,7 +1642,7 @@ router.post('/jobs/bulk', async (req, res) => {
       result = { modifiedCount: outcome.modifiedCount + proposal.modifiedCount };
 
     } else {
-      return res.status(400).json({ error: 'action must be apply-next, skip, requeue or dismiss' });
+      return res.status(400).json({ error: 'action must be apply-next, skip, requeue, restore or dismiss' });
     }
 
     res.json({ updated: result.modifiedCount, run });
@@ -1612,7 +1774,7 @@ router.post('/claim', async (req, res) => {
         config.apply.maxPerRun,
         config.apply.maxPerDay - doneToday
       ));
-      payload.jobs = budget === 0 ? [] : await NaukriJob.find({
+      payload.jobs = budget === 0 ? [] : queueOrder(await NaukriJob.find({
         userId: req.userId,
         // Exactly what the Waiting tab lists, so "waiting" and "what the next
         // run takes" cannot disagree. Skips are NOT claimed: one blocked on a
@@ -1625,9 +1787,10 @@ router.post('/claim', async (req, res) => {
         // you have asked for the attempt.
         $or: [{ likelyExternal: { $ne: true } }, { priority: { $gt: 0 } }],
         ...BASE_FILTER,
-      // Priority first, then oldest approval. Picking jobs in the UI sets
-      // priority, so "apply to these" means these — not "these, eventually".
-      }).sort({ priority: -1, approvedAt: 1 }).limit(budget).lean().then(rows => rows.map(serialize));
+      // Apply early: the order is lib/naukriQueue.js queueOrder — anything
+      // you picked first, then freshest postings, then best fit. Sorted in JS
+      // because "how fresh" is read from Naukri's own words ("3 days ago").
+      }).limit(5000).lean()).slice(0, budget).map(serialize);
       payload.budget = { perRun: config.apply.maxPerRun, perDay: config.apply.maxPerDay, doneToday, granted: budget };
     }
 
@@ -1755,7 +1918,8 @@ router.post('/ingest', async (req, res) => {
       $inc: { 'stats.found': created + updated, 'stats.new': created, 'stats.updated': updated, 'stats.autoApproved': autoApproved },
     });
 
-    res.json({ created, updated, skipped, autoApproved });
+    const tidied = await tidyInbox(req.userId, config);
+    res.json({ created, updated, skipped, autoApproved, tidied });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1862,6 +2026,71 @@ router.post('/result', async (req, res) => {
     );
 
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/naukri/track — worker token. Rows read from Naukri's own
+// application history (applyapi/v5/history, the "My applies" page). Each is
+// matched to a job WE applied to by Naukri's job id; its furthest stage
+// (viewed, shortlisted, contacted, not shortlisted) is recorded, and a job
+// still at "applied" in your pipeline moves on (shortlisted/contacted → in
+// review, not shortlisted → rejected). Your own pipeline edits are never
+// overwritten. Applications made outside this app are counted, not stored.
+router.post('/track', async (req, res) => {
+  try {
+    const { runId, rows } = req.body || {};
+    if (!runId || !Array.isArray(rows)) return res.status(400).json({ error: 'runId and rows are required' });
+    const now = new Date();
+    // Naukri prints "2026-10-18 11:35:12" in India time. Anything unreadable
+    // becomes null rather than failing the whole sync.
+    const ist = (v) => {
+      if (!v) return null;
+      const d = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}/.test(v) ? `${v.replace(' ', 'T')}+05:30` : v);
+      return isNaN(d.getTime()) ? null : d;
+    };
+    let matched = 0, moved = 0;
+    const news = [];
+    for (const row of rows.slice(0, 2000)) {
+      const jobId = str(row && row.jobId, 100);
+      if (!jobId) continue;
+      const job = await NaukriJob.findOne({ userId: req.userId, sourceId: jobId, ...BASE_FILTER });
+      if (!job) continue;
+      matched++;
+      const { stage, at, timeline } = readStatus(row);
+      const set = {
+        naukriTimeline: timeline.slice(0, 20).map(t => ({ id: t.id, value: str(t.value, 80), at: ist(t.at) })),
+        listingOpen: row.isOpen === undefined ? null : String(row.isOpen) === 'true',
+        trackedAt: now,
+      };
+      const changed = stage !== job.naukriStage;
+      if (changed) {
+        set.naukriStage = stage;
+        set.naukriStageAt = ist(at) || now;
+      }
+      const update = { $set: set };
+      // Move the pipeline only from 'applied' — never over your own edits.
+      if (changed && job.applyStatus === 'applied' && (stage === 'shortlisted' || stage === 'contacted' || stage === 'not-shortlisted')) {
+        const to = stage === 'not-shortlisted' ? 'rejected' : 'in-review';
+        set.applyStatus = to;
+        update.$push = { applyHistory: { at: now, from: 'applied', to, note: `Naukri: ${stage.replace('-', ' ')}` } };
+        moved++;
+      }
+      if (changed && (stage === 'shortlisted' || stage === 'contacted')) news.push(`${job.title} · ${job.company}`);
+      await NaukriJob.updateOne({ _id: job._id }, update);
+    }
+    await NaukriRun.updateOne({ _id: runId, userId: req.userId }, { $inc: { 'stats.tracked': matched, 'stats.moved': moved } });
+    if (news.length) {
+      await notify(req.userId, {
+        type: 'naukri.applied',
+        title: news.length === 1 ? `Recruiter interest: ${news[0]}` : `${news.length} applications shortlisted or contacted`,
+        body: news.slice(0, 5).join('\n'),
+        link: '/naukri',
+        dedupeKey: `naukri.track:${runId}:${news.length}`,
+      });
+    }
+    res.json({ matched, moved });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

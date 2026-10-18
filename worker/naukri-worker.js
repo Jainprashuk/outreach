@@ -368,6 +368,19 @@ async function executeRun(runDoc, config, openSession = null) {
         return {};
       }
 
+      if (runDoc.kind === 'track') {
+        // Read-only: what recruiters did with your applications.
+        const { rows, expected } = await Promise.race([driver.track(session, { onProgress }), expired]);
+        let matched = 0, moved = 0;
+        for (let i = 0; i < rows.length; i += CHUNK) {
+          const r = await apiRetry('/api/naukri/track', { runId: runDoc.id, rows: rows.slice(i, i + CHUNK) });
+          matched += r.matched || 0; moved += r.moved || 0;
+        }
+        await finish('done', { exitCode: 0, stats: {} });
+        log(`track done — ${rows.length} recruiter action(s) read${expected != null ? ` of ${expected}` : ''}, ${matched} on jobs applied from here, ${moved} moved in your pipeline`);
+        return {};
+      }
+
       return finish('failed', { error: `Unknown run kind: ${runDoc.kind}` });
     } finally {
       // Only close what we opened. A session handed in by the caller is theirs

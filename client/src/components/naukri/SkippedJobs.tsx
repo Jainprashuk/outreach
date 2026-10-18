@@ -5,6 +5,27 @@ import { listNaukriJobsApi, bulkNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty } from './ui';
 import { useToast } from '../../context/ToastContext';
 import SelectionBar, { RowCheck } from './SelectionBar';
+import { useFindPeople } from './useFindPeople';
+
+// What happened, in a word, and the one thing worth doing about it.
+type Why = 'company-site' | 'walk-in' | 'closed' | 'already' | 'set-aside' | 'other';
+function whyOf(j: NaukriJob): Why {
+  const n = (j.applyNote || '').toLowerCase();
+  if (/company site/.test(n)) return 'company-site';
+  if (/walk-in/.test(n)) return 'walk-in';
+  if (/closed or removed|no longer takes/.test(n)) return 'closed';
+  if (/already applied/.test(n)) return 'already';
+  if (/set aside/.test(n)) return 'set-aside';
+  return 'other';
+}
+const WHY_TEXT: Record<Why, string> = {
+  'company-site': 'Applies on the company’s own site — the worker only does Naukri applies.',
+  'walk-in': 'Walk-in drive — Naukri only offers “I am interested”, which is not an application.',
+  closed: 'Listing closed or removed — Naukri no longer takes applications for it.',
+  already: 'You had already applied to this one on Naukri.',
+  'set-aside': 'You set this aside.',
+  other: '',
+};
 
 // Jobs the worker reached and backed out of, for a reason an answer cannot fix.
 // (Skips on a screening question live in their own view, Needs answer, because
@@ -68,6 +89,8 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
     finally { setBusy(false); }
   };
 
+  const { findPeople, finding } = useFindPeople();
+
   const toggle = (id: string) => setSel(s => {
     const next = new Set(s);
     next.has(id) ? next.delete(id) : next.add(id);
@@ -92,7 +115,31 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
         <a href={job.url} target="_blank" rel="noreferrer"
            style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{job.title}</a>
         <div><Muted>{job.company}{job.location ? ` · ${job.location}` : ''}</Muted></div>
-        {tab === 'other' && job.applyNote && <Muted style={{ display: 'block' }}>{job.applyNote}</Muted>}
+        <Muted style={{ display: 'block' }}>{WHY_TEXT[whyOf(job)] || job.applyNote}</Muted>
+      </div>
+      {/* The next step for this kind of skip — so every row says what to do. */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {(whyOf(job) === 'company-site' || whyOf(job) === 'walk-in') && (
+          <a className="btn btn-xs" href={job.url} target="_blank" rel="noreferrer">
+            <i className="ti ti-external-link" /> {whyOf(job) === 'walk-in' ? 'See the drive' : 'Apply on their site'}
+          </a>
+        )}
+        {whyOf(job) === 'company-site' && (
+          <button className="btn btn-xs btn-primary" type="button" disabled={finding !== null} onClick={() => findPeople(job)}
+            title="Find the recruiter or hiring manager at this company and email them">
+            {finding === job.id ? <><i className="ti ti-loader-2 tc-spin" /> Finding…</> : <><i className="ti ti-user-search" /> Find a recruiter</>}
+          </button>
+        )}
+        {(whyOf(job) === 'set-aside' || whyOf(job) === 'other') && (
+          <button className="btn btn-xs" type="button" disabled={busy} onClick={() => bulk('requeue', [job.id])}>
+            <i className="ti ti-rotate" /> {whyOf(job) === 'other' ? 'Try again' : 'Move to waiting'}
+          </button>
+        )}
+        {(whyOf(job) === 'closed' || whyOf(job) === 'already') && (
+          <button className="btn btn-xs" type="button" disabled={busy} onClick={() => bulk('dismiss', [job.id])}>
+            <i className="ti ti-trash" /> Dismiss
+          </button>
+        )}
       </div>
     </div>
   );

@@ -53,6 +53,7 @@ const slotSchema = new mongoose.Schema({
   runRefresh: { type: Boolean, default: false },
   runHarvest: { type: Boolean, default: false },
   runApply:   { type: Boolean, default: true },
+  runTrack:   { type: Boolean, default: false },
 });
 
 // An AI-drafted answer to a screening question the answer bank has no rule for.
@@ -94,6 +95,9 @@ const naukriConfigSchema = new mongoose.Schema({
     runRefresh: { type: Boolean, default: true },
     runHarvest: { type: Boolean, default: true },
     runApply:   { type: Boolean, default: false },
+    // Read what recruiters did with your applications (viewed, shortlisted,
+    // contacted) from Naukri's application history. Read-only; on by default.
+    runTrack:   { type: Boolean, default: true },
     // Slots 2 and 3. Empty = the single daily time above, as before.
     extraSlots: { type: [slotSchema], default: [] },
   },
@@ -102,6 +106,16 @@ const naukriConfigSchema = new mongoose.Schema({
   // takes effect on the next check-in without restarting the worker.
   worker: {
     pollSeconds: { type: Number, default: 20, min: 15, max: 120 },
+  },
+
+  // Clear jobs nobody will apply to out of the inbox, automatically: too old,
+  // too poor a fit, or (optionally) company-site. Off by default — it rejects
+  // jobs on your behalf — and every tidied job can be restored.
+  inboxTidy: {
+    enabled:     { type: Boolean, default: false },
+    maxAgeDays:  { type: Number, default: 21, min: 1 },
+    minScore:    { type: Number, default: 40, min: 0, max: 100 },
+    companySite: { type: Boolean, default: false },
   },
 
   // Harvest size. Clamped again in the worker to its hard caps (10 searches,
