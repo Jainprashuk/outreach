@@ -30,7 +30,7 @@ import ApplyCard from '../components/naukri/config/ApplyCard';
 import { Card, Band, Muted, Notice, Empty, Hint } from '../components/naukri/ui';
 import { fmtTime, DAY_LABELS } from '../components/naukri/format';
 import {
-  PlatformProvider, NAUKRI_VIEW, PlatformTag, ScopeTag, type PlatformView,
+  PlatformProvider, NAUKRI_VIEW, PlatformTag, ScopeTag, PLATFORM_COLOR, type PlatformView,
 } from '../components/naukri/platform';
 
 // Job Platforms — the page that was "Naukri", now one view over every job site
@@ -136,10 +136,88 @@ function Menu({ label, icon, disabled, title, primary, items }: {
   );
 }
 
-// The switcher: All platforms + one card per platform that is switched on.
-function Switcher({ platforms, scope, onPick, onSetup }: {
-  platforms: PlatformInfo[]; scope: PlatformScope; onPick: (p: PlatformScope) => void; onSetup: () => void;
+// All platforms → Apply: one button that applies on the ticked platforms, and
+// an arrow that opens the list to tick. Every platform that can apply right now
+// starts ticked; one that can't (apply off, worker not ready) shows why and
+// stays unticked. Your unticks are remembered on this browser.
+// Short, like every other page's: the switcher and tabs say the rest.
+const SUBTITLE = 'Harvest, apply and track replies across job sites';
+
+type ApplyChoice = { id: PlatformId; label: string; ok: boolean; why?: string; mode?: string };
+const APPLY_SKIP_KEY = 'jp-apply-skip';
+function ApplyPicker({ choices, busy, onApply }: {
+  choices: ApplyChoice[]; busy: boolean; onApply: (ids: PlatformId[]) => void;
 }) {
+  const [open, setOpen] = useState(false);
+  const [skip, setSkip] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(APPLY_SKIP_KEY) || '[]'); } catch { return []; }
+  });
+  const ref = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false); };
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpen(false); };
+    document.addEventListener('pointerdown', close);
+    document.addEventListener('keydown', key);
+    return () => { document.removeEventListener('pointerdown', close); document.removeEventListener('keydown', key); };
+  }, [open]);
+  const toggle = (id: string) => {
+    const next = skip.includes(id) ? skip.filter(x => x !== id) : [...skip, id];
+    setSkip(next);
+    try { localStorage.setItem(APPLY_SKIP_KEY, JSON.stringify(next)); } catch { /* private window */ }
+  };
+  const picked = choices.filter(c => c.ok && !skip.includes(c.id));
+  const tip = picked.length ? `Applies on: ${picked.map(c => c.label).join(', ')}` : 'Tick at least one ready platform';
+  return (
+    <span ref={ref} style={{ position: 'relative', display: 'inline-flex' }}>
+      <button className="btn btn-primary btn-sm" type="button" disabled={!picked.length || busy} title={tip}
+        onClick={() => onApply(picked.map(c => c.id))}
+        style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}>
+        <i className="ti ti-send" /> Apply
+      </button>
+      <button className="btn btn-primary btn-sm" type="button" aria-label="Choose platforms to apply on"
+        aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(o => !o)}
+        style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, paddingLeft: 7, paddingRight: 7,
+          borderLeft: '1px solid color-mix(in srgb, currentColor 30%, transparent)' }}>
+        <i className="ti ti-chevron-down" style={{ fontSize: 12 }} />
+      </button>
+      {open && (
+        <span role="dialog" aria-label="Apply on" style={{
+          position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 50, width: 260,
+          background: 'var(--bg)', border: '1px solid var(--border-md)', borderRadius: 'var(--radius)',
+          boxShadow: 'var(--shadow-lg)', padding: 10, display: 'flex', flexDirection: 'column', gap: 4,
+        }}>
+          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '.04em', padding: '0 4px 4px' }}>
+            Apply on
+          </span>
+          {choices.map(c => (
+            <label key={c.id} title={c.why} style={{
+              display: 'flex', alignItems: 'center', gap: 9, padding: '6px 4px', borderRadius: 8, fontSize: 13,
+              cursor: c.ok ? 'pointer' : 'not-allowed', opacity: c.ok ? 1 : 0.55,
+            }}>
+              <input type="checkbox" checked={c.ok && !skip.includes(c.id)} disabled={!c.ok} onChange={() => toggle(c.id)} />
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: PLATFORM_COLOR[c.id], flexShrink: 0 }} />
+              <span style={{ flex: 1 }}>{c.label}</span>
+              <span style={{ fontSize: 11, color: 'var(--text3)' }}>{c.ok ? (c.mode === 'dry-run' ? 'Dry run' : 'Real') : c.why}</span>
+            </label>
+          ))}
+          <span style={{ fontSize: 11, color: 'var(--text3)', padding: '4px 4px 0' }}>
+            Only jobs you approved are sent, within each platform's daily limit.
+          </span>
+        </span>
+      )}
+    </span>
+  );
+}
+
+// The switcher: All platforms + one card per platform that is switched on, and
+// a "Turn on" card for each one that is off. There is no separate setup: a
+// platform needs only to be on, its worker running and you logged into the
+// site in the debug Chrome — the card's status says which of those is missing.
+function Switcher({ platforms, scope, onPick, onTurnOn }: {
+  platforms: PlatformInfo[]; scope: PlatformScope; onPick: (p: PlatformScope) => void; onTurnOn: (p: PlatformInfo) => void;
+}) {
+  const off = platforms.filter(p => !p.enabled);
   const on = platforms.filter(p => p.enabled && p.overview);
   const inbox = on.reduce((n, p) => n + (p.overview?.reviewCount || 0), 0);
   const card = (key: string, pressed: boolean, dot: React.ReactNode, name: string, status: string, count: number | null, onClick: () => void, title?: string) => (
@@ -165,17 +243,19 @@ function Switcher({ platforms, scope, onPick, onSetup }: {
       <style>{'@keyframes jp-pulse{50%{opacity:.35}}@media (prefers-reduced-motion:reduce){[aria-label="Platform"] span{animation:none!important}}'}</style>
       {card('all', scope === 'all',
         dot('conic-gradient(var(--blue) 0 33%, var(--teal) 0 66%, var(--purple) 0)'),
-        'All platforms', `${on.length} set up`, inbox, () => onPick('all'))}
+        'All platforms', `${on.length} on`, inbox, () => onPick('all'))}
       {on.map((p) => {
         const r = readiness(p.overview!, { withRun: true });
         return card(p.id, scope === p.id, dot(TONE_COLOR[r.tone], r.tone === 'run'), p.label, r.short, p.overview!.reviewCount, () => onPick(p.id), r.text);
       })}
-      <button type="button" onClick={onSetup} style={{
-        display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 12, cursor: 'pointer',
-        background: 'transparent', border: '1px dashed var(--border-md)', color: 'var(--text2)', font: 'inherit', fontSize: 13,
-      }}>
-        <i className="ti ti-plus" /> Set up a platform
-      </button>
+      {off.map(p => (
+        <button key={p.id} type="button" onClick={() => onTurnOn(p)} title={`Switch ${p.label} on — it starts read-only (harvest and check replies; apply stays off until you choose)`} style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', borderRadius: 12, cursor: 'pointer',
+          background: 'transparent', border: '1px dashed var(--border-md)', color: 'var(--text2)', font: 'inherit', fontSize: 13,
+        }}>
+          <i className="ti ti-plus" /> Turn on {p.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -495,8 +575,8 @@ export default function JobPlatforms() {
   };
 
   // All view: start one kind on every ready platform that can do it.
-  const startAll = async (kind: NaukriRunKind) => {
-    const on = (registry?.platforms || []).filter(p => p.enabled && p.overview);
+  const startAll = async (kind: NaukriRunKind, only?: PlatformId[]) => {
+    const on = (registry?.platforms || []).filter(p => p.enabled && p.overview && (!only || only.includes(p.id as PlatformId)));
     const can = on.filter(p => readiness(p.overview!, { withRun: true }).canRun
       && (kind === 'apply' ? p.overview!.applyMode !== 'off' : kind === 'track' ? p.capabilities.track : true));
     const skipped = on.filter(p => !can.includes(p) && (kind !== 'apply' || p.overview!.applyMode !== 'off'));
@@ -525,7 +605,7 @@ export default function JobPlatforms() {
 
   if (!registry || !shown) {
     return (
-      <Layout title="Job Platforms" subtitle="Harvests jobs, applies to the ones you approve and tracks what recruiters do">
+      <Layout title="Job Platforms" subtitle={SUBTITLE}>
         <Empty icon="ti-loader">{error || 'Loading…'}</Empty>
       </Layout>
     );
@@ -533,7 +613,14 @@ export default function JobPlatforms() {
 
   const switcher = (
     <Switcher platforms={registry.platforms} scope={scope} onPick={(p) => pick(p)}
-      onSetup={() => { pick('all', 'config'); toast('Platforms are set up under Configuration.', 'info'); }} />
+      onTurnOn={async (p) => {
+        try {
+          await updatePlatformConfigApi(p.id as PlatformId, { enabled: true });
+          toast(`${p.label} turned on. Start its worker on your computer and log into ${p.label} in the debug Chrome.`, 'success');
+          await load();
+          pick(p.id);
+        } catch (e: any) { toast(e?.message || `Could not turn ${p.label} on`, 'error'); }
+      }} />
   );
 
   // ── header actions ──────────────────────────────────────────────────────
@@ -588,20 +675,23 @@ export default function JobPlatforms() {
     readinessLine = <StatusHeader overview={overview} onHelp={scope === 'naukri' ? () => setGuide('setup') : undefined} />;
   } else {
     const ready = on.filter(p => readiness(p.overview!, { withRun: true }).canRun);
-    const applying = ready.filter(p => p.overview!.applyMode !== 'off');
+    const allTip = ready.length ? `Runs on: ${ready.map(p => p.label).join(', ')}` : 'No platform is ready to run';
+    const applyChoices: ApplyChoice[] = on.map(p => {
+      const r = readiness(p.overview!, { withRun: true });
+      const mode = p.overview!.applyMode || 'on';
+      return mode === 'off' ? { id: p.id as PlatformId, label: p.label, ok: false, why: 'Apply off' }
+        : !r.canRun ? { id: p.id as PlatformId, label: p.label, ok: false, why: r.short }
+        : { id: p.id as PlatformId, label: p.label, ok: true, mode };
+    });
     actions = (
       <>
-        <span style={{ fontSize: 12, color: 'var(--text3)' }}>To run one platform, use its card below or select it above.</span>
-        <button className="btn btn-sm" type="button" disabled={!ready.length || busy} onClick={() => startAll('harvest')}>
+        <button className="btn btn-sm" type="button" disabled={!ready.length || busy} onClick={() => startAll('harvest')} title={allTip}>
           <i className="ti ti-download" /> Harvest all
         </button>
-        <button className="btn btn-sm" type="button" disabled={!ready.length || busy} onClick={() => startAll('track')}>
-          <i className="ti ti-messages" /> Check replies on all
+        <button className="btn btn-sm" type="button" disabled={!ready.length || busy} onClick={() => startAll('track')} title={allTip}>
+          <i className="ti ti-messages" /> Check replies
         </button>
-        <button className="btn btn-primary btn-sm" type="button" disabled={!applying.length || busy} onClick={() => startAll('apply')}
-          title={applying.length ? `Applies on: ${applying.map(p => p.label).join(', ')}` : 'No ready platform has apply turned on'}>
-          <i className="ti ti-send" /> Apply on {applying.length} platform{applying.length === 1 ? '' : 's'}
-        </button>
+        <ApplyPicker choices={applyChoices} busy={busy} onApply={(ids) => startAll('apply', ids)} />
       </>
     );
     const trouble = on.map(p => ({ p, r: readiness(p.overview!) })).filter(x => x.r.tone === 'bad' || x.r.tone === 'warn');
@@ -623,12 +713,11 @@ export default function JobPlatforms() {
 
   const counts: Partial<Record<View, number>> = { review: shown.reviewCount, jobs: shown.needsAnswerCount };
   const nextApply = (shown.upcoming || []).find(x => x.kinds.includes('apply'));
-  const subtitle = 'Harvests jobs, applies to the ones you approve and tracks what recruiters do, using a worker on your computer for each platform.';
   const others = on.filter(p => p.id !== scope).map(p => p.label);
 
   return (
     <PlatformProvider value={platformView}>
-    <Layout title="Job Platforms" subtitle={subtitle} actions={actions}>
+    <Layout title="Job Platforms" subtitle={SUBTITLE} actions={actions}>
       {switcher}
 
       <div className="section-head">

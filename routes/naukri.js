@@ -344,16 +344,16 @@ async function setupChecklist(userId, config, worker, platform = 'naukri') {
   const slots = slotsOf(site.schedule);
   const answers = (config.answers || []).filter(a => a.enabled !== false);
   const src = site.sources || {};
+  // Resume and profile are set once and used by every platform.
+  const shared = ' (shared by all platforms)';
   const items = [
     { key: 'worker', card: null, label: `Worker running and logged in to ${label}`,
       done: !!(worker && worker.lastSeenAt && (worker.loggedIn || worker.naukriLoggedIn)),
-      hint: platform === 'naukri'
-        ? 'Run `bash worker/start-all.sh` on your Mac and log in to Naukri in the debug Chrome.'
-        : `Run \`npm run ${platform}-worker\` on your Mac and log in to ${label} in the debug Chrome.` },
-    { key: 'resume', card: 'resume', label: 'Resume with readable text',
+      hint: `Run \`npm run workers\` on your Mac and log in to ${label} in the debug Chrome.` },
+    { key: 'resume', card: 'resume', label: `Resume with readable text${shared}`,
       done: !!(eff && text && text.trim().length > 200),
       hint: 'Upload a PDF resume in Settings (or paste its text in Resume & headline) — AI answers and your profile come from it.' },
-    { key: 'profile', card: 'profile', label: 'Profile: skills, experience, CTC, notice period',
+    { key: 'profile', card: 'profile', label: `Profile: skills, experience, CTC, notice period${shared}`,
       done: (p.skills || []).length >= 3 && p.totalExperienceMonths != null && p.expectedCtcLpa != null && p.noticePeriodDays != null,
       hint: 'Use "Fill from resume", then add CTC and notice period. Skills and years drive the fit score.' },
     { key: 'sources', card: 'searches', label: 'Where to find jobs: searches or Recommended',
@@ -372,7 +372,11 @@ async function setupChecklist(userId, config, worker, platform = 'naukri') {
       done: !!(site.inboxTidy && site.inboxTidy.enabled),
       hint: 'Turn on inbox tidy in Filters so old and poor-fit jobs clear themselves away.' },
   ];
-  return { items, done: items.filter(i => i.done).length, total: items.length };
+  // Instahyre and Hirist apply in one click — no screening questions (verified
+  // 2026-10-21) — so answers and AI answers do nothing there, and inbox tidy
+  // is a nicety, not setup. Their list is only what changes results.
+  const list = platform === 'naukri' ? items : items.filter(i => !['answers', 'autoAnswer', 'tidy'].includes(i.key));
+  return { items: list, done: list.filter(i => i.done).length, total: list.length };
 }
 
 // ── Owner endpoints ────────────────────────────────────────────────────────
