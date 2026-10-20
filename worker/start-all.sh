@@ -2,14 +2,15 @@
 # Start everything the Mac side needs, in one terminal:
 #   1. the debug Chrome on the CDP port (only if it isn't already listening)
 #   2. the LinkedIn scrape worker
-#   3. one worker per job platform in $PLATFORMS (default: naukri)
+#   3. one worker per job platform in $PLATFORMS (default: naukri instahyre hirist)
 #
-# Set PLATFORMS in .env to run more, e.g. PLATFORMS="naukri instahyre hirist".
+# Set PLATFORMS in .env to run fewer, e.g. PLATFORMS="naukri". A worker for a
+# platform you have not switched on just idles (the server answers "disabled").
 # Each platform's worker is its own process with its own lock, so a captcha on
 # one stops only that one. They share the debug Chrome via worker/chrome-lock.js.
 #
 # Each worker holds sleep off for its own lifetime (worker/power.js: caffeinate
-# on macOS, systemd-inhibit on Linux), so nothing here needs to. Output is prefixed [linkedin] / [naukri]. Ctrl+C stops both; Chrome stays open.
+# on macOS, systemd-inhibit on Linux), so nothing here needs to. Output is prefixed [linkedin] / [naukri] / [instahyre] / [hirist]. Ctrl+C stops all; Chrome stays open.
 #
 #   npm run workers        (or: worker/start-all.sh)
 set -uo pipefail
@@ -74,7 +75,7 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 start linkedin scrape-worker.js
-for P in ${PLATFORMS:-naukri}; do
+for P in ${PLATFORMS:-naukri instahyre hirist}; do
   case "$P" in
     naukri)           start naukri naukri-worker.js ;;
     instahyre|hirist) start "$P" platform-worker.js "$P" ;;
@@ -82,5 +83,5 @@ for P in ${PLATFORMS:-naukri}; do
   esac
 done
 
-echo "Workers running (linkedin + ${PLATFORMS:-naukri}). Ctrl+C to stop."
+echo "Workers running (linkedin + ${PLATFORMS:-naukri instahyre hirist}). Ctrl+C to stop."
 wait "${PIDS[@]}"

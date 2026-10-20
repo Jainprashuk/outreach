@@ -142,7 +142,8 @@ A captcha blocks only that platform for 7 days. They share the debug Chrome
 through `chrome-lock.js`, so one drives it at a time.
 
 `npm run workers` starts the platforms listed in `PLATFORMS` in `.env`
-(default `naukri`), e.g. `PLATFORMS="naukri instahyre hirist"`. To start one at
+(default all three: `naukri instahyre hirist`; set e.g. `PLATFORMS="naukri"` to
+run fewer — a worker for a platform you have not switched on just idles). To start one at
 login: `bash worker/install-worker.sh instahyre` (one launchd / systemd unit per
 platform; no argument still installs the LinkedIn worker).
 
