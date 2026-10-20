@@ -392,8 +392,18 @@ function DuplicatesCard({ rules, onSaved }: { rules: DuplicateRules; onSaved: ()
 }
 
 // Activity, All platforms: one card per platform with a Run on menu.
-function AllActivity({ platforms, onOpen, onRun, busy }: {
-  platforms: PlatformInfo[]; onOpen: (p: PlatformId) => void; busy: boolean;
+// "Today 14:00 · harvest, apply" — when a scheduled run is next.
+const KIND_WORD: Record<string, string> = { refresh: 'refresh profile', harvest: 'harvest', apply: 'apply', track: 'check replies' };
+function whenText(at: string): string {
+  const d = new Date(at);
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - today.getTime()) / 864e5);
+  const day = days === 0 ? 'Today' : days === 1 ? 'Tomorrow' : d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+  return `${day} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function AllActivity({ platforms, onOpen, onOpenWaiting, onRun, busy }: {
+  platforms: PlatformInfo[]; onOpen: (p: PlatformId) => void; onOpenWaiting: (p: PlatformId) => void; busy: boolean;
   onRun: (p: PlatformId, kind: NaukriRunKind, sources?: NaukriSources) => void;
 }) {
   const on = platforms.filter(p => p.enabled && p.overview);
@@ -438,11 +448,30 @@ function AllActivity({ platforms, onOpen, onRun, busy }: {
                 <span className={`badge ${r.tone === 'ok' ? 'badge-approved' : r.tone === 'bad' ? 'badge-blocked' : r.tone === 'run' ? 'badge-inreview' : 'badge-queued'}`}
                   style={{ marginLeft: 'auto' }} title={r.text}>{r.short}</span>
               </div>
-              <div style={{ display: 'flex', gap: 18, marginBottom: 8 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 10 }}>
                 {([['in inbox', o.reviewCount], ['found this week', o.foundThisWeek || 0], ['applied this week', o.week.applied]] as const).map(([label, n]) => (
-                  <div key={label}><div style={{ fontSize: 20, fontWeight: 700 }}>{n}</div><Muted style={{ fontSize: 11 }}>{label}</Muted></div>
+                  <div key={label}><div style={{ fontSize: 20, fontWeight: 700 }}>{n}</div><Muted style={{ fontSize: 11, lineHeight: 1.3, display: 'block' }}>{label}</Muted></div>
                 ))}
+                {/* Approved, not sent yet: what the next apply run takes, within the daily limit. */}
+                <button type="button" onClick={() => onOpenWaiting(p.id)} title={`Approved jobs waiting to be applied to on ${p.label} — open the Waiting list`}
+                  style={{ background: 'none', border: 'none', padding: 0, font: 'inherit', color: 'inherit', textAlign: 'left', cursor: 'pointer' }}>
+                  <div style={{ fontSize: 20, fontWeight: 700, color: o.waitingCount ? 'var(--accent)' : undefined }}>{o.waitingCount || 0}</div>
+                  <Muted style={{ fontSize: 11, lineHeight: 1.3, display: 'block' }}>approved, in queue</Muted>
+                </button>
               </div>
+              {o.schedule?.enabled && (o.upcoming || []).length > 0 && (
+                <div style={{ fontSize: 12, marginBottom: 6, padding: '7px 9px', borderRadius: 8, background: 'var(--bg2)', display: 'grid', gap: 3 }}>
+                  <span style={{ color: 'var(--text3)', fontSize: 11, textTransform: 'uppercase', letterSpacing: '.04em' }}>
+                    <i className="ti ti-clock" /> Next runs
+                  </span>
+                  {(o.upcoming || []).slice(0, 2).map(u => (
+                    <span key={u.at} style={{ display: 'flex', gap: 8 }}>
+                      <strong style={{ fontWeight: 600, minWidth: 96 }}>{whenText(u.at)}</strong>
+                      <span style={{ color: 'var(--text2)' }}>{u.kinds.map(k => KIND_WORD[k] || k).join(', ')}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
               <Hint style={{ marginBottom: 10 }}>
                 {scheduleText(o)}
                 {o.applyMode === 'off' && (o.readOnlySince
@@ -739,7 +768,8 @@ export default function JobPlatforms() {
       {/* Keyed by scope so every list refetches from the right platform. */}
       <div key={scope}>
       {view === 'activity' && !single && (
-        <AllActivity platforms={registry.platforms} busy={busy} onRun={runOn} onOpen={(p) => pick(p)} />
+        <AllActivity platforms={registry.platforms} busy={busy} onRun={runOn} onOpen={(p) => pick(p)}
+          onOpenWaiting={(p) => { setJobsView('waiting'); pick(p, 'jobs'); }} />
       )}
       {view === 'activity' && single && overview && (
         <>
