@@ -120,7 +120,7 @@ const ACTIVE_STATUSES = ['pending', 'processing', 'paused'];
 // Every item field except `body` — nothing in the browser reads the email body
 // back, and it is by far the heaviest part of a polled job.
 const ITEM_FIELDS = ['contactId', 'to', 'name', 'subject', 'status', 'messageId', 'error', 'processedAt'];
-const ACTIVE_PROJECTION = { ...Object.fromEntries(ITEM_FIELDS.map(f => [`items.${f}`, 1])), status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1, ratePerHour: 1, campaignId: 1 };
+const ACTIVE_PROJECTION = { ...Object.fromEntries(ITEM_FIELDS.map(f => [`items.${f}`, 1])), status: 1, processedCount: 1, attachResume: 1, createdAt: 1, sendMode: 1, ratePerHour: 1, campaignId: 1, pauseReason: 1, pausedUntil: 1 };
 
 // Auto-cancel jobs stuck in pending/processing for over 24h with zero progress.
 // These are ghost jobs where Inngest never ran (e.g. server was down when the event fired).

@@ -1,65 +1,67 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+// The Dashboard answers "what needs me today, and is everything running?". Each
+// number opens the page that owns it; browsing contacts is the Contacts page's job.
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import Layout from '../components/Layout';
-import Avatar from '../components/Avatar';
-import StatusBadge from '../components/StatusBadge';
-import ReplyModal from '../components/ReplyModal';
+import NeedsYouStrip, { type NeedsTask } from '../components/dashboard/NeedsYouStrip';
+import { SendingCard, WorkersCard } from '../components/dashboard/RunningPanel';
+import WeekPulse from '../components/dashboard/WeekPulse';
+import RecentActivity from '../components/dashboard/RecentActivity';
+import SetupChecklist, { type SetupStep } from '../components/dashboard/SetupChecklist';
+import { fmtAgo, fmtWhen, plural } from '../components/dashboard/format';
 import { useApp } from '../context/AppContext';
 import { useToast } from '../context/ToastContext';
 import { useActionQueue } from '../context/ActionQueueContext';
-import { retryFailedApi, type Contact } from '../lib/api';
-import { Skeleton, SkeletonRows } from '../components/Skeleton';
-import { RefreshBar, Refreshing, CountOrSpinner } from '../components/RefreshBar';
-import { useContactList, loadContactListIds } from '../hooks/useContactList';
+import { useInterviews } from '../context/InterviewContext';
+import { usePulseChange } from '../context/PulseContext';
+import { useVisibleInterval } from '../hooks/useVisibleInterval';
+import {
+  actionCenterSummaryApi, activeRunsApi, apiFetch, loadAnalyticsSummaryApi, loadTimelineApi, platformsApi, retryFailedApi,
+  type ActionCenterSummary, type AnalyticsSummary, type PlatformInfo, type SendJob, type Timeline, type WorkerRunCard,
+} from '../lib/api';
 
-const PAGE_SIZE = 25;
-
-const TABS = [
-  ['all', 'All'], ['sent', 'Sent'], ['replied', 'Replied'],
-  ['followup-due', 'Follow-up Due'], ['follow-up-sent', 'Follow-up Sent'],
-  ['follow-up-replied', 'Replied after Follow-up'],
-  ['closed', 'Closed'], ['no-openings', 'No Openings'], ['in-review', 'In Review'],
-] as const;
-
-type SortCol = 'name' | 'company' | 'template' | 'status' | 'approval' | 'lastSentAt' | 'repliedAt' | 'createdAt';
+// Everything here also refreshes on the pulse; this is only the safety net.
+const SAFETY_MS = 5 * 60_000;
 
 export default function Dashboard() {
   const app = useApp();
   const toast = useToast();
-  const navigate = useNavigate();
   const actionQueue = useActionQueue();
+  const { interviews, loaded: interviewsLoaded, reminders } = useInterviews();
 
-  const [tab, setTab] = useState('all');
-  const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState('');
-  const [approvalFilter, setApprovalFilter] = useState('');
-  const [templateFilter, setTemplateFilter] = useState('');
-  const [page, setPage] = useState(1);
-  const [sortCol, setSortCol] = useState<SortCol>('createdAt');
-  const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-  const [selectedFu, setSelectedFu] = useState<Set<string>>(new Set());
-  const [replyContactId, setReplyContactId] = useState<string | null>(null);
+  const [summary, setSummary] = useState<ActionCenterSummary | null>(null);
+  const [jobs, setJobs] = useState<SendJob[] | null>(null);
+  const [timeline, setTimeline] = useState<Timeline | null>(null);
+  const [runs, setRuns] = useState<WorkerRunCard[] | null>(null);
+  const [platforms, setPlatforms] = useState<PlatformInfo[] | null>(null);
+  const [analytics, setAnalytics] = useState<AnalyticsSummary | null>(null);
   const [checking, setChecking] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const [error, setError] = useState('');
   const silentChecking = useRef(false);
 
-  const [replySnapshot, setReplySnapshot] = useState<Contact | null>(null);
+  // A failed refresh keeps what is on screen; the next pulse or tick tries again.
+  const loadSummary = useCallback(() => actionCenterSummaryApi().then(setSummary).catch(() => {}), []);
+  const loadSending = useCallback(() => Promise.all([
+    apiFetch<SendJob[]>('/api/jobs/active-all').then(setJobs).catch(() => {}),
+    loadTimelineApi('24h', 'all').then(setTimeline).catch(() => {}),
+  ]), []);
+  const loadWorkers = useCallback(() => Promise.all([
+    activeRunsApi().then(r => setRuns(r.runs)).catch(() => {}),
+    platformsApi().then(r => setPlatforms(r.platforms)).catch(() => {}),
+  ]), []);
+  const loadAnalytics = useCallback(() => loadAnalyticsSummaryApi().then(setAnalytics).catch(() => {}), []);
 
-  // Templates + settings only: the table below pages its contacts on the server.
+  useEffect(() => { app.initMeta().catch(() => {}); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useVisibleInterval(() => { loadSummary(); loadSending(); loadWorkers(); loadAnalytics(); }, SAFETY_MS);
+  usePulseChange(p => p.jobs, () => { loadSending(); loadSummary(); });
+  usePulseChange(p => p.runs || '', loadWorkers);
+  usePulseChange(p => p.mailbox, () => { loadAnalytics(); loadSummary(); });
+  // An approval, delete or send elsewhere in the app moves the to-do counts.
+  const firstVersion = useRef(true);
   useEffect(() => {
-    app.initMeta().catch(err => setError(err.message));
-  }, []);
-
-  const list = useContactList({
-    tab, search, status: statusFilter, approval: approvalFilter, template: templateFilter,
-    sort: sortCol, dir: sortDir,
-  }, page);
-  useEffect(() => { if (list.error) setError(list.error); }, [list.error]);
-
-  const busy = !list.data;
-  // A refetch with rows already on screen (first loads show skeletons instead).
-  const refreshing = list.loading && !!list.data;
+    if (firstVersion.current) { firstVersion.current = false; return; }
+    loadSummary();
+  }, [app.contactsVersion, loadSummary]);
 
   // Auto mailbox check: on load if stale, every 15 min, and on tab re-focus (same as classic)
   useEffect(() => {
@@ -95,40 +97,7 @@ export default function Dashboard() {
     };
     document.addEventListener('visibilitychange', onVis);
     return () => { if (t) clearTimeout(t); clearInterval(interval); document.removeEventListener('visibilitychange', onVis); };
-  }, [app.metaLoaded]);
-
-  const stats = list.data?.stats || {
-    total: 0, sent: 0, bounced: 0, replied: 0, followUpReplied: 0, pending: 0, remaining: 0, followUpDue: 0,
-    followUpSent: 0, closed: 0, noOpenings: 0, inReview: 0, resumable: 0, failed: 0, unread: 0,
-  };
-
-  // Filtered, sorted and paged on the server (lib/contactList.js).
-  const filteredCount = list.data?.total ?? 0;
-  const totalPages = list.data?.pages ?? 1;
-  const safePage = list.data?.page ?? 1;
-  const paged = list.data?.contacts ?? [];
-
-  const resumableCount = stats.resumable;
-  const failedCount = stats.failed;
-  const unreadCount = stats.unread;
-
-  const setSort = (col: SortCol) => {
-    if (sortCol === col) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'));
-    else {
-      setSortCol(col);
-      setSortDir(col === 'createdAt' || col === 'repliedAt' || col === 'lastSentAt' ? 'desc' : 'asc');
-    }
-    setPage(1);
-  };
-
-  const sortIcon = (col: SortCol) =>
-    sortCol !== col
-      ? <i className="ti ti-arrows-sort" style={{ fontSize: 10, opacity: 0.35, marginLeft: 3 }} />
-      : <i className={`ti ${sortDir === 'asc' ? 'ti-arrow-up' : 'ti-arrow-down'}`} style={{ fontSize: 10, color: 'var(--blue)', marginLeft: 3 }} />;
-
-  const Th = ({ label, col }: { label: string; col: SortCol }) => (
-    <th onClick={() => setSort(col)} style={{ cursor: 'pointer', userSelect: 'none' }}>{label}{sortIcon(col)}</th>
-  );
+  }, [app.metaLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const checkMailbox = async () => {
     setChecking(true);
@@ -138,7 +107,7 @@ export default function Dashboard() {
       const parts: string[] = [];
       if (result.bounced?.length) parts.push(`${result.bounced.length} bounce${result.bounced.length !== 1 ? 's' : ''}: ${result.bounced.map((b: any) => b.name).join(', ')}`);
       if (result.replied?.length) parts.push(`${result.replied.length} repl${result.replied.length !== 1 ? 'ies' : 'y'}: ${result.replied.map((r: any) => r.name).join(', ')}`);
-      if (parts.length === 0) toast(`Scanned ${result.scanned} message${result.scanned !== 1 ? 's' : ''} — nothing new.`, 'info');
+      if (parts.length === 0) toast(`Scanned ${result.scanned} message${result.scanned !== 1 ? 's' : ''}. Nothing new.`, 'info');
       else toast(`Found ${parts.join(' and ')}`, result.bounced?.length ? 'error' : 'success');
     } catch (err: any) {
       toast(err.message, 'error');
@@ -151,9 +120,9 @@ export default function Dashboard() {
     setRetrying(true);
     try {
       const data = await retryFailedApi();
-      if (data.retried === 0) { toast('No failed emails to retry.', 'info'); return; }
-      toast(`${data.retried} contact${data.retried !== 1 ? 's' : ''} reset to queued.`, 'success');
-      list.reload();
+      if (data.retried === 0) toast('No failed emails to retry.', 'info');
+      else toast(`${plural(data.retried, 'contact')} reset to queued. Open Send to send them again.`, 'success');
+      loadSummary();
     } catch (err: any) {
       toast(err.message, 'error');
     } finally {
@@ -161,326 +130,98 @@ export default function Dashboard() {
     }
   };
 
-  const lastChecked = app.sender.lastMailboxCheckAt;
-  const lastCheckedLabel = !app.metaLoaded ? 'Loading...'
-    : !lastChecked ? 'Mailbox not checked yet'
-    : (() => {
-      const mins = Math.round((Date.now() - lastChecked.getTime()) / 60000);
-      return mins < 1 ? 'Last checked: just now' : mins < 60 ? `Last checked: ${mins}m ago` : `Last checked: ${Math.round(mins / 60)}h ago`;
-    })();
-
-  const showDetail = (c: Contact) => {
-    if (c.status === 'replied' || c.status === 'follow-up-replied') { setReplySnapshot(c); setReplyContactId(c.id); return; }
-    let msg = `Contact: ${c.name}\nEmail: ${c.email}\nCompany: ${c.company}\nStatus: ${c.status}`;
-    if (c.status === 'bounced' && c.bounceReason) msg += `\nBounce reason: ${c.bounceReason}`;
-    alert(msg);
-  };
-
-  const toggleFuRow = (id: string, checked: boolean) => {
-    setSelectedFu(prev => { const n = new Set(prev); if (checked) n.add(id); else n.delete(id); return n; });
-  };
-
-  // Which quick-select is waiting on the server for its ids.
-  const [selecting, setSelecting] = useState<number | null>(null);
-  const selectLastN = async (n: number) => {
-    setSelecting(n);
-    try {
-      // Every follow-up-due contact in the current sort, ignoring the other filters — as before.
-      const all = await loadContactListIds({ tab: 'followup-due', sort: sortCol, dir: sortDir });
-      setSelectedFu(new Set(isFinite(n) ? all.slice(0, n) : all));
-    } catch (err: any) { toast(err.message, 'error'); }
-    finally { setSelecting(null); }
-  };
-
-  // The freshest copy on this page, else the one that was clicked.
-  const replyContact = replyContactId
-    ? paged.find(c => c.id === replyContactId) || (replySnapshot?.id === replyContactId ? replySnapshot : null)
-    : null;
-  const isFuTab = tab === 'followup-due';
-  const fuAllChecked = isFuTab && paged.length > 0 && paged.every(c => selectedFu.has(c.id));
-
-  const kpis = [
-    // First on purpose: the one number here that is a to-do list rather than a tally.
-    { label: 'Replies need you', value: actionQueue.counts['needs-you'], cls: 'amber', to: '/mailbox?tab=needs-you', icon: 'ti-inbox', ico: 'amber' },
-    { label: 'Total contacts', value: stats.total, cls: '', icon: 'ti-users', ico: '' },
-    { label: 'Sent', value: stats.sent, cls: 'green', icon: 'ti-send', ico: 'green' },
-    { label: 'Bounced', value: stats.bounced, cls: 'red', icon: 'ti-alert-triangle', ico: 'red' },
-    { label: 'Follow-up Due', value: stats.followUpDue, cls: 'amber', link: true, icon: 'ti-clock-hour-4', ico: 'amber' },
-    // Token, not a literal: #2563eb is the light-theme indigo and stayed that
-    // dark blue on the dark canvas. The chip matches the number's hue.
-    { label: 'In Review', value: stats.inReview, cls: 'indigo', icon: 'ti-eye', ico: 'indigo' },
+  // ── Needs you ──────────────────────────────────────────────────────────────
+  const enabledPlatforms = (platforms || []).filter(p => p.enabled && p.overview);
+  const needsAnswer = enabledPlatforms.reduce((s, p) => s + (p.overview?.needsAnswerCount || 0), 0);
+  const toReview = enabledPlatforms.reduce((s, p) => s + (p.overview?.reviewCount || 0), 0);
+  const soon = reminders.soon;
+  const tasks: NeedsTask[] = [
+    { key: 'replies', n: actionQueue.counts['needs-you'], title: 'Replies need you', detail: 'People who wrote back and are waiting on your answer',
+      tone: 'amber', cta: 'Open Mailbox', to: '/mailbox?tab=needs-you' },
+    { key: 'interviews-soon', n: soon.length, title: soon.length === 1 ? 'Interview coming up' : 'Interviews coming up',
+      detail: soon.slice(0, 2).map(iv => `${iv.company}${iv.interviewAt ? `, ${fmtWhen(iv.interviewAt)}` : ''}`).join(' · '),
+      tone: 'amber', cta: 'Prepare', to: soon.length === 1 ? `/interviews?open=${soon[0].id}` : '/interviews' },
+    { key: 'failed', n: summary?.failed || 0, title: 'Failed sends', detail: 'Gmail did not accept these. Reset them to the queue and send again.',
+      tone: 'red', cta: 'Retry', onClick: retryFailed, busy: retrying },
+    { key: 'needs-answer', n: needsAnswer, title: 'Job applications need answers', detail: 'Applications stopped on a screening question',
+      tone: 'amber', cta: 'Answer', to: '/job-platforms?tab=review' },
+    { key: 'followup-due', n: summary?.followUpDue || 0, title: 'Follow-ups due', detail: 'No reply yet to your email, ready for a follow-up',
+      tone: 'accent', cta: 'Review and send', to: '/contacts?tab=followup-due' },
+    { key: 'chase', n: actionQueue.counts['follow-up'], title: 'Gone quiet', detail: 'People who stopped replying 7+ days after your answer',
+      tone: 'accent', cta: 'Open Mailbox', to: '/mailbox?tab=follow-up' },
+    { key: 'pending', n: summary?.pending || 0, title: 'Drafts to approve', detail: 'Emails waiting for your OK before they can send',
+      tone: 'accent', cta: 'Review', to: '/send/step2' },
+    { key: 'ready', n: summary?.ready || 0, title: 'Approved, not sent', detail: 'Approved emails ready to go out',
+      tone: 'accent', cta: 'Send', to: '/send/step3' },
+    { key: 'jobs-review', n: toReview, title: 'Jobs to review', detail: 'Matched jobs on your job platforms waiting for approval',
+      tone: 'accent', cta: 'Review', to: '/job-platforms?tab=review' },
+    { key: 'stale-interviews', n: reminders.stale.length, title: 'Interviews without an update', detail: 'No change in 3+ days. Follow up or update the status.',
+      tone: 'accent', cta: 'Update', to: '/interviews' },
+    { key: 'leads', n: summary?.newLeads || 0, title: 'New leads', detail: 'Hiring posts and leads you have not looked at yet',
+      tone: 'accent', cta: 'Open Leads', to: '/leads' },
   ];
+  const needsLoading = !summary || !actionQueue.loaded || !interviewsLoaded;
+
+  // ── New account ────────────────────────────────────────────────────────────
+  const hasTemplates = Object.keys(app.templates).length > 0;
+  const hasContacts = !!analytics && analytics.metrics.total > 0;
+  const steps: SetupStep[] = [
+    { key: 'gmail', title: 'Connect Gmail', detail: 'Add your Gmail address and app password so emails send from you',
+      done: !!summary?.gmailConnected, to: '/settings', cta: 'Connect' },
+    { key: 'template', title: 'Write your first template', detail: 'The email people get. Variables fill in each person\'s name and company.',
+      done: hasTemplates, to: '/templates', cta: 'Create template' },
+    { key: 'contacts', title: 'Add people to email', detail: 'Paste a list, import a CSV, or find people at a company in Discover',
+      done: hasContacts, to: '/add-contacts', cta: 'Add contacts' },
+  ];
+  const setupKnown = !!summary && !!analytics && app.metaLoaded;
+  const showSetup = setupKnown && steps.some(s => !s.done);
+
+  // ── Header status line ─────────────────────────────────────────────────────
+  const quotaPause = (jobs || []).find(j => j.status === 'paused' && j.pauseReason === 'gmail_daily_limit');
+  const lastChecked = app.sender.lastMailboxCheckAt;
+  const status: Array<{ text: string; tone?: 'amber' | 'green' }> = [];
+  if (actionQueue.counts['needs-you']) status.push({ text: `${plural(actionQueue.counts['needs-you'], 'reply', 'replies')} need you`, tone: 'amber' });
+  if (soon.length) status.push({ text: `${plural(soon.length, 'interview')} today or tomorrow`, tone: 'amber' });
+  if (quotaPause) status.push({ text: quotaPause.pausedUntil ? `Sending paused until ${fmtWhen(quotaPause.pausedUntil)}` : 'Sending paused by Gmail\'s daily limit', tone: 'amber' });
+  if (!status.length && !needsLoading) {
+    // Nothing urgent: name the first thing that is ready, not "nothing to do".
+    const next = tasks.find(t => t.n > 0);
+    status.push(next ? { text: `${next.n} ${next.title.toLowerCase()}` } : { text: 'Nothing waiting on you', tone: 'green' });
+  }
+  status.push({ text: !app.metaLoaded ? 'Loading…' : lastChecked ? `Mailbox checked ${fmtAgo(lastChecked)}` : 'Mailbox not checked yet' });
+  const subtitle = (
+    <span className="dash-status-line">
+      {status.map(s => (
+        <span key={s.text}>{s.tone && <i className={`dash-dot ${s.tone}`} aria-hidden="true" />}{s.text}</span>
+      ))}
+    </span>
+  );
 
   return (
-    <Layout title="Dashboard" subtitle={lastCheckedLabel} actions={
+    <Layout title="Dashboard" subtitle={subtitle} actions={
       <>
-        {resumableCount > 0 && (
-          <button className="btn btn-primary" onClick={() => navigate('/send/step3')} type="button">
-            <i className="ti ti-player-play" /> Resume sending ({resumableCount})
-          </button>
-        )}
-        {failedCount > 0 && (
-          <button className="btn" onClick={retryFailed} disabled={retrying} type="button">
-            <i className="ti ti-refresh" /> {retrying ? 'Resetting…' : `Retry failed (${failedCount})`}
-          </button>
-        )}
-        <button className="btn" onClick={checkMailbox} disabled={checking} type="button">
-          <i className="ti ti-mail-search" /> {checking ? 'Checking...' : 'Check for bounces & replies'}
+        <button className="btn" onClick={checkMailbox} disabled={checking} type="button" title="Check Gmail for new replies and bounces">
+          <i className={`ti ${checking ? 'ti-loader' : 'ti-mail-search'}`} /> {checking ? 'Checking…' : 'Check mailbox'}
         </button>
-        <Link to="/send/step1" className="btn btn-primary"><i className="ti ti-plus" /> New entry</Link>
+        <Link to="/campaigns/new" className="btn btn-primary"><i className="ti ti-plus" /> New campaign</Link>
       </>
-    } wide>
-      <div className="stat-grid stat-grid-6">
-        {kpis.map(k => k.to ? (
-          <Link key={k.label} to={k.to} className="stat-card" style={{ textDecoration: 'none' }}>
-            <div className={`kpi-ico ${k.ico}`}><i className={`ti ${k.icon}`} /></div>
-            <div className="stat-label">{k.label}</div>
-            {busy || !actionQueue.loaded ? <Skeleton w="42%" h={28} style={{ marginTop: 2 }} /> : <div className={`stat-value ${k.cls}`}>{k.value}</div>}
-          </Link>
-        ) : k.link ? (
-          <a key={k.label} href="#" className="stat-card" style={{ textDecoration: 'none' }}
-            onClick={e => { e.preventDefault(); setTab('followup-due'); setPage(1); }}>
-            <div className={`kpi-ico ${k.ico}`}><i className={`ti ${k.icon}`} /></div>
-            <div className="stat-label">{k.label}</div>
-            {busy ? <Skeleton w="42%" h={28} style={{ marginTop: 2 }} /> : <div className={`stat-value ${k.cls}`}>{k.value}</div>}
-          </a>
-        ) : (
-          <div key={k.label} className="stat-card">
-            <div className={`kpi-ico ${k.ico}`}><i className={`ti ${k.icon}`} /></div>
-            <div className="stat-label">{k.label}</div>
-            {busy ? <Skeleton w="42%" h={28} style={{ marginTop: 2 }} /> : <div className={`stat-value ${k.cls}`}>{k.value}</div>}
-          </div>
-        ))}
-      </div>
-
-      <div className="section" style={{ flex: 1 }}>
-        <div className="section-head">
-          <div className="nav-tabs">
-            {TABS.map(([key, label]) => (
-              <button type="button" key={key} className={`nav-tab${tab === key ? ' active' : ''}`}
-                onClick={() => { setTab(key); setPage(1); setSortCol('createdAt'); setSortDir('desc'); setSelectedFu(new Set()); }}>
-                {key === 'replied' && unreadCount > 0 ? <>Replied <span className="tab-badge">{unreadCount}</span></> : label}
-              </button>
-            ))}
-          </div>
-          <span className="contact-count-badge"><CountOrSpinner loading={refreshing}>{filteredCount} contacts</CountOrSpinner></span>
-        </div>
-
-        {isFuTab && (
-          <div className="quick-select" style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
-            <span style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 500 }}>Quick select:</span>
-            {[10, 25, 50, 100].map(n => (
-              <button key={n} className="btn btn-xs" disabled={selecting !== null} onClick={() => selectLastN(n)} type="button">
-                {selecting === n && <i className="ti ti-loader" aria-hidden="true" />} Last {n}
-              </button>
-            ))}
-            <button className="btn btn-xs" disabled={selecting !== null} onClick={() => selectLastN(Infinity)} type="button">
-              {selecting === Infinity && <i className="ti ti-loader" aria-hidden="true" />} All
-            </button>
-            <button className="btn btn-xs" style={{ color: 'var(--text3)' }} onClick={() => setSelectedFu(new Set())} type="button">Clear</button>
-          </div>
-        )}
-
-        <div className="filter-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 14 }}>
-          <input type="text" placeholder="Search name, email or company..." value={search}
-            onChange={e => { setSearch(e.target.value); setPage(1); }}
-            style={{ flex: 1, minWidth: 200, maxWidth: 320 }} />
-          <select value={statusFilter} onChange={e => { setStatusFilter(e.target.value); setPage(1); }} style={{ width: 'auto', minWidth: 140 }}>
-            <option value="">All statuses</option>
-            <option value="queued">Queued</option><option value="sent">Sent</option>
-            <option value="failed">Failed</option><option value="bounced">Bounced</option>
-            <option value="replied">Replied</option>
-          </select>
-          <select value={approvalFilter} onChange={e => { setApprovalFilter(e.target.value); setPage(1); }} style={{ width: 'auto', minWidth: 140 }}>
-            <option value="">All approvals</option>
-            <option value="pending">Pending</option><option value="approved">Approved</option>
-            <option value="rejected">Rejected</option>
-          </select>
-          <select value={templateFilter} onChange={e => { setTemplateFilter(e.target.value); setPage(1); }} style={{ width: 'auto', minWidth: 140 }}>
-            <option value="">All templates</option>
-            {Object.keys(app.templates).map(key => (
-              <option key={key} value={key}>{app.templates[key].name || key}</option>
-            ))}
-          </select>
-          <button className="btn btn-sm" type="button" onClick={() => {
-            setSearch(''); setStatusFilter(''); setApprovalFilter(''); setTemplateFilter(''); setPage(1);
-          }}>Clear filters</button>
-        </div>
-
-        {/* Refetching after a tab / filter / sort / page change: keep the rows, dimmed. */}
-        <RefreshBar active={refreshing} />
-        <Refreshing active={refreshing}>
-        <div className="table-card">
-          {tab === 'replied' ? (
-            <table>
-              <thead>
-                <tr>
-                  <Th label="Contact" col="name" /><Th label="Company" col="company" />
-                  <th>Reply preview</th><Th label="Replied" col="repliedAt" /><th>Status</th><th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {busy ? <SkeletonRows rows={8} cols={6} chipCol={0} />
-                : error ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
-                : paged.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-message-off" />No replies yet</div></td></tr>
-                : paged.map(c => {
-                  const isNew = !c.replyRead;
-                  const fmtDate = c.repliedAt
-                    ? new Date(c.repliedAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-                    : '—';
-                  const raw = c.replySnippet || '';
-                  const snippet = raw.length > 75 ? raw.slice(0, 75) + '…' : raw;
-                  return (
-                    <tr key={c.id} className={isNew ? 'reply-unread-row' : ''}>
-                      <td>
-                        <div className="contact-chip">
-                          {isNew ? <span className="reply-unread-dot" /> : <span style={{ width: 10, display: 'inline-block', flexShrink: 0 }} />}
-                          <Avatar name={c.name} />
-                          <div><div className="name">{c.name}</div><div className="email">{c.email}</div></div>
-                        </div>
-                      </td>
-                      <td style={{ color: 'var(--text2)' }}>{c.company || '—'}</td>
-                      <td className="reply-snippet-cell">{snippet || <span style={{ color: 'var(--text3)' }}>No preview</span>}</td>
-                      <td style={{ fontSize: 12, whiteSpace: 'nowrap', color: 'var(--text2)' }}>{fmtDate}</td>
-                      <td className="cell-actions">
-                        <StatusBadge status={c.status} contact={c} />
-                        {isNew ? <span className="badge badge-new">New</span> : null}
-                      </td>
-                      <td className="cell-actions">
-                        <button className="btn btn-sm" onClick={() => setReplyContactId(c.id)} type="button"><i className="ti ti-message" /> View</button>
-                        <button aria-label="Delete contact" className="btn btn-sm" onClick={async () => {
-                          if (!confirm(`Delete ${c.name} (${c.email})?\nThis will hide the contact from all views.`)) return;
-                          try { await app.deleteContact(c.id); toast(`${c.name} deleted.`, 'success'); }
-                          catch (err: any) { toast(err.message, 'error'); }
-                        }} title="Delete contact" type="button"><i className="ti ti-trash" /></button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : isFuTab ? (
-            <table>
-              <thead>
-                <tr>
-                  <th className="cb-col">
-                    <input type="checkbox" className="row-cb" checked={fuAllChecked}
-                      ref={el => { if (el) el.indeterminate = !fuAllChecked && paged.some(c => selectedFu.has(c.id)); }}
-                      onChange={e => {
-                        setSelectedFu(prev => {
-                          const n = new Set(prev);
-                          paged.forEach(c => { if (e.target.checked) n.add(c.id); else n.delete(c.id); });
-                          return n;
-                        });
-                      }} title="Select all" />
-                  </th>
-                  <Th label="Contact" col="name" /><Th label="Company" col="company" />
-                  <Th label="Last Sent" col="lastSentAt" /><Th label="Status" col="status" /><th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {busy ? <SkeletonRows rows={8} cols={6} chipCol={1} />
-                : paged.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-check" />No follow-ups due</div></td></tr>
-                : paged.map(c => {
-                  const daysAgo = c.lastSentAt ? Math.floor((Date.now() - new Date(c.lastSentAt).getTime()) / 86400000) : null;
-                  return (
-                    <tr key={c.id}>
-                      <td className="cb-col">
-                        <input type="checkbox" className="row-cb" checked={selectedFu.has(c.id)}
-                          onChange={e => toggleFuRow(c.id, e.target.checked)} />
-                      </td>
-                      <td>
-                        <div className="contact-chip">
-                          <Avatar name={c.name} />
-                          <div><div className="name">{c.name}</div><div className="email">{c.email}</div></div>
-                        </div>
-                      </td>
-                      <td style={{ color: 'var(--text2)' }}>{c.company}</td>
-                      <td style={{ color: 'var(--text2)' }}>{daysAgo === null ? '—' : `${daysAgo}d ago`}</td>
-                      <td><StatusBadge status={c.status} contact={c} /></td>
-                      <td className="cell-actions">
-                        {c.status === 'replied'
-                          ? <button className="btn btn-sm" onClick={() => setReplyContactId(c.id)} type="button"><i className="ti ti-message" /> View reply</button>
-                          : <button className="btn btn-sm" onClick={() => showDetail(c)} type="button">View</button>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <Th label="Contact" col="name" /><Th label="Company" col="company" />
-                  <Th label="Template" col="template" /><Th label="Status" col="status" />
-                  <Th label="Approval" col="approval" /><th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {busy ? <SkeletonRows rows={8} cols={6} chipCol={0} />
-                : error ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-alert-triangle" />{error}</div></td></tr>
-                : paged.length === 0 ? <tr><td colSpan={6}><div className="empty-state"><i className="ti ti-users" />No contacts found</div></td></tr>
-                : paged.map(c => (
-                  <tr key={c.id}>
-                    <td>
-                      <div className="contact-chip">
-                        <Avatar name={c.name} />
-                        <div><div className="name">{c.name}</div><div className="email">{c.email}</div></div>
-                      </div>
-                    </td>
-                    <td style={{ color: 'var(--text2)' }}>{c.company}</td>
-                    <td style={{ color: 'var(--text2)' }}>{app.templates[c.template]?.name || c.template}</td>
-                    <td><StatusBadge status={c.status} contact={c} /></td>
-                    <td><StatusBadge status={c.approvalStatus} /></td>
-                    <td className="cell-actions">
-                      {c.status === 'failed'
-                        ? <button className="btn btn-sm btn-primary" onClick={async () => {
-                            // Match classic retriggerContact: re-queue as approved (keep edits) → step3
-                            try {
-                              await app.updateContact(c.id, { status: 'queued', approvalStatus: 'approved' });
-                              navigate('/send/step3');
-                            } catch (err: any) { toast('Could not reset contact: ' + err.message, 'error'); }
-                          }} type="button"><i className="ti ti-send" /> Re-send</button>
-                        : c.approvalStatus === 'pending'
-                          ? <Link to="/send/step2" className="btn btn-sm">Review</Link>
-                          : <button className="btn btn-sm" onClick={() => showDetail(c)} type="button">View</button>}
-                      <button aria-label="Delete contact" className="btn btn-sm" onClick={async () => {
-                        if (!confirm(`Delete ${c.name} (${c.email})?\nThis will hide the contact from all views.`)) return;
-                        try { await app.deleteContact(c.id); toast(`${c.name} deleted.`, 'success'); }
-                        catch (err: any) { toast(err.message, 'error'); }
-                      }} title="Delete contact" type="button"><i className="ti ti-trash" /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-        </Refreshing>
-
-        {totalPages > 1 && (
-          <div className="pagination-bar">
-            <button className="btn btn-sm" disabled={safePage === 1} onClick={() => setPage(p => p - 1)} type="button">
-              <i className="ti ti-chevron-left" /> Prev
-            </button>
-            <span className="page-info">Page {safePage} of {totalPages}</span>
-            <button className="btn btn-sm" disabled={safePage === totalPages} onClick={() => setPage(p => p + 1)} type="button">
-              Next <i className="ti ti-chevron-right" />
-            </button>
-          </div>
+    }>
+      <div className="dash">
+        {showSetup && <SetupChecklist steps={steps} />}
+        {/* A brand-new account sees only the checklist; one that is partly set up
+            (say, job platforms but no Gmail yet) keeps the rest below it. */}
+        {!(showSetup && !hasContacts) && (
+          <>
+            <NeedsYouStrip tasks={tasks} loading={needsLoading} />
+            <div className="dash-two">
+              <SendingCard jobs={jobs} timeline={timeline} />
+              <WorkersCard runs={runs} platforms={platforms} mailboxCheckedAt={lastChecked} />
+            </div>
+            <WeekPulse analytics={analytics} interviews={interviews} />
+            <RecentActivity activity={analytics?.activity || null} interviews={interviews} />
+          </>
         )}
       </div>
-
-      <div className={`bulk-bar${selectedFu.size > 0 ? ' visible' : ''}`}>
-        <span className="bb-count">{selectedFu.size} selected</span>
-        <button className="btn btn-send" type="button"
-          onClick={() => { if (selectedFu.size) navigate(`/send/step1?followup=1&ids=${[...selectedFu].join(',')}`); }}>
-          <i className="ti ti-send" /> Send Follow-ups
-        </button>
-      </div>
-
-      <ReplyModal contact={replyContact} onClose={() => setReplyContactId(null)} />
     </Layout>
   );
 }
