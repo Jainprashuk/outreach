@@ -318,7 +318,13 @@ async function executeRun(runDoc, config, openSession = null) {
     const session = openSession || await driver.connect({ cdpPort: CFG.cdpPort });
 
     try {
-      if (!await driver.loggedIn(session)) {
+      // A site whose job search is public (Hirist) harvests logged out.
+      const publicHarvest = runDoc.kind === 'harvest' && driver.meta && driver.meta.capabilities && driver.meta.capabilities.publicHarvest;
+      const isIn = await driver.loggedIn(session);
+      // Logged out on a public site: searches only (login-only feeds skipped).
+      const loggedOut = publicHarvest && !isIn;
+      if (loggedOut) log(`not logged into ${LABEL} — harvesting public searches only`);
+      if (!publicHarvest && !isIn) {
         // A login wall is a human problem. Retrying would just burn runs.
         return finish('failed', { error: `Not logged into ${LABEL}. Log in inside the debug Chrome window, then try again.` });
       }
@@ -340,7 +346,7 @@ async function executeRun(runDoc, config, openSession = null) {
       }
 
       if (runDoc.kind === 'harvest') {
-        const { jobs, searches, recommended = 0 } = await Promise.race([driver.harvest(session, { config, onProgress }), expired]);
+        const { jobs, searches, recommended = 0 } = await Promise.race([driver.harvest(session, { config, onProgress, loggedOut }), expired]);
         // Same doctrine as the LinkedIn harvest's zero-rendered check: a page
         // that painted nothing is a failure, never "no new jobs today".
         if (jobs.length === 0) {

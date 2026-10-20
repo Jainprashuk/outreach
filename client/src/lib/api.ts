@@ -1984,11 +1984,15 @@ export interface NaukriOverview {
 export type PlatformId = 'naukri' | 'instahyre' | 'hirist';
 export type PlatformScope = PlatformId | 'all';
 export type ApplyMode = 'off' | 'dry-run' | 'on';
-export interface PlatformCapabilities { refresh: boolean; harvest: boolean; dryRun: boolean; apply: boolean; track: boolean }
+export interface PlatformCapabilities {
+  refresh: boolean; harvest: boolean; dryRun: boolean; apply: boolean; track: boolean;
+  /** The site's job search needs no login, so harvests run while logged out. */
+  publicHarvest?: boolean;
+}
 export interface PlatformInfo {
   id: PlatformId; label: string; color: 'blue' | 'teal' | 'purple';
   capabilities: PlatformCapabilities;
-  /** Harvest choices, by label. `recommended` null = the site has no matched feed. */
+  /** Harvest choices, by label. `recommended` null = the site has no matched feed (none today). */
   sources: { searches: string; recommended: string | null };
   enabled: boolean;
   /** Null while the platform is switched off. */

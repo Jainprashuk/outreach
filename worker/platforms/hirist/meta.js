@@ -3,12 +3,12 @@
 // Everything Hirist-shaped, in one place. The driver (../shared/driver.js)
 // reads only this file.
 //
-// STATUS: written before Phase 0 recon on the live site. Hirist moved to
-// hirist.tech; its listings are fetched as JSON by a separate API host. Values
-// marked "verify" come from its public pages and must be confirmed in DevTools
-// and written into RECON.md. Hirist has no strong recommended feed, so harvest
-// uses your searches only (lib/platforms.js sources.recommended = null).
-// capabilities.apply is false: only a dry run exists.
+// STATUS: VERIFIED on the live site 2026-10-20/21 (RECON.md): search pages
+// /search/<slug>-jobs load GET gladiator.hirist.tech/job/search?query=… (20 a
+// page); your job feed /jobfeed loads /job/jobfeed?page=N (50 a page, login
+// needed); applied jobs /applied-jobs load /job/applied-jobs?page=N&status=;
+// the login cookie is hirist_seeker_enc. capabilities.apply is false: only a
+// dry run exists.
 
 const { capabilitiesOf } = require('../../../lib/platforms');
 
@@ -18,13 +18,16 @@ module.exports = {
   id: 'hirist',
   label: 'Hirist',
   origin: ORIGIN,
-  // Hirist's pages call an API on a sibling host. verify
-  apiHosts: ['hirist.tech', 'hirist.com'],
-  feedTest: (url) => /(\/api\/|gladiator|\/job)/i.test(url) && !/(analytics|track|event|log|banner)/i.test(url),
+  // Hirist's pages fetch jobs from this host (verified).
+  apiHosts: ['gladiator.hirist.tech'],
+  // The job lists only: search results and keyword pages (verified).
+  // Your job feed too (logged in only).
+  feedTest: (url) => /\/job\/(search|keyword|jobfeed)\b/.test(url),
 
   cookieUrls: [ORIGIN, 'https://hirist.tech'],
-  // verify — the token cookie set at login.
-  sessionCookies: ['token', 'authToken', 'jwt', 'hirist_token', 'access_token'],
+  // Set at login (verified 2026-10-21). PHPSESSID and chatSdkToken exist
+  // logged out too, so no pattern match: only these names count.
+  sessionCookies: ['hirist_seeker_enc', 'HIRIST_CK1'],
 
   guardMarkers: {
     loginUrls: ['/login', '/signin'],   // verify
@@ -35,37 +38,113 @@ module.exports = {
 
   capabilities: capabilitiesOf('hirist'),
 
-  feeds: [],
+  // Your job feed (verified): GET /job/jobfeed?minexp=N&page=0, 50 jobs, the
+  // same job shape as search. Needs a login — a logged-out harvest skips it
+  // (loginOnly) rather than walking into the login wall.
+  feeds: [
+    { url: `${ORIGIN}/jobfeed`, label: 'My job feed', origin: 'recommended', loginOnly: true },
+  ],
   recruiterFeed: false,
-  // Search results page. verify
+  // Free-text search (verified): /search/backend-developer-jobs?minexp=3.
+  // `loc` takes Hirist's own location ids, so location is left to your
+  // Filters → Locations, which run on every harvest anyway.
   searchUrl: (s) => {
     const slug = String(s.keywords || '').toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
-    const u = new URL(`${ORIGIN}/k/${slug || 'software'}-jobs`);
-    if (s.location) u.searchParams.set('loc', s.location);
+    const u = new URL(`${ORIGIN}/search/${slug || 'software-developer'}-jobs`);
     if (s.experienceYears != null) u.searchParams.set('minexp', String(s.experienceYears));
     return u.toString();
   },
-  fields: {},
-  jobUrl: (o, url) => url || (o.id != null ? `${ORIGIN}/j/${o.id}` : ''),
+  // Numbered pages (verified): ?page=2 loads the API's page=1.
+  pageUrl: (url, n) => { const u = new URL(url); u.searchParams.set('page', String(n)); return u.toString(); },
+  // Field names in the feed (verified): min/max = experience years,
+  // minSal/maxSal (0 with hideSal = 1 when pay is hidden), createdTime = ms.
+  fields: {
+    id: ['id'],
+    company: ['companyData.companyName'],
+    expMin: ['min'], expMax: ['max'],
+    salMin: ['minSal'], salMax: ['maxSal'],
+    posted: ['createdTime', 'createdTimeMs'],
+    location: ['locations', 'location'],
+  },
+  // The feed carries no link; the listing is /j/<title-slug>-<id> (verified:
+  // "Happiest Minds - Node.js Architect" → /j/happiest-minds-nodejs-architect-1677995).
+  jobUrl: (o, url) => url || (o.id != null
+    ? `${ORIGIN}/j/${String(o.title || 'job').toLowerCase().replace(/\./g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}-${o.id}`
+    : ''),
 
+  // Applied jobs (verified page + feed, 2026-10-21): /applied-jobs loads
+  // GET /job/applied-jobs?page=0&status= → { data: { jobs: [], hasMore,
+  // count } }. Row fields are "verify" — the account had no applications yet;
+  // the page's own code reads appliedData.recruiterActions.
+  // NOTE: an unknown hirist.tech path hangs instead of 404ing (seen on
+  // /my-jobs), so only verified URLs belong here.
   applications: {
-    url: `${ORIGIN}/my-jobs`,   // verify
-    test: (url) => /(applied|application|myjobs|my-jobs)/i.test(url),
+    url: `${ORIGIN}/applied-jobs`,
+    test: (url) => /\/job\/applied-jobs\b/.test(url),
     rowsFrom: (body) => {
-      const list = Array.isArray(body) ? body : (body && (body.data || body.jobs || body.applications || body.results)) || [];
+      const d = body && body.data;
+      const list = Array.isArray(body) ? body
+        : Array.isArray(d) ? d
+        : (d && (d.jobs || d.applications)) || (body && (body.jobs || body.applications || body.results)) || [];
+      // A row (verified 2026-10-21 on the first real application):
+      // { id: <APPLICATION id>, applicationDate: ms, jobDetail: { id: <job id>,
+      //   title, … }, recruiterAction: [], app_status: 0, … }. The job id is
+      // jobDetail.id — `id` is the application's own id. recruiterAction's
+      // entries were still empty; strings or { action/name/status } are read.
+      const word = (a) => (typeof a === 'string' ? a
+        : a && typeof a === 'object' ? (a.action || a.actionName || a.name || a.status || a.type || '') : '');
       return (Array.isArray(list) ? list : []).map(r => r && ({
-        jobId: (r.job && r.job.id) || r.jobId || r.job_id || r.id,
-        statuses: [r.status, r.applicationStatus, r.recruiterAction, r.stage, r.viewed ? 'viewed' : null].filter(Boolean),
-        at: r.updatedAt || r.updated_at || r.appliedOn || null,
+        jobId: (r.jobDetail && r.jobDetail.id) || (r.job && r.job.id) || r.jobId || r.job_id || null,
+        statuses: [
+          r.applicationStatus, r.stage,
+          ...[].concat(r.recruiterAction || []).map(word),
+          ...[].concat((r.appliedData && r.appliedData.recruiterActions) || []).map(word),
+          typeof r.status === 'string' ? r.status : null,
+        ].filter(x => typeof x === 'string' && x),
+        // applicationDate runs 5h30m behind the real moment (applied at
+        // 20:56:36Z, row said 15:26:36Z — verified 2026-10-21), so add it back.
+        at: r.applicationDate ? new Date(Number(r.applicationDate) + 330 * 60000).toISOString() : (r.updatedAt || null),
       })).filter(Boolean);
     },
   },
 
   // Listings that redirect to company sites are skipped, as Naukri skips
   // #company-site-button.
+  //
+  // Real apply (mapped 2026-10-21 from the site's own code + job JSON): the
+  // listing loads GET /job/detail?jobcode=<id> with applyUrl (company site),
+  // assessmentFlags/assessmentCompleted (screening test) and applied. The
+  // button [data-track="apply-job"] then either redirects (incomplete profile
+  // → /registration/…, screening test, company site — which ALSO records an
+  // apply on Hirist, so it is skipped BEFORE clicking), opens a dialog, or
+  // sends POST gladiator.hirist.tech/job/apply?jobcode=<id> ("Job Applied
+  // Successfully") and the button turns "Applied".
   applyFlow: {
     applyButtons: [/^apply( now)?$/i, /^quick apply$/i],
+    applySelector: '[data-track="apply-job"]',
     externalButtons: [/apply on company (site|website)/i, /^apply externally$/i],
     alreadyText: ['already applied', 'you have applied', 'applied on'],
+    appliedLabel: /^applied$/i,
+    // The one request that IS the application.
+    applyRequest: (url, method) => method === 'POST' && /gladiator\.hirist\.tech\/job\/apply\?jobcode=/.test(url),
+    jobIdOf: (url) => { const m = /[?&]jobcode=(\d+)/.exec(url); return m ? m[1] : null; },
+    // Never sent from here: "apply to these similar jobs too".
+    blockRequests: [/\/job\/apply-multiple\b/],
+    // Read before clicking, from the listing's own JSON.
+    detailTest: (url) => /\/job\/detail\?jobcode=/.test(url),
+    preCheck: (body) => {
+      const d = body && (body.data && typeof body.data === 'object' && !Array.isArray(body.data) ? body.data : body);
+      if (!d || typeof d !== 'object') return null;
+      if (Number(d.applied) > 0 || d.isApplied) return 'Hirist says you have already applied to this job';
+      if (d.applyUrl && !Number(d.confidential)) return 'Applies on the company site — Hirist hands you over to it, apply there yourself';
+      if (Number(d.assessmentFlags) && !d.assessmentCompleted) return 'Needs a screening test on Hirist first — open the listing to take it';
+      if (Number(d.status) === 0) return 'Listing closed — Hirist no longer takes applications for it';
+      return null;
+    },
+    // Where a click can send you instead of applying.
+    redirects: [
+      { test: '/registration/', reason: 'Hirist wants your profile finished before you apply (it opened /registration). Finish it on hirist.tech, then re-approve.' },
+      { test: 'assessment', reason: 'Hirist opened a screening test for this job — take it on the site, then re-approve.' },
+    ],
   },
 };

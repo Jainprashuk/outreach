@@ -63,6 +63,10 @@ export function readiness(o: NaukriOverview, { withRun = false }: { withRun?: bo
     return { tone: 'warn', icon: 'ti-browser', canRun: true, short: 'Chrome closed',
       text: 'Chrome is not on the debug port. The worker will try to launch it; if it fails, run ./chrome-debug.sh.' };
   }
+  if (!worker.naukriLoggedIn && o.capabilities?.publicHarvest) {
+    return { tone: 'warn', icon: 'ti-lock', canRun: true, short: 'Logged out',
+      text: `${L} is logged out. Searches still harvest (its job search is public); log in inside the debug Chrome window for your job feed, check replies and apply.` };
+  }
   if (!worker.naukriLoggedIn) {
     return { tone: 'warn', icon: 'ti-lock', canRun: false, short: 'Log back in',
       text: `Chrome is up but ${L} is logged out. Log in inside the debug Chrome window — no ${naukri ? '' : `${L} `}run will start until you do.` };

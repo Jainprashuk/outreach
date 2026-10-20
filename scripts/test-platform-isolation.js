@@ -147,7 +147,12 @@ async function main() {
     console.log('\ncapabilities and apply mode');
     ok('no refresh on Instahyre', (await call('POST', '/api/p/instahyre/runs', { kind: 'refresh' })).status === 409);
     ok('apply off → no apply run', (await call('POST', '/api/p/instahyre/runs', { kind: 'apply' })).status === 409);
+    // A platform whose real apply is not proven (capabilities.apply false) —
+    // simulated in this process, since both added sites now have it.
+    const caps = require('../lib/platforms').PLATFORMS.instahyre.capabilities;
+    caps.apply = false;
     ok('real apply on an unproven platform is refused', (await call('PATCH', '/api/p/instahyre/config', { applyMode: 'on' })).status === 400);
+    caps.apply = true;
     ok('dry run can be switched on', (await call('PATCH', '/api/p/instahyre/config', { applyMode: 'dry-run' })).config.applyMode === 'dry-run');
     await call('POST', '/api/p/instahyre/jobs/decide', { ids: iJobs.slice(0, 2).map(j => String(j._id)), decision: 'approved' });
     const da = await claimAndRun('instahyre');
@@ -174,11 +179,11 @@ async function main() {
     await call('POST', '/api/naukri/runs', { kind: 'track' });
     const nt = await claimAndRun('naukri');
     ok('Naukri still claims and runs', nt.run && nt.run.status === 'done' && nt.run.kind === 'track', nt.run && nt.run.error);
-    await call('PATCH', '/api/p/hirist/config', { enabled: true, searches: [{ keywords: 'sre' }] });
+    await call('PATCH', '/api/p/hirist/config', { enabled: true, searches: [{ keywords: 'sre' }], sources: { searches: true, recommended: false } });
     await call('POST', '/api/p/hirist/runs', { kind: 'harvest' });
     const hh = await claimAndRun('hirist');
     ok('Hirist still claims and runs', hh.run && hh.run.status === 'done' && hh.run.platform === 'hirist', hh.run && hh.run.error);
-    ok('Hirist (no matched feed) harvested searches only', (await NaukriJob.find({ userId, platform: 'hirist' }).lean()).every(j => !(j.origins || []).includes('recommended')));
+    ok('Hirist with its job feed unticked harvested searches only', (await NaukriJob.find({ userId, platform: 'hirist' }).lean()).every(j => !(j.origins || []).includes('recommended')));
     ok('Naukri overview not blocked', !(await call('GET', '/api/naukri/overview')).blockedUntil);
 
     console.log('\nturning a platform off');

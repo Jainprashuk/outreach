@@ -123,7 +123,8 @@ function toJob(raw, { fields = {}, baseUrl = '', urlFor = null } = {}) {
     description: stripHtml(first(o, F.description) || '').slice(0, 5000),
     ...posted(first(o, F.posted)),
     ...(ext === true || ext === 'true' || ext === 1 ? { companySite: true } : {}),
-    ...(first(o, F.recruiter) === true ? { recruiter: true } : {}),
+    // true, or (Instahyre) a recruiter's message object / text.
+    ...((() => { const r = first(o, F.recruiter); return r === true || (r && typeof r === 'object') || (typeof r === 'string' && r.trim()); })() ? { recruiter: true } : {}),
   };
 }
 

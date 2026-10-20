@@ -45,7 +45,8 @@ function makeLoggedIn(meta) {
     const has = async () => {
       for (const url of meta.cookieUrls) {
         const cookies = await session.context.cookies(url).catch(() => []);
-        if (cookies.some(c => meta.sessionCookies.includes(c.name) && c.value)) return true;
+        if (cookies.some(c => c.value && (meta.sessionCookies.includes(c.name)
+          || (meta.sessionCookiePattern && meta.sessionCookiePattern.test(c.name))))) return true;
       }
       return false;
     };

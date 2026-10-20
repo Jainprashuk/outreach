@@ -123,10 +123,10 @@ const siteSchemaFor = (id) => new mongoose.Schema({
   },
   searches: { type: [searchSchema], default: [] },
   sources: {
-    // A site with its own matched feed harvests that by default; one without
-    // (Hirist) harvests your searches.
+    // Every site harvests its own matched feed by default; Hirist's search is
+    // public too, so its searches start on as well.
     searches:    { type: Boolean, default: id === 'hirist' },
-    recommended: { type: Boolean, default: id !== 'hirist' },
+    recommended: { type: Boolean, default: true },
     recommendedTabs: { type: [String], default: [] },
   },
   filters: {

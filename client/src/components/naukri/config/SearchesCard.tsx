@@ -31,7 +31,8 @@ export default function SearchesCard({ config, onSaved }: {
   const [rows, setRows] = useState<NaukriSearch[]>(config.searches.length ? config.searches : [blank()]);
   const { id: platformId, label: site, sources: siteSources } = usePlatform();
   const isNaukri = platformId === 'naukri';
-  // A site with no matched feed (Hirist) harvests searches only.
+  // A site with no matched feed harvests searches only (none today; Hirist's
+  // job feed was mapped 2026-10-21).
   const recLabel = siteSources.recommended;
   const toast = useToast();
   const [limits, setLimits] = useState(config.searchLimits || { maxSearches: 10, maxPages: 8 });
