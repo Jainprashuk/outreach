@@ -126,3 +126,29 @@ scraper repo explains why: a checkpoint means stop, not retry.
 
 Only one worker may run at a time — `jl` rewrites `data/leads.json` wholesale
 with no locking. A PID lock at `~/.job-leads/worker.lock` enforces it.
+
+## Job platform workers (Naukri, Instahyre, Hirist)
+
+One loop, `worker/platform-worker.js`, started once per platform:
+
+    npm run naukri-worker        # = PLATFORM=naukri (worker/naukri-worker.js is an alias)
+    npm run instahyre-worker
+    npm run hirist-worker
+    npm run instahyre-worker:stub   # no browser, fake data — test the loop end to end
+
+Each process has its own lock (`~/.job-leads/<id>-worker.lock`), outbox
+(`<id>-outbox.json`) and API path (`/api/p/<id>/…`; Naukri keeps `/api/naukri`).
+A captcha blocks only that platform for 7 days. They share the debug Chrome
+through `chrome-lock.js`, so one drives it at a time.
+
+`npm run workers` starts the platforms listed in `PLATFORMS` in `.env`
+(default `naukri`), e.g. `PLATFORMS="naukri instahyre hirist"`. To start one at
+login: `bash worker/install-worker.sh instahyre` (one launchd / systemd unit per
+platform; no argument still installs the LinkedIn worker).
+
+Drivers: Naukri's is `worker/naukri/` (unchanged). Instahyre and Hirist use the
+shared driver in `worker/platforms/shared/`, configured by each
+`worker/platforms/<id>/meta.js`. Their URLs, cookies and field names are not yet
+verified on the live sites — fill in `worker/platforms/<id>/RECON.md` from
+DevTools and update `meta.js`. Real apply is locked off for both
+(`lib/platforms.js` capabilities.apply); only a dry run exists.

@@ -6,6 +6,7 @@ import { listNaukriJobsApi, updateNaukriJobApi, naukriJobsOutreachApi } from '..
 import { useFindPeople } from './useFindPeople';
 import { Card, Muted, Empty } from './ui';
 import { fmtRunTime } from './format';
+import { usePlatform, PlatformTag } from './platform';
 import { useToast } from '../../context/ToastContext';
 
 // Everything that left, and where it got to.
@@ -33,6 +34,7 @@ const STAGE_BADGE: Record<string, string> = {
 };
 
 export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
+  const { id: scope } = usePlatform();
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [loading, setLoading] = useState(true);
   // After the first load, reloads keep the list on screen (dimmed) instead of blanking it.
@@ -118,7 +120,7 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
           <div style={{ flex: 1, minWidth: 190 }}>
             <a href={job.url} target="_blank" rel="noreferrer"
                style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{job.title}</a>
-            <div><Muted><Link to={`/companies?q=${encodeURIComponent(job.company)}`} style={{ color: 'inherit' }}>{job.company}</Link>{job.appliedAt ? ` · ${fmtRunTime(job.appliedAt)}` : ''}</Muted></div>
+            <div><Muted><Link to={`/companies?q=${encodeURIComponent(job.company)}`} style={{ color: 'inherit' }}>{job.company}</Link>{job.appliedAt ? ` · ${fmtRunTime(job.appliedAt)}` : ''}</Muted>{scope === 'all' && <> <PlatformTag id={job.platform} /></>}</div>
             {/* How it went out — "Applied after 2 question(s)" is worth knowing
                 when you are wondering whether a screening form was involved.
                 The skip/retry notes that used to live here belong to Waiting;

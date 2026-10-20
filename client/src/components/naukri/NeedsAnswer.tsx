@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { NaukriQuestionGroup, NaukriAutoAnswer } from '../../lib/api';
 import { naukriNeedsAnswerApi, draftNaukriAnswerApi, useNaukriAnswerApi, ignoreNaukriQuestionApi, isAiKeyRequired, reviewNaukriAutoAnswerApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty, Notice } from './ui';
+import { PLATFORM_LABEL } from './platform';
 import { useToast } from '../../context/ToastContext';
 
 // Screening questions that stopped an application, one card per QUESTION —
@@ -85,7 +86,8 @@ function QuestionCard({ group, busy, auto, onUse, onIgnore }: {
           <Muted>
             blocks {group.count} job{group.count === 1 ? '' : 's'}:{' '}
             {group.jobs.slice(0, 3).map((j, i) => (
-              <span key={j.id}>{i > 0 && ', '}<a href={j.url} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>{j.title} · {j.company}</a></span>
+              <span key={j.id}>{i > 0 && ', '}<a href={j.url} target="_blank" rel="noreferrer" style={{ color: 'inherit' }}>{j.title} · {j.company}</a>
+                {j.platform && (group.platforms || []).length > 1 ? ` (${PLATFORM_LABEL[j.platform]})` : ''}</span>
             ))}
             {group.count > 3 && ` +${group.count - 3} more`}
           </Muted>
@@ -220,9 +222,11 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
     setBusy(true);
     try {
       const r = await useNaukriAnswerApi(question, answer, pattern);
+      // The answer bank is shared: say which platforms it just freed jobs on.
+      const on = (r.platforms || []).map(p => p.label).join(', ');
       toast(r.requeued
-        ? `Saved as a rule — ${r.requeued} job${r.requeued === 1 ? '' : 's'} back in Waiting.`
-        : 'Saved as a rule.', 'success');
+        ? `Saved to the answer bank. ${r.requeued} job${r.requeued === 1 ? '' : 's'}${on ? ` on ${on}` : ''} will be retried on the next apply run.`
+        : 'Saved to the answer bank.', 'success');
       // A broader pattern may have answered other questions too: reload.
       await load(); onChanged();
     } catch (e: any) { toast(e?.message || 'Could not save', 'error'); }
@@ -264,6 +268,10 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
   const blocked = groups.reduce((n, g) => n + g.count, 0);
   return (
     <>
+      <Notice icon="ti-share">
+        Answers go into one answer bank shared by every platform. Answer once and the jobs below are retried on their
+        own platform&apos;s next apply run.
+      </Notice>
       {autoCard}
       {!meta.aiDrafts && (
         <Notice icon="ti-info-circle">AI drafts are off (Configuration → Answers). You can still answer each question below.</Notice>

@@ -11,6 +11,16 @@ const mongoose = require('mongoose');
 // apply. Keeping the two apart is what lets Naukri be deleted in one revert.
 const naukriJobSchema = new mongoose.Schema({
   userId:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
+  // Which job site it came from (lib/platforms.js). Rows from before platforms
+  // existed have none and are Naukri's. sourceKey is already prefixed with the
+  // platform, so the unique index below needs no change.
+  platform: { type: String, default: 'naukri' },
+  // Company + title, normalised (lib/jobDupes.js). The same role found on two
+  // platforms shares it; whether it is a duplicate is worked out on read, from
+  // the other rows' live state, never stored as a copy that could go stale.
+  dupKey:   { type: String, default: '' },
+  // You chose to apply here even though another platform already applied.
+  dupOverride: { type: Boolean, default: false },
 
   // ── identity ───────────────────────────────────────────────────────────────
   // Naukri's own job id, lifted from the listing URL and always stringified.
@@ -161,6 +171,11 @@ naukriJobSchema.index({ userId: 1, approval: 1, lastSeenAt: -1 });
 naukriJobSchema.index({ userId: 1, approval: 1, score: -1 });
 // The applied view, and the per-day apply cap.
 naukriJobSchema.index({ userId: 1, applyStatus: 1, appliedAt: -1 });
+// Per-platform inbox and applied views.
+naukriJobSchema.index({ userId: 1, platform: 1, approval: 1, score: -1 });
+naukriJobSchema.index({ userId: 1, platform: 1, applyStatus: 1, appliedAt: -1 });
+// Duplicate lookups across platforms.
+naukriJobSchema.index({ userId: 1, dupKey: 1 });
 
 naukriJobSchema.set('toJSON', {
   transform: (doc, ret) => {

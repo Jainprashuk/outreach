@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { NaukriConfig, NaukriSearch, NaukriRecommendedTab } from '../../../lib/api';
+import { usePlatform } from '../platform';
 import { Card } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 import { useToast } from '../../../context/ToastContext';
@@ -28,6 +29,10 @@ export default function SearchesCard({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
 }) {
   const [rows, setRows] = useState<NaukriSearch[]>(config.searches.length ? config.searches : [blank()]);
+  const { id: platformId, label: site, sources: siteSources } = usePlatform();
+  const isNaukri = platformId === 'naukri';
+  // A site with no matched feed (Hirist) harvests searches only.
+  const recLabel = siteSources.recommended;
   const toast = useToast();
   const [limits, setLimits] = useState(config.searchLimits || { maxSearches: 10, maxPages: 8 });
   const [sources, setSources] = useState({
@@ -51,7 +56,7 @@ export default function SearchesCard({ config, onSaved }: {
       // Rows with neither keywords nor a URL are dropped server-side; say so
       // rather than letting them vanish silently.
       const usable = rows.filter(r => r.keywords.trim() || r.url.trim());
-      if (!sources.searches && !sources.recommended) throw new Error('Pick at least one: your searches or recommended jobs');
+      if (!sources.searches && !(recLabel && sources.recommended)) throw new Error(recLabel ? `Pick at least one: your searches or ${recLabel.toLowerCase()}` : 'Add a search and keep My searches ticked');
       const r = await updateNaukriConfigApi({ searches: usable, searchLimits: limits, sources });
       setLimits(r.config.searchLimits);
       setSources(s => ({ ...s, ...r.config.sources, recommendedTabs: r.config.sources.recommendedTabs?.length ? r.config.sources.recommendedTabs : ALL_TABS }));
@@ -63,7 +68,7 @@ export default function SearchesCard({ config, onSaved }: {
   };
 
   return (
-    <Card title="Searches" icon="ti-search" collapsible id="searches" defaultOpen={false}
+    <Card title="Searches" icon="ti-search" collapsible id="searches" defaultOpen={false} scope="site"
       right={<button className="btn btn-xs" type="button" onClick={() => setRows(r => [...r, blank()])}>
         <i className="ti ti-plus" /> Add
       </button>}>
@@ -98,7 +103,7 @@ export default function SearchesCard({ config, onSaved }: {
             </button>
           </div>
           <input type="text"
-            placeholder="…or paste a Naukri search URL (overrides the fields above)"
+            placeholder={`…or paste a ${site} search URL (overrides the fields above)`}
             value={row.url} onChange={e => patch(i, { url: e.target.value })}
             style={{ width: '100%', marginTop: 6, fontSize: 12 }}
           />
@@ -112,16 +117,19 @@ export default function SearchesCard({ config, onSaved }: {
             onChange={e => setSources(s => ({ ...s, searches: e.target.checked }))} />
           <span>My searches<div style={{ color: 'var(--text2)', fontSize: 11 }}>The searches listed above.</div></span>
         </label>
-        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+        {!recLabel && (
+          <div style={{ color: 'var(--text2)', fontSize: 11 }}>{site} has no recommended feed, so harvest uses these searches only.</div>
+        )}
+        {recLabel && <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
           <input type="checkbox" checked={sources.recommended} style={{ marginTop: 3 }}
             onChange={e => setSources(s => ({ ...s, recommended: e.target.checked }))} />
           <span>
-            Naukri&apos;s recommended jobs
+            {isNaukri ? <>Naukri&apos;s recommended jobs</> : `${site}'s ${recLabel.toLowerCase()}`}
             <div style={{ color: 'var(--text2)', fontSize: 11 }}>
-              The jobs Naukri picks for your profile. They go through the same filters, scoring, inbox and apply flow,
+              The jobs {site} picks for your profile. They go through the same filters, scoring, inbox and apply flow,
               marked “Recommended”. The Harvest button can also pick a source for one run.
             </div>
-            {sources.recommended && (
+            {isNaukri && sources.recommended && (
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 6 }}>
                 {REC_TABS.map(([id, label, help]) => (
                   <button key={id} type="button" title={help} onClick={() => toggleTab(id)}
@@ -132,7 +140,7 @@ export default function SearchesCard({ config, onSaved }: {
               </div>
             )}
           </span>
-        </label>
+        </label>}
       </div>
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', margin: '12px 0 4px' }}>
@@ -148,8 +156,11 @@ export default function SearchesCard({ config, onSaved }: {
         </label>
       </div>
       <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 12 }}>
-        20 listings a page. At most 10 searches × 8 pages — the worker&apos;s safety caps — so these can only be lowered.
-        Recommended jobs reads the tabs you pick above, each one page. Fewer means a quicker, lighter harvest.
+        {isNaukri
+          ? <>20 listings a page. At most 10 searches × 8 pages — the worker&apos;s safety caps — so these can only be lowered.
+            Recommended jobs reads the tabs you pick above, each one page. Fewer means a quicker, lighter harvest.</>
+          : <>A page is one scroll of {site}&apos;s list. At most 5 searches × 5 pages on {site} — the worker&apos;s safety caps — so
+            higher numbers here are lowered to those.</>}
       </div>
 
       {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 8 }}>{msg}</div>}

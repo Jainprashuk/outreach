@@ -7,7 +7,7 @@ import Leads from './pages/Leads';
 import Discover from './pages/Discover';
 import Companies from './pages/Companies';
 import Library from './pages/Library';
-import Naukri from './pages/Naukri';
+import JobPlatforms from './pages/JobPlatforms';
 import Jobs from './pages/Jobs';
 import CampaignsRouter from './pages/campaigns/CampaignsRouter';
 import Interviews from './pages/Interviews';
@@ -25,6 +25,14 @@ import Step2 from './pages/send/Step2';
 import Step3 from './pages/send/Step3';
 import Done from './pages/send/Done';
 import NotAuthorised from './components/NotAuthorised';
+
+// /naukri → Job Platforms with Naukri selected, keeping any ?platform=/&tab=.
+function NaukriRedirect() {
+  const { search } = useLocation();
+  const q = new URLSearchParams(search);
+  if (!q.get('platform')) q.set('platform', 'naukri');
+  return <Navigate to={`/job-platforms?${q.toString()}`} replace />;
+}
 import { useSession } from './context/SessionContext';
 
 // /target-company was this tab's first name; old links and bookmarks still land.
@@ -101,7 +109,10 @@ export default function App() {
       <Route path="/companies/:key" element={owner(<Companies />)} />
       <Route path="/library" element={owner(<LibraryOnly><Library /></LibraryOnly>)} />
       <Route path="/jobs" element={owner(<Jobs />)} />
-      <Route path="/naukri" element={owner(<Naukri />)} />
+      <Route path="/job-platforms" element={owner(<JobPlatforms />)} />
+      {/* The old Naukri page: same page, Naukri selected (a ?platform= from a
+          notification link wins). */}
+      <Route path="/naukri" element={<NaukriRedirect />} />
       {/* Splat route: the list, wizard and detail screens live in CampaignsRouter. */}
       <Route path="/campaigns/*" element={owner(<CampaignsRouter />)} />
       <Route path="/interviews" element={owner(<Interviews />)} />

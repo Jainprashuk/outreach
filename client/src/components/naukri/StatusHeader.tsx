@@ -11,27 +11,44 @@ import { fmtTime } from './format';
 // Written fresh against Naukri's states rather than imported from the LinkedIn
 // panel, so that file stays untouched and the two can diverge.
 
-type Tone = 'ok' | 'warn' | 'bad' | 'idle';
+type Tone = 'ok' | 'warn' | 'bad' | 'idle' | 'run';
 
-export interface Readiness { tone: Tone; icon: string; text: string; canRun: boolean }
+export interface Readiness {
+  tone: Tone; icon: string; text: string; canRun: boolean;
+  /** Two or three words for the platform switcher card. */
+  short: string;
+}
 
-export function readiness(o: NaukriOverview): Readiness {
+const RUN_LABEL: Record<string, string> = { refresh: 'Refresh profile', harvest: 'Harvest', apply: 'Apply', track: 'Check replies', probe: 'Test' };
+export const runLabel = (kind: string, dryRun?: boolean) => (kind === 'apply' && dryRun ? 'Dry run apply' : RUN_LABEL[kind] || kind);
+
+/** The sentence alone. `withRun` adds the "running" state the switcher shows. */
+export function readiness(o: NaukriOverview, { withRun = false }: { withRun?: boolean } = {}): Readiness {
   const { worker } = o;
+  const L = o.label || 'Naukri';
+  const naukri = !o.platform || o.platform === 'naukri';
 
+  if (withRun && o.activeRun) {
+    const k = runLabel(o.activeRun.kind, o.activeRun.dryRun);
+    return { tone: 'run', icon: 'ti-activity', canRun: false, short: `${k} running`, text: `${k} is running on ${L}.` };
+  }
   // Ordered by what blocks hardest. A captcha block outranks everything: while
   // it holds, nothing runs no matter how healthy the machine looks.
   if (o.blockedUntil) {
     return { tone: 'bad', icon: 'ti-hand-stop', canRun: false,
-      text: `Naukri challenged the account. Everything is paused until ${fmtTime(o.blockedUntil)}`
-          + `${o.blockedReason ? ` — ${o.blockedReason}` : ''}. Do not work around this.` };
+      short: `Paused until ${new Date(o.blockedUntil).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}`,
+      text: `${L} challenged the account. ${naukri ? 'Everything' : `${L} runs are`} paused until ${fmtTime(o.blockedUntil)}`
+          + `${o.blockedReason ? ` — ${o.blockedReason}` : ''}. ${naukri ? '' : 'Other platforms keep running. '}Do not work around this.` };
   }
   if (o.paused) {
-    return { tone: 'bad', icon: 'ti-player-pause', canRun: false,
-      text: 'Paused. Turn off "Pause all" in Configuration → Apply behaviour & Safety to run anything.' };
+    return { tone: 'bad', icon: 'ti-player-pause', canRun: false, short: 'Paused by you',
+      text: naukri
+        ? 'Paused. Turn off "Pause all" in Configuration → Apply behaviour & Safety to run anything.'
+        : `${L} is paused. Turn off "Pause ${L}" in Configuration → Apply behaviour & safety to run anything.` };
   }
   if (!worker.everSeen) {
-    return { tone: 'idle', icon: 'ti-plug-connected-x', canRun: true,
-      text: 'Worker has never checked in. Run `npm run naukri-worker` on your Mac.' };
+    return { tone: 'idle', icon: 'ti-plug-connected-x', canRun: true, short: 'Not connected',
+      text: `Worker has never checked in. Run \`npm run ${o.platform || 'naukri'}-worker\` on your Mac.` };
   }
   if (!worker.online) {
     const when = worker.nextWakeAt
@@ -39,28 +56,28 @@ export function readiness(o: NaukriOverview): Readiness {
       : 'when you next open your Mac';
     // Still runnable on purpose: queueing from a phone with the Mac shut is the
     // point of having a queue.
-    return { tone: 'idle', icon: 'ti-zzz', canRun: true,
+    return { tone: 'idle', icon: 'ti-zzz', canRun: true, short: 'Mac asleep',
       text: `Your Mac is asleep. Anything you start will be queued and run ${when}.` };
   }
   if (!worker.chromeUp) {
-    return { tone: 'warn', icon: 'ti-browser', canRun: true,
+    return { tone: 'warn', icon: 'ti-browser', canRun: true, short: 'Chrome closed',
       text: 'Chrome is not on the debug port. The worker will try to launch it; if it fails, run ./chrome-debug.sh.' };
   }
   if (!worker.naukriLoggedIn) {
-    return { tone: 'warn', icon: 'ti-lock', canRun: false,
-      text: 'Chrome is up but Naukri is logged out. Log in inside the debug Chrome window — no run will start until you do.' };
+    return { tone: 'warn', icon: 'ti-lock', canRun: false, short: 'Log back in',
+      text: `Chrome is up but ${L} is logged out. Log in inside the debug Chrome window — no ${naukri ? '' : `${L} `}run will start until you do.` };
   }
   if (o.dryRun) {
-    return { tone: 'warn', icon: 'ti-test-pipe', canRun: true,
+    return { tone: 'warn', icon: 'ti-test-pipe', canRun: true, short: 'Ready, dry run',
       text: 'Ready — but DRY RUN is on. Apply runs will fill everything and submit nothing.' };
   }
-  return { tone: 'ok', icon: 'ti-circle-check', canRun: true,
+  return { tone: 'ok', icon: 'ti-circle-check', canRun: true, short: o.applyMode === 'off' && !naukri ? 'Ready, read-only' : 'Ready',
     text: o.nextOccurrence ? `Ready. Next scheduled run ${fmtTime(o.nextOccurrence)}.` : 'Ready. No schedule set.' };
 }
 
-const TONE_COLOR: Record<Tone, string> = {
-  ok: 'var(--green)', warn: 'var(--orange, var(--text2))',
-  bad: 'var(--red)', idle: 'var(--text2)',
+export const TONE_COLOR: Record<Tone, string> = {
+  ok: 'var(--green)', warn: 'var(--amber, var(--text2))',
+  bad: 'var(--red)', idle: 'var(--text3)', run: 'var(--accent)',
 };
 
 const Dot = ({ on, children }: { on: boolean; children: React.ReactNode }) => (
@@ -104,7 +121,7 @@ export default function StatusHeader({ overview, onHelp }: { overview: NaukriOve
         }}>
           <Dot on={w.online}>{w.online ? 'Mac online' : 'Mac offline'}{w.host ? ` · ${w.host}` : ''}</Dot>
           <Dot on={w.chromeUp}>Chrome</Dot>
-          <Dot on={w.naukriLoggedIn}>Naukri session</Dot>
+          <Dot on={w.naukriLoggedIn}>{overview.label || 'Naukri'} session</Dot>
           {overview.dryRun && <span style={{ color: 'var(--orange, var(--text2))' }}>dry run</span>}
           {overview.autoApprove && <span style={{ color: 'var(--red)' }}>auto-approve on</span>}
           <span>{overview.appliedToday} applied today</span>

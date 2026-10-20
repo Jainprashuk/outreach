@@ -19,8 +19,46 @@ const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = requi
 const { reportIssue } = require('../lib/issues');
 const { notify } = require('../lib/notify');
 const { WORKER_OFFLINE_MS, workerBack } = require('../lib/workerWatch');
+const {
+  isPlatform, labelOf, capabilitiesOf, platformQuery, platformOfDoc, siteOf, applyModeOf,
+  kindBlocked, isEnabled, publicRegistry, PLATFORM_IDS, SITE_FIELDS,
+} = require('../lib/platforms');
+const { dupKeyOf, dupesFor, dupText, blocksAuto, blocksApply } = require('../lib/jobDupes');
 
-const router = express.Router();
+// mergeParams: the same router is mounted at /api/naukri (Naukri) and at
+// /api/p/:platform (every platform), and reads the platform from req.platform.
+const router = express.Router({ mergeParams: true });
+
+// Which platform this request is about. server.js sets req.platform with
+// withPlatform(); a router mounted bare (the test harnesses) is Naukri, as it
+// always was. 'all' is the All platforms view: read-only lists and counts.
+router.use((req, res, next) => {
+  const p = req.platform || (req.params && req.params.platform) || 'naukri';
+  if (p !== 'all' && !isPlatform(p)) return res.status(404).json({ error: `Unknown platform: ${p}` });
+  req.platform = p;
+  // Job-level writes carry ids, so they work from the All view too.
+  const jobPath = /^\/jobs(\/|$)/.test(req.path);
+  if (p === 'all' && !ALL_OK.has(`${req.method} ${req.path}`) && !jobPath) {
+    return res.status(400).json({ error: 'Pick a platform for this — the All platforms view only lists jobs.' });
+  }
+  next();
+});
+// What the All platforms view may call. Everything else needs one platform.
+const ALL_OK = new Set([
+  'GET /jobs', 'GET /jobs/outreach', 'POST /jobs/decide', 'GET /needs-answer',
+  'POST /needs-answer/draft', 'POST /needs-answer/use', 'POST /needs-answer/auto', 'POST /needs-answer/ignore',
+  'GET /config/unknown-questions', 'POST /config/test-answer', 'GET /platforms', 'GET /runs',
+  'POST /config/starter-rules', 'POST /config/profile-from-resume', 'GET /resume',
+  // Shared settings only (the PATCH refuses any one platform's own fields).
+  'GET /config', 'PATCH /config', 'POST /resume', 'DELETE /resume',
+]);
+// What the All view's PATCH /config may change: settings every platform shares.
+const SHARED_KEYS = new Set(['profile', 'answers', 'autoAnswer', 'aiDrafts', 'onUnknownQuestion', 'resumeText', 'duplicates', 'crossPlatformOrder']);
+// A row with its platform, for rows from before the field existed.
+const PQ = (req) => platformQuery(req.platform);
+const LABEL = (req) => labelOf(req.platform === 'all' ? 'naukri' : req.platform);
+// Links in notifications open the page on the right platform.
+const pageLink = (platform) => (platform && platform !== 'naukri' ? `/naukri?platform=${platform}` : '/naukri');
 
 const BASE_FILTER = { deleted: { $ne: true } };
 const ACTIVE = ['queued', 'running'];
@@ -80,14 +118,19 @@ const ALL_SKIPPED = { applyStatus: 'skipped', approval: { $ne: 'rejected' } };
 // Jobs blocked on a screening question go back to Waiting the moment a rule
 // answers it — and not before. Called whenever the answer bank changes, so
 // "answer it once" is all it ever takes. Returns how many moved.
-async function requeueAnswered(userId, config) {
+//
+// Across EVERY platform: the answer bank is shared, so a rule saved from the
+// Instahyre page frees a Naukri job that asked the same thing. `platforms`, when
+// given, collects which platforms had jobs freed.
+async function requeueAnswered(userId, config, platforms = null) {
   const blocked = await NaukriJob.find(
     { userId, approval: 'approved', ...SKIP_BUCKETS['needs-answer'], ...BASE_FILTER },
-    { unknownQuestion: 1, applyNote: 1 },
+    { unknownQuestion: 1, applyNote: 1, platform: 1 },
   ).lean();
   const bank = { answers: config.answers, profile: config.profile };
   const ready = blocked.filter(j => resolveAnswer(j.unknownQuestion, bank).matched);
   if (!ready.length) return 0;
+  if (platforms) for (const j of ready) platforms.add(platformOfDoc(j));
   const now = new Date();
   for (const j of ready) {
     await NaukriJob.updateOne({ _id: j._id, userId, applyStatus: 'skipped' }, {
@@ -119,11 +162,15 @@ const upload = multer({
 const serialize = (doc) => {
   if (!doc) return null;
   const obj = { ...doc };
+  obj.platform = platformOfDoc(doc);
   obj.id = doc._id.toString();
   delete obj._id;
   delete obj.__v;
   return obj;
 };
+
+// Aggregations do not cast like find() does.
+const oidOf = (id) => (id instanceof mongoose.Types.ObjectId ? id : new mongoose.Types.ObjectId(String(id)));
 
 const str = (v, max = 300) => String(v == null ? '' : v).trim().slice(0, max);
 
@@ -208,11 +255,12 @@ const blockedUntilOf = (worker) => {
 // its midnight reset the cap at 05:30 IST. Counted from NaukriJob rather than
 // summed off run stats, because the jobs are the thing that actually left — a
 // failed run that applied to three before dying still spent three.
-const appliedToday = (userId, timeZone) => {
+const appliedToday = (userId, timeZone, platform = 'naukri') => {
   let since;
   try { since = startOfDayIn(timeZone || 'Asia/Kolkata'); }
   catch (_) { since = new Date(); since.setHours(0, 0, 0, 0); }
-  return NaukriJob.countDocuments({ userId, appliedAt: { $gte: since }, ...BASE_FILTER });
+  // Per platform: each one has its own daily limit.
+  return NaukriJob.countDocuments({ userId, appliedAt: { $gte: since }, ...platformQuery(platform), ...BASE_FILTER });
 };
 
 // Schedule facts the tab shows, in one shape for /overview and /config.
@@ -231,11 +279,11 @@ const scheduleView = (schedule) => {
 // Configuration → Filters (lib/naukriQueue.js tidyReason). They become
 // 'rejected' with the reason; Restore puts one back for good. Runs after every
 // harvest and whenever the rules are saved. Returns how many were cleared.
-async function tidyInbox(userId, config) {
-  const rules = config.inboxTidy || {};
+async function tidyInbox(userId, config, platform = 'naukri') {
+  const rules = siteOf(config, platform).inboxTidy || {};
   if (!rules.enabled) return 0;
   const pending = await NaukriJob.find(
-    { userId, approval: 'pending', applyStatus: 'none', tidyExempt: { $ne: true }, ...BASE_FILTER },
+    { userId, approval: 'pending', applyStatus: 'none', tidyExempt: { $ne: true }, ...platformQuery(platform), ...BASE_FILTER },
     { postedAt: 1, postedText: 1, lastSeenAt: 1, score: 1, likelyExternal: 1, tidyExempt: 1 },
   ).lean();
   const now = new Date();
@@ -255,10 +303,10 @@ async function tidyInbox(userId, config) {
 // Over applications sent in the last `days`, from the daily track run: how
 // many were viewed, shortlisted, contacted — overall, by where the job came
 // from, and by fit score — so you can see what is actually working.
-async function resultsSummary(userId, days = 30) {
+async function resultsSummary(userId, days = 30, platform = 'naukri') {
   const since = new Date(Date.now() - days * 86400000);
   const rows = await NaukriJob.find(
-    { userId, appliedAt: { $gte: since }, ...BASE_FILTER },
+    { userId, appliedAt: { $gte: since }, ...platformQuery(platform), ...BASE_FILTER },
     { naukriStage: 1, origins: 1, score: 1, trackedAt: 1 },
   ).lean();
   const tally = (list) => {
@@ -287,17 +335,21 @@ async function resultsSummary(userId, days = 30) {
 // ── Setup progress ─────────────────────────────────────────────────────────
 // What a new (or half-set-up) account still needs, each with the card that
 // fixes it. Every item is something that changes results, not busywork.
-async function setupChecklist(userId, config, worker) {
+async function setupChecklist(userId, config, worker, platform = 'naukri') {
   const eff = await effectiveResume(userId, config);
   const text = await resumeTextFor(userId, config);
   const p = config.profile || {};
-  const slots = slotsOf(config.schedule);
+  const site = siteOf(config, platform);
+  const label = labelOf(platform);
+  const slots = slotsOf(site.schedule);
   const answers = (config.answers || []).filter(a => a.enabled !== false);
-  const src = config.sources || {};
+  const src = site.sources || {};
   const items = [
-    { key: 'worker', card: null, label: 'Worker running and logged in to Naukri',
-      done: !!(worker && worker.lastSeenAt && worker.naukriLoggedIn),
-      hint: 'Run `bash worker/start-all.sh` on your Mac and log in to Naukri in the debug Chrome.' },
+    { key: 'worker', card: null, label: `Worker running and logged in to ${label}`,
+      done: !!(worker && worker.lastSeenAt && (worker.loggedIn || worker.naukriLoggedIn)),
+      hint: platform === 'naukri'
+        ? 'Run `bash worker/start-all.sh` on your Mac and log in to Naukri in the debug Chrome.'
+        : `Run \`npm run ${platform}-worker\` on your Mac and log in to ${label} in the debug Chrome.` },
     { key: 'resume', card: 'resume', label: 'Resume with readable text',
       done: !!(eff && text && text.trim().length > 200),
       hint: 'Upload a PDF resume in Settings (or paste its text in Resume & headline) — AI answers and your profile come from it.' },
@@ -305,19 +357,19 @@ async function setupChecklist(userId, config, worker) {
       done: (p.skills || []).length >= 3 && p.totalExperienceMonths != null && p.expectedCtcLpa != null && p.noticePeriodDays != null,
       hint: 'Use "Fill from resume", then add CTC and notice period. Skills and years drive the fit score.' },
     { key: 'sources', card: 'searches', label: 'Where to find jobs: searches or Recommended',
-      done: (config.searches || []).some(s => s.enabled !== false && (s.keywords || s.url)) || !!src.recommended,
-      hint: 'Add a search or two, or tick Naukri\'s recommended jobs.' },
+      done: (site.searches || []).some(s => s.enabled !== false && (s.keywords || s.url)) || !!src.recommended,
+      hint: `Add a search or two${capabilitiesOf(platform) && src ? `, or tick ${label}'s recommended jobs` : ''}.` },
     { key: 'answers', card: 'answers', label: 'Common screening answers',
       done: answers.length >= 5,
       hint: 'Press "Add common rules" in Answers — notice period, CTC, experience, location in one go.' },
-    { key: 'schedule', card: 'schedule', label: 'Daily schedule that applies',
-      done: !!config.schedule.enabled && slots.some(s => s.kinds.includes('apply')),
+    { key: 'schedule', card: 'schedule', label: applyModeOf(site, platform) === 'off' ? 'Daily schedule that harvests' : 'Daily schedule that applies',
+      done: !!site.schedule.enabled && slots.some(s => s.kinds.includes(applyModeOf(site, platform) === 'off' ? 'harvest' : 'apply')),
       hint: 'Turn on the schedule with Apply ticked — a second apply time (e.g. 14:00) gets fresh jobs out the same day.' },
     { key: 'autoAnswer', card: 'answers', label: 'AI answers screening questions it is sure of',
       done: !!(config.autoAnswer && config.autoAnswer.enabled),
       hint: 'Turn on "Let AI answer during apply" in Answers so fewer jobs stop on a question.' },
     { key: 'tidy', card: 'filters', label: 'Inbox tidies itself',
-      done: !!(config.inboxTidy && config.inboxTidy.enabled),
+      done: !!(site.inboxTidy && site.inboxTidy.enabled),
       hint: 'Turn on inbox tidy in Filters so old and poor-fit jobs clear themselves away.' },
   ];
   return { items, done: items.filter(i => i.done).length, total: items.length };
@@ -331,7 +383,7 @@ async function setupChecklist(userId, config, worker) {
 router.get('/analytics', async (req, res) => {
   try {
     const days = Math.min(90, Math.max(7, Number(req.query.days) || 30));
-    res.json(await naukriAnalytics(req.userId, { days }));
+    res.json(await naukriAnalytics(req.userId, { days, platform: req.platform }));
   } catch (err) {
     console.error('[naukri] analytics:', err.message);
     res.status(500).json({ error: err.message });
@@ -343,90 +395,158 @@ router.get('/analytics', async (req, res) => {
 // trigger anything, rather than leaving a queued row looking broken.
 router.get('/overview', async (req, res) => {
   try {
+    res.json(await overviewFor(req.userId, req.platform));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/p/:platform/platforms — every platform at a glance, for the
+// switcher, the All platforms view and the Action Center: each one's overview
+// (the same object /overview returns) plus whether it is switched on.
+router.get('/platforms', async (req, res) => {
+  try {
     await failStaleRuns(req.userId);
     const config = await NaukriConfig.getForUser(req.userId);
-    const weekAgo = new Date(Date.now() - 7 * 86400000);
-    const [worker, activeRun, queued, history, reviewCount, appliedCount, todayCount, waitingCount, skippedCount, needsAnswerCount, week] = await Promise.all([
-      NaukriWorker.getForUser(req.userId),
-      NaukriRun.findOne({ userId: req.userId, status: 'running', ...BASE_FILTER }).sort({ createdAt: 1 }).lean(),
-      NaukriRun.find({ userId: req.userId, status: 'queued', ...BASE_FILTER }).sort({ createdAt: 1 }).limit(10).lean(),
-      NaukriRun.find({ userId: req.userId, status: { $nin: ACTIVE }, ...BASE_FILTER }).sort({ createdAt: -1 }).limit(20).lean(),
-      NaukriJob.countDocuments({ userId: req.userId, approval: 'pending', ...BASE_FILTER }),
-      NaukriJob.countDocuments({ userId: req.userId, applyStatus: { $in: SENT_STATUSES }, ...BASE_FILTER }),
-      appliedToday(req.userId, config.schedule.timezone),
-      // Approved and genuinely queued to be sent. Deliberately excludes skips:
-      // those have been looked at and backed out of, which is a different state
-      // with a different next action, and mixing them made "138 waiting" mean
-      // two unrelated things at once. They have their own tab.
-      //
-      // Appended LAST, matching the destructuring above. Adding a query in the
-      // middle silently shifts every position after it — that is how the panel
-      // once reported the waiting count as "applied today".
-      NaukriJob.countDocuments({ userId: req.userId, ...WAITING_FILTER, ...BASE_FILTER }),
-      NaukriJob.countDocuments({ userId: req.userId, ...ALL_SKIPPED, ...BASE_FILTER }),
-      NaukriJob.countDocuments({ userId: req.userId, ...SKIP_BUCKETS['needs-answer'], ...BASE_FILTER }),
-      // This week's outcomes, from the history entries the worker writes as it
-      // goes — so a job retried twice counts as what it ended up as each time,
-      // not as whatever it is now.
-      NaukriJob.aggregate([
-        { $match: { userId: req.userId, 'applyHistory.at': { $gte: weekAgo }, deleted: { $ne: true } } },
-        { $unwind: '$applyHistory' },
-        { $match: { 'applyHistory.at': { $gte: weekAgo }, 'applyHistory.to': { $in: ['applied', 'skipped', 'failed'] } } },
-        { $group: { _id: '$applyHistory.to', n: { $sum: 1 } } },
-      ]),
-    ]);
-    const weekOf = (k) => (week.find(w => w._id === k) || {}).n || 0;
-
-    const lastSeenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt) : null;
+    const out = [];
+    for (const id of PLATFORM_IDS) {
+      const site = siteOf(config, id);
+      const enabled = isEnabled(site, id);
+      const reg = publicRegistry().find(r => r.id === id);
+      out.push({ ...reg, enabled, overview: enabled ? await overviewFor(req.userId, id, { config, light: true }) : null });
+    }
     res.json({
-      activeRun: serialize(activeRun),
-      queuedRuns: queued.map(serialize),
-      history: history.map(serialize),
-      worker: {
-        everSeen: !!lastSeenAt,
-        online: !!lastSeenAt && Date.now() - lastSeenAt.getTime() < ONLINE_MS,
-        lastSeenAt,
-        host: worker.host || '',
-        chromeUp: !!worker.chromeUp,
-        naukriLoggedIn: !!worker.naukriLoggedIn,
-        nextWakeAt: worker.nextWakeAt || null,
-      },
-      schedule: config.schedule,
-      ...scheduleView(config.schedule),
-      reviewCount,
-      needsAnswerCount,
-      week: { applied: weekOf('applied'), skipped: weekOf('skipped'), failed: weekOf('failed') },
-      perRun: config.apply.maxPerRun,
-      perDay: config.apply.maxPerDay,
-      sources: config.sources,
-      // What still needs setting up, and what recruiters did with what was sent.
-      setup: await setupChecklist(req.userId, config, worker),
-      results: await resultsSummary(req.userId, 30),
-      inboxTidy: config.inboxTidy,
-      appliedCount,
-      appliedToday: todayCount,
-      waitingCount,
-      skippedCount,
-      // Surfaced separately from the config blob so the header can warn about
-      // them without the client having to know which fields mean "unsafe".
-      paused: !!config.safety.pauseAll,
-      dryRun: !!config.safety.dryRun,
-      autoApprove: !!config.apply.autoApproveEnabled,
-      blockedUntil: blockedUntilOf(worker),
-      blockedReason: worker.blockedReason || '',
+      platforms: out,
+      duplicates: config.duplicates,
+      crossPlatformOrder: !!config.crossPlatformOrder,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
+// One platform's overview. `light` skips the setup checklist and the results
+// summary, which only the platform's own page shows.
+async function overviewFor(userId, platform, { config: given = null, light = false } = {}) {
+  const pq = platformQuery(platform);
+  if (!given) await failStaleRuns(userId);
+  const config = given || await NaukriConfig.getForUser(userId);
+  const site = siteOf(config, platform);
+  const weekAgo = new Date(Date.now() - 7 * 86400000);
+  const [worker, activeRun, queued, history, reviewCount, appliedCount, todayCount, waitingCount, skippedCount, needsAnswerCount, week, foundWeek] = await Promise.all([
+    NaukriWorker.getForUser(userId, platform),
+    NaukriRun.findOne({ userId, status: 'running', ...pq, ...BASE_FILTER }).sort({ createdAt: 1 }).lean(),
+    NaukriRun.find({ userId, status: 'queued', ...pq, ...BASE_FILTER }).sort({ createdAt: 1 }).limit(10).lean(),
+    NaukriRun.find({ userId, status: { $nin: ACTIVE }, ...pq, ...BASE_FILTER }).sort({ createdAt: -1 }).limit(light ? 5 : 20).lean(),
+    NaukriJob.countDocuments({ userId, approval: 'pending', ...pq, ...BASE_FILTER }),
+    NaukriJob.countDocuments({ userId, applyStatus: { $in: SENT_STATUSES }, ...pq, ...BASE_FILTER }),
+    appliedToday(userId, site.schedule.timezone, platform),
+    // Approved and genuinely queued to be sent. Deliberately excludes skips:
+    // those have been looked at and backed out of, which is a different state
+    // with a different next action, and mixing them made "138 waiting" mean
+    // two unrelated things at once. They have their own tab.
+    //
+    // Appended LAST, matching the destructuring above. Adding a query in the
+    // middle silently shifts every position after it — that is how the panel
+    // once reported the waiting count as "applied today".
+    NaukriJob.countDocuments({ userId, ...WAITING_FILTER, ...pq, ...BASE_FILTER }),
+    NaukriJob.countDocuments({ userId, ...ALL_SKIPPED, ...pq, ...BASE_FILTER }),
+    NaukriJob.countDocuments({ userId, ...SKIP_BUCKETS['needs-answer'], ...pq, ...BASE_FILTER }),
+    // This week's outcomes, from the history entries the worker writes as it
+    // goes — so a job retried twice counts as what it ended up as each time,
+    // not as whatever it is now.
+    NaukriJob.aggregate([
+      { $match: { userId: oidOf(userId), 'applyHistory.at': { $gte: weekAgo }, ...pq, deleted: { $ne: true } } },
+      { $unwind: '$applyHistory' },
+      { $match: { 'applyHistory.at': { $gte: weekAgo }, 'applyHistory.to': { $in: ['applied', 'skipped', 'failed'] } } },
+      { $group: { _id: '$applyHistory.to', n: { $sum: 1 } } },
+    ]),
+    // New jobs found this week, for the All platforms cards.
+    NaukriJob.countDocuments({ userId, firstSeenAt: { $gte: weekAgo }, ...pq, ...BASE_FILTER }),
+  ]);
+  const weekOf = (k) => (week.find(w => w._id === k) || {}).n || 0;
+  const mode = applyModeOf(site, platform);
+
+  const lastSeenAt = worker.lastSeenAt ? new Date(worker.lastSeenAt) : null;
+  return {
+    platform,
+    label: labelOf(platform),
+    capabilities: capabilitiesOf(platform),
+    enabled: isEnabled(site, platform),
+    applyMode: mode,
+    readOnlySince: site.readOnlySince || null,
+    foundThisWeek: foundWeek,
+    activeRun: serialize(activeRun),
+    queuedRuns: queued.map(serialize),
+    history: history.map(serialize),
+    worker: {
+      everSeen: !!lastSeenAt,
+      online: !!lastSeenAt && Date.now() - lastSeenAt.getTime() < ONLINE_MS,
+      lastSeenAt,
+      host: worker.host || '',
+      chromeUp: !!worker.chromeUp,
+      naukriLoggedIn: !!(worker.loggedIn || worker.naukriLoggedIn),
+      loggedIn: !!(worker.loggedIn || worker.naukriLoggedIn),
+      nextWakeAt: worker.nextWakeAt || null,
+    },
+    schedule: site.schedule,
+    ...scheduleView(site.schedule),
+    reviewCount,
+    needsAnswerCount,
+    week: { applied: weekOf('applied'), skipped: weekOf('skipped'), failed: weekOf('failed') },
+    perRun: site.apply.maxPerRun,
+    perDay: site.apply.maxPerDay,
+    sources: site.sources,
+    // What still needs setting up, and what recruiters did with what was sent.
+    setup: light ? null : await setupChecklist(userId, config, worker, platform),
+    results: light ? null : await resultsSummary(userId, 30, platform),
+    inboxTidy: site.inboxTidy,
+    appliedCount,
+    appliedToday: todayCount,
+    waitingCount,
+    skippedCount,
+    // Surfaced separately from the config blob so the header can warn about
+    // them without the client having to know which fields mean "unsafe".
+    paused: !!site.safety.pauseAll,
+    dryRun: mode === 'dry-run',
+    autoApprove: !!site.apply.autoApproveEnabled,
+    blockedUntil: blockedUntilOf(worker),
+    blockedReason: worker.blockedReason || '',
+  };
+}
+
 // ── Configuration ──────────────────────────────────────────────────────────
+
+// The config as one platform sees it: its own settings at the top level, where
+// the Naukri page has always read them, plus the shared ones. Naukri's view is
+// the document as it was, with the platform facts added.
+function configView(config, platformIn) {
+  // The All view sees the shared settings; its own-settings fields are Naukri's
+  // and are never written through it (SHARED_KEYS).
+  const platform = platformIn === 'all' ? 'naukri' : platformIn;
+  const json = config.toJSON();
+  if (platform !== 'naukri') {
+    const own = (json.platforms && json.platforms[platform]) || {};
+    for (const k of SITE_FIELDS) if (own[k] !== undefined) json[k] = own[k];
+    // Naukri-only: other sites do not rank on profile recency.
+    json.headlineVariants = [];
+  }
+  const site = siteOf(config, platform);
+  json.platform = platformIn;
+  json.label = platformIn === 'all' ? 'All platforms' : labelOf(platform);
+  json.capabilities = capabilitiesOf(platform);
+  json.enabled = isEnabled(site, platform);
+  json.applyMode = applyModeOf(site, platform);
+  json.readOnlySince = site.readOnlySince || null;
+  return json;
+}
 
 router.get('/config', async (req, res) => {
   try {
     const config = await NaukriConfig.getForUser(req.userId);
     const [eff, text] = await Promise.all([effectiveResume(req.userId, config), resumeTextFor(req.userId, config)]);
-    const json = config.toJSON();
+    const json = configView(config, req.platform);
+    const site = siteOf(config, req.platform);
     // The resume the card shows is the one Naukri will USE — the Settings one
     // when no Naukri-only file was uploaded.
     json.resume = eff
@@ -434,7 +554,7 @@ router.get('/config', async (req, res) => {
       : { filename: '', size: 0, uploadedAt: null, source: null, text };
     res.json({
       config: json,
-      ...scheduleView(config.schedule),
+      ...scheduleView(site.schedule),
       resume: eff ? { filename: eff.filename, size: eff.size, uploadedAt: eff.uploadedAt, source: eff.source } : null,
     });
   } catch (err) {
@@ -447,39 +567,78 @@ router.get('/config', async (req, res) => {
 router.patch('/config', async (req, res) => {
   try {
     const body = req.body || {};
+    if (req.platform === 'all') {
+      const own = Object.keys(body).filter(k => !SHARED_KEYS.has(k));
+      if (own.length) return res.status(400).json({ error: `Pick a platform to change ${own.join(', ')} — those are set per platform.` });
+    }
     const config = await NaukriConfig.getForUser(req.userId);
+    // Settings for THIS platform go to its own section (Naukri: the top level,
+    // as always); profile, resume, answers and AI settings are shared.
+    const site = siteOf(config, req.platform);
+    const label = LABEL(req);
+
+    if (body.enabled !== undefined) {
+      site.enabled = !!body.enabled;
+      if (site.enabled && !site.readOnlySince && applyModeOf(site, req.platform) === 'off') site.readOnlySince = new Date();
+    }
+    if (body.applyMode !== undefined) {
+      const mode = String(body.applyMode);
+      if (!['off', 'dry-run', 'on'].includes(mode)) return res.status(400).json({ error: 'applyMode must be off, dry-run or on' });
+      const caps = capabilitiesOf(req.platform);
+      if (mode === 'on' && !caps.apply) {
+        return res.status(400).json({ error: `Real apply on ${label} isn't verified yet — use Dry run until it is.` });
+      }
+      if (mode === 'dry-run' && !caps.dryRun) return res.status(400).json({ error: `${label} has no apply step yet.` });
+      const before = applyModeOf(site, req.platform);
+      if (req.platform === 'naukri') {
+        // Naukri keeps safety.dryRun as its switch; applyMode only says "off".
+        site.applyMode = mode === 'off' ? 'off' : null;
+        if (mode !== 'off') site.safety.dryRun = mode === 'dry-run';
+      } else {
+        site.applyMode = mode;
+      }
+      if (mode === 'off' && before !== 'off') site.readOnlySince = new Date();
+      if (mode !== 'off') site.readOnlySince = null;
+    }
+    if (body.duplicates) {
+      const d = body.duplicates;
+      if (d.windowDays !== undefined) config.duplicates.windowDays = num(d.windowDays, { min: 7, max: 180, integer: true }) ?? 60;
+      if (d.blockAuto !== undefined) config.duplicates.blockAuto = !!d.blockAuto;
+      if (d.blockApply !== undefined) config.duplicates.blockApply = !!d.blockApply;
+    }
+    if (body.crossPlatformOrder !== undefined) config.crossPlatformOrder = !!body.crossPlatformOrder;
 
     if (body.schedule) {
       const s = body.schedule;
       if (s.time !== undefined) {
         if (!parseTime(s.time)) return res.status(400).json({ error: 'time must be HH:mm' });
-        config.schedule.time = str(s.time, 5);
+        site.schedule.time = str(s.time, 5);
       }
       if (s.days !== undefined) {
         const clean = [...new Set((Array.isArray(s.days) ? s.days : []).map(Number))]
           .filter(d => Number.isInteger(d) && d >= 0 && d <= 6).sort();
         if (!clean.length) return res.status(400).json({ error: 'Pick at least one day' });
-        config.schedule.days = clean;
+        site.schedule.days = clean;
       }
       if (s.timezone !== undefined) {
         try { new Intl.DateTimeFormat('en-US', { timeZone: String(s.timezone) }); }
         catch (_) { return res.status(400).json({ error: `Unknown timezone: ${s.timezone}` }); }
-        config.schedule.timezone = String(s.timezone);
+        site.schedule.timezone = String(s.timezone);
       }
       if (s.catchUpHours !== undefined) {
         const n = num(s.catchUpHours, { min: 0, max: 12 });
         if (n == null) return res.status(400).json({ error: 'catchUpHours must be between 0 and 12' });
-        config.schedule.catchUpHours = n;
+        site.schedule.catchUpHours = n;
       }
       for (const k of ['runRefresh', 'runHarvest', 'runApply', 'runTrack']) {
-        if (s[k] !== undefined) config.schedule[k] = !!s[k];
+        if (s[k] !== undefined) site.schedule[k] = !!s[k];
       }
       // Slots 2 and 3. Each needs a valid time and at least one kind, and no
       // two slots may share a time — that would fire the same wake twice.
       if (s.extraSlots !== undefined) {
         const raw = Array.isArray(s.extraSlots) ? s.extraSlots : [];
         if (raw.length > MAX_SLOTS - 1) return res.status(400).json({ error: `At most ${MAX_SLOTS} times a day` });
-        const seen = new Set([config.schedule.time]);
+        const seen = new Set([site.schedule.time]);
         const clean = [];
         for (const x of raw) {
           const time = str(x && x.time, 5);
@@ -492,22 +651,34 @@ router.patch('/config', async (req, res) => {
           }
           clean.push(slot);
         }
-        config.schedule.extraSlots = clean;
+        site.schedule.extraSlots = clean;
+      }
+      // A tick for a step this platform cannot do is dropped, not saved: the
+      // schedule must never ask a worker for a run it has no driver for.
+      const caps = capabilitiesOf(req.platform);
+      if (!caps.refresh) site.schedule.runRefresh = false;
+      if (!caps.track) site.schedule.runTrack = false;
+      if (!caps.harvest) site.schedule.runHarvest = false;
+      if (!caps.refresh || !caps.track) {
+        for (const x of site.schedule.extraSlots || []) {
+          if (!caps.refresh) x.runRefresh = false;
+          if (!caps.track) x.runTrack = false;
+        }
       }
       if (s.enabled !== undefined) {
-        if (s.enabled && slotsOf({ ...config.schedule.toObject(), ...s, extraSlots: config.schedule.extraSlots }).length === 0) {
+        if (s.enabled && slotsOf({ ...site.schedule.toObject(), ...s, extraSlots: site.schedule.extraSlots }).length === 0) {
           return res.status(400).json({ error: 'Turn on at least one of refresh, harvest or apply' });
         }
-        config.schedule.enabled = !!s.enabled;
+        site.schedule.enabled = !!s.enabled;
         // Turning the schedule on must not immediately fire an occurrence from
         // earlier today — that would spend the day's budget the instant you
         // saved the form.
-        if (s.enabled) config.schedule.lastFiredAt = new Date();
+        if (s.enabled) site.schedule.lastFiredAt = new Date();
       }
     }
 
     if (body.searches !== undefined) {
-      config.searches = (Array.isArray(body.searches) ? body.searches : []).slice(0, 20).map(s => ({
+      site.searches = (Array.isArray(body.searches) ? body.searches : []).slice(0, 20).map(s => ({
         label:    str(s && s.label, 100),
         keywords: str(s && s.keywords, 200),
         location: str(s && s.location, 100),
@@ -516,28 +687,28 @@ router.patch('/config', async (req, res) => {
         enabled:  s && s.enabled !== false,
       })).filter(s => s.keywords || s.url);
     }
-    if (body.useRecommended !== undefined) config.useRecommended = !!body.useRecommended;
+    if (body.useRecommended !== undefined) site.useRecommended = !!body.useRecommended;
     if (body.sources) {
-      const next = cleanSources(body.sources, config.sources);
+      const next = cleanSources(body.sources, site.sources);
       if (!next) return res.status(400).json({ error: 'Pick at least one place to harvest from: your searches or recommended jobs' });
-      config.sources = next;
+      site.sources = next;
     }
     if (body.searchLimits) {
       const l = body.searchLimits;
-      if (l.maxSearches !== undefined) config.searchLimits.maxSearches = num(l.maxSearches, { min: 1, max: 10, integer: true }) ?? 10;
-      if (l.maxPages !== undefined) config.searchLimits.maxPages = num(l.maxPages, { min: 1, max: 8, integer: true }) ?? 8;
+      if (l.maxSearches !== undefined) site.searchLimits.maxSearches = num(l.maxSearches, { min: 1, max: 10, integer: true }) ?? 10;
+      if (l.maxPages !== undefined) site.searchLimits.maxPages = num(l.maxPages, { min: 1, max: 8, integer: true }) ?? 8;
     }
     if (body.worker && body.worker.pollSeconds !== undefined) {
-      config.worker.pollSeconds = num(body.worker.pollSeconds, { min: 15, max: 120, integer: true }) ?? 20;
+      site.worker.pollSeconds = num(body.worker.pollSeconds, { min: 15, max: 120, integer: true }) ?? 20;
     }
     if (body.aiDrafts !== undefined) config.aiDrafts = !!body.aiDrafts;
     let tidyChanged = false;
     if (body.inboxTidy) {
       const t = body.inboxTidy;
-      if (t.enabled !== undefined) config.inboxTidy.enabled = !!t.enabled;
-      if (t.maxAgeDays !== undefined) config.inboxTidy.maxAgeDays = num(t.maxAgeDays, { min: 1, integer: true }) ?? config.inboxTidy.maxAgeDays;
-      if (t.minScore !== undefined) config.inboxTidy.minScore = num(t.minScore, { min: 0, max: 100, integer: true }) ?? config.inboxTidy.minScore;
-      if (t.companySite !== undefined) config.inboxTidy.companySite = !!t.companySite;
+      if (t.enabled !== undefined) site.inboxTidy.enabled = !!t.enabled;
+      if (t.maxAgeDays !== undefined) site.inboxTidy.maxAgeDays = num(t.maxAgeDays, { min: 1, integer: true }) ?? site.inboxTidy.maxAgeDays;
+      if (t.minScore !== undefined) site.inboxTidy.minScore = num(t.minScore, { min: 0, max: 100, integer: true }) ?? site.inboxTidy.minScore;
+      if (t.companySite !== undefined) site.inboxTidy.companySite = !!t.companySite;
       tidyChanged = true;
     }
     if (body.resumeText !== undefined) {
@@ -549,14 +720,14 @@ router.patch('/config', async (req, res) => {
     if (body.filters) {
       const f = body.filters;
       for (const k of ['titleInclude', 'titleExclude', 'companyExclude', 'locations']) {
-        if (f[k] !== undefined) config.filters[k] = cleanList(f[k]);
+        if (f[k] !== undefined) site.filters[k] = cleanList(f[k]);
       }
-      if (f.remoteOnly !== undefined) config.filters.remoteOnly = !!f.remoteOnly;
-      if (f.skipAlreadyApplied !== undefined) config.filters.skipAlreadyApplied = !!f.skipAlreadyApplied;
-      if (f.minExperienceYears !== undefined) config.filters.minExperienceYears = num(f.minExperienceYears, { min: 0, max: 50 });
-      if (f.maxExperienceYears !== undefined) config.filters.maxExperienceYears = num(f.maxExperienceYears, { min: 0, max: 50 });
-      if (f.minSalaryLpa !== undefined) config.filters.minSalaryLpa = num(f.minSalaryLpa, { min: 0, max: 1000 });
-      if (f.maxPostedAgeDays !== undefined) config.filters.maxPostedAgeDays = num(f.maxPostedAgeDays, { min: 1, max: 365, integer: true });
+      if (f.remoteOnly !== undefined) site.filters.remoteOnly = !!f.remoteOnly;
+      if (f.skipAlreadyApplied !== undefined) site.filters.skipAlreadyApplied = !!f.skipAlreadyApplied;
+      if (f.minExperienceYears !== undefined) site.filters.minExperienceYears = num(f.minExperienceYears, { min: 0, max: 50 });
+      if (f.maxExperienceYears !== undefined) site.filters.maxExperienceYears = num(f.maxExperienceYears, { min: 0, max: 50 });
+      if (f.minSalaryLpa !== undefined) site.filters.minSalaryLpa = num(f.minSalaryLpa, { min: 0, max: 1000 });
+      if (f.maxPostedAgeDays !== undefined) site.filters.maxPostedAgeDays = num(f.maxPostedAgeDays, { min: 1, max: 365, integer: true });
     }
 
     if (body.profile) {
@@ -609,19 +780,19 @@ router.patch('/config', async (req, res) => {
     if (body.apply) {
       const a = body.apply;
       // No ceilings: the numbers are yours. Only "a whole number, at least 1".
-      if (a.maxPerRun !== undefined) config.apply.maxPerRun = num(a.maxPerRun, { min: 1, integer: true }) ?? config.apply.maxPerRun;
-      if (a.maxPerDay !== undefined) config.apply.maxPerDay = num(a.maxPerDay, { min: 1, integer: true }) ?? config.apply.maxPerDay;
-      if (a.autoApproveEnabled !== undefined) config.apply.autoApproveEnabled = !!a.autoApproveEnabled;
+      if (a.maxPerRun !== undefined) site.apply.maxPerRun = num(a.maxPerRun, { min: 1, integer: true }) ?? site.apply.maxPerRun;
+      if (a.maxPerDay !== undefined) site.apply.maxPerDay = num(a.maxPerDay, { min: 1, integer: true }) ?? site.apply.maxPerDay;
+      if (a.autoApproveEnabled !== undefined) site.apply.autoApproveEnabled = !!a.autoApproveEnabled;
       // Floor of 50: below that, "auto-approve" is approving jobs that match
       // under half of what you asked for.
-      if (a.autoApproveMinScore !== undefined) config.apply.autoApproveMinScore = num(a.autoApproveMinScore, { min: 50, max: 100, integer: true }) ?? 80;
-      if (a.delayMinMs !== undefined) config.apply.delayMinMs = num(a.delayMinMs, { min: 500, max: 60000, integer: true });
-      if (a.delayMaxMs !== undefined) config.apply.delayMaxMs = num(a.delayMaxMs, { min: 500, max: 60000, integer: true });
-      if (a.coverNote !== undefined) config.apply.coverNote = str(a.coverNote, 4000);
+      if (a.autoApproveMinScore !== undefined) site.apply.autoApproveMinScore = num(a.autoApproveMinScore, { min: 50, max: 100, integer: true }) ?? 80;
+      if (a.delayMinMs !== undefined) site.apply.delayMinMs = num(a.delayMinMs, { min: 500, max: 60000, integer: true });
+      if (a.delayMaxMs !== undefined) site.apply.delayMaxMs = num(a.delayMaxMs, { min: 500, max: 60000, integer: true });
+      if (a.coverNote !== undefined) site.apply.coverNote = str(a.coverNote, 4000);
       // A max below the min would make the randomised gap negative, which reads
       // to Naukri as a script.
-      if (config.apply.delayMaxMs < config.apply.delayMinMs) {
-        config.apply.delayMaxMs = config.apply.delayMinMs;
+      if (site.apply.delayMaxMs < site.apply.delayMinMs) {
+        site.apply.delayMaxMs = site.apply.delayMinMs;
       }
     }
 
@@ -630,8 +801,8 @@ router.patch('/config', async (req, res) => {
     }
 
     if (body.safety) {
-      if (body.safety.pauseAll !== undefined) config.safety.pauseAll = !!body.safety.pauseAll;
-      if (body.safety.dryRun !== undefined) config.safety.dryRun = !!body.safety.dryRun;
+      if (body.safety.pauseAll !== undefined) site.safety.pauseAll = !!body.safety.pauseAll;
+      if (body.safety.dryRun !== undefined) site.safety.dryRun = !!body.safety.dryRun;
     }
 
     await config.save();
@@ -639,8 +810,8 @@ router.patch('/config', async (req, res) => {
     const requeued = answersChanged ? await requeueAnswered(req.userId, config) : 0;
     // New tidy rules apply to what is already in the inbox, not just to the
     // next harvest.
-    const tidied = tidyChanged ? await tidyInbox(req.userId, config) : 0;
-    res.json({ config: config.toJSON(), ...scheduleView(config.schedule), requeued, tidied });
+    const tidied = tidyChanged ? await tidyInbox(req.userId, config, req.platform) : 0;
+    res.json({ config: configView(config, req.platform), ...scheduleView(site.schedule), requeued, tidied });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -680,8 +851,8 @@ router.post('/config/test-answer', async (req, res) => {
 router.post('/config/preview-filters', async (req, res) => {
   try {
     const config = await NaukriConfig.getForUser(req.userId);
-    const filters = (req.body || {}).filters || config.filters;
-    const jobs = await NaukriJob.find({ userId: req.userId, ...BASE_FILTER })
+    const filters = (req.body || {}).filters || siteOf(config, req.platform).filters;
+    const jobs = await NaukriJob.find({ userId: req.userId, ...PQ(req), ...BASE_FILTER })
       .sort({ lastSeenAt: -1 }).limit(200)
       .select('title company location experienceMin experienceMax salaryText postedText')
       .lean();
@@ -704,7 +875,7 @@ router.get('/config/unknown-questions', async (req, res) => {
   try {
     const [rows, config] = await Promise.all([
       NaukriJob.aggregate([
-        { $match: { userId: req.userId, ...SKIP_BUCKETS['needs-answer'], deleted: { $ne: true } } },
+        { $match: { userId: req.userId, ...SKIP_BUCKETS['needs-answer'], ...PQ(req), deleted: { $ne: true } } },
         { $group: { _id: '$unknownQuestion', count: { $sum: 1 }, lastSeenAt: { $max: '$updatedAt' } } },
         { $sort: { count: -1, lastSeenAt: -1 } },
         { $limit: 50 },
@@ -740,8 +911,9 @@ router.get('/config/unknown-questions', async (req, res) => {
 router.post('/inbox/tidy', async (req, res) => {
   try {
     const config = await NaukriConfig.getForUser(req.userId);
-    if (!config.inboxTidy || !config.inboxTidy.enabled) return res.status(409).json({ error: 'Inbox tidy is off — turn it on in Configuration → Filters' });
-    res.json({ tidied: await tidyInbox(req.userId, config) });
+    const site = siteOf(config, req.platform);
+    if (!site.inboxTidy || !site.inboxTidy.enabled) return res.status(409).json({ error: 'Inbox tidy is off — turn it on in Configuration → Filters' });
+    res.json({ tidied: await tidyInbox(req.userId, config, req.platform) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -861,14 +1033,18 @@ router.get('/needs-answer', async (req, res) => {
     const autoRequeued = await promoteConfidentDrafts(req.userId, await NaukriConfig.getForUser(req.userId));
     const [rows, config] = await Promise.all([
       NaukriJob.aggregate([
-        { $match: { userId: req.userId, ...SKIP_BUCKETS['needs-answer'], deleted: { $ne: true } } },
+        // This platform's questions (all of them in the All view). The answer
+        // bank they go into is shared, so answering one here also frees jobs
+        // on every other platform that asked it.
+        { $match: { userId: req.userId, ...SKIP_BUCKETS['needs-answer'], ...PQ(req), deleted: { $ne: true } } },
         { $sort: { updatedAt: -1 } },
         { $group: {
             _id: '$unknownQuestion',
             count: { $sum: 1 },
             lastSeenAt: { $max: '$updatedAt' },
             options: { $max: '$questionOptions' },
-            jobs: { $push: { id: { $toString: '$_id' }, title: '$title', company: '$company', url: '$url' } },
+            jobs: { $push: { id: { $toString: '$_id' }, title: '$title', company: '$company', url: '$url', platform: { $ifNull: ['$platform', 'naukri'] } } },
+            platforms: { $addToSet: { $ifNull: ['$platform', 'naukri'] } },
         } },
         { $sort: { count: -1, lastSeenAt: -1 } },
         { $limit: 100 },
@@ -894,6 +1070,7 @@ router.get('/needs-answer', async (req, res) => {
           lastSeenAt: r.lastSeenAt,
           options: r.options || [],
           jobs: r.jobs.slice(0, 5),
+          platforms: r.platforms || ['naukri'],
           draft: d ? { answer: d.answer, quote: d.quote, source: d.source, status: d.status, confidence: d.confidence || 0 } : null,
         };
       }),
@@ -976,8 +1153,9 @@ router.post('/needs-answer/use', async (req, res) => {
     config.answers.unshift(rule);
     config.drafts = (config.drafts || []).filter(d => !sameQuestion(d.question, question));
     await config.save();
-    const requeued = await requeueAnswered(req.userId, config);
-    res.json({ requeued, rule });
+    const freed = new Set();
+    const requeued = await requeueAnswered(req.userId, config, freed);
+    res.json({ requeued, rule, platforms: [...freed].map(p => ({ id: p, label: labelOf(p) })) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1036,7 +1214,7 @@ router.post('/ai-answer', async (req, res) => {
 
     // Per-run cap, taken atomically so parallel calls cannot overshoot it.
     const slot = await NaukriRun.findOneAndUpdate(
-      { _id: runId, userId: req.userId, status: 'running', 'stats.aiAsked': { $lt: MAX_AI_PER_RUN }, ...BASE_FILTER },
+      { _id: runId, userId: req.userId, status: 'running', 'stats.aiAsked': { $lt: MAX_AI_PER_RUN }, ...PQ(req), ...BASE_FILTER },
       { $inc: { 'stats.aiAsked': 1 } },
       { new: true, projection: { _id: 1 } },
     );
@@ -1217,7 +1395,7 @@ router.get('/runs', async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit, 10) || 20));
-    const filter = { userId: req.userId, ...BASE_FILTER };
+    const filter = { userId: req.userId, ...PQ(req), ...BASE_FILTER };
     if (KINDS.includes(req.query.kind)) filter.kind = req.query.kind;
     const [runs, total] = await Promise.all([
       NaukriRun.find(filter).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).lean(),
@@ -1230,19 +1408,34 @@ router.get('/runs', async (req, res) => {
 });
 
 // Shared by the manual button and by an approval, which queues an apply run.
-async function queueRun(userId, kind, trigger = 'manual', { sources = null } = {}) {
-  const [worker, config] = await Promise.all([
-    NaukriWorker.getForUser(userId),
+async function queueRun(userId, kind, trigger = 'manual', { sources = null, platform = 'naukri' } = {}) {
+  const [worker, fullConfig] = await Promise.all([
+    NaukriWorker.getForUser(userId, platform),
     NaukriConfig.getForUser(userId),
   ]);
+  const config = siteOf(fullConfig, platform);
+  const label = labelOf(platform);
+  const pq = platformQuery(platform);
+
+  if (!isEnabled(config, platform)) {
+    return { error: `${label} is turned off. Turn it on in Configuration → Platforms.`, code: 409 };
+  }
+  // A step this platform has no driver for, or apply while apply is off.
+  const notAllowed = kindBlocked(kind, config, platform);
+  if (notAllowed) return { error: notAllowed, code: 409 };
 
   if (config.safety.pauseAll) {
-    return { error: 'Naukri is paused. Turn off "Pause all" in Configuration to run anything.', code: 423 };
+    return {
+      error: platform === 'naukri'
+        ? 'Naukri is paused. Turn off "Pause all" in Configuration to run anything.'
+        : `${label} is paused. Turn off "Pause ${label}" in Configuration to run anything.`,
+      code: 423,
+    };
   }
   const blockedUntil = blockedUntilOf(worker);
   if (blockedUntil) {
     return {
-      error: 'Naukri showed a captcha on the last run. Everything is paused until '
+      error: `${label} showed a captcha on the last run. Everything is paused until `
            + blockedUntil.toISOString() + ' — do not work around this.',
       code: 423, blockedUntil,
     };
@@ -1251,7 +1444,7 @@ async function queueRun(userId, kind, trigger = 'manual', { sources = null } = {
   // Today's limit already used: say so now, rather than queue a run that the
   // worker can only finish empty ("nothing to do") a few seconds later.
   if (kind === 'apply') {
-    const done = await appliedToday(userId, config.schedule.timezone);
+    const done = await appliedToday(userId, config.schedule.timezone, platform);
     if (done >= config.apply.maxPerDay) {
       return {
         error: `Today's limit of ${config.apply.maxPerDay} applications is used up (${done} sent). `
@@ -1262,17 +1455,19 @@ async function queueRun(userId, kind, trigger = 'manual', { sources = null } = {
   }
 
   await failStaleRuns(userId);
-  const active = await NaukriRun.findOne({ userId, status: { $in: ACTIVE }, ...BASE_FILTER }).lean();
+  // One active run per PLATFORM: an Instahyre harvest never waits on a Naukri
+  // apply. The shared Chrome is serialised on the Mac (worker/chrome-lock.js).
+  const active = await NaukriRun.findOne({ userId, status: { $in: ACTIVE }, ...pq, ...BASE_FILTER }).lean();
   if (active) {
     // An apply run queued by an approval while one is already pending is a
     // no-op, not an error: the pending run will pick up the new approvals when
     // it claims, because it reads them at claim time.
     if (kind === 'apply' && active.kind === 'apply') return { run: active, deduped: true };
-    return { error: `A Naukri ${active.kind} is already ${active.status}`, code: 409, run: serialize(active) };
+    return { error: `A ${label} ${active.kind} is already ${active.status}`, code: 409, run: serialize(active) };
   }
 
   const run = await NaukriRun.create({
-    userId, kind, trigger, dryRun: !!config.safety.dryRun,
+    userId, platform, kind, trigger, dryRun: applyModeOf(config, platform) === 'dry-run',
     // A harvest can be pointed at one source for this run only.
     sources: kind === 'harvest' && sources ? sources : null,
   });
@@ -1288,10 +1483,10 @@ router.post('/runs', async (req, res) => {
     let sources = null;
     if (kind === 'harvest' && (req.body || {}).sources) {
       const cfg = await NaukriConfig.getForUser(req.userId);
-      sources = cleanSources(req.body.sources, cfg.sources);
+      sources = cleanSources(req.body.sources, siteOf(cfg, req.platform).sources);
       if (!sources) return res.status(400).json({ error: 'Pick searches, recommended jobs, or both' });
     }
-    const out = await queueRun(req.userId, kind, 'manual', { sources });
+    const out = await queueRun(req.userId, kind, 'manual', { sources, platform: req.platform });
     if (out.error) return res.status(out.code).json(out);
     res.status(201).json({ run: out.run });
   } catch (err) {
@@ -1304,7 +1499,7 @@ router.post('/runs/:id/cancel', async (req, res) => {
     // Only a queued run can be cancelled — a running one is a live Chrome
     // session on the Mac that this process cannot reach.
     const run = await NaukriRun.findOneAndUpdate(
-      { _id: req.params.id, userId: req.userId, status: 'queued', ...BASE_FILTER },
+      { _id: req.params.id, userId: req.userId, status: 'queued', ...PQ(req), ...BASE_FILTER },
       { $set: { status: 'cancelled', finishedAt: new Date() } },
       { new: true }
     );
@@ -1332,7 +1527,19 @@ router.get('/jobs', async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
     const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
-    const filter = { userId: req.userId, ...BASE_FILTER };
+    const filter = { userId: req.userId, ...PQ(req), ...BASE_FILTER };
+    // Each row comes back with `dup`: its furthest-along copy on another
+    // platform (lib/jobDupes.js), worked out now from that copy's live state.
+    const dupWindow = ((await NaukriConfig.findOne({ userId: req.userId }, { duplicates: 1 }).lean()) || {}).duplicates;
+    const withDupes = async (rows) => {
+      const dupes = await dupesFor(NaukriJob, req.userId, rows, { windowDays: (dupWindow && dupWindow.windowDays) || 60 });
+      return rows.map((r) => {
+        const o = serialize(r);
+        const d = dupes.get(String(r._id));
+        o.dup = d ? { ...d, text: dupText(d) } : null;
+        return o;
+      });
+    };
     // `bucket=waiting` is the Waiting tab asking for exactly what its badge
     // counts, rather than reproducing the rule and hoping the two agree.
     if (req.query.bucket === 'waiting') Object.assign(filter, WAITING_FILTER);
@@ -1363,6 +1570,7 @@ router.get('/jobs', async (req, res) => {
     // collides with the search box's $or; the chip counts are taken without it.
     const ORIGIN = {
       recommended: { origins: 'recommended' },
+      recruiter: { origins: 'recruiter' },
       search: { $or: [{ origins: 'search' }, { origins: { $size: 0 } }] },
     };
     const originCond = ORIGIN[req.query.origin] || null;
@@ -1457,7 +1665,7 @@ router.get('/jobs', async (req, res) => {
       ]);
       const ordered = queueOrder(all);
       return res.json({
-        jobs: ordered.slice((page - 1) * limit, page * limit).map(serialize),
+        jobs: await withDupes(ordered.slice((page - 1) * limit, page * limit)),
         total: ordered.length, page, limit, pages: Math.ceil(ordered.length / limit), typeCounts: counts, originCounts: origins,
       });
     }
@@ -1470,7 +1678,7 @@ router.get('/jobs', async (req, res) => {
         originCounts(),
         stageCounts ? stageCounts() : null,
       ]);
-      return res.json({ jobs: jobs.map(serialize), total, page, limit, pages: Math.ceil(total / limit), typeCounts: counts, originCounts: origins, stageCounts: stages });
+      return res.json({ jobs: await withDupes(jobs), total, page, limit, pages: Math.ceil(total / limit), typeCounts: counts, originCounts: origins, stageCounts: stages });
     }
 
     // Salary and posted-age are parsed from Naukri's own words by the same lib
@@ -1494,7 +1702,7 @@ router.get('/jobs', async (req, res) => {
     const total = kept.length;
     const slice = kept.slice((page - 1) * limit, page * limit);
     res.json({
-      jobs: slice.map(serialize), total, page, limit, pages: Math.ceil(total / limit),
+      jobs: await withDupes(slice), total, page, limit, pages: Math.ceil(total / limit),
       truncated: rows.length >= REFINE_CAP,
       typeCounts: await typeCounts(),
       originCounts: await originCounts(),
@@ -1546,6 +1754,20 @@ router.get('/jobs/outreach', async (req, res) => {
   }
 });
 
+// Queue an apply run on every platform the given jobs belong to, skipping the
+// ones whose apply mode is off. Returns [{ platform, run } | { platform, error }].
+async function queueApplyFor(userId, ids) {
+  const plats = [...new Set((await NaukriJob.find({ _id: { $in: ids }, userId }, { platform: 1 }).lean()).map(platformOfDoc))];
+  const config = await NaukriConfig.getForUser(userId);
+  const out = [];
+  for (const p of plats) {
+    if (applyModeOf(siteOf(config, p), p) === 'off') continue;
+    const r = await queueRun(userId, 'apply', 'manual', { platform: p });
+    out.push(r.error ? { platform: p, error: r.error } : { platform: p, run: r.run });
+  }
+  return out;
+}
+
 // POST /api/naukri/jobs/decide — THE authorisation point. Approving is the only
 // thing in this system that permits an application to be sent, which is why it
 // also queues the apply run rather than leaving that to a schedule.
@@ -1570,10 +1792,15 @@ router.post('/jobs/decide', async (req, res) => {
 
     let queuedRun = null;
     if (decision === 'approved' && result.modifiedCount > 0) {
-      const out = await queueRun(req.userId, 'apply', 'manual');
+      // One apply run per platform the approved jobs are on (the All view can
+      // approve across platforms in one go). A platform with apply off just
+      // keeps them in Waiting — that is not an error worth showing.
+      const runs = await queueApplyFor(req.userId, ids.slice(0, 500));
       // A queue failure here must not lose the approvals — they are saved, and
       // the reason is reported so the UI can explain why nothing started.
-      queuedRun = out.error ? { error: out.error } : out.run;
+      const first = runs[0] || null;
+      queuedRun = first ? (first.error ? { error: first.error } : first.run) : null;
+      return res.json({ updated: result.modifiedCount, run: queuedRun, runs });
     }
 
     res.json({ updated: result.modifiedCount, run: queuedRun });
@@ -1604,7 +1831,8 @@ router.post('/jobs/bulk', async (req, res) => {
         { ...scope, approval: 'approved', applyStatus: { $in: ['none', 'failed', 'skipped'] }, retryable: { $ne: false } },
         { $set: { priority: 1 } }
       );
-      const out = await queueRun(req.userId, 'apply', 'manual');
+      const runs = await queueApplyFor(req.userId, ids.slice(0, 500));
+      const out = runs[0] || { error: 'Apply is off for this platform — they wait in Waiting.' };
       run = out.error ? { error: out.error } : out.run;
 
     } else if (action === 'skip') {
@@ -1663,8 +1891,21 @@ router.post('/jobs/bulk', async (req, res) => {
       );
       result = { modifiedCount: outcome.modifiedCount + proposal.modifiedCount };
 
+    } else if (action === 'allow-duplicate') {
+      // "Apply anyway": you have seen that another platform already applied to
+      // this role and want this one sent too. Back to Waiting, and the
+      // apply-time duplicate skip leaves it alone from now on.
+      const rows = await NaukriJob.find({ ...scope, applyStatus: { $in: ['none', 'skipped', 'failed', 'dismissed'] } }, { applyStatus: 1 }).lean();
+      for (const j of rows) {
+        await NaukriJob.updateOne({ _id: j._id }, {
+          $set: { dupOverride: true, applyStatus: 'none', retryable: true, approval: 'approved', approvedAt: now, approvedBy: 'you', applyNote: '' },
+          $push: { applyHistory: { at: now, from: j.applyStatus, to: 'none', note: 'apply anyway: duplicate allowed by you' } },
+        });
+      }
+      result = { modifiedCount: rows.length };
+
     } else {
-      return res.status(400).json({ error: 'action must be apply-next, skip, requeue, restore or dismiss' });
+      return res.status(400).json({ error: 'action must be apply-next, skip, requeue, restore, dismiss or allow-duplicate' });
     }
 
     res.json({ updated: result.modifiedCount, run });
@@ -1705,26 +1946,34 @@ router.patch('/jobs/:id', async (req, res) => {
 // call is a serverless cold-start candidate.
 router.post('/claim', async (req, res) => {
   try {
-    const { host, chromeUp, naukriLoggedIn, nextWakeAt, probeOnly } = req.body || {};
+    const { host, chromeUp, naukriLoggedIn, loggedIn, nextWakeAt, probeOnly } = req.body || {};
+    const platform = req.platform;
+    const pq = platformQuery(platform);
+    const label = labelOf(platform);
 
-    const worker = await NaukriWorker.getForUser(req.userId);
+    const worker = await NaukriWorker.getForUser(req.userId, platform);
     const prevSeenAt = worker.lastSeenAt;
     worker.lastSeenAt = new Date();
     if (host !== undefined) worker.host = str(host, 200);
     if (chromeUp !== undefined) worker.chromeUp = !!chromeUp;
-    if (naukriLoggedIn !== undefined) worker.naukriLoggedIn = !!naukriLoggedIn;
+    // `loggedIn` from a platform worker; `naukriLoggedIn` from older Naukri
+    // workers. Both fields are written so either reader is right.
+    const li = loggedIn !== undefined ? loggedIn : naukriLoggedIn;
+    if (li !== undefined) { worker.loggedIn = !!li; worker.naukriLoggedIn = !!li; }
     if (nextWakeAt !== undefined) {
       const d = nextWakeAt ? new Date(nextWakeAt) : null;
       worker.nextWakeAt = d && !isNaN(d.getTime()) ? d : null;
     }
     await worker.save();
     // Back after an outage long enough to have been reported: say so once.
-    if (prevSeenAt && Date.now() - new Date(prevSeenAt).getTime() > WORKER_OFFLINE_MS) await workerBack(req.userId, 'naukri', prevSeenAt);
+    if (prevSeenAt && Date.now() - new Date(prevSeenAt).getTime() > WORKER_OFFLINE_MS) await workerBack(req.userId, platform, prevSeenAt);
 
-    const config = await NaukriConfig.getForUser(req.userId);
+    const fullConfig = await NaukriConfig.getForUser(req.userId);
+    const config = siteOf(fullConfig, platform);
     // Sent on EVERY response, idle ones included, so a changed check-in
     // interval reaches the worker without a restart.
     const pollSeconds = (config.worker && config.worker.pollSeconds) || 20;
+    if (!isEnabled(config, platform)) return res.json({ run: null, paused: true, disabled: true, pollSeconds });
     if (config.safety.pauseAll) return res.json({ run: null, paused: true, pollSeconds });
     if (blockedUntilOf(worker)) return res.json({ run: null, blockedUntil: worker.blockedUntil, pollSeconds });
 
@@ -1742,24 +1991,43 @@ router.post('/claim', async (req, res) => {
     // created in execution order: refresh, then harvest, then apply.
     const due = dueSlot(config.schedule, new Date());
     if (due) {
-      const active = await NaukriRun.findOne({ userId: req.userId, status: { $in: ACTIVE }, ...BASE_FILTER }).lean();
+      const active = await NaukriRun.findOne({ userId: req.userId, status: { $in: ACTIVE }, ...pq, ...BASE_FILTER }).lean();
       // A slot that comes due while a run is active WAITS for it rather than
       // being spent: it fires on the first poll after the active run ends, as
       // long as that is still inside catchUpHours. Spending it lost the whole
       // day's scheduled work whenever a manual run overlapped the slot.
       if (!active) {
-        for (const kind of due.kinds) {
-          await NaukriRun.create({ userId: req.userId, kind, trigger: 'scheduled', dryRun: !!config.safety.dryRun });
+        const dryRun = applyModeOf(config, platform) === 'dry-run';
+        // Only steps this platform can do, and apply only while apply is on.
+        for (const kind of due.kinds.filter(k => !kindBlocked(k, config, platform))) {
+          await NaukriRun.create({ userId: req.userId, platform, kind, trigger: 'scheduled', dryRun });
         }
         // Stamped to the OCCURRENCE, not to now, so a late catch-up doesn't
         // drag the next slot forward.
         config.schedule.lastFiredAt = due.at;
-        await config.save();
+        await fullConfig.save();
+      }
+    }
+
+    // Optional (Configuration → Platforms): runs across platforms go out
+    // oldest first. Hold this platform back while another ready platform has
+    // an older queued run — its own worker will take it on its next poll.
+    if (fullConfig.crossPlatformOrder) {
+      const mine = await NaukriRun.findOne({ userId: req.userId, status: 'queued', ...pq, ...BASE_FILTER }, { createdAt: 1 }).sort({ createdAt: 1 }).lean();
+      if (mine) {
+        for (const other of PLATFORM_IDS.filter(p => p !== platform)) {
+          const site = siteOf(fullConfig, other);
+          if (!isEnabled(site, other) || site.safety.pauseAll) continue;
+          const w = await NaukriWorker.findOne({ userId: req.userId, ...platformQuery(other) }).lean();
+          if (!w || blockedUntilOf(w) || !w.lastSeenAt || Date.now() - new Date(w.lastSeenAt).getTime() > ONLINE_MS) continue;
+          const older = await NaukriRun.exists({ userId: req.userId, status: 'queued', createdAt: { $lt: mine.createdAt }, ...platformQuery(other), ...BASE_FILTER });
+          if (older) return res.json({ run: null, waiting: labelOf(other), pollSeconds });
+        }
       }
     }
 
     const run = await NaukriRun.findOneAndUpdate(
-      { userId: req.userId, status: 'queued', ...BASE_FILTER },
+      { userId: req.userId, status: 'queued', ...pq, ...BASE_FILTER },
       { $set: { status: 'running', claimedAt: new Date(), workerHost: str(host, 200) } },
       { sort: { createdAt: 1 }, new: true }
     );
@@ -1771,33 +2039,40 @@ router.post('/claim', async (req, res) => {
       run: run.toJSON(),
       pollSeconds,
       config: {
+        platform,
         searches: config.searches.filter(s => s.enabled),
         searchLimits: config.searchLimits,
         // This run's own choice if it made one, else the default.
         sources: (run.sources && (run.sources.searches || run.sources.recommended)) ? run.sources : config.sources,
-        useRecommended: config.useRecommended,
+        useRecommended: platform === 'naukri' ? fullConfig.useRecommended : !!(config.sources && config.sources.recommended),
         filters: config.filters,
-        profile: config.profile,
-        answers: config.answers.filter(a => a.enabled),
+        profile: fullConfig.profile,
+        answers: fullConfig.answers.filter(a => a.enabled),
         // Whether the worker may ask /ai-answer mid-questionnaire. The server
         // re-checks it (and the threshold) on every call regardless.
-        autoAnswer: { enabled: !!(config.autoAnswer && config.autoAnswer.enabled) },
-        onUnknownQuestion: config.onUnknownQuestion,
+        autoAnswer: { enabled: !!(fullConfig.autoAnswer && fullConfig.autoAnswer.enabled) },
+        onUnknownQuestion: fullConfig.onUnknownQuestion,
         apply: config.apply,
-        headlineVariants: config.headlineVariants,
-        headlineIndex: config.headlineIndex,
-        dryRun: !!config.safety.dryRun,
+        headlineVariants: platform === 'naukri' ? fullConfig.headlineVariants : [],
+        headlineIndex: platform === 'naukri' ? fullConfig.headlineIndex : 0,
+        dryRun: !!run.dryRun,
       },
     };
 
     if (run.kind === 'apply') {
-      const doneToday = await appliedToday(req.userId, config.schedule.timezone);
-      const budget = Math.max(0, Math.min(
+      // Apply turned off (or capability withdrawn) after this run was queued:
+      // it runs empty rather than sending anything.
+      const mode = applyModeOf(config, platform);
+      const doneToday = await appliedToday(req.userId, config.schedule.timezone, platform);
+      const budget = mode === 'off' ? 0 : Math.max(0, Math.min(
         config.apply.maxPerRun,
         config.apply.maxPerDay - doneToday
       ));
-      payload.jobs = budget === 0 ? [] : queueOrder(await NaukriJob.find({
+      // A real run must never be handed jobs while the mode says rehearse.
+      if (mode === 'dry-run' && !run.dryRun) { run.dryRun = true; await run.save(); payload.run.dryRun = true; payload.config.dryRun = true; }
+      let candidates = budget === 0 ? [] : queueOrder(await NaukriJob.find({
         userId: req.userId,
+        ...pq,
         // Exactly what the Waiting tab lists, so "waiting" and "what the next
         // run takes" cannot disagree. Skips are NOT claimed: one blocked on a
         // question is moved back here by requeueAnswered the moment a rule
@@ -1812,7 +2087,37 @@ router.post('/claim', async (req, res) => {
       // Apply early: the order is lib/naukriQueue.js queueOrder — anything
       // you picked first, then freshest postings, then best fit. Sorted in JS
       // because "how fresh" is read from Naukri's own words ("3 days ago").
-      }).limit(5000).lean()).slice(0, budget).map(serialize);
+      }).limit(5000).lean());
+
+      // Duplicates across platforms, checked HERE — at the last moment before
+      // the worker clicks. Runs are serialised on the Mac (one Chrome, one
+      // lock), so another platform's applications are already recorded by the
+      // time this claim happens. A job another platform has applied to is
+      // skipped with that reason (never sent twice), unless you chose "Apply
+      // anyway". Not for a dry run: a rehearsal sends nothing.
+      const dupRule = fullConfig.duplicates || {};
+      if (dupRule.blockApply !== false && !run.dryRun && candidates.length) {
+        const look = candidates.slice(0, budget * 3 + 20).filter(j => !j.dupOverride);
+        const dupes = await dupesFor(NaukriJob, req.userId, look, { windowDays: dupRule.windowDays || 60 });
+        const now = new Date();
+        const dropped = new Set();
+        for (const j of look) {
+          const d = dupes.get(String(j._id));
+          if (!blocksApply(d)) continue;
+          dropped.add(String(j._id));
+          const note = dupText(d);
+          await NaukriJob.updateOne({ _id: j._id, userId: req.userId, applyStatus: { $in: ['none', 'failed'] } }, {
+            $set: { applyStatus: 'skipped', retryable: false, priority: 0, applyNote: note, unknownQuestion: '', questionOptions: [] },
+            $push: { applyHistory: { at: now, from: j.applyStatus, to: 'skipped', note } },
+          });
+          await NaukriRun.updateOne({ _id: run._id }, {
+            $push: { results: { jobId: j._id, title: j.title, company: j.company, outcome: 'skipped', reason: note, at: now } },
+            $inc: { 'stats.dupSkipped': 1 },
+          });
+        }
+        if (dropped.size) candidates = candidates.filter(j => !dropped.has(String(j._id)));
+      }
+      payload.jobs = candidates.slice(0, budget).map(serialize);
       payload.budget = { perRun: config.apply.maxPerRun, perDay: config.apply.maxPerDay, doneToday, granted: budget };
     }
 
@@ -1820,9 +2125,9 @@ router.post('/claim', async (req, res) => {
     // real edit rather than the same string written back. Advanced here, at
     // claim time, so a crashed run still moves on rather than retrying the same
     // variant forever.
-    if (run.kind === 'refresh' && config.headlineVariants.length) {
-      config.headlineIndex = (config.headlineIndex + 1) % config.headlineVariants.length;
-      await config.save();
+    if (run.kind === 'refresh' && platform === 'naukri' && fullConfig.headlineVariants.length) {
+      fullConfig.headlineIndex = (fullConfig.headlineIndex + 1) % fullConfig.headlineVariants.length;
+      await fullConfig.save();
     }
 
     res.json(payload);
@@ -1840,14 +2145,21 @@ router.post('/ingest', async (req, res) => {
     if (!runId) return res.status(400).json({ error: 'runId is required' });
     if (!Array.isArray(jobs)) return res.status(400).json({ error: 'jobs must be an array' });
 
-    const run = await NaukriRun.findOne({ _id: runId, userId: req.userId, ...BASE_FILTER });
+    const run = await NaukriRun.findOne({ _id: runId, userId: req.userId, ...PQ(req), ...BASE_FILTER });
     if (!run) return res.status(404).json({ error: 'No such run' });
 
-    let created = 0, updated = 0, skipped = 0, autoApproved = 0;
+    const platform = req.platform;
+    const pq = platformQuery(platform);
+    let created = 0, updated = 0, skipped = 0, autoApproved = 0, dupHeld = 0;
     const now = new Date();
-    const config = await NaukriConfig.getForUser(req.userId);
-    const auto = config.apply.autoApproveEnabled && !config.safety.pauseAll;
-    const minScore = config.apply.autoApproveMinScore ?? 80;
+    const fullConfig = await NaukriConfig.getForUser(req.userId);
+    const site = siteOf(fullConfig, platform);
+    // Scoring reads this platform's searches and filters with the shared profile.
+    const config = platform === 'naukri' ? fullConfig
+      : { searches: site.searches, filters: site.filters, profile: fullConfig.profile };
+    const auto = site.apply.autoApproveEnabled && !site.safety.pauseAll;
+    const minScore = site.apply.autoApproveMinScore ?? 80;
+    const dupRule = fullConfig.duplicates || {};
 
     // Employers already known to hand off to their own site. Apply type is a
     // property of the employer far more than the role, so this predicts most of
@@ -1859,6 +2171,7 @@ router.post('/ingest', async (req, res) => {
       (await NaukriJob.distinct('company', {
         userId: req.userId,
         $or: [{ applyNote: EXTERNAL_SKIP }, { 'applyHistory.note': EXTERNAL_SKIP }],
+        ...pq,
         ...BASE_FILTER,
       })).filter(Boolean).map(c => c.toLowerCase())
     );
@@ -1867,10 +2180,14 @@ router.post('/ingest', async (req, res) => {
       const sourceId = str(raw && raw.sourceId, 100);
       const title = str(raw && raw.title, 300);
       if (!sourceId || !title) { skipped++; continue; }
-      const sourceKey = `naukri:${sourceId}`;
+      // `naukri:<id>`, `instahyre:<id>` … — the same site id on two platforms
+      // is two different jobs, and the unique index already keys on this.
+      const sourceKey = `${platform}:${sourceId}`;
       const queries = cleanList(raw.queries, 20);
       // Older workers send no origins; everything they harvested came from a search.
-      const origins = (Array.isArray(raw.origins) ? raw.origins : ['search']).filter(o => o === 'search' || o === 'recommended');
+      // 'recruiter' = a recruiter on the site reached out about it (Instahyre).
+      const origins = (Array.isArray(raw.origins) ? raw.origins : ['search']).filter(o => o === 'search' || o === 'recommended' || o === 'recruiter');
+      const dupKey = dupKeyOf({ company: raw.company, title });
       // Naukri's own feed (Recommended jobs) states it outright; otherwise it is
       // predicted from employers already seen sending people off-site.
       const likelyExternal = raw.companySite === true || externalCompanies.has(str(raw.company, 200).toLowerCase());
@@ -1880,6 +2197,7 @@ router.post('/ingest', async (req, res) => {
       const fit = scoreJob({
         title, tags: raw.tags, description: raw.description, experienceMin: raw.experienceMin,
         experienceMax: raw.experienceMax, salaryText: raw.salaryText, postedText: raw.postedText, likelyExternal, origins,
+        ...(platform !== 'naukri' ? { platformLabel: labelOf(platform) } : {}),
       }, config);
 
       const result = await NaukriJob.updateOne(
@@ -1903,9 +2221,10 @@ router.post('/ingest', async (req, res) => {
             ...(postedAt ? { postedAt } : {}),
             score: fit.score,
             scoreReasons: fit.reasons,
+            dupKey,
           },
           $setOnInsert: {
-            userId: req.userId, sourceId, sourceKey,
+            userId: req.userId, platform, sourceId, sourceKey,
             firstSeenAt: now,
             // A harvest may only ever propose. Nothing here may pre-approve.
             approval: 'pending',
@@ -1928,6 +2247,13 @@ router.post('/ingest', async (req, res) => {
       // goes out at the next scheduled apply run, inside the daily cap; no run
       // is queued from here.
       if (auto && result.upsertedCount && !likelyExternal && fit.score >= minScore) {
+        // Never auto-approve a role already applied to or approved on another
+        // platform: it stays in the inbox with its duplicate badge, for you.
+        if (dupRule.blockAuto !== false && dupKey) {
+          const me = { _id: 'new', dupKey, platform };
+          const d = (await dupesFor(NaukriJob, req.userId, [me], { windowDays: dupRule.windowDays || 60 })).get('new');
+          if (blocksAuto(d)) { dupHeld++; continue; }
+        }
         const ok = await NaukriJob.updateOne(
           { userId: req.userId, sourceKey, approval: 'pending', applyStatus: 'none' },
           { $set: { approval: 'approved', approvedAt: now, approvedBy: 'auto' } },
@@ -1940,8 +2266,8 @@ router.post('/ingest', async (req, res) => {
       $inc: { 'stats.found': created + updated, 'stats.new': created, 'stats.updated': updated, 'stats.autoApproved': autoApproved },
     });
 
-    const tidied = await tidyInbox(req.userId, config);
-    res.json({ created, updated, skipped, autoApproved, tidied });
+    const tidied = await tidyInbox(req.userId, fullConfig, platform);
+    res.json({ created, updated, skipped, autoApproved, tidied, dupHeld });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1961,7 +2287,7 @@ router.post('/progress', async (req, res) => {
     // Only while the run is actually running — a late event must not resurrect
     // the progress block of a run that already failed or was cancelled.
     const run = await NaukriRun.findOneAndUpdate(
-      { _id: runId, userId: req.userId, status: 'running', ...BASE_FILTER },
+      { _id: runId, userId: req.userId, status: 'running', ...PQ(req), ...BASE_FILTER },
       { $set: { progress: {
           phase:      str(progress.phase, 40),
           label:      str(progress.label, 300),
@@ -1995,7 +2321,9 @@ router.post('/result', async (req, res) => {
       return res.status(400).json({ error: 'outcome must be applied, skipped, failed or dry-run' });
     }
 
-    const job = await NaukriJob.findOne({ _id: jobId, userId: req.userId, ...BASE_FILTER });
+    // Scoped to this platform: an Instahyre worker can only ever report on an
+    // Instahyre job.
+    const job = await NaukriJob.findOne({ _id: jobId, userId: req.userId, ...PQ(req), ...BASE_FILTER });
     if (!job) return res.status(404).json({ error: 'No such job' });
 
     // Already recorded: the worker retries a report whose response it never
@@ -2032,8 +2360,8 @@ router.post('/result', async (req, res) => {
 
     if (outcome === 'failed') {
       reportIssue({
-        userId: req.userId, source: 'job', area: 'naukri', kind: 'apply_failed',
-        message: `Naukri apply failed for "${job.title}" at ${job.company}${reason ? `: ${str(reason, 500)}` : ''}`,
+        userId: req.userId, source: 'job', area: req.platform, kind: 'apply_failed',
+        message: `${LABEL(req)} apply failed for "${job.title}" at ${job.company}${reason ? `: ${str(reason, 500)}` : ''}`,
         key: `apply_failed ${str(reason, 500).replace(/\d+/g, '')}`,
         meta: { runId: String(runId), jobId: String(job._id) },
       });
@@ -2077,7 +2405,9 @@ router.post('/track', async (req, res) => {
     for (const row of rows.slice(0, 2000)) {
       const jobId = str(row && row.jobId, 100);
       if (!jobId) continue;
-      const job = await NaukriJob.findOne({ userId: req.userId, sourceId: jobId, ...BASE_FILTER });
+      // By the site's own job id, on THIS platform only — ids are only unique
+      // within one site.
+      const job = await NaukriJob.findOne({ userId: req.userId, sourceId: jobId, ...PQ(req), ...BASE_FILTER });
       if (!job) continue;
       matched++;
       const { stage, at, timeline } = readStatus(row);
@@ -2096,7 +2426,7 @@ router.post('/track', async (req, res) => {
       if (changed && job.applyStatus === 'applied' && (stage === 'shortlisted' || stage === 'contacted' || stage === 'not-shortlisted')) {
         const to = stage === 'not-shortlisted' ? 'rejected' : 'in-review';
         set.applyStatus = to;
-        update.$push = { applyHistory: { at: now, from: 'applied', to, note: `Naukri: ${stage.replace('-', ' ')}` } };
+        update.$push = { applyHistory: { at: now, from: 'applied', to, note: `${LABEL(req)}: ${stage.replace('-', ' ')}` } };
         moved++;
       }
       if (changed && (stage === 'shortlisted' || stage === 'contacted')) news.push(`${job.title} · ${job.company}`);
@@ -2104,12 +2434,16 @@ router.post('/track', async (req, res) => {
     }
     await NaukriRun.updateOne({ _id: runId, userId: req.userId }, { $inc: { 'stats.tracked': matched, 'stats.moved': moved } });
     if (news.length) {
+      // Same notification types as always (no history to migrate); the
+      // platform rides in the title and in meta.platform.
+      const on = req.platform === 'naukri' ? '' : ` (${LABEL(req)})`;
       await notify(req.userId, {
         type: 'naukri.applied',
-        title: news.length === 1 ? `Recruiter interest: ${news[0]}` : `${news.length} applications shortlisted or contacted`,
+        title: news.length === 1 ? `Recruiter interest: ${news[0]}${on}` : `${news.length} applications shortlisted or contacted${on}`,
         body: news.slice(0, 5).join('\n'),
-        link: '/naukri',
+        link: pageLink(req.platform),
         dedupeKey: `naukri.track:${runId}:${news.length}`,
+        meta: { platform: req.platform },
       });
     }
     res.json({ matched, moved });
@@ -2139,20 +2473,23 @@ router.post('/finish', async (req, res) => {
     }
 
     const run = await NaukriRun.findOneAndUpdate(
-      { _id: runId, userId: req.userId, ...BASE_FILTER },
+      { _id: runId, userId: req.userId, ...PQ(req), ...BASE_FILTER },
       { $set: update },
       { new: true }
     );
     if (!run) return res.status(404).json({ error: 'No such run' });
+    const label = LABEL(req);
+    const link = pageLink(req.platform);
+    const on = req.platform === 'naukri' ? '' : ` on ${label}`;
 
     if (status !== 'done') {
       reportIssue({
-        userId: req.userId, source: 'job', area: 'naukri', kind: `run_${status}`,
+        userId: req.userId, source: 'job', area: req.platform, kind: `run_${status}`,
         message: status === 'blocked'
-          ? `Naukri showed a captcha — runs paused${error ? `: ${error}` : ''}`
-          : `Naukri run failed${error ? `: ${error}` : ''}`,
+          ? `${label} showed a captcha — runs paused${error ? `: ${error}` : ''}`
+          : `${label} run failed${error ? `: ${error}` : ''}`,
         detail: error ? String(error) : '',
-        key: `naukri ${status} ${exitCode == null ? '' : exitCode}`,
+        key: `${req.platform} ${status} ${exitCode == null ? '' : exitCode}`,
         meta: { runId: String(runId), exitCode: exitCode ?? null, stats: stats || null },
       });
     }
@@ -2162,10 +2499,11 @@ router.post('/finish', async (req, res) => {
       if (applied > 0) {
         await notify(req.userId, {
           type: 'naukri.applied',
-          title: `Applied to ${applied} job${applied === 1 ? '' : 's'}`,
+          title: `Applied to ${applied} job${applied === 1 ? '' : 's'}${on}`,
           body: run.stats?.failed ? `${run.stats.failed} could not be applied to.` : '',
-          link: '/naukri',
+          link,
           dedupeKey: `naukri.applied:${run._id}`,
+          meta: { platform: req.platform },
         });
       }
     } else {
@@ -2174,20 +2512,25 @@ router.post('/finish', async (req, res) => {
       const reason = error ? str(error, 200).split('\n')[0] : '';
       await notify(req.userId, {
         type: 'naukri.attention',
-        title: status === 'blocked' ? 'Naukri showed a captcha — runs paused' : 'Naukri run failed',
-        body: reason || (status === 'blocked' ? 'Naukri runs are paused for a week.' : 'Check that you are signed in to Naukri on your Mac.'),
-        link: '/naukri',
+        title: status === 'blocked' ? `${label} showed a captcha — runs paused` : `${label} run failed`,
+        body: reason || (status === 'blocked'
+          ? `${label} runs are paused for a week. Other platforms keep running.`
+          : `Check that you are signed in to ${label} on your Mac.`),
+        link,
         dedupeKey: `naukri.attention:${run._id}`,
+        meta: { platform: req.platform },
       });
     }
 
     // A captcha means Naukri challenged the session. The answer is to stop for a
     // week, so the block lives here rather than in the worker — a restarted
     // worker must not be able to shrug it off, and neither must the schedule.
+    // Only THIS platform's worker is blocked: a Hirist captcha must not stop
+    // Naukri or Instahyre.
     if (status === 'blocked') {
-      const worker = await NaukriWorker.getForUser(req.userId);
+      const worker = await NaukriWorker.getForUser(req.userId, req.platform);
       worker.blockedUntil = new Date(Date.now() + BLOCK_MS);
-      worker.blockedReason = str(error, 300) || 'Naukri showed a captcha during a run';
+      worker.blockedReason = str(error, 300) || `${label} showed a captcha during a run`;
       await worker.save();
     }
 

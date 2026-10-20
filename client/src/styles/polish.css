@@ -778,3 +778,27 @@ td.cell-actions > * + * { margin-left: 4px; }
 .tr-clickable { cursor: pointer; }
 .tr-clickable:hover td { background: var(--bg2); }
 @media (prefers-reduced-motion: reduce) { .user-drawer { animation: none; } }
+
+/* Job platforms: one collapsed chip, then one split pill per platform
+   (■ Name │ Find jobs │ Apply N). Only runnable segments are shown. */
+.ac-chip .ac-chev { font-size: 13px !important; color: var(--text3) !important; transition: transform .15s var(--ease); }
+.ac-chip[aria-expanded="true"] { border-color: var(--accent); }
+.ac-chip[aria-expanded="true"] .ac-chev { transform: rotate(180deg); }
+.ac-split {
+  display: inline-flex; align-items: stretch; height: 34px; border-radius: 999px; overflow: hidden;
+  border: 1px solid var(--border-md, var(--border)); background: var(--bg2); box-shadow: var(--shadow-lg);
+  font-size: 12.5px; font-weight: 600; animation: ac-pop .18s var(--ease) both; white-space: nowrap;
+}
+.ac-split-name { display: inline-flex; align-items: center; gap: 7px; padding: 0 11px 0 12px; color: var(--text); }
+.ac-split-name .pdot { width: 8px; height: 8px; border-radius: 2px; }
+.ac-seg {
+  display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; border: none; border-left: 1px solid var(--border-md, var(--border));
+  background: transparent; color: var(--accent); font: inherit; cursor: pointer;
+}
+.ac-seg i { font-size: 15px; }
+.ac-seg:hover, .ac-seg:focus-visible { background: var(--accent-bg); outline: none; }
+.ac-seg:disabled { opacity: .55; cursor: wait; }
+.ac-seg.is-note { color: var(--text3); cursor: default; font-weight: 500; }
+.ac-seg.is-note:hover { background: transparent; }
+.ac-seg .ac-chip-count { height: 18px; min-width: 18px; font-size: 11px; }
+@media (prefers-reduced-motion: reduce) { .ac-split { animation: none; } }

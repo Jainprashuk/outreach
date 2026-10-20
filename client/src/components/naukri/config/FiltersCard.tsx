@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { NaukriConfig, NaukriFilters } from '../../../lib/api';
+import { usePlatform } from '../platform';
 import { Card } from '../ui';
 import { updateNaukriConfigApi, previewNaukriFiltersApi } from '../../../lib/api';
 import { useToast } from '../../../context/ToastContext';
@@ -17,6 +18,7 @@ const toText = (a: string[]) => (a || []).join(', ');
 export default function FiltersCard({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
 }) {
+  const { label: site } = usePlatform();
   const [f, setF] = useState<NaukriFilters>(config.filters);
   // Inbox tidy: clears jobs waiting for review that nobody will apply to.
   const [tidy, setTidy] = useState(config.inboxTidy || { enabled: false, maxAgeDays: 21, minScore: 40, companySite: false });
@@ -66,7 +68,7 @@ export default function FiltersCard({ config, onSaved }: {
   );
 
   return (
-    <Card title="Filters" icon="ti-filter" collapsible id="filters" defaultOpen={false}>
+    <Card title="Filters" icon="ti-filter" collapsible id="filters" defaultOpen={false} scope="site">
 
       <Text label="Title must contain one of" k="titleInclude" help="Empty means any title." />
       <Text label="Title must NOT contain" k="titleExclude" />
@@ -97,7 +99,7 @@ export default function FiltersCard({ config, onSaved }: {
       </div>
       <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 10 }}>
         Experience bands are kept when they overlap yours at all. Listings that do not publish pay are
-        kept — most of Naukri hides it, and dropping them would empty your queue.
+        kept — most of {site} hides it, and dropping them would empty your queue.
       </div>
 
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 6 }}>
@@ -106,7 +108,7 @@ export default function FiltersCard({ config, onSaved }: {
       </label>
       <label style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 13, marginBottom: 12 }}>
         <input type="checkbox" checked={f.skipAlreadyApplied} onChange={e => set('skipAlreadyApplied', e.target.checked)} />
-        Skip jobs Naukri says you already applied to
+        Skip jobs {site} says you already applied to
       </label>
 
       {preview && (

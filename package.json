@@ -11,7 +11,12 @@
     "scrape-worker": "node worker/scrape-worker.js",
     "naukri-worker": "node worker/naukri-worker.js",
     "workers": "bash worker/start-all.sh",
-    "naukri-worker:stub": "NAUKRI_STUB=1 node worker/naukri-worker.js"
+    "naukri-worker:stub": "NAUKRI_STUB=1 node worker/naukri-worker.js",
+    "platform-worker": "node worker/platform-worker.js",
+    "instahyre-worker": "PLATFORM=instahyre node worker/platform-worker.js",
+    "hirist-worker": "PLATFORM=hirist node worker/platform-worker.js",
+    "instahyre-worker:stub": "PLATFORM=instahyre PLATFORM_STUB=1 node worker/platform-worker.js",
+    "hirist-worker:stub": "PLATFORM=hirist PLATFORM_STUB=1 node worker/platform-worker.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import type { NaukriJobQuery } from '../../lib/api';
+import { usePlatform } from './platform';
 import { Muted, Hint } from './ui';
 
 // Filters for the review queue.
@@ -57,6 +58,7 @@ export default function JobFilters({ draft, onChange, total, showing, truncated,
 }) {
   const [open, setOpen] = useState(false);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => onChange({ ...draft, [k]: v });
+  const { id: scope, label: site } = usePlatform();
   const active = activeCount(draft);
 
   const Num = ({ k, placeholder, width = 86 }: { k: keyof Draft; placeholder: string; width?: number }) => (
@@ -98,7 +100,7 @@ export default function JobFilters({ draft, onChange, total, showing, truncated,
         <div style={{ display: 'flex', gap: 6, marginBottom: 9, flexWrap: 'wrap', alignItems: 'center' }}>
           {([
             ['', 'All', typeCounts.all, 'ti-list'],
-            ['native', 'Naukri apply', typeCounts.native, 'ti-bolt'],
+            ['native', scope === 'all' ? 'Native apply' : `${site} apply`, typeCounts.native, 'ti-bolt'],
             ['external', 'Company site', typeCounts.external, 'ti-external-link'],
           ] as const).map(([value, label, n, icon]) => (
             <button
@@ -112,7 +114,7 @@ export default function JobFilters({ draft, onChange, total, showing, truncated,
           ))}
           <Hint style={{ marginTop: 0, flexBasis: '100%' }}>
             “Company site” is an employer already seen handing off to their own careers page — the worker
-            cannot apply to those. “Naukri apply” is everything else, which is a prediction rather than a
+            cannot apply to those. “{scope === 'all' ? 'Native' : site} apply” is everything else, which is a prediction rather than a
             promise: an employer we have not seen do it yet still might.
           </Hint>
         </div>
@@ -177,7 +179,7 @@ export default function JobFilters({ draft, onChange, total, showing, truncated,
 
           <Hint style={{ flexBasis: '100%', marginTop: 0 }}>
             Experience matches when the listing&apos;s band overlaps yours — a 3–8 yrs role still shows at 4.
-            Listings that don&apos;t publish pay are kept, since most of Naukri hides it.
+            Listings that don&apos;t publish pay are kept, since most listings hide it.
           </Hint>
         </div>
       )}

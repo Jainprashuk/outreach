@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { NaukriRun } from '../../lib/api';
 import { fmtRunTime, elapsed } from './format';
+import { PlatformTag } from './platform';
 import { Muted, Empty } from './ui';
 
 // The PAST band: what already happened, newest first, each row expandable.
@@ -37,6 +38,7 @@ function summary(run: NaukriRun): string {
       const parts = [`${s.applied} applied`];
       if (s.skipped) parts.push(`${s.skipped} skipped`);
       if (s.failed) parts.push(`${s.failed} failed`);
+      if (s.dupSkipped) parts.push(`${s.dupSkipped} already applied on another platform`);
       return parts.join(' · ');
     }
     default: return '';
@@ -63,7 +65,7 @@ function dominantReason(run: NaukriRun): string | null {
   return n === skips.length ? `skips all: ${reason}` : `${n} skipped: ${reason}`;
 }
 
-function Row({ run }: { run: NaukriRun }) {
+function Row({ run, showPlatform = false }: { run: NaukriRun; showPlatform?: boolean }) {
   const [open, setOpen] = useState(false);
   const hasDetail = !!run.error || run.results.length > 0;
   const why = dominantReason(run);
@@ -79,7 +81,8 @@ function Row({ run }: { run: NaukriRun }) {
       >
         <span className={`badge ${BADGE[run.status]}`}>{run.status}</span>
         <i className={`ti ${KIND_ICON[run.kind] || 'ti-point'}`} style={{ fontSize: 14, color: 'var(--text2)' }} />
-        <span style={{ minWidth: 70, fontSize: 13 }}>{run.kind}</span>
+        {showPlatform && <PlatformTag id={run.platform} />}
+        <span style={{ minWidth: 70, fontSize: 13 }}>{run.kind === 'apply' && run.dryRun ? 'dry run apply' : run.kind}</span>
         <Muted style={{ minWidth: 118 }}>{fmtRunTime(run.createdAt)}</Muted>
         <Muted style={{ flex: 1, minWidth: 150 }}>
           {[summary(run), why].filter(Boolean).join(' · ')}
@@ -110,11 +113,11 @@ function Row({ run }: { run: NaukriRun }) {
   );
 }
 
-export default function RunTimeline({ runs }: { runs: NaukriRun[] }) {
+export default function RunTimeline({ runs, showPlatform = false }: { runs: NaukriRun[]; showPlatform?: boolean }) {
   if (!runs.length) {
     return <Empty icon="ti-history">Nothing has run yet.</Empty>;
   }
-  return <div>{runs.map(r => <Row key={r.id} run={r} />)}</div>;
+  return <div>{runs.map(r => <Row key={r.id} run={r} showPlatform={showPlatform} />)}</div>;
 }
 
 // The NOW band. Separate from the history rows because a live run needs

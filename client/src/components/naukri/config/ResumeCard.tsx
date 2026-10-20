@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { NaukriConfig } from '../../../lib/api';
+import { usePlatform, ScopeTag } from '../platform';
 import { Card } from '../ui';
 import { updateNaukriConfigApi, deleteNaukriResumeApi, naukriConfigApi } from '../../../lib/api';
 import { Link } from 'react-router-dom';
@@ -19,6 +20,7 @@ import { useToast } from '../../../context/ToastContext';
 export default function ResumeCard({ config, onSaved }: {
   config: NaukriConfig; onSaved: () => void;
 }) {
+  const isNaukri = usePlatform().id === 'naukri';
   const [variants, setVariants] = useState<string[]>(config.headlineVariants.length ? config.headlineVariants : ['']);
   const toast = useToast();
   // The config always carries an (empty) resume record, so "is there a file"
@@ -85,7 +87,7 @@ export default function ResumeCard({ config, onSaved }: {
   };
 
   return (
-    <Card title="Resume & headline" icon="ti-file-cv" collapsible id="resume" defaultOpen={false}>
+    <Card title={isNaukri ? 'Resume & headline' : 'Resume'} icon="ti-file-cv" collapsible id="resume" defaultOpen={false} scope="shared">
 
       <div style={{ marginBottom: 14 }}>
         {resume ? (
@@ -133,7 +135,9 @@ export default function ResumeCard({ config, onSaved }: {
         </div>
       </div>
 
-      <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 6 }}>Headline variants</div>
+      {/* Headlines only matter where the daily refresh exists — Naukri. */}
+      {isNaukri && <>
+      <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 6, display: 'flex', gap: 6, alignItems: 'center' }}>Headline variants <ScopeTag only="Naukri" /></div>
       {variants.map((v, i) => (
         <div key={i} style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
           <input type="text" style={{ flex: 1 }} value={v}
@@ -148,11 +152,12 @@ export default function ResumeCard({ config, onSaved }: {
         Naukri may ignore as a no-op — two or three variants make the save reliable.
       </div>
 
-      {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 8 }}>{msg}</div>}
       <div style={{ display: 'flex', gap: 8 }}>
         <button className="btn btn-sm" onClick={() => setVariants(r => [...r, ''])}>Add variant</button>
         <button className="btn btn-primary btn-sm" onClick={saveVariants} disabled={busy}>Save headlines</button>
       </div>
+      </>}
+      {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginTop: 8 }}>{msg}</div>}
     </Card>
   );
 }

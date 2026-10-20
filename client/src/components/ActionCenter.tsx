@@ -7,8 +7,8 @@ import { useVisibleInterval } from '../hooks/useVisibleInterval';
 import {
   actionCenterSummaryApi, actionCenterIdsApi, retryFailedApi,
   moveLeadsToOutreachApi, moveProspectsApi,
-  scrapeStatusApi, queueScrapeApi, naukriOverviewApi, queueNaukriRunApi, runSourceApi,
-  type ActionCenterSummary, type ScrapeStatus, type NaukriOverview,
+  scrapeStatusApi, queueScrapeApi, platformsApi, queuePlatformRunApi, runSourceApi,
+  type ActionCenterSummary, type ScrapeStatus, type PlatformInfo,
 } from '../lib/api';
 import { relativeTime } from '../lib/format';
 import CreateContactCampaignModal from './CreateContactCampaignModal';
@@ -37,7 +37,7 @@ const SHORT: Record<string, string> = {
   mailbox: 'Check mailbox', failed: 'Retry failed',
   followup: 'Follow up', ready: 'Send ready', pending: 'Approve & send', leads: 'New leads',
   prospects: 'Discover people',
-  scrape: 'LinkedIn scrape', 'naukri-harvest': 'Naukri: new jobs', 'naukri-apply': 'Naukri: apply',
+  scrape: 'LinkedIn scrape',
   hn: 'HN leads', web: 'Web leads',
 };
 
@@ -66,7 +66,9 @@ export default function ActionCenter() {
   const [open, setOpen] = useState(false);
   const [summary, setSummary] = useState<ActionCenterSummary | null>(null);
   const [scrape, setScrape] = useState<ScrapeStatus | null>(null);
-  const [naukri, setNaukri] = useState<NaukriOverview | null>(null);
+  // Every job platform that is switched on (Naukri, Instahyre, Hirist).
+  const [plats, setPlats] = useState<PlatformInfo[] | null>(null);
+  const [jpOpen, setJpOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [sheet, setSheet] = useState<SheetProps | null>(null);
   const [tip, setTip] = useState<Tip | null>(null);
@@ -83,9 +85,9 @@ export default function ActionCenter() {
   }, []);
   // Worker state only matters once the panel is open — not worth a poll of its own.
   const loadRunState = useCallback(async () => {
-    const [s, n] = await Promise.allSettled([scrapeStatusApi(), naukriOverviewApi()]);
+    const [s, n] = await Promise.allSettled([scrapeStatusApi(), platformsApi()]);
     setScrape(s.status === 'fulfilled' ? s.value : null);
-    setNaukri(n.status === 'fulfilled' ? n.value : null);
+    setPlats(n.status === 'fulfilled' ? n.value.platforms.filter(p => p.enabled && p.overview) : null);
   }, []);
 
   useVisibleInterval(load, POLL_MS, enabled);
@@ -263,23 +265,55 @@ export default function ActionCenter() {
     },
   });
 
-  const naukriBlocked = !naukri ? 'Loading…'
-    : (naukri.paused ? 'Naukri is paused (Pause all)' : undefined)
-      || blockedLabel(naukri.blockedUntil)
-      || (naukri.activeRun || naukri.queuedRuns.length ? 'A Naukri run is already queued or running' : undefined);
-  const naukriHint = naukri && !naukri.worker.online ? 'Worker offline — runs when it wakes' : undefined;
-  rows.push({
-    id: 'naukri-harvest', group: 'run', icon: 'ti-briefcase',
-    title: 'Naukri: find new jobs', hint: naukriHint, disabled: naukriBlocked,
-    run: async () => { await queueNaukriRunApi('harvest'); toast('Harvest queued — new listings will land in the Inbox.', 'success'); loadRunState(); },
+  // ── Job platforms ───────────────────────────────────────────────────────
+  // One split chip per platform: Find jobs │ Apply N. A blocked, paused or busy
+  // platform shows why in place of its actions. Naukri's reasons and toasts are
+  // the ones its two Run icons had.
+  const an = (w: string) => (/^[aeiou]/i.test(w) ? 'An' : 'A');
+  const jp = (plats || []).map((p) => {
+    const o = p.overview!;
+    const L = p.label;
+    const naukriP = p.id === 'naukri';
+    const busyRun = o.activeRun || o.queuedRuns.length ? o.activeRun || o.queuedRuns[0] : null;
+    const blocked = (o.paused ? (naukriP ? 'Naukri is paused (Pause all)' : `${L} is paused (Pause ${L})`) : undefined)
+      || (o.blockedUntil ? `${blockedLabel(o.blockedUntil)}${o.blockedReason ? `: ${o.blockedReason}` : ''}` : undefined)
+      || (busyRun ? `${an(L)} ${L} run is already queued or running` : undefined);
+    const hint = !o.worker.online ? 'Worker offline — runs when it wakes' : undefined;
+    const dry = o.applyMode === 'dry-run';
+    const srcLabel = o.sources?.recommended && p.sources.recommended
+      ? (o.sources.searches ? `your searches and ${p.sources.recommended.toLowerCase()}` : p.sources.recommended.toLowerCase())
+      : 'your searches';
+    const harvest: Row = {
+      id: `jp-${p.id}-harvest`, group: 'run', icon: 'ti-briefcase', title: `${L}: find new jobs`,
+      hint: hint || `Harvests ${srcLabel}. New listings land in the Inbox.`, disabled: blocked,
+      run: async () => {
+        await queuePlatformRunApi(p.id, 'harvest');
+        toast(naukriP ? 'Harvest queued — new listings will land in the Inbox.' : `${L}: harvest queued. New listings will land in the Inbox.`, 'success');
+        loadRunState();
+      },
+    };
+    const applyOff = o.applyMode === 'off' ? `Apply is off for ${L}` : undefined;
+    const apply: Row = {
+      id: `jp-${p.id}-apply`, group: 'run', icon: 'ti-send-2',
+      title: `${L}: ${dry ? 'dry run apply' : 'apply'} to ${plural(o.waitingCount, 'approved job')}`,
+      hint: hint || (dry ? 'Dry run is on: fills everything and submits nothing.' : 'Approved jobs go out on the next worker poll.'),
+      disabled: blocked || applyOff || (o.waitingCount ? undefined : 'No approved jobs waiting'),
+      run: async () => {
+        await queuePlatformRunApi(p.id, 'apply');
+        toast(naukriP && !dry ? 'Apply run queued — approved jobs go out on the next worker poll.' : `${L}: ${dry ? 'dry run' : 'apply run'} queued. Approved jobs go out on the next worker poll.`, 'success');
+        loadRunState();
+      },
+    };
+    const status = o.activeRun ? `${o.activeRun.kind === 'apply' && o.activeRun.dryRun ? 'Dry run apply' : o.activeRun.kind} running…`
+      : o.blockedUntil ? blockedLabel(o.blockedUntil) || 'Blocked'
+      : o.paused ? 'Paused'
+      : busyRun ? `${busyRun.kind} queued`
+      : o.applyMode === 'off' ? 'Ready, apply is off'
+      : dry ? 'Ready, apply is dry run'
+      : o.waitingCount ? `Ready, ${o.waitingCount} approved` : 'Ready';
+    return { p, harvest, apply, status, waiting: o.waitingCount, dry };
   });
-  if (naukri && naukri.waitingCount > 0) {
-    rows.push({
-      id: 'naukri-apply', group: 'run', icon: 'ti-send-2',
-      title: `Naukri: apply to ${plural(naukri.waitingCount, 'approved job')}`, hint: naukriHint, disabled: naukriBlocked,
-      run: async () => { await queueNaukriRunApi('apply'); toast('Apply run queued — approved jobs go out on the next worker poll.', 'success'); loadRunState(); },
-    });
-  }
+  const applyN = jp.reduce((n, x) => n + (x.apply.disabled ? 0 : x.waiting), 0);
   rows.push({
     id: 'hn', group: 'run', icon: 'ti-brand-ycombinator', title: 'Find leads: Hacker News hiring thread',
     run: async () => { await runSourceApi('hn'); toast('Hacker News search started — leads land on the Leads board.', 'success'); },
@@ -302,8 +336,8 @@ export default function ActionCenter() {
   const COUNT: Record<string, number | undefined> = s ? {
     failed: s.failed, followup: s.followUpDue, ready: s.ready, pending: s.pending, leads: s.newLeads,
     prospects: s.readyProspects,
-    'naukri-apply': naukri?.waitingCount,
   } : {};
+  for (const x of jp) COUNT[x.apply.id] = x.waiting;
 
   // The hover card sits beside the chip, outside the (scrollable) stack so it is never clipped.
   const showTip = (row: Row, el: HTMLElement) => {
@@ -371,6 +405,46 @@ export default function ActionCenter() {
                 </div>
               );
             })}
+            {s && jp.length > 0 && (
+              <div className="ac-group-stack">
+                <div className="ac-group">Job platforms</div>
+                <button type="button" role="menuitem" className="ac-chip" aria-expanded={jpOpen}
+                  style={{ animationDelay: `${Math.min(order++, 12) * 22}ms` }}
+                  onClick={() => setJpOpen(v => !v)}>
+                  <i className="ti ti-briefcase" />
+                  <span className="ac-chip-label">Job platforms</span>
+                  {applyN > 0 && <span className="ac-chip-count">{applyN}</span>}
+                  <i className="ti ti-chevron-down ac-chev" aria-hidden />
+                </button>
+                {jpOpen && jp.map(({ p, harvest, apply, status, waiting, dry }) => {
+                  const segs = [harvest, apply].filter(r => !r.disabled);
+                  return (
+                    <div key={p.id} className="ac-split" style={{ animationDelay: `${Math.min(order++, 12) * 22}ms` }}>
+                      <span className="ac-split-name">
+                        <span className="pdot" style={{ background: `var(--${p.color})` }} />{p.label}
+                      </span>
+                      {segs.map(r => (
+                        <button key={r.id} type="button" role="menuitem" className="ac-seg"
+                          aria-label={`${r.title}${r.hint ? ` — ${r.hint}` : ''}`}
+                          disabled={!!busy && busy !== r.id}
+                          onMouseEnter={e => showTip(r, e.currentTarget)} onMouseLeave={() => setTip(null)}
+                          onFocus={e => showTip(r, e.currentTarget)} onBlur={() => setTip(null)}
+                          onClick={act(r.id, async () => { setOpen(false); await r.run(); })}>
+                          <i className={`ti ${busy === r.id ? 'ti-loader-2 ac-spin' : r === harvest ? 'ti-briefcase' : 'ti-send'}`} />
+                          {r === harvest ? 'Find jobs' : dry ? 'Dry run' : 'Apply'}
+                          {r === apply && waiting > 0 && <span className="ac-chip-count">{waiting}</span>}
+                        </button>
+                      ))}
+                      {!segs.length && (
+                        <span className="ac-seg is-note" role="note">
+                          <i className="ti ti-lock" />{/^Ready/.test(status) ? 'Nothing to run' : status}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {s && due === 0 && <div className="ac-chip ac-chip-muted"><i className="ti ti-circle-check" /> All caught up</div>}
           </div>
         )}

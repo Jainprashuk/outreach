@@ -2,6 +2,7 @@ import { Fragment, useState } from 'react';
 import type { NaukriOverview, NaukriStageTally } from '../../lib/api';
 import { Card, Band, Muted, Hint } from './ui';
 import { fmtRunTime } from './format';
+import { usePlatform } from './platform';
 
 // Two cards for the Activity tab.
 //
@@ -16,8 +17,9 @@ import { fmtRunTime } from './format';
 const pct = (n: number, of: number) => (of ? `${Math.round((100 * n) / of)}%` : '—');
 
 export function SetupCard({ overview, onFix }: { overview: NaukriOverview; onFix: (card: string | null) => void }) {
-  const { items, done, total } = overview.setup;
   const [open, setOpen] = useState(true);
+  if (!overview.setup) return null;
+  const { items, done, total } = overview.setup;
   if (done >= total) return null;
   return (
     <Card>
@@ -68,6 +70,7 @@ function Funnel({ t, compact = false }: { t: NaukriStageTally; compact?: boolean
 
 export function ResultsCard({ overview, onCheck, busy }: { overview: NaukriOverview; onCheck: () => void; busy: boolean }) {
   const r = overview.results;
+  const { label: site } = usePlatform();
   if (!r) return null;
   const tracked = !!r.lastTracked;
   return (
@@ -76,7 +79,7 @@ export function ResultsCard({ overview, onCheck, busy }: { overview: NaukriOverv
         <Band>Results · last {r.days} days</Band>
         <Muted>{tracked ? `checked ${fmtRunTime(r.lastTracked)}` : 'not checked yet'}</Muted>
         <button className="btn btn-xs" type="button" onClick={onCheck} disabled={busy} style={{ marginLeft: 'auto' }}
-          title="Read what recruiters did from Naukri's My applies (read-only)">
+          title={`Read what recruiters did from ${site}'s application history (read-only)`}>
           <i className="ti ti-refresh" /> Check replies now
         </button>
       </div>
@@ -88,14 +91,14 @@ export function ResultsCard({ overview, onCheck, busy }: { overview: NaukriOverv
           {r.notShortlisted > 0 && <Muted style={{ display: 'block', marginTop: 4 }}>{r.notShortlisted} not shortlisted</Muted>}
           <div style={{ marginTop: 10, display: 'grid', gridTemplateColumns: 'max-content 1fr', gap: '4px 14px', alignItems: 'baseline' }}>
             {r.bySource.search.sent > 0 && (<><Muted>My searches</Muted><Funnel t={r.bySource.search} compact /></>)}
-            {r.bySource.recommended.sent > 0 && (<><Muted>Recommended</Muted><Funnel t={r.bySource.recommended} compact /></>)}
+            {r.bySource.recommended.sent > 0 && (<><Muted>Recommended / matched</Muted><Funnel t={r.bySource.recommended} compact /></>)}
             {Object.entries(r.byScore).filter(([, t]) => t.sent > 0).map(([band, t]) => (
               <Fragment key={band}><Muted>Fit {band}</Muted><Funnel t={t} compact /></Fragment>
             ))}
           </div>
           {!tracked && (
             <Hint style={{ marginTop: 8 }}>
-              Replies are read once a day from Naukri&apos;s My applies (Schedule → Track replies), or now with the button above.
+              Replies are read once a day from {site}&apos;s application history (Schedule → Check replies), or now with the button above.
             </Hint>
           )}
         </>
