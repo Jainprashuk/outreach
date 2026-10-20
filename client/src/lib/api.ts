@@ -1685,6 +1685,7 @@ export type NaukriApplyStatus =
 
 export interface NaukriRun {
   id: string;
+  platform?: PlatformId;
   kind: NaukriRunKind;
   status: NaukriRunStatus;
   trigger: 'manual' | 'scheduled';
@@ -1707,6 +1708,8 @@ export interface NaukriRun {
     applied: number; skipped: number; failed: number; rehearsed: number; searches: number;
     /** Harvest only: new jobs auto-approve moved straight to Waiting. */
     autoApproved?: number;
+    /** Apply only: left out because another platform had already applied. */
+    dupSkipped?: number;
     /** Harvest only: listings read off Recommended jobs. */
     recommended?: number;
     /** Track only: recruiter actions read, and jobs moved in your pipeline. */
@@ -1738,8 +1741,15 @@ export interface NaukriJob {
   url: string;
   postedText: string;
   queries: string[];
-  /** Where it was found: your searches, Naukri's Recommended jobs, or both. */
-  origins?: Array<'search' | 'recommended'>;
+  /** Where it was found: your searches, the site's recommended / matched feed,
+      or a recruiter reaching out (Instahyre). */
+  origins?: Array<'search' | 'recommended' | 'recruiter'>;
+  /** Which job platform it is on. */
+  platform?: PlatformId;
+  dupKey?: string;
+  /** Its furthest-along copy on another platform, worked out on read. */
+  dup?: JobDuplicate | null;
+  dupOverride?: boolean;
   firstSeenAt: string;
   lastSeenAt: string;
   seenCount: number;
@@ -1770,6 +1780,14 @@ export interface NaukriJob {
   /** The screening question that caused a skip — offered as a one-click answer rule. */
   unknownQuestion: string;
   applyHistory: Array<{ at: string; from: string; to: string; note: string }>;
+}
+
+export interface JobDuplicate {
+  platform: PlatformId; label: string;
+  state: 'applied' | 'approved' | 'pending';
+  at: string | null; jobId: string;
+  /** "Already applied via Naukri on 12 Oct" / "Approved on Hirist" / "Also on …" */
+  text: string;
 }
 
 export interface NaukriSchedule {
@@ -1852,6 +1870,16 @@ export interface NaukriAnswer {
 
 export interface NaukriConfig {
   id: string;
+  /** Which platform this view of the config is for; its own settings are at the top level. */
+  platform?: PlatformId;
+  label?: string;
+  capabilities?: PlatformCapabilities;
+  enabled?: boolean;
+  applyMode?: ApplyMode;
+  readOnlySince?: string | null;
+  /** Shared by every platform. */
+  duplicates?: DuplicateRules;
+  crossPlatformOrder?: boolean;
   schedule: NaukriSchedule;
   searches: NaukriSearch[];
   useRecommended: boolean;
@@ -1897,10 +1925,20 @@ export interface NaukriWorkerState {
   host: string;
   chromeUp: boolean;
   naukriLoggedIn: boolean;
+  /** Logged into THIS platform's site (same value as naukriLoggedIn). */
+  loggedIn?: boolean;
   nextWakeAt: string | null;
 }
 
 export interface NaukriOverview {
+  platform?: PlatformId;
+  label?: string;
+  capabilities?: PlatformCapabilities;
+  enabled?: boolean;
+  applyMode?: ApplyMode;
+  readOnlySince?: string | null;
+  /** New jobs first seen in the last 7 days. */
+  foundThisWeek?: number;
   activeRun: NaukriRun | null;
   queuedRuns: NaukriRun[];
   history: NaukriRun[];
@@ -1919,9 +1957,9 @@ export interface NaukriOverview {
   /** The default harvest sources, for the Harvest menu's tick. */
   sources: NaukriSources;
   /** What still needs setting up — each item names the card that fixes it. */
-  setup: { items: NaukriSetupItem[]; done: number; total: number };
+  setup: { items: NaukriSetupItem[]; done: number; total: number } | null;
   /** What recruiters did with the last 30 days of applications. */
-  results: NaukriResults;
+  results: NaukriResults | null;
   inboxTidy: NaukriInboxTidy;
   appliedCount: number;
   appliedToday: number;
@@ -1937,33 +1975,76 @@ export interface NaukriOverview {
   blockedReason: string;
 }
 
-export const naukriOverviewApi = () => apiFetch<NaukriOverview>('/api/naukri/overview');
+// ── Job platforms ────────────────────────────────────────────────────────────
+// Naukri, Instahyre and Hirist run through one pipeline (lib/platforms.js). The
+// Job Platforms page sets which one the naukri*Api helpers below talk to;
+// everything else (the Action Center, Analytics) names its platform
+// explicitly, so a page left on Instahyre can never send another surface's
+// call there. 'all' is the All platforms view: job lists and Needs answer only.
+export type PlatformId = 'naukri' | 'instahyre' | 'hirist';
+export type PlatformScope = PlatformId | 'all';
+export type ApplyMode = 'off' | 'dry-run' | 'on';
+export interface PlatformCapabilities { refresh: boolean; harvest: boolean; dryRun: boolean; apply: boolean; track: boolean }
+export interface PlatformInfo {
+  id: PlatformId; label: string; color: 'blue' | 'teal' | 'purple';
+  capabilities: PlatformCapabilities;
+  /** Harvest choices, by label. `recommended` null = the site has no matched feed. */
+  sources: { searches: string; recommended: string | null };
+  enabled: boolean;
+  /** Null while the platform is switched off. */
+  overview: NaukriOverview | null;
+}
+export interface DuplicateRules { windowDays: number; blockAuto: boolean; blockApply: boolean }
+
+let naukriScope: PlatformScope = 'naukri';
+// Only while the Job Platforms page is open: anywhere else these helpers are
+// Naukri's, as they always were. Read from the URL rather than reset by the
+// page on unmount — React's dev double-mount would run that reset between
+// the page setting its scope and the cards fetching with it.
+const NB = () => {
+  const onPage = typeof window !== 'undefined' && /\/job-platforms/.test(window.location.pathname);
+  const s = onPage ? naukriScope : 'naukri';
+  return s === 'naukri' ? '/api/naukri' : `/api/p/${s}`;
+};
+export const setNaukriPlatform = (p: PlatformScope) => { naukriScope = p; };
+export const currentNaukriPlatform = () => naukriScope;
+const PB = (p: PlatformId) => (p === 'naukri' ? '/api/naukri' : `/api/p/${p}`);
+
+export const platformsApi = () =>
+  apiFetch<{ platforms: PlatformInfo[]; duplicates: DuplicateRules; crossPlatformOrder: boolean }>('/api/naukri/platforms');
+export const platformOverviewApi = (p: PlatformId) => apiFetch<NaukriOverview>(`${PB(p)}/overview`);
+export const queuePlatformRunApi = (p: PlatformId, kind: NaukriRunKind, opts: { sources?: NaukriSources } = {}) =>
+  apiFetch<{ run: NaukriRun }>(`${PB(p)}/runs`, { method: 'POST', body: JSON.stringify({ kind, ...opts }) });
+export const updatePlatformConfigApi = (p: PlatformId, patch: Record<string, unknown>) =>
+  apiFetch<{ config: NaukriConfig }>(`${PB(p)}/config`, { method: 'PATCH', body: JSON.stringify(patch) });
+
+export const naukriOverviewApi = () => apiFetch<NaukriOverview>(`${NB()}/overview`);
 
 export const naukriConfigApi = () =>
   apiFetch<{ config: NaukriConfig; nextOccurrence: string | null; upcoming: NaukriOccurrence[]; resume: NaukriConfig['resume'] | null }>(
-    '/api/naukri/config');
+    `${NB()}/config`);
 
 /** Partial save — send only the section a card owns, so two open cards can't clobber each other.
     `requeued` counts skipped jobs a changed answer (or profile field) just moved back to Waiting. */
 export const updateNaukriConfigApi = (patch: Record<string, unknown>) =>
   apiFetch<{ config: NaukriConfig; nextOccurrence: string | null; upcoming: NaukriOccurrence[]; requeued: number; tidied?: number }>(
-    '/api/naukri/config', { method: 'PATCH', body: JSON.stringify(patch) });
+    `${NB()}/config`, { method: 'PATCH', body: JSON.stringify(patch) });
 
 /** Run the inbox tidy rules now. */
 export const tidyNaukriInboxApi = () =>
-  apiFetch<{ tidied: number }>('/api/naukri/inbox/tidy', { method: 'POST' });
+  apiFetch<{ tidied: number }>(`${NB()}/inbox/tidy`, { method: 'POST' });
 
 /** SUGGESTED profile values read from the resume by AI — nothing is saved. */
 export const naukriProfileFromResumeApi = () =>
   apiFetch<{ suggested: {
     skills: string[]; totalExperienceMonths: number | null; currentDesignation: string;
     currentCompany: string; currentLocation: string; highestQualification: string;
-  } }>('/api/naukri/config/profile-from-resume', { method: 'POST' });
+  } }>(`${NB()}/config/profile-from-resume`, { method: 'POST' });
 
 /** "Add common rules" — appends the starter rules you don't already have. */
 export const addNaukriStarterRulesApi = () =>
   apiFetch<{ config: NaukriConfig; added: number; requeued: number }>(
-    '/api/naukri/config/starter-rules', { method: 'POST' });
+    `${NB()}/config/starter-rules`, { method: 'POST' });
 
 export interface NaukriDraft {
   answer: string; quote: string; source: 'resume' | 'profile' | 'answer' | '';
@@ -1983,7 +2064,9 @@ export interface NaukriQuestionGroup {
   lastSeenAt: string;
   /** The choices Naukri offered, when it was a radio question. */
   options: string[];
-  jobs: Array<{ id: string; title: string; company: string; url: string }>;
+  jobs: Array<{ id: string; title: string; company: string; url: string; platform?: PlatformId }>;
+  /** Which platforms asked it. The answer bank is shared by all of them. */
+  platforms?: PlatformId[];
   draft: NaukriDraft | null;
 }
 
@@ -1995,34 +2078,34 @@ export const naukriNeedsAnswerApi = () =>
     autoAnswered: NaukriAutoAnswer[];
     /** Jobs sent back to Waiting just now because a draft was confident enough. */
     autoRequeued?: number;
-  }>('/api/naukri/needs-answer');
+  }>(`${NB()}/needs-answer`);
 
 export const reviewNaukriAutoAnswerApi = (pattern: string, action: 'keep' | 'edit' | 'remove', answer?: string) =>
-  apiFetch<{ ok: true }>('/api/naukri/needs-answer/auto', { method: 'POST', body: JSON.stringify({ pattern, action, answer }) });
+  apiFetch<{ ok: true }>(`${NB()}/needs-answer/auto`, { method: 'POST', body: JSON.stringify({ pattern, action, answer }) });
 
 export const draftNaukriAnswerApi = (question: string) =>
   apiFetch<{ draft: NaukriDraft; note?: string | null; autoUsed?: boolean; requeued?: number }>(
-    '/api/naukri/needs-answer/draft', { method: 'POST', body: JSON.stringify({ question }) });
+    `${NB()}/needs-answer/draft`, { method: 'POST', body: JSON.stringify({ question }) });
 
 /** Make it a rule; every job blocked on it goes back to Waiting. */
 export const useNaukriAnswerApi = (question: string, answer: string, pattern?: string) =>
-  apiFetch<{ requeued: number }>(
-    '/api/naukri/needs-answer/use', { method: 'POST', body: JSON.stringify({ question, answer, pattern }) });
+  apiFetch<{ requeued: number; platforms?: Array<{ id: PlatformId; label: string }> }>(
+    `${NB()}/needs-answer/use`, { method: 'POST', body: JSON.stringify({ question, answer, pattern }) });
 
 export const ignoreNaukriQuestionApi = (question: string) =>
   apiFetch<{ dismissed: number }>(
-    '/api/naukri/needs-answer/ignore', { method: 'POST', body: JSON.stringify({ question }) });
+    `${NB()}/needs-answer/ignore`, { method: 'POST', body: JSON.stringify({ question }) });
 
 /** 409 when a run is already active; 423 while paused or inside a captcha block. */
 export const queueNaukriRunApi = (kind: NaukriRunKind, opts: { sources?: NaukriSources } = {}) =>
-  apiFetch<{ run: NaukriRun }>('/api/naukri/runs', { method: 'POST', body: JSON.stringify({ kind, ...opts }) });
+  apiFetch<{ run: NaukriRun }>(`${NB()}/runs`, { method: 'POST', body: JSON.stringify({ kind, ...opts }) });
 
 export const cancelNaukriRunApi = (id: string) =>
-  apiFetch<{ run: NaukriRun }>(`/api/naukri/runs/${id}/cancel`, { method: 'POST' });
+  apiFetch<{ run: NaukriRun }>(`${NB()}/runs/${id}/cancel`, { method: 'POST' });
 
 export const listNaukriRunsApi = (page = 1, limit = 20, kind?: NaukriRunKind) =>
   apiFetch<{ runs: NaukriRun[]; total: number; page: number; limit: number; pages: number }>(
-    `/api/naukri/runs?page=${page}&limit=${limit}${kind ? `&kind=${kind}` : ''}`);
+    `${NB()}/runs?page=${page}&limit=${limit}${kind ? `&kind=${kind}` : ''}`);
 
 export interface NaukriJobQuery {
   /** Ask for a named set the server defines — 'waiting' is exactly what the
@@ -2069,13 +2152,13 @@ export const listNaukriJobsApi = (params: NaukriJobQuery = {}) => {
     originCounts?: { all: number; search: number; recommended: number };
     /** Applied only: how many sit at each recruiter stage. */
     stageCounts?: Record<'none' | 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted', number> | null;
-  }>(`/api/naukri/jobs?${qs.toString()}`);
+  }>(`${NB()}/jobs?${qs.toString()}`);
 };
 
 /** The authorisation point: approving is what permits an application, and it queues the run. */
 export const decideNaukriJobsApi = (ids: string[], decision: NaukriApproval, reason?: string) =>
   apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
-    '/api/naukri/jobs/decide', { method: 'POST', body: JSON.stringify({ ids, decision, reason }) });
+    `${NB()}/jobs/decide`, { method: 'POST', body: JSON.stringify({ ids, decision, reason }) });
 
 /**
  * Act on a selection. The action names differ by where you are:
@@ -2084,13 +2167,13 @@ export const decideNaukriJobsApi = (ids: string[], decision: NaukriApproval, rea
  */
 export const bulkNaukriJobsApi = (
   ids: string[],
-  action: 'apply-next' | 'skip' | 'requeue' | 'dismiss' | 'restore',
+  action: 'apply-next' | 'skip' | 'requeue' | 'dismiss' | 'restore' | 'allow-duplicate',
   reason?: string,
 ) => apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
-  '/api/naukri/jobs/bulk', { method: 'POST', body: JSON.stringify({ ids, action, reason }) });
+  `${NB()}/jobs/bulk`, { method: 'POST', body: JSON.stringify({ ids, action, reason }) });
 
 export const updateNaukriJobApi = (id: string, patch: { applyStatus?: NaukriApplyStatus; applyNote?: string }) =>
-  apiFetch<{ job: NaukriJob }>(`/api/naukri/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
+  apiFetch<{ job: NaukriJob }>(`${NB()}/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
 
 /** Runs the same resolver the worker does, so the tester cannot disagree with reality. */
 export const testNaukriAnswerApi = (question: string) =>
@@ -2098,14 +2181,14 @@ export const testNaukriAnswerApi = (question: string) =>
     question: string; matched: boolean; answer: string | null; kind: string | null;
     pattern: string | null; ruleIndex: number | null; reason: string | null;
     missing: string[]; wouldSkip: boolean;
-  }>('/api/naukri/config/test-answer', { method: 'POST', body: JSON.stringify({ question }) });
+  }>(`${NB()}/config/test-answer`, { method: 'POST', body: JSON.stringify({ question }) });
 
 /** "Would have kept 18 of 47", replayed against your last harvest before you commit. */
 export const previewNaukriFiltersApi = (filters: Partial<NaukriFilters>) =>
   apiFetch<{
     counts: { total: number; kept: number; dropped: number };
     examples: Array<{ title: string; company: string; reason: string }>;
-  }>('/api/naukri/config/preview-filters', { method: 'POST', body: JSON.stringify({ filters }) });
+  }>(`${NB()}/config/preview-filters`, { method: 'POST', body: JSON.stringify({ filters }) });
 
 /** Questions that caused skips — the loop by which the answer bank fills itself. */
 export const naukriUnknownQuestionsApi = () =>
@@ -2114,10 +2197,10 @@ export const naukriUnknownQuestionsApi = () =>
     questions: Array<{ question: string; count: number; lastSeenAt: string }>;
     /** How many caused a skip but are now covered — lets the UI say "all answered". */
     answeredCount: number;
-  }>('/api/naukri/config/unknown-questions');
+  }>(`${NB()}/config/unknown-questions`);
 
 export const deleteNaukriResumeApi = () =>
-  apiFetch<{ ok: true }>('/api/naukri/resume', { method: 'DELETE' });
+  apiFetch<{ ok: true }>(`${NB()}/resume`, { method: 'DELETE' });
 
 // ── Lifecycle emails & reports ───────────────────────────────────────────────
 
@@ -2481,7 +2564,7 @@ export interface NaukriJobOutreach {
   people: number; contacts: number; replied: number;
 }
 export const naukriJobsOutreachApi = (ids: string[]) =>
-  apiFetch<{ jobs: Record<string, NaukriJobOutreach> }>(`/api/naukri/jobs/outreach?ids=${ids.join(',')}`);
+  apiFetch<{ jobs: Record<string, NaukriJobOutreach> }>(`${NB()}/jobs/outreach?ids=${ids.join(',')}`);
 export const prospectSearchApi = (id: string) => apiFetch<{ search: ProspectSearch }>(`/api/prospects/search/${id}`);
 export const cancelSearchApi = (id: string) =>
   apiFetch<{ ok: boolean; cancelled: boolean; search: ProspectSearch }>(`/api/prospects/search/${id}/cancel`, { method: 'POST' });
@@ -2536,7 +2619,8 @@ export interface NaukriAnalytics {
   ai: { asked: number; answered: number; drafts: Record<'ready' | 'unknown' | 'error' | 'ignored', number>; answers: { you: number; auto: number } };
   tidy: Record<'stale' | 'low-fit' | 'company-site' | 'other', number>;
 }
-export const naukriAnalyticsApi = (days = 30) => apiFetch<NaukriAnalytics>(`/api/naukri/analytics?days=${days}`);
+export const naukriAnalyticsApi = (days = 30, platform: PlatformId = 'naukri') =>
+  apiFetch<NaukriAnalytics>(`${platform === 'naukri' ? '/api/naukri' : `/api/p/${platform}`}/analytics?days=${days}`);
 
 export interface QueueAnalytics {
   days: number;

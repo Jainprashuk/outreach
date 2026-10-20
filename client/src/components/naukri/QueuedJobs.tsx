@@ -5,6 +5,7 @@ import { listNaukriJobsApi, decideNaukriJobsApi, queueNaukriRunApi, bulkNaukriJo
 import { Card, Muted, Hint, Empty, Notice } from './ui';
 import { useToast } from '../../context/ToastContext';
 import SelectionBar, { RowCheck } from './SelectionBar';
+import { usePlatform, PlatformTag, DupBadge } from './platform';
 import { fmtTime, fmtRunTime } from './format';
 
 // Approved, and still waiting to be applied to.
@@ -23,11 +24,21 @@ import { fmtTime, fmtRunTime } from './format';
 // most-certain first, because the point is to end the question, not list
 // possibilities.
 function trigger(o: NaukriOverview): { tone: 'ok' | 'warn'; text: string } {
+  // The All platforms view: each platform has its own schedule and apply mode.
+  if (!o.platform && o.label === 'All platforms') {
+    return { tone: 'ok', text: 'Each job goes out on its own platform’s next apply run. Select a platform above to see its schedule.' };
+  }
   if (o.paused) {
-    return { tone: 'warn', text: 'Nothing will run: Naukri is paused in Configuration → Apply behaviour & safety.' };
+    return { tone: 'warn', text: `Nothing will run: ${o.label || 'Naukri'} is paused in Configuration → Apply behaviour & safety.` };
   }
   if (o.blockedUntil) {
-    return { tone: 'warn', text: `Nothing will run until ${fmtTime(o.blockedUntil)} — Naukri challenged the account.` };
+    return { tone: 'warn', text: `Nothing will run until ${fmtTime(o.blockedUntil)} — ${o.label || 'Naukri'} challenged the account.` };
+  }
+  if (o.applyMode === 'off') {
+    return { tone: 'warn', text: `Apply is off for ${o.label || 'this platform'}, so these wait here. Turn it on in Configuration → Apply behaviour & safety.` };
+  }
+  if (o.applyMode === 'dry-run' && o.platform && o.platform !== 'naukri') {
+    return { tone: 'warn', text: `Dry run only: apply runs on ${o.label} walk these listings and submit nothing.` };
   }
   // Any of the schedule's times (not just the first) may be the one that applies.
   const nextApply = (o.upcoming || []).find(x => x.kinds.includes('apply'));
@@ -51,6 +62,7 @@ function trigger(o: NaukriOverview): { tone: 'ok' | 'warn'; text: string } {
 export default function QueuedJobs({ overview, onChanged }: {
   overview: NaukriOverview; onChanged: () => void;
 }) {
+  const { id: scope } = usePlatform();
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [parked, setParked] = useState<NaukriJob[]>([]);
   const [loading, setLoading] = useState(true);
@@ -227,12 +239,15 @@ export default function QueuedJobs({ overview, onChanged }: {
               <div style={{ flex: 1, minWidth: 190 }}>
                 <a href={job.url} target="_blank" rel="noreferrer"
                    style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{job.title}</a>
+                {scope === 'all' && <> <PlatformTag id={job.platform} /></>}
+                {job.dup && <div><DupBadge dup={job.dup} /></div>}
                 <div>
                   <Muted>
                     {job.company}
                     {job.approvedAt ? ` · ${job.approvedBy === 'auto' ? 'auto-approved' : 'approved'} ${fmtRunTime(job.approvedAt)}` : ''}
                     {job.score != null ? ` · fit ${job.score}` : ''}
                     {job.origins?.includes('recommended') ? ' · recommended' : ''}
+                    {job.origins?.includes('recruiter') ? ' · recruiter reached out' : ''}
                     {i >= perRun ? ` · run ${Math.floor(i / perRun) + 1}` : ' · next run'}
                   </Muted>
                 </div>

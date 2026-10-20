@@ -95,7 +95,7 @@ export default function ProfileCard({ config, onSaved }: {
   );
 
   return (
-    <Card title="Profile" icon="ti-user" collapsible id="profile" defaultOpen={false}
+    <Card title="Profile" icon="ti-user" collapsible id="profile" defaultOpen={false} scope="shared"
       right={<button className="btn btn-xs" type="button" onClick={fillFromResume} disabled={reading}
         title="Read skills, experience and current role from your resume — you choose what to keep">
         {reading ? <><i className="ti ti-loader-2 tc-spin" /> Reading…</> : <><i className="ti ti-sparkles" /> Fill from resume</>}

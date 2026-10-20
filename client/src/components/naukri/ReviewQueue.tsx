@@ -6,6 +6,11 @@ import { Card, Muted, Hint, Empty } from './ui';
 import JobFilters, { EMPTY, toQuery, activeCount, type Draft } from './JobFilters';
 import HoverCard from '../HoverCard';
 import { useToast } from '../../context/ToastContext';
+import { usePlatform, PlatformTag, DupBadge, DupConfirm, PLATFORM_LABEL } from './platform';
+
+// A copy on another platform that is already applied to or approved: approving
+// this one too would send the employer a second application.
+const blocksApprove = (j: NaukriJob) => !!j.dup && (j.dup.state === 'applied' || j.dup.state === 'approved');
 
 // The inbox — new listings waiting for a yes or no.
 //
@@ -46,6 +51,8 @@ function Row({ job, selected, focused, busy, onToggle, onDecide, onFocus, onRest
   onRestore?: () => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const { id: scope } = usePlatform();
+  const site = PLATFORM_LABEL[job.platform || 'naukri'];
   useEffect(() => { if (focused) ref.current?.scrollIntoView({ block: 'nearest' }); }, [focused]);
   const exp = job.experienceMin != null
     ? `${job.experienceMin}${job.experienceMax != null ? `-${job.experienceMax}` : '+'} yrs`
@@ -66,14 +73,21 @@ function Row({ job, selected, focused, busy, onToggle, onDecide, onFocus, onRest
             {job.title}
           </a>
           <span style={{ color: 'var(--text2)', fontSize: 12 }}>{job.company}</span>
+          {scope === 'all' && <PlatformTag id={job.platform} />}
+          {job.origins?.includes('recruiter') && (
+            <span className="badge badge-approved" title={`A recruiter on ${site} reached out about this one`} style={{ fontSize: 10.5 }}>
+              <i className="ti ti-user-check" style={{ marginRight: 3 }} />Recruiter
+            </span>
+          )}
           {job.origins?.includes('recommended') && (
             <span className="badge badge-seen" title={job.origins.includes('search')
-              ? 'Found by your searches and recommended by Naukri'
-              : 'From Naukri’s Recommended jobs for your profile'} style={{ fontSize: 10.5 }}>
+              ? `Found by your searches and recommended by ${site}`
+              : `From ${site}’s recommended jobs for your profile`} style={{ fontSize: 10.5 }}>
               <i className="ti ti-star" style={{ marginRight: 3 }} />Recommended
             </span>
           )}
         </div>
+        {job.dup && <div><DupBadge dup={job.dup} /></div>}
         <div style={{ color: 'var(--text2)', fontSize: 12, marginTop: 2, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {exp && <span>{exp}</span>}
           {job.location && <span style={{ maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{job.location}</span>}
@@ -134,6 +148,9 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
 
   // "Show tidied": the jobs the inbox tidy cleared away, each with Restore.
   const [tidiedView, setTidiedView] = useState(false);
+  // A single approve of a duplicate waits on "Approve anyway".
+  const [confirmDup, setConfirmDup] = useState<NaukriJob | null>(null);
+  const { label: here } = usePlatform();
 
   const load = useCallback(async (d: Draft, p: number) => {
     setLoading(true);
@@ -167,10 +184,22 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
     return next;
   });
 
-  const decide = useCallback(async (ids: string[], decision: 'approved' | 'rejected') => {
+  const decide = useCallback(async (idsIn: string[], decision: 'approved' | 'rejected', { anyway = false } = {}) => {
+    let ids = idsIn;
+    let kept = 0;
+    if (decision === 'approved' && !anyway) {
+      const byId = new Map(jobs.map(j => [j.id, j]));
+      const dupes = ids.filter(id => { const j = byId.get(id); return j && blocksApprove(j); });
+      // One job: ask. Several: approve the rest, keep the duplicates for you.
+      if (ids.length === 1 && dupes.length === 1) { setConfirmDup(byId.get(ids[0]) || null); return; }
+      if (dupes.length) { kept = dupes.length; ids = ids.filter(id => !dupes.includes(id)); }
+      if (!ids.length) { toast(`Kept ${kept} in the inbox: already applied or approved on another platform.`, 'info'); return; }
+    }
     if (!ids.length) return;
     setBusy(true); setMsg('');
     try {
+      // "Approve anyway": the apply-time duplicate skip must leave it alone too.
+      if (anyway) await bulkNaukriJobsApi(ids, 'allow-duplicate');
       const r = await decideNaukriJobsApi(ids, decision);
       // Approving queues the apply run server-side, and that can be refused
       // (paused, blocked, one already active). Say so — the approvals are saved
@@ -181,8 +210,9 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
           ? `Approved ${r.updated}, but the apply run did not start: ${runErr}`
           : `Approved ${r.updated} — apply run queued.`
         : `Rejected ${r.updated}.`;
-      if (ids.length > 1 || runErr) toast(text, decision === 'approved' && runErr ? 'error' : 'success');
-      setMsg(text);
+      const full = kept ? `${text} Kept ${kept} in the inbox: already applied or approved on another platform.` : text;
+      if (ids.length > 1 || runErr || kept) toast(full, decision === 'approved' && runErr ? 'error' : 'success');
+      setMsg(full);
       // Out of the list at once, so the keyboard flow never waits on a reload.
       const gone = new Set(ids);
       const left = jobs.filter(j => !gone.has(j.id));
@@ -230,7 +260,7 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
 
   const allSelected = jobs.length > 0 && sel.size === jobs.length;
   const filtered = activeCount(draft) > 0;
-  const atOrAbove = jobs.filter(j => (j.score ?? -1) >= minScore && !j.likelyExternal);
+  const atOrAbove = jobs.filter(j => (j.score ?? -1) >= minScore && !j.likelyExternal && !blocksApprove(j));
 
   return (
     <Card>
@@ -277,7 +307,7 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
           </select>
           <button className="btn btn-sm btn-primary" type="button" disabled={busy || !atOrAbove.length}
             onClick={() => decide(atOrAbove.map(j => j.id), 'approved')}
-            title="Only the jobs on this page, and never predicted company-site ones">
+            title="Only the jobs on this page, and never predicted company-site ones or duplicates already applied to elsewhere">
             Approve {atOrAbove.length}
           </button>
         </div>
@@ -309,6 +339,11 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
       )}
       </>)}
       </Refreshing>
+      {confirmDup && (
+        <DupConfirm job={confirmDup} here={confirmDup.platform ? PLATFORM_LABEL[confirmDup.platform] : here}
+          onCancel={() => setConfirmDup(null)}
+          onConfirm={() => { const j = confirmDup; setConfirmDup(null); decide([j.id], 'approved', { anyway: true }); }} />
+      )}
     </Card>
   );
 }

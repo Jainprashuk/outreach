@@ -1,8 +1,11 @@
 import { useState } from 'react';
-import type { NaukriConfig } from '../../../lib/api';
+import type { ApplyMode, NaukriConfig } from '../../../lib/api';
 import { Card, Notice } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 import { useToast } from '../../../context/ToastContext';
+import { usePlatform } from '../platform';
+
+const MODES: Array<[ApplyMode, string]> = [['off', 'Off'], ['dry-run', 'Dry run'], ['on', 'On']];
 
 // The caps, and the two switches that decide whether this thing is safe.
 //
@@ -23,6 +26,8 @@ export default function ApplyCard({ config, onSaved }: {
 }) {
   const [a, setA] = useState(config.apply);
   const toast = useToast();
+  const { label, capabilities, id: platformId } = usePlatform();
+  const [mode, setMode] = useState<ApplyMode>(config.applyMode || (config.safety.dryRun ? 'dry-run' : 'on'));
   const [safety, setSafety] = useState(config.safety);
   const [confirm, setConfirm] = useState('');
   const [busy, setBusy] = useState(false);
@@ -67,6 +72,21 @@ export default function ApplyCard({ config, onSaved }: {
     finally { setBusy(false); }
   };
 
+  // Off / Dry run / On. Real apply stays locked on a platform whose apply step
+  // is not proven on the live site yet (the server refuses it too).
+  const setApplyMode = async (m: ApplyMode) => {
+    if (m === mode) return;
+    setBusy(true); setMsg('');
+    try {
+      const r = await updateNaukriConfigApi({ applyMode: m });
+      setMode(r.config.applyMode || m);
+      setSafety(s => ({ ...s, dryRun: m === 'dry-run' }));
+      toast(`${label} apply: ${m === 'off' ? 'off' : m === 'dry-run' ? 'dry run' : 'on'}.`, 'success');
+      onSaved();
+    } catch (e: any) { toast(e?.message || 'Could not change apply', 'error'); setMsg(e?.message || 'Could not change apply'); }
+    finally { setBusy(false); }
+  };
+
   const enableAuto = async () => {
     if (confirm.trim().toUpperCase() !== 'APPLY WITHOUT ME') return;
     setBusy(true);
@@ -78,7 +98,29 @@ export default function ApplyCard({ config, onSaved }: {
   };
 
   return (
-    <Card title="Apply behaviour & safety" icon="ti-send" collapsible id="apply" defaultOpen={false}>
+    <Card title="Apply behaviour & safety" icon="ti-send" collapsible id="apply" defaultOpen={false} scope="site">
+
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Apply</div>
+        <div role="radiogroup" aria-label={`${label} apply`} style={{ display: 'inline-flex', border: '0.5px solid var(--border-md)', borderRadius: 'var(--radius)', overflow: 'hidden' }}>
+          {MODES.map(([m, text]) => {
+            const locked = (m === 'on' && !capabilities.apply) || (m === 'dry-run' && !capabilities.dryRun);
+            return (
+              <button key={m} type="button" role="radio" aria-checked={mode === m} disabled={busy || locked}
+                title={locked ? `Real apply on ${label} isn't verified yet — use Dry run until it is.` : undefined}
+                onClick={() => setApplyMode(m)} className={`btn btn-sm${mode === m ? ' btn-primary' : ''}`}
+                style={{ borderRadius: 0, border: 'none' }}>
+                {text}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ color: 'var(--text2)', fontSize: 11, marginTop: 4 }}>
+          Dry run walks the whole flow, fills every field, submits nothing and logs what it would have sent.
+          {platformId !== 'naukri' && ' Off means this platform only harvests and checks replies.'}
+          {!capabilities.apply && ` Real apply on ${label} unlocks once its dry runs match what you see on the site.`}
+        </div>
+      </div>
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
         <label style={{ fontSize: 13 }}>
@@ -104,7 +146,7 @@ export default function ApplyCard({ config, onSaved }: {
       </div>
       <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 12 }}>
         No limit beyond what you set here. A run never takes more than what is left of today&apos;s limit. Going well past
-        30–40 a day can start to look automated to Naukri — your call. The gap is randomised
+        30–40 a day can start to look automated to {label} — your call. The gap is randomised
         between every job — a fixed interval is a signature.
       </div>
 
@@ -122,24 +164,13 @@ export default function ApplyCard({ config, onSaved }: {
       </button>
 
       <div style={{ borderTop: '1px solid var(--border)', paddingTop: 12 }}>
-        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, marginBottom: 10 }}>
-          <input type="checkbox" checked={safety.dryRun}
-            onChange={e => setSafetyFlag('dryRun', e.target.checked)} style={{ marginTop: 3 }} />
-          <span>
-            Dry run
-            <div style={{ color: 'var(--text2)', fontSize: 11 }}>
-              Walk the whole flow, fill every field, submit nothing, and log what it would have sent.
-            </div>
-          </span>
-        </label>
-
         <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, marginBottom: 12 }}>
           <input type="checkbox" checked={safety.pauseAll}
             onChange={e => setSafetyFlag('pauseAll', e.target.checked)} style={{ marginTop: 3 }} />
           <span>
-            Pause all
+            Pause {label}
             <div style={{ color: 'var(--text2)', fontSize: 11 }}>
-              The kill switch. The worker is handed no work at all while this is on.
+              The kill switch: this worker gets no work at all while this is on. Other platforms keep running.
             </div>
           </span>
         </label>
@@ -152,12 +183,13 @@ export default function ApplyCard({ config, onSaved }: {
           </div>
           <div style={{ color: 'var(--text2)', fontSize: 11, marginBottom: 8 }}>
             While off, nothing is applied to unless you approve that specific job. While on, each harvest
-            approves new jobs scoring {a.autoApproveMinScore}+ (never likely company-site ones). They wait in
+            approves new jobs scoring {a.autoApproveMinScore}+ (never likely company-site ones, never duplicates you
+            already applied to or approved on another platform). They wait in
             Jobs → Waiting — where you can un-approve any — and go out on the schedule&apos;s Apply runs.
           </div>
           {a.autoApproveEnabled && !scheduleApplies && (
             <Notice tone="warn" icon="ti-alert-triangle">
-              None of your schedule&apos;s times has Apply ticked, so auto-approved jobs will wait until you press
+              None of {label}&apos;s schedule times has Apply ticked, so auto-approved jobs will wait until you press
               Apply.{' '}
               <button className="btn btn-xs" type="button" disabled={busy} onClick={turnOnScheduledApply}>Tick Apply on the schedule</button>
             </Notice>

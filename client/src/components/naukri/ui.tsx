@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { usePlatform, ScopeTag } from './platform';
 
 /** Open a collapsible config card by its id and scroll to it — used by the
     setup checklist's "Fix" links. */
@@ -20,8 +21,10 @@ export const openNaukriCard = (id: string) =>
 // bare <input>/<select>/<textarea>, which the stylesheet already styles globally
 // — they need no className at all.
 
-export function Card({ title, icon, right, badge, children, style, collapsible, id, defaultOpen = true }: {
+export function Card({ title, icon, right, badge, children, style, collapsible, id, defaultOpen = true, scope }: {
   title?: string; icon?: string; right?: ReactNode; children: ReactNode;
+  /** Where the setting applies: this platform only ('site') or every platform ('shared'). */
+  scope?: 'site' | 'shared';
   /** Shown beside the title even when collapsed — for a count that means
       "there is something for you in here", which a hidden card must still say. */
   badge?: ReactNode;
@@ -36,6 +39,7 @@ export function Card({ title, icon, right, badge, children, style, collapsible, 
   // want. Not remembered between visits: a card left open last time used to
   // stay open, so the Configuration tab drifted into a long wall of forms.
   const [open, setOpen] = useState(() => (collapsible ? defaultOpen : true));
+  const platform = usePlatform();
 
   const toggle = () => setOpen(o => !o);
 
@@ -79,6 +83,7 @@ export function Card({ title, icon, right, badge, children, style, collapsible, 
             )}
             {icon && <i className={`ti ${icon}`} style={{ fontSize: 14 }} />}
             {title}
+            {scope && <ScopeTag only={scope === 'site' ? platform.label : null} />}
             {badge}
           </span>
           {/* Header actions stay reachable while collapsed only if they make

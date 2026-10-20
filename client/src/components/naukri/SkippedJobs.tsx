@@ -5,24 +5,28 @@ import { listNaukriJobsApi, bulkNaukriJobsApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty } from './ui';
 import { useToast } from '../../context/ToastContext';
 import SelectionBar, { RowCheck } from './SelectionBar';
+import { usePlatform, PlatformTag } from './platform';
 import { useFindPeople } from './useFindPeople';
 
 // What happened, in a word, and the one thing worth doing about it.
-type Why = 'company-site' | 'walk-in' | 'closed' | 'already' | 'set-aside' | 'other';
+type Why = 'company-site' | 'walk-in' | 'closed' | 'already' | 'set-aside' | 'other' | 'duplicate';
 function whyOf(j: NaukriJob): Why {
   const n = (j.applyNote || '').toLowerCase();
   if (/company site/.test(n)) return 'company-site';
   if (/walk-in/.test(n)) return 'walk-in';
   if (/closed or removed|no longer takes/.test(n)) return 'closed';
+  // The same role was applied to on another platform (lib/jobDupes.js).
+  if (/already applied via /.test(n)) return 'duplicate';
   if (/already applied/.test(n)) return 'already';
   if (/set aside/.test(n)) return 'set-aside';
   return 'other';
 }
 const WHY_TEXT: Record<Why, string> = {
-  'company-site': 'Applies on the company’s own site — the worker only does Naukri applies.',
+  'company-site': 'Applies on the company’s own site — the worker only does native applies on the job site.',
   'walk-in': 'Walk-in drive — Naukri only offers “I am interested”, which is not an application.',
-  closed: 'Listing closed or removed — Naukri no longer takes applications for it.',
-  already: 'You had already applied to this one on Naukri.',
+  closed: 'Listing closed or removed — the site no longer takes applications for it.',
+  already: 'You had already applied to this one on the site.',
+  duplicate: '',
   'set-aside': 'You set this aside.',
   other: '',
 };
@@ -43,6 +47,7 @@ const isExternal = (j: NaukriJob) => /applies on the company site/i.test(j.apply
 const isQuestion = (j: NaukriJob) => !!j.unknownQuestion;
 
 export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
+  const { id: scope } = usePlatform();
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [tab, setTab] = useState<Tab>('external');
   const [loading, setLoading] = useState(true);
@@ -114,8 +119,13 @@ export default function SkippedJobs({ onChanged }: { onChanged: () => void }) {
       <div style={{ flex: 1, minWidth: 190 }}>
         <a href={job.url} target="_blank" rel="noreferrer"
            style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{job.title}</a>
-        <div><Muted>{job.company}{job.location ? ` · ${job.location}` : ''}</Muted></div>
-        <Muted style={{ display: 'block' }}>{WHY_TEXT[whyOf(job)] || job.applyNote}</Muted>
+        <div><Muted>{job.company}{job.location ? ` · ${job.location}` : ''}</Muted>{scope === 'all' && <> <PlatformTag id={job.platform} /></>}</div>
+        {whyOf(job) === 'duplicate'
+          ? <span style={{ display: 'inline-flex', gap: 6, alignItems: 'center', fontSize: 12 }}>
+              <span className="badge" style={{ background: 'var(--amber-bg)', color: 'var(--amber)' }}><i className="ti ti-copy" /> Duplicate</span>
+              <Muted>{job.applyNote}</Muted>
+            </span>
+          : <Muted style={{ display: 'block' }}>{WHY_TEXT[whyOf(job)] || job.applyNote}</Muted>}
       </div>
       {/* The next step for this kind of skip — so every row says what to do. */}
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

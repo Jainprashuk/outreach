@@ -4,6 +4,7 @@ import { Card, Muted } from '../ui';
 import { queueNaukriRunApi, updateNaukriConfigApi } from '../../../lib/api';
 import { fmtTime } from '../format';
 import { useToast } from '../../../context/ToastContext';
+import { usePlatform } from '../platform';
 
 // Read-only health, plus the two controls that belong next to it: a probe that
 // proves the whole chain end to end, and the kill switch.
@@ -29,6 +30,7 @@ export default function ConnectionCard({ overview, onChanged }: {
   overview: NaukriOverview; onChanged: () => void;
 }) {
   const w = overview.worker;
+  const { id: platformId, label: site, capabilities } = usePlatform();
   const [busy, setBusy] = useState(false);
   const toast = useToast();
   const [msg, setMsg] = useState('');
@@ -36,8 +38,12 @@ export default function ConnectionCard({ overview, onChanged }: {
   const probe = async () => {
     setBusy(true); setMsg('');
     try {
-      await queueNaukriRunApi('refresh');
-      const m = 'Test queued — a refresh run proves the attach, the login and a real profile save. Watch it in Activity.';
+      // Where there is no profile save to test, a (read-only) replies check
+      // proves the same chain: attach, login, a real page load.
+      await queueNaukriRunApi(capabilities.refresh ? 'refresh' : 'track');
+      const m = capabilities.refresh
+        ? 'Test queued — a refresh run proves the attach, the login and a real profile save. Watch it in Activity.'
+        : `Test queued — a read-only replies check proves the attach, the ${site} login and a real page load. Watch it in Activity.`;
       toast(m, 'success'); setMsg(m);
       onChanged();
     } catch (e: any) { const m = e?.message || 'Could not queue the test run'; toast(m, 'error'); setMsg(m); }
@@ -50,7 +56,7 @@ export default function ConnectionCard({ overview, onChanged }: {
       await updateNaukriConfigApi({ safety: { pauseAll: !overview.paused } });
       // The kill switch deserves confirmation: its only other visible effect is
       // buttons quietly going grey.
-      toast(overview.paused ? 'Resumed — runs can start again.' : 'Paused — the worker will be handed no work.',
+      toast(overview.paused ? `Resumed — ${site} runs can start again.` : `Paused — the ${site} worker will be handed no work. Other platforms keep running.`,
         overview.paused ? 'success' : 'info');
       onChanged();
     } catch (e: any) { const m = e?.message || 'Could not change the pause switch'; toast(m, 'error'); setMsg(m); }
@@ -58,17 +64,21 @@ export default function ConnectionCard({ overview, onChanged }: {
   };
 
   return (
-    <Card title="Connection" icon="ti-plug-connected" collapsible id="connection" defaultOpen={false}
+    <Card title="Connection" icon="ti-plug-connected" collapsible id="connection" defaultOpen={false} scope="site"
       right={w.lastSeenAt ? <Muted>last seen {fmtTime(w.lastSeenAt)}</Muted> : null}>
 
       <Line ok={w.everSeen && w.online} label={w.host ? `Worker running on ${w.host}` : 'Worker running'}
             fix={w.everSeen
               ? `Your Mac is asleep or the worker stopped. It resumes ${w.nextWakeAt ? `at ${fmtTime(w.nextWakeAt)}` : 'when you open it'}.`
-              : 'Never checked in. Run `npm run naukri-worker` on your Mac.'} />
+              : `Never checked in. Run \`npm run ${platformId}-worker\` on your Mac.`} />
       <Line ok={w.chromeUp} label="Chrome on the debug port"
             fix="Run ./chrome-debug.sh in the scraper repo. Chrome refuses the debug port on your default profile, so it needs that dedicated one." />
-      <Line ok={w.naukriLoggedIn} label="Logged into Naukri"
-            fix="Open naukri.com inside the debug Chrome window and log in. The cookie persists across reboots; no password is ever stored here." />
+      <Line ok={w.naukriLoggedIn} label={`Logged into ${site}`}
+            fix={`Open ${site} inside the debug Chrome window and log in. The cookie persists across reboots; no password is ever stored here.`} />
+      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 8 }}>
+        Start command <code style={{ fontSize: 12 }}>npm run {platformId}-worker</code>
+        {platformId !== 'naukri' && <> · or add it to <code>PLATFORMS</code> in .env for <code>npm run workers</code></>}
+      </div>
 
       {overview.blockedUntil && (
         <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 8 }}>
@@ -81,7 +91,7 @@ export default function ConnectionCard({ overview, onChanged }: {
           Test connection
         </button>
         <button className={`btn btn-sm${overview.paused ? ' btn-primary' : ''}`} onClick={togglePause} disabled={busy}>
-          {overview.paused ? 'Resume' : 'Pause all'}
+          {overview.paused ? 'Resume' : `Pause ${site}`}
         </button>
       </div>
       {msg && <div style={{ color: 'var(--text2)', fontSize: 12, marginTop: 8 }}>{msg}</div>}

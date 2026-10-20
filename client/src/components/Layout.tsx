@@ -113,7 +113,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
       {/* Display only — requireLibraryAccess re-checks on every request. Hidden
           unless an admin turned it on for this account. */}
       {canSeeLibrary && item('/library', 'ti-books', 'Library', 'Contacts, leads, Discover people and companies from every user, in one shared list. Only the details — never anyone’s sends or replies. Add the ones you want to your outreach.')}
-      {item('/naukri', 'ti-briefcase-2', 'Naukri', 'Keeps your Naukri profile fresh and applies to the jobs you approve, using a worker on your computer.')}
+      {item('/job-platforms', 'ti-briefcase-2', 'Job Platforms', 'Naukri, Instahyre and Hirist in one place: harvests jobs, applies to the ones you approve and tracks what recruiters do, using a worker on your computer for each platform.')}
       {item('/campaigns', 'ti-calendar-repeat', 'Campaigns', 'Hands-off sending: give it a list and it emails a set number of people a day for you.')}
       {item('/logs', 'ti-list-details', 'Logs', 'A record of everything the app did — sends, imports, scrapes, errors — for checking what happened and when.')}
 

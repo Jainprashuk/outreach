@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import type { NaukriSchedule, NaukriSlot, NaukriOccurrence } from '../../../lib/api';
+import type { ApplyMode, NaukriSchedule, NaukriSlot, NaukriOccurrence } from '../../../lib/api';
+import { usePlatform } from '../platform';
 import { Card, Muted, Hint } from '../ui';
 import { updateNaukriConfigApi } from '../../../lib/api';
 import { fmtTime, DAY_LABELS } from '../format';
@@ -22,19 +23,31 @@ const KINDS = [
   ['runRefresh', 'Refresh', 'Re-save your profile so recruiter search ranks you'],
   ['runHarvest', 'Harvest', 'Collect new listings into the inbox (read-only)'],
   ['runApply', 'Apply', 'Send applications for jobs in Waiting — unattended'],
-  ['runTrack', 'Track replies', 'Read what recruiters did (viewed, shortlisted, contacted) from Naukri — read-only'],
+  ['runTrack', 'Check replies', 'Read what recruiters did (viewed, shortlisted, contacted), read-only'],
 ] as const;
+// Which capability each tick needs (lib/platforms.js).
+const CAP: Record<string, 'refresh' | 'harvest' | 'apply' | 'track'> = { runRefresh: 'refresh', runHarvest: 'harvest', runApply: 'apply', runTrack: 'track' };
+const STEP: Record<string, string> = { runRefresh: 'refresh profile', runHarvest: 'harvest', runApply: 'apply', runTrack: 'check replies' };
 
 type Kind = typeof KINDS[number][0];
 
 export default function ScheduleCard({
-  schedule, upcoming, pollSeconds, onSaved,
+  schedule, upcoming, pollSeconds, onSaved, applyMode = 'on',
 }: {
   schedule: NaukriSchedule;
   upcoming: NaukriOccurrence[];
   pollSeconds: number;
   onSaved: () => void;
+  applyMode?: ApplyMode;
 }) {
+  const { label: site, capabilities } = usePlatform();
+  // Why a tick cannot be used here, or null when it can.
+  const tickOff = (key: string): string | null => {
+    const cap = CAP[key];
+    if (cap !== 'apply' && !capabilities[cap]) return `${site} has no ${STEP[key]} step`;
+    if (cap === 'apply' && applyMode === 'off') return 'Apply is off for this platform';
+    return null;
+  };
   const [draft, setDraft] = useState<NaukriSchedule>({ ...schedule, extraSlots: schedule.extraSlots || [] });
   const [poll, setPoll] = useState(pollSeconds);
   const [next, setNext] = useState<NaukriOccurrence[]>(upcoming);
@@ -85,10 +98,10 @@ export default function ScheduleCard({
   };
 
   const nothingOn = times.every(t => !t.runRefresh && !t.runHarvest && !t.runApply && !t.runTrack);
-  const applyAnywhere = times.some(t => t.runApply);
+  const applyAnywhere = applyMode !== 'off' && times.some(t => t.runApply);
 
   return (
-    <Card title="Schedule" icon="ti-calendar-repeat" collapsible id="schedule" defaultOpen={false}
+    <Card title="Schedule" icon="ti-calendar-repeat" collapsible id="schedule" defaultOpen={false} scope="site"
       right={draft.enabled && next[0] ? <Muted>Next: {fmtTime(next[0].at)}</Muted> : null}>
 
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: 13 }}>
@@ -116,12 +129,15 @@ export default function ScheduleCard({
           padding: '8px 10px', marginBottom: 6, background: 'var(--bg2)', borderRadius: 'var(--radius)',
         }}>
           <input type="time" value={t.time} onChange={e => setTime(i, { time: e.target.value })} style={{ width: 110 }} />
-          {KINDS.map(([key, label, help]) => (
-            <label key={key} title={help} style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 13 }}>
-              <input type="checkbox" checked={!!t[key as Kind]} onChange={e => setTime(i, { [key]: e.target.checked })} />
-              {label}
-            </label>
-          ))}
+          {KINDS.map(([key, label, help]) => {
+            const off = tickOff(key);
+            return (
+              <label key={key} title={off || help} style={{ display: 'flex', gap: 5, alignItems: 'center', fontSize: 13, opacity: off ? 0.45 : 1, cursor: off ? 'not-allowed' : 'pointer' }}>
+                <input type="checkbox" disabled={!!off} checked={!off && !!t[key as Kind]} onChange={e => setTime(i, { [key]: e.target.checked })} />
+                {label}
+              </label>
+            );
+          })}
           {i > 0 && (
             <button className="btn btn-xs" type="button" onClick={() => removeTime(i)} style={{ marginLeft: 'auto' }}>
               <i className="ti ti-trash" /> Remove
@@ -136,7 +152,7 @@ export default function ScheduleCard({
       )}
       <Hint style={{ marginBottom: 12 }}>
         Refresh re-saves your profile · Harvest fills the inbox (read-only) · Apply sends jobs in Waiting, freshest
-        postings first · Track replies reads recruiter actions (read-only). A second Apply time (e.g. 14:00) gets the
+        postings first · Check replies reads recruiter actions (read-only). A second Apply time (e.g. 14:00) gets the
         day&apos;s new listings out while they are fresh.
         {applyAnywhere
           ? ' Apply is ticked, so scheduled wakes send applications without you there — within the daily cap.'

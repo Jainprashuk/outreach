@@ -107,7 +107,7 @@ export default function AnswerBank({ config, onSaved }: {
   const pending = unknown;
 
   return (
-    <Card title="Answers" icon="ti-messages" collapsible id="answers" defaultOpen={false}
+    <Card title="Answers" icon="ti-messages" collapsible id="answers" defaultOpen={false} scope="shared"
       badge={pending.length > 0
         ? <span className="contact-count-badge" style={{ marginLeft: 6 }}>{pending.length} unanswered</span>
         : null}
