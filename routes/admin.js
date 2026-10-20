@@ -1071,6 +1071,12 @@ function sanitizeForAdmin(report, discover, naukri) {
     autoApproved: naukri.autoApproved,
     ai: naukri.ai,
     tidy: naukri.tidy,
+    // Per job platform: the platform's id and name plus counts, nothing else.
+    byPlatform: (naukri.byPlatform || []).map(x => ({
+      platform: String(x.platform), label: String(x.label),
+      ...Object.fromEntries(['found', 'approved', 'applied', 'appliedToday', 'responded', 'shortlisted', 'interviewing', 'runs', 'failedRuns', 'blockedRuns']
+        .map(f => [f, Number(x[f]) || 0])),
+    })),
   } : null;
   return { report: r, discover: d, naukri: k };
 }

@@ -606,6 +606,7 @@ app.use('/api/contacts', requireDb, require('./routes/contacts'));
 app.use('/api/actions', requireDb, require('./routes/actions'));
 app.use('/api/notifications', requireDb, require('./routes/notifications'));
 app.use('/api/pulse', requireDb, require('./routes/pulse'));
+app.use('/api/runs', requireDb, require('./routes/runs'));
 app.use('/api/replies', requireDb, require('./routes/replies'));
 app.use('/api/templates', requireDb, require('./routes/templates'));
 app.use('/api/settings', requireDb, require('./routes/settings'));

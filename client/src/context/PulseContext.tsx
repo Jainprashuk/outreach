@@ -15,6 +15,8 @@ export interface Pulse {
   jobs: string;
   notifications: string;
   mailbox: string;
+  /** Worker runs (LinkedIn harvest, job platforms): active ones and the newest finish. */
+  runs?: string;
 }
 
 const PulseContext = createContext<Pulse | null>(null);

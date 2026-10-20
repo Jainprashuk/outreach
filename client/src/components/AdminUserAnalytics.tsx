@@ -62,7 +62,7 @@ export default function AdminUserAnalytics({ userId }: { userId: string }) {
     <>
       <div className="section-head" style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
         <div className="nav-tabs">
-          {([['report', 'ti-file-analytics', 'Report'], ['pipeline', 'ti-list-check', 'Pipeline'], ['discover', 'ti-compass', 'Discover'], ['naukri', 'ti-briefcase', 'Naukri']] as const).map(([k, icon, label]) => (
+          {([['report', 'ti-file-analytics', 'Report'], ['pipeline', 'ti-list-check', 'Pipeline'], ['discover', 'ti-compass', 'Discover'], ['naukri', 'ti-briefcase', 'Job Platforms']] as const).map(([k, icon, label]) => (
             <button key={k} type="button" className={`nav-tab${tab === k ? ' active' : ''}`} onClick={() => setTab(k)}>
               <i className={`ti ${icon}`} /> {label}
             </button>
@@ -184,7 +184,7 @@ export default function AdminUserAnalytics({ userId }: { userId: string }) {
         </>
       )}
       {tab === 'naukri' && data && (
-        data.naukri ? <NaukriAnalyticsView data={data.naukri} admin /> : <div className="an-empty">No Naukri numbers for this account.</div>
+        data.naukri ? <NaukriAnalyticsView data={data.naukri} admin platform="all" /> : <div className="an-empty">No job platform numbers for this account.</div>
       )}
     </>
   );

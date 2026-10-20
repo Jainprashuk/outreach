@@ -574,7 +574,7 @@ export default function Analytics() {
           <i className="ti ti-compass" /> Discover
         </button>
         <button type="button" className={`nav-tab${view === 'naukri' ? ' active' : ''}`} onClick={() => setView('naukri')}>
-          <i className="ti ti-briefcase" /> Naukri
+          <i className="ti ti-briefcase" /> Job Platforms
         </button>
         <button type="button" className={`nav-tab${view === 'reports' ? ' active' : ''}`} onClick={() => setView('reports')}>
           <i className="ti ti-file-analytics" /> Reports
@@ -652,7 +652,7 @@ export default function Analytics() {
 
   if (view === 'naukri') {
     return (
-      <Layout title="Analytics" subtitle="Naukri: what was applied to, why the rest stopped, and what recruiters did"
+      <Layout title="Analytics" subtitle="Job platforms: what was applied to, why the rest stopped, and what recruiters did"
         actions={
           <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
             <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} /> Refresh

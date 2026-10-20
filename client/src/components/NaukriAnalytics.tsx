@@ -1,12 +1,13 @@
-// Analytics → Naukri. The question it answers first is "is applying working?":
-// what the worker sent, why the rest stopped, and whether recruiters respond.
-// Everything here is already stored by the Naukri flow (lib/naukriAnalytics.js).
+// Analytics → Job Platforms (Naukri, Instahyre, Hirist, or all of them). The
+// question it answers first is "is applying working?": what the worker sent,
+// why the rest stopped, and whether recruiters respond. Everything here is
+// already stored by the job-platform flow (lib/naukriAnalytics.js).
 // `NaukriAnalyticsView` takes data directly so the admin drawer can reuse it.
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Card, HBar } from './AnalyticsCards';
 import { Skeleton } from './Skeleton';
-import { naukriAnalyticsApi, type NaukriAnalytics as Data } from '../lib/api';
+import { naukriAnalyticsApi, type NaukriAnalytics as Data, type PlatformScope } from '../lib/api';
 import { cvar, fmtDur, pct } from '../lib/analytics';
 
 const STAGE_LABEL: Record<string, string> = {
@@ -94,14 +95,54 @@ function Loading() {
   );
 }
 
-export function NaukriAnalyticsView({ data, admin = false }: { data: Data; admin?: boolean }) {
+const SITE_LABEL: Record<string, string> = { all: 'job platform', naukri: 'Naukri', instahyre: 'Instahyre', hirist: 'Hirist' };
+const RECOMMENDED_LABEL: Record<string, string> = {
+  all: 'Recommended / matched feeds', naukri: "Naukri's Recommended jobs", instahyre: "Instahyre's Matched opportunities", hirist: 'Your Hirist job feed',
+};
+
+/** All platforms: each site side by side, so you can see which one works. */
+function ByPlatform({ rows }: { rows: NonNullable<Data['byPlatform']> }) {
+  return (
+    <div style={{ marginBottom: 14 }}>
+      <Card title="By platform" icon="ti-layout-columns" sub="Each job site side by side — found, sent, and what recruiters did">
+        <div style={{ overflowX: 'auto' }}>
+          <table className="an-table">
+            <thead><tr>
+              <th>Platform</th><th className="num">Found</th><th className="num">Approved</th><th className="num">Applied</th>
+              <th className="num">Today</th><th className="num">Responded</th><th className="num">Shortlisted</th>
+              <th className="num">Interviews</th><th className="num">Runs</th>
+            </tr></thead>
+            <tbody>
+              {rows.map(r => (
+                <tr key={r.platform}>
+                  <td><Link to={`/job-platforms?platform=${r.platform}`} style={{ color: 'var(--accent)', textDecoration: 'none', fontWeight: 500 }}>{r.label}</Link></td>
+                  <td className="num">{r.found}</td><td className="num">{r.approved}</td>
+                  <td className="num">{r.applied}</td><td className="num">{r.appliedToday}</td>
+                  <td className="num">{r.responded}{r.applied ? <span style={{ color: 'var(--text3)' }}> ({pct(r.responded, r.applied)}%)</span> : null}</td>
+                  <td className="num">{r.shortlisted}</td><td className="num">{r.interviewing}</td>
+                  <td className="num" title={`${r.failedRuns} failed · ${r.blockedRuns} hit a captcha`}>
+                    {r.runs}{r.failedRuns || r.blockedRuns ? <span style={{ color: 'var(--red)' }}> · {r.failedRuns + r.blockedRuns} ✕</span> : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
+export function NaukriAnalyticsView({ data, admin = false, platform = 'all' }: { data: Data; admin?: boolean; platform?: PlatformScope }) {
   const t = data.totals;
+  const site = SITE_LABEL[platform] || 'job platform';
+  const pageLink = `/job-platforms?platform=${platform}`;
   if (!t.found) {
     return (
       <div className="an-empty" style={{ flexDirection: 'column', gap: 10 }}>
         <i className="ti ti-briefcase" />
-        No Naukri jobs yet{admin ? '.' : ' — run a harvest to see how applying performs.'}
-        {!admin && <Link to="/naukri" className="btn btn-sm"><i className="ti ti-briefcase" /> Open Naukri</Link>}
+        No {site} jobs yet{admin ? '.' : ' — run a harvest to see how applying performs.'}
+        {!admin && <Link to={pageLink} className="btn btn-sm"><i className="ti ti-briefcase" /> Open Job Platforms</Link>}
       </div>
     );
   }
@@ -140,6 +181,7 @@ export function NaukriAnalyticsView({ data, admin = false }: { data: Data; admin
 
   return (
     <>
+      {platform === 'all' && data.byPlatform && data.byPlatform.length > 0 && <ByPlatform rows={data.byPlatform} />}
       <div className="stat-grid stat-grid-6" style={{ padding: '0 0 4px', marginBottom: 14 }}>
         {kpis.map(k => (
           <div className="stat-card" key={k.label}>
@@ -181,7 +223,7 @@ export function NaukriAnalyticsView({ data, admin = false }: { data: Data; admin
             ))}
           {data.reasons.some(r => r.key === 'question') && !admin && (
             <div className="an-card-sub" style={{ marginTop: 10 }}>
-              Unanswered questions retry once you answer them — <Link to="/naukri">Naukri</Link> → Jobs → Needs answer.
+              Unanswered questions retry once you answer them — <Link to={pageLink}>Job Platforms</Link> → Jobs → Needs answer.
             </div>
           )}
         </Card>
@@ -190,8 +232,8 @@ export function NaukriAnalyticsView({ data, admin = false }: { data: Data; admin
       <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
         <Card title="What recruiters did" icon="ti-user-search"
           sub={data.responseMedianHours != null
-            ? `Applications, by the furthest step Naukri shows · typical response in ${fmtDur(data.responseMedianHours)}`
-            : 'Applications, by the furthest step Naukri shows'}>
+            ? `Applications, by the furthest step the site shows · typical response in ${fmtDur(data.responseMedianHours)}`
+            : 'Applications, by the furthest step the site shows'}>
           {stagesTracked === 0
             ? <div className="an-empty"><i className="ti ti-user-search" />No applications yet</div>
             : data.stages.filter(s => s.n > 0).map(s => (
@@ -199,7 +241,7 @@ export function NaukriAnalyticsView({ data, admin = false }: { data: Data; admin
                 fill={s.stage === 'shortlisted' || s.stage === 'contacted' ? teal : s.stage === 'not-shortlisted' ? red : s.stage === 'viewed' ? accent : muted} />
             ))}
           {t.applied > 0 && t.tracked === 0 && (
-            <div className="an-card-sub" style={{ marginTop: 10 }}>Turn on "Track replies" in the Naukri schedule to read what recruiters did.</div>
+            <div className="an-card-sub" style={{ marginTop: 10 }}>Turn on "Check replies" in the {platform === 'all' ? 'platform' : site} schedule to read what recruiters did.</div>
           )}
         </Card>
         <Card title="Fit score" icon="ti-chart-bar"
@@ -228,7 +270,7 @@ export function NaukriAnalyticsView({ data, admin = false }: { data: Data; admin
       <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
         <Card title="Where jobs come from" icon="ti-route" sub="Found, and applied to, by source">
           <HBar label="Your searches" n={data.origins.search} d={t.found} fill={accent} extra={` · ${data.origins.searchApplied} applied`} />
-          <HBar label="Naukri's Recommended jobs" n={data.origins.recommended} d={t.found} fill={accent} extra={` · ${data.origins.recommendedApplied} applied`} />
+          <HBar label={RECOMMENDED_LABEL[platform] || 'Recommended'} n={data.origins.recommended} d={t.found} fill={accent} extra={` · ${data.origins.recommendedApplied} applied`} />
           {!admin && data.queries && data.queries.length > 0 && (
             <div style={{ overflowX: 'auto', marginTop: 10 }}>
               <table className="an-table">
@@ -285,19 +327,39 @@ export function NaukriAnalyticsView({ data, admin = false }: { data: Data; admin
   );
 }
 
+const SCOPES: Array<[PlatformScope, string]> = [['all', 'All platforms'], ['naukri', 'Naukri'], ['instahyre', 'Instahyre'], ['hirist', 'Hirist']];
+const SCOPE_KEY = 'analytics-jp-scope';
+
 export default function NaukriAnalytics({ refreshToken }: { refreshToken: number }) {
   const [data, setData] = useState<Data | null>(null);
   const [error, setError] = useState('');
+  const [scope, setScope] = useState<PlatformScope>(() => {
+    try { const v = localStorage.getItem(SCOPE_KEY) as PlatformScope | null; return v && SCOPES.some(([k]) => k === v) ? v : 'all'; }
+    catch { return 'all'; }
+  });
+  const pickScope = (v: PlatformScope) => {
+    setScope(v); setData(null);
+    try { localStorage.setItem(SCOPE_KEY, v); } catch { /* private window */ }
+  };
 
   useEffect(() => {
     let alive = true;
-    naukriAnalyticsApi(30)
+    naukriAnalyticsApi(30, scope)
       .then(d => { if (alive) { setData(d); setError(''); } })
       .catch(err => { if (alive) setError(err.message); });
     return () => { alive = false; };
-  }, [refreshToken]);
+  }, [refreshToken, scope]);
 
-  if (error) return <div className="an-empty"><i className="ti ti-alert-triangle" />{error}</div>;
-  if (!data) return <Loading />;
-  return <NaukriAnalyticsView data={data} />;
+  return (
+    <>
+      <div className="nav-tabs" role="group" aria-label="Platform" style={{ marginBottom: 14 }}>
+        {SCOPES.map(([k, label]) => (
+          <button key={k} type="button" className={`nav-tab${scope === k ? ' active' : ''}`} onClick={() => pickScope(k)}>{label}</button>
+        ))}
+      </div>
+      {error ? <div className="an-empty"><i className="ti ti-alert-triangle" />{error}</div>
+        : !data ? <Loading />
+        : <NaukriAnalyticsView data={data} platform={scope} />}
+    </>
+  );
 }

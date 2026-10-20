@@ -1423,6 +1423,27 @@ export interface ScrapeStatus {
 
 export const scrapeStatusApi = () => apiFetch<ScrapeStatus>('/api/scrapes/status');
 
+/** A worker run for the floating progress panel (routes/runs.js). */
+export interface WorkerRunCard {
+  id: string;
+  /** 'linkedin' or a job platform id. */
+  source: string;
+  label: string;
+  kind: string;
+  kindLabel: string;
+  status: 'queued' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled';
+  createdAt: string;
+  finishedAt: string | null;
+  detail: string;
+  done: number;
+  total: number;
+  unit: string;
+  counts: Partial<Record<'found' | 'hiring' | 'new' | 'applied' | 'skipped' | 'failed' | 'rehearsed' | 'tracked', number>>;
+  error: string | null;
+  link: string;
+}
+export const activeRunsApi = () => apiFetch<{ runs: WorkerRunCard[] }>('/api/runs/active');
+
 export const listScrapeRunsApi = (page = 1, limit = 20) =>
   apiFetch<{ runs: ScrapeRun[]; total: number; page: number; limit: number; pages: number }>(
     `/api/scrapes?page=${page}&limit=${limit}`);
@@ -2622,8 +2643,13 @@ export interface NaukriAnalytics {
   autoApproved: number;
   ai: { asked: number; answered: number; drafts: Record<'ready' | 'unknown' | 'error' | 'ignored', number>; answers: { you: number; auto: number } };
   tidy: Record<'stale' | 'low-fit' | 'company-site' | 'other', number>;
+  /** One row per job platform with jobs or runs (all-platform scope compares them). */
+  byPlatform?: Array<{
+    platform: PlatformId; label: string; found: number; approved: number; applied: number; appliedToday: number;
+    responded: number; shortlisted: number; interviewing: number; runs: number; failedRuns: number; blockedRuns: number;
+  }>;
 }
-export const naukriAnalyticsApi = (days = 30, platform: PlatformId = 'naukri') =>
+export const naukriAnalyticsApi = (days = 30, platform: PlatformScope = 'naukri') =>
   apiFetch<NaukriAnalytics>(`${platform === 'naukri' ? '/api/naukri' : `/api/p/${platform}`}/analytics?days=${days}`);
 
 export interface QueueAnalytics {

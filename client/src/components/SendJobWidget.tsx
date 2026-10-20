@@ -4,7 +4,7 @@
 // concurrently, and a single-job widget silently hid all but the most recent one.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { API_BASE, JOBS_CHANGED_EVENT, type SendJob } from '../lib/api';
+import { API_BASE, JOBS_CHANGED_EVENT, activeRunsApi, type SendJob, type WorkerRunCard } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { useVisibleInterval } from '../hooks/useVisibleInterval';
 import { usePulseChange } from '../context/PulseContext';
@@ -22,6 +22,45 @@ const fmtTime = (ms: number) => {
   const mins = totalMins % 60;
   return hrs > 0 ? `~${hrs}h ${mins}m` : `~${mins}m`;
 };
+
+// Worker runs (LinkedIn harvest, job platforms) share the panel with send jobs.
+const RUN_LIVE_MS = 5000;   // poll while a run card is showing
+const RUN_DOT: Record<string, string> = {
+  linkedin: 'var(--blue, #0a66c2)', naukri: 'var(--blue, #1557a0)', instahyre: 'var(--teal, #0f766e)', hirist: 'var(--purple, #7e22ce)',
+};
+const runFinished = (r: WorkerRunCard) => !['queued', 'running'].includes(r.status);
+
+// What a run has got to, in a few words.
+function runCounts(r: WorkerRunCard): string {
+  const c = r.counts || {};
+  const bits: string[] = [];
+  if (r.source === 'linkedin') {
+    if (c.found) bits.push(`${c.found} posts`);
+    if (c.hiring) bits.push(`${c.hiring} hiring`);
+    if (c.new) bits.push(`${c.new} new`);
+  } else if (r.kind === 'apply') {
+    if (c.applied) bits.push(`${c.applied} applied`);
+    if (c.rehearsed) bits.push(`${c.rehearsed} rehearsed`);
+    if (c.skipped) bits.push(`${c.skipped} skipped`);
+    if (c.failed) bits.push(`${c.failed} failed`);
+  } else if (r.kind === 'track') {
+    if (c.tracked) bits.push(`${c.tracked} read`);
+  } else {
+    if (c.found) bits.push(`${c.found} found`);
+    if (c.new) bits.push(`${c.new} new`);
+  }
+  return bits.join(' · ');
+}
+
+function runTitle(r: WorkerRunCard): React.ReactNode {
+  const name = `${r.label} · ${r.kindLabel}`;
+  if (r.status === 'queued') return <><i className="ti ti-clock" /> {name} · queued</>;
+  if (r.status === 'running') return <><i className="ti ti-circle-filled sjw-live-dot" /> {name}</>;
+  if (r.status === 'done') return <><i className="ti ti-circle-check" /> {name} done</>;
+  if (r.status === 'blocked') return <><i className="ti ti-hand-stop" /> {name} · paused (challenge)</>;
+  if (r.status === 'cancelled') return <><i className="ti ti-x" /> {name} cancelled</>;
+  return <><i className="ti ti-alert-triangle" /> {name} failed</>;
+}
 
 const isEffectivelyDone = (j: SendJob) => {
   const allItemsDone = j.items.length > 0 && j.items.every(i => i.status !== 'pending');
@@ -103,6 +142,40 @@ export default function SendJobWidget() {
     return () => { timers.forEach(t => clearTimeout(t)); timers.clear(); };
   }, []);
 
+  // ── worker runs ───────────────────────────────────────────────────────────
+  // The server includes runs that finished in the last two minutes, so a card
+  // can show how a run ended; each finished one is shown for DISMISS_MS here,
+  // then hidden for good.
+  const [runs, setRuns] = useState<WorkerRunCard[]>([]);
+  const hiddenRuns = useRef<Set<string>>(new Set());
+  const runTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const pollRuns = useCallback(async () => {
+    try {
+      const { runs: all } = await activeRunsApi();
+      const shown = all.filter(r => !hiddenRuns.current.has(r.id));
+      for (const r of shown) {
+        if (runFinished(r) && !runTimers.current.has(r.id)) {
+          runTimers.current.set(r.id, setTimeout(() => {
+            hiddenRuns.current.add(r.id);
+            setRuns(prev => prev.filter(p => p.id !== r.id));
+          }, DISMISS_MS));
+        }
+      }
+      setRuns(shown);
+    } catch { /* transient */ }
+  }, []);
+  useEffect(() => { if (!isStep3) pollRuns(); }, [pollRuns, isStep3]);
+  useVisibleInterval(pollRuns, runs.length > 0 ? RUN_LIVE_MS : IDLE_POLL_MS, !isStep3);
+  usePulseChange(p => p.runs || '', pollRuns, !isStep3 && runs.length === 0);
+  useEffect(() => {
+    const timers = runTimers.current;
+    return () => { timers.forEach(t => clearTimeout(t)); timers.clear(); };
+  }, []);
+  const hideRun = (id: string) => {
+    hiddenRuns.current.add(id);
+    setRuns(prev => prev.filter(r => r.id !== id));
+  };
+
   // The widget is useful while a drip runs, but its default bottom-right home
   // can cover page actions. Keep a deliberately local, per-browser placement.
   useEffect(() => {
@@ -165,15 +238,50 @@ export default function SendJobWidget() {
     } catch { /* transient */ }
   };
 
-  if (isStep3 || jobs.length === 0) return null;
+  if (isStep3 || (jobs.length === 0 && runs.length === 0)) return null;
 
-  const visible = jobs.slice(0, MAX_CARDS);
-  const hidden = jobs.length - visible.length;
+  const runShown = runs.slice(0, 3);
+  const visible = jobs.slice(0, Math.max(1, MAX_CARDS - runShown.length));
+  const hidden = jobs.length - visible.length + (runs.length - runShown.length);
 
   return (
     <div id="send-job-widget" ref={widgetRef}
       style={position ? { left: position.left, top: position.top, right: 'auto', bottom: 'auto' } : undefined}>
-      {hidden > 0 && <div className="sjw-more">+{hidden} more job{hidden > 1 ? 's' : ''} running</div>}
+      {hidden > 0 && <div className="sjw-more">+{hidden} more running</div>}
+      {runShown.map(run => {
+        const pct = run.total > 0 ? Math.min(100, Math.round((run.done / run.total) * 100)) : (runFinished(run) ? 100 : 0);
+        const counts = runCounts(run);
+        return (
+          <div className="sjw-card" key={`run-${run.id}`}>
+            <div className="sjw-header sjw-drag-handle" title="Drag to move this panel"
+              onPointerDown={startMove} onPointerMove={move} onPointerUp={endMove} onPointerCancel={endMove}>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
+                <span style={{ width: 8, height: 8, borderRadius: '50%', background: RUN_DOT[run.source] || 'var(--text3)', flexShrink: 0 }} />
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title={`${run.label} · ${run.kindLabel} · ${run.status === 'queued' ? 'waiting for the worker on your computer' : run.status}`}>{runTitle(run)}</span>
+              </span>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <button className="btn btn-xs" onClick={() => navigate(run.link)} title={`Open ${run.label}`} type="button"><i className="ti ti-external-link" /></button>
+                <button className="btn btn-xs" onClick={() => setCollapsed(c => !c)} title={collapsed ? 'Maximise details' : 'Minimise details'} type="button"><i className={`ti ${collapsed ? 'ti-plus' : 'ti-minus'}`} /></button>
+                <button aria-label="Hide (the run continues)" className="btn btn-xs" onClick={() => hideRun(run.id)} title="Hide (the run continues)" type="button"><i className="ti ti-x" /></button>
+              </div>
+            </div>
+            {collapsed && run.status === 'running' && <div className="sjw-min-progress">
+              <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>
+              <span>{run.total ? `${run.done}/${run.total}` : counts || '…'}</span>
+            </div>}
+            <div className={`sjw-body${collapsed ? ' collapsed' : ''}`}>
+              {run.status === 'running' && <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct}%` }} /></div>}
+              <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>
+                {run.status === 'queued' ? 'Starts when the worker on your computer picks it up.'
+                  : <>{run.total ? `${run.done}/${run.total} ${run.unit}` : ''}{run.total && counts ? ' · ' : ''}{counts || (run.status === 'running' ? 'starting…' : '')}</>}
+              </div>
+              {run.detail && run.status === 'running' && <div className="sjw-recipient" title={run.detail}><i className="ti ti-search" /> {run.detail}</div>}
+              {run.error && runFinished(run) && <div className="sjw-recipient" title={run.error} style={{ color: 'var(--red)' }}><i className="ti ti-alert-triangle" /> {run.error}</div>}
+            </div>
+          </div>
+        );
+      })}
       {visible.map(job => {
         const total = job.items.length;
         const sent = job.items.filter(i => i.status === 'sent').length;
