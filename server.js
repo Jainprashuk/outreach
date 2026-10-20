@@ -116,6 +116,12 @@ const WORKER_PATHS = new Set([
   '/api/naukri/ai-answer',
   // Recruiter actions read from Naukri's application history (read-only).
   '/api/naukri/track',
+  // The same worker endpoints for every job platform (Instahyre, Hirist, and
+  // Naukri again under its platform path), each listed EXACTLY — never a
+  // /api/p/ prefix, which would expose the owner routes under it too.
+  ...require('./lib/platforms').PLATFORM_IDS.flatMap(id => [
+    'claim', 'ingest', 'finish', 'progress', 'result', 'worker-resume', 'ai-answer', 'track',
+  ].map(r => `/api/p/${id}/${r}`)),
 ]);
 
 const isCron = (req) => {
@@ -613,7 +619,17 @@ app.use('/api/prospects', requireDb, require('./routes/prospects'));
 // Company pages: one company across every module (read-only, lib/companyView.js).
 app.use('/api/companies', requireDb, require('./routes/companies'));
 app.use('/api/scrapes', requireDb, require('./routes/scrapes'));
-app.use('/api/naukri', requireDb, require('./routes/naukri'));
+// Job platforms. Naukri keeps its own path; every platform (Naukri included)
+// is also reachable at /api/p/<id>/…, served by the same router with the
+// platform set on the request. An unknown id is a 404, not a fall-through.
+const withPlatform = (fixed) => (req, res, next) => {
+  const p = fixed || req.params.platform;
+  if (p !== 'all' && !require('./lib/platforms').isPlatform(p)) return res.status(404).json({ error: `Unknown platform: ${p}` });
+  req.platform = p;
+  next();
+};
+app.use('/api/naukri', requireDb, withPlatform('naukri'), require('./routes/naukri'));
+app.use('/api/p/:platform', requireDb, withPlatform(), require('./routes/naukri'));
 // People who actually got back to you. A separate store from Contact/Lead so the
 // outreach and apply journeys above are never written to — see models/Interview.js.
 app.use('/api/interviews', requireDb, require('./routes/interviews'));

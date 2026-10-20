@@ -11,6 +11,9 @@ const mongoose = require('mongoose');
 //   apply   — act on jobs YOU approved, and only those
 const naukriRunSchema = new mongoose.Schema({
   userId:  { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
+  // Which job site this run drives (lib/platforms.js). Runs from before
+  // platforms existed have none and are Naukri's.
+  platform: { type: String, default: 'naukri' },
   // track = read recruiter actions from Naukri's application history (read-only).
   kind:    { type: String, enum: ['refresh', 'harvest', 'apply', 'probe', 'track'], required: true },
   // Harvest only: which sources THIS run walks, when chosen on the Harvest
@@ -65,6 +68,10 @@ const naukriRunSchema = new mongoose.Schema({
     aiAnswered: { type: Number, default: 0 },
     // Track only: applications read from Naukri, and how many of ours moved.
     tracked:    { type: Number, default: 0 },
+    // Apply only: jobs left out at claim because another platform had already
+    // applied to the same role (lib/jobDupes.js). Kept apart from `skipped`,
+    // which the worker reports for the jobs it actually opened.
+    dupSkipped: { type: Number, default: 0 },
     moved:      { type: Number, default: 0 },
   },
 
@@ -96,6 +103,7 @@ const naukriRunSchema = new mongoose.Schema({
 // on every worker poll, so keep it indexed.
 naukriRunSchema.index({ userId: 1, status: 1, createdAt: 1 });
 naukriRunSchema.index({ userId: 1, createdAt: -1 });
+naukriRunSchema.index({ userId: 1, platform: 1, status: 1 });
 
 naukriRunSchema.set('toJSON', {
   transform: (doc, ret) => {

@@ -2,7 +2,11 @@
 # Start everything the Mac side needs, in one terminal:
 #   1. the debug Chrome on the CDP port (only if it isn't already listening)
 #   2. the LinkedIn scrape worker
-#   3. the Naukri worker
+#   3. one worker per job platform in $PLATFORMS (default: naukri)
+#
+# Set PLATFORMS in .env to run more, e.g. PLATFORMS="naukri instahyre hirist".
+# Each platform's worker is its own process with its own lock, so a captcha on
+# one stops only that one. They share the debug Chrome via worker/chrome-lock.js.
 #
 # Each worker holds sleep off for its own lifetime (worker/power.js: caffeinate
 # on macOS, systemd-inhibit on Linux), so nothing here needs to. Output is prefixed [linkedin] / [naukri]. Ctrl+C stops both; Chrome stays open.
@@ -50,10 +54,10 @@ echo
 # ── 2 & 3. Workers ──────────────────────────────────────────────────────────
 PIDS=()
 
-start() {  # start <label> <script>
-  local label="$1" script="$2"
+start() {  # start <label> <script> [platform]
+  local label="$1" script="$2" platform="${3:-}"
   # Process substitution keeps $! pointing at node itself, not the log pipe.
-  node "$REPO/worker/$script" \
+  PLATFORM="$platform" node "$REPO/worker/$script" \
     > >(while IFS= read -r line; do printf '[%s] %s\n' "$label" "$line"; done) 2>&1 &
   PIDS+=("$!")
 }
@@ -70,7 +74,13 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 start linkedin scrape-worker.js
-start naukri   naukri-worker.js
+for P in ${PLATFORMS:-naukri}; do
+  case "$P" in
+    naukri)           start naukri naukri-worker.js ;;
+    instahyre|hirist) start "$P" platform-worker.js "$P" ;;
+    *) echo "Skipping unknown platform \"$P\" in PLATFORMS (use naukri, instahyre, hirist)." >&2 ;;
+  esac
+done
 
-echo "Both workers running. Ctrl+C to stop."
+echo "Workers running (linkedin + ${PLATFORMS:-naukri}). Ctrl+C to stop."
 wait "${PIDS[@]}"

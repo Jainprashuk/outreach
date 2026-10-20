@@ -9,8 +9,17 @@ const mongoose = require('mongoose');
 // reason that matters: blockedUntil. A Naukri captcha must not be able to stop
 // LinkedIn harvesting, and vice versa. Sharing the doc would couple the two
 // blocks and make one site's bad day the other's outage.
+//
+// One doc per (user, platform). The same reasoning extends to Instahyre and
+// Hirist: an Instahyre captcha must not pause Naukri. Docs from before
+// platforms existed have no `platform` and are Naukri's (lib/platforms.js
+// platformQuery), so nothing is migrated.
 const naukriWorkerSchema = new mongoose.Schema({
   userId:          { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
+  platform:        { type: String, default: 'naukri' },
+  // Logged into this platform's site. `naukriLoggedIn` is the original name
+  // and is still written for every platform, so older readers keep working.
+  loggedIn:        { type: Boolean, default: false },
   lastSeenAt:      { type: Date, default: null },
   host:            { type: String, default: '' },
   chromeUp:        { type: Boolean, default: false },
@@ -24,9 +33,12 @@ const naukriWorkerSchema = new mongoose.Schema({
   blockedReason:   { type: String, default: '' },
 }, { timestamps: true });
 
-naukriWorkerSchema.statics.getForUser = async function (userId) {
-  let doc = await this.findOne({ userId });
-  if (!doc) doc = await this.create({ userId });
+naukriWorkerSchema.index({ userId: 1, platform: 1 });
+
+naukriWorkerSchema.statics.getForUser = async function (userId, platform = 'naukri') {
+  const { platformQuery } = require('../lib/platforms');
+  let doc = await this.findOne({ userId, ...platformQuery(platform) });
+  if (!doc) doc = await this.create({ userId, platform });
   return doc;
 };
 

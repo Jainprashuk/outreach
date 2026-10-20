@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
-# Install the LinkedIn scrape worker so it starts at login and the portal's
-# Scrape button always has something listening:
+# Install a worker so it starts at login and the portal always has something
+# listening. With no argument it installs the LinkedIn scrape worker, exactly as
+# before; name a job platform to install that platform's worker instead (one
+# unit per platform, so each can be stopped on its own):
+#
+#   bash worker/install-worker.sh                # LinkedIn scrape worker
+#   bash worker/install-worker.sh naukri         # Naukri worker
+#   bash worker/install-worker.sh instahyre      # Instahyre worker
+#   bash worker/install-worker.sh hirist         # Hirist worker
+#
 #   macOS — a launchd agent   (uninstall: launchctl bootout gui/$UID/com.prashuk.scrape-worker)
 #   Linux — a systemd user unit (uninstall: systemctl --user disable --now outreach-scrape-worker)
 #
@@ -8,7 +16,15 @@
 # watch; this is only for when you'd rather not think about it.
 set -euo pipefail
 
-LABEL="com.prashuk.scrape-worker"
+TARGET="${1:-scrape}"
+case "$TARGET" in
+  scrape) LABEL="com.prashuk.scrape-worker"; SCRIPT="scrape-worker.js"; UNIT="outreach-scrape-worker"
+          LOGNAME="worker.log"; DESC="LinkedIn scrape worker"; PLATFORM_ENV="" ;;
+  naukri|instahyre|hirist)
+          LABEL="com.prashuk.$TARGET-worker"; SCRIPT="platform-worker.js"; UNIT="outreach-$TARGET-worker"
+          LOGNAME="$TARGET-worker.log"; DESC="$TARGET worker"; PLATFORM_ENV="$TARGET" ;;
+  *) echo "Unknown worker \"$TARGET\". Use: scrape (default), naukri, instahyre or hirist." >&2; exit 1 ;;
+esac
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOGDIR="$HOME/.job-leads"
@@ -31,8 +47,7 @@ case "$(uname -s)" in
 Darwin) ;;
 Linux)
   # ── Linux: systemd user unit ──────────────────────────────────────────────
-  command -v systemctl >/dev/null || { echo "systemctl not found — start the worker by hand: npm run scrape-worker" >&2; exit 1; }
-  UNIT="outreach-scrape-worker"
+  command -v systemctl >/dev/null || { echo "systemctl not found — start the worker by hand: npm run $TARGET-worker" >&2; exit 1; }
   UNIT_DIR="$HOME/.config/systemd/user"
   UNIT_FILE="$UNIT_DIR/$UNIT.service"
   mkdir -p "$LOGDIR" "$UNIT_DIR"
@@ -48,12 +63,13 @@ Linux)
   umask 077   # the unit contains WORKER_SECRET
   cat > "$UNIT_FILE" <<UNIT_EOF
 [Unit]
-Description=Outreach LinkedIn scrape worker
+Description=Outreach $DESC
 After=graphical-session.target network-online.target
 
 [Service]
-ExecStart=$NODE_BIN $REPO/worker/scrape-worker.js
+ExecStart=$NODE_BIN $REPO/worker/$SCRIPT
 WorkingDirectory=$REPO
+Environment=PLATFORM=$PLATFORM_ENV
 Environment=OUTREACH_URL=$OUTREACH_URL
 Environment=WORKER_SECRET=$WORKER_SECRET
 Environment=JL_REPO=$JL_REPO
@@ -63,8 +79,8 @@ Environment=XAUTHORITY=${XAUTHORITY:-}
 Environment=XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-}
 Restart=always
 RestartSec=10
-StandardOutput=append:$LOGDIR/worker.log
-StandardError=append:$LOGDIR/worker.log
+StandardOutput=append:$LOGDIR/$LOGNAME
+StandardError=append:$LOGDIR/$LOGNAME
 
 [Install]
 WantedBy=default.target
@@ -77,9 +93,9 @@ UNIT_EOF
   echo "Installed $UNIT (systemd user unit)"
   echo "  portal : $OUTREACH_URL"
   echo "  scraper: $JL_REPO"
-  echo "  log    : $LOGDIR/worker.log"
+  echo "  log    : $LOGDIR/$LOGNAME"
   echo
-  echo "Follow it with:  tail -f $LOGDIR/worker.log"
+  echo "Follow it with:  tail -f $LOGDIR/$LOGNAME"
   echo "Uninstall with:  systemctl --user disable --now $UNIT && rm $UNIT_FILE"
   echo
   cat <<'NOTE'
@@ -115,19 +131,20 @@ cat > "$PLIST" <<PLIST_EOF
   <key>ProgramArguments</key>
   <array>
     <string>$NODE_BIN</string>
-    <string>$REPO/worker/scrape-worker.js</string>
+    <string>$REPO/worker/$SCRIPT</string>
   </array>
   <key>EnvironmentVariables</key>
   <dict>
     <key>OUTREACH_URL</key><string>$OUTREACH_URL</string>
     <key>WORKER_SECRET</key><string>$WORKER_SECRET</string>
     <key>JL_REPO</key><string>$JL_REPO</string>
+    <key>PLATFORM</key><string>$PLATFORM_ENV</string>
   </dict>
   <key>WorkingDirectory</key><string>$REPO</string>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>$LOGDIR/worker.log</string>
-  <key>StandardErrorPath</key><string>$LOGDIR/worker.log</string>
+  <key>StandardOutPath</key><string>$LOGDIR/$LOGNAME</string>
+  <key>StandardErrorPath</key><string>$LOGDIR/$LOGNAME</string>
 </dict>
 </plist>
 PLIST_EOF
@@ -141,9 +158,9 @@ launchctl enable "gui/$UID/$LABEL"
 echo "Installed $LABEL"
 echo "  portal : $OUTREACH_URL"
 echo "  scraper: $JL_REPO"
-echo "  log    : $LOGDIR/worker.log"
+echo "  log    : $LOGDIR/$LOGNAME"
 echo
-echo "Follow it with:  tail -f $LOGDIR/worker.log"
+echo "Follow it with:  tail -f $LOGDIR/$LOGNAME"
 echo "Uninstall with:  launchctl bootout gui/$UID/$LABEL"
 echo
 

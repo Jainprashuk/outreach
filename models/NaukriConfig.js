@@ -79,8 +79,112 @@ const draftSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now },
 });
 
+// Settings that belong to ONE other job platform (Instahyre, Hirist), under
+// `platforms.<id>`. Same names and shapes as Naukri's own top-level fields, so
+// the routes read `site.schedule` whatever the platform (lib/platforms.js
+// siteOf). Naukri's fields stay at the top level, untouched, which is why its
+// defaults are not shared from here. Defaults are deliberately quieter than
+// Naukri's: a new platform starts off, read-only, with a small apply budget.
+const siteSchemaFor = (id) => new mongoose.Schema({
+  _id: false,
+  enabled:   { type: Boolean, default: false },
+  // off = harvest and check replies only · dry-run = walk the apply flow,
+  // submit nothing · on = real applications (only once the driver is proven;
+  // lib/platforms.js caps it otherwise).
+  applyMode: { type: String, enum: ['off', 'dry-run', 'on'], default: 'off' },
+  // When apply was last turned off (or the platform first switched on), so
+  // Activity can say how long it has been read-only.
+  readOnlySince: { type: Date, default: null },
+  schedule: {
+    enabled:      { type: Boolean, default: false },
+    days:         { type: [Number], default: [1, 2, 3, 4, 5] },
+    time:         { type: String, default: '09:30' },
+    timezone:     { type: String, default: 'Asia/Kolkata' },
+    catchUpHours: { type: Number, default: 6 },
+    lastFiredAt:  { type: Date, default: null },
+    runRefresh: { type: Boolean, default: false },
+    runHarvest: { type: Boolean, default: true },
+    runApply:   { type: Boolean, default: false },
+    runTrack:   { type: Boolean, default: true },
+    extraSlots: { type: [slotSchema], default: [] },
+  },
+  worker: {
+    pollSeconds: { type: Number, default: 20, min: 15, max: 120 },
+  },
+  inboxTidy: {
+    enabled:     { type: Boolean, default: false },
+    maxAgeDays:  { type: Number, default: 21, min: 1 },
+    minScore:    { type: Number, default: 40, min: 0, max: 100 },
+    companySite: { type: Boolean, default: false },
+  },
+  searchLimits: {
+    maxSearches: { type: Number, default: 5, min: 1, max: 10 },
+    maxPages:    { type: Number, default: 3, min: 1, max: 8 },
+  },
+  searches: { type: [searchSchema], default: [] },
+  sources: {
+    // A site with its own matched feed harvests that by default; one without
+    // (Hirist) harvests your searches.
+    searches:    { type: Boolean, default: id === 'hirist' },
+    recommended: { type: Boolean, default: id !== 'hirist' },
+    recommendedTabs: { type: [String], default: [] },
+  },
+  filters: {
+    titleInclude:   { type: [String], default: [] },
+    titleExclude:   { type: [String], default: [] },
+    companyExclude: { type: [String], default: [] },
+    locations:      { type: [String], default: [] },
+    remoteOnly:     { type: Boolean, default: false },
+    minExperienceYears: { type: Number, default: null },
+    maxExperienceYears: { type: Number, default: null },
+    minSalaryLpa:       { type: Number, default: null },
+    maxPostedAgeDays:   { type: Number, default: 14 },
+    skipAlreadyApplied: { type: Boolean, default: true },
+  },
+  apply: {
+    maxPerRun: { type: Number, default: 5, min: 1 },
+    maxPerDay: { type: Number, default: 15, min: 1 },
+    autoApproveEnabled:  { type: Boolean, default: false },
+    autoApproveMinScore: { type: Number, default: 80 },
+    delayMinMs: { type: Number, default: 2000, min: 500 },
+    delayMaxMs: { type: Number, default: 5000, min: 500 },
+    coverNote:  { type: String, default: '' },
+  },
+  safety: {
+    pauseAll: { type: Boolean, default: false },
+    // Unused off Naukri (applyMode says it); kept so the shape matches.
+    dryRun:   { type: Boolean, default: false },
+  },
+});
+
 const naukriConfigSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
+
+  // ── job platforms ──────────────────────────────────────────────────────────
+  // Naukri's own on/off and apply mode. `enabled` defaults on and `applyMode`
+  // null, which means "as before": apply follows safety.dryRun. Only an
+  // explicit 'off' (Configuration → Apply: Off) changes anything.
+  enabled:   { type: Boolean, default: true },
+  applyMode: { type: String, enum: ['off', 'dry-run', 'on', null], default: null },
+  readOnlySince: { type: Date, default: null },
+  // Every other platform's own settings. Profile, resume, answers and AI
+  // settings below are SHARED by all of them.
+  platforms: {
+    instahyre: { type: siteSchemaFor('instahyre'), default: () => ({}) },
+    hirist:    { type: siteSchemaFor('hirist'), default: () => ({}) },
+  },
+  // The same role turns up on several sites. Shared: one rule for all of them.
+  duplicates: {
+    windowDays: { type: Number, default: 60, min: 7, max: 180 },
+    // Don't auto-approve a job already applied to or approved elsewhere.
+    blockAuto:  { type: Boolean, default: true },
+    // At apply time, skip a job another platform has already applied to.
+    blockApply: { type: Boolean, default: true },
+  },
+  // Off by default. When on, a worker holds back its platform's queued run while
+  // another ready platform has an OLDER queued run, so runs across platforms go
+  // out oldest first instead of whichever worker polls first.
+  crossPlatformOrder: { type: Boolean, default: false },
 
   // ── schedule ───────────────────────────────────────────────────────────────
   schedule: {
