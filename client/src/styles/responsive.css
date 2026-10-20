@@ -177,11 +177,10 @@
      the whole column scrolled sideways under it. */
   .topbar { flex-wrap: wrap; }
 }
-/* Below 1500px the account menu shows just the avatar — that is the room the
-   full Dashboard action row needs. The name is in the menu itself. */
 @media (min-width: 1280px) and (max-width: 1499px) {
-  .usermenu-name, .usermenu-caret { display: none; }
-  .usermenu-btn { padding: 3px; }
-  /* The title takes what's left (its subtitle wraps) instead of claiming 260px. */
-  .topbar-left { flex: 1 1 0; min-width: 160px; }
+  /* The title takes what's left (its subtitle wraps) instead of claiming 260px.
+     `.topbar >` so it outranks polish.css's later `.topbar-left { flex: 1 1 auto }`,
+     which otherwise sized the title to its full subtitle and pushed the bell and
+     account menu onto a second line. */
+  .topbar > .topbar-left { flex: 1 1 0; min-width: 160px; }
 }
