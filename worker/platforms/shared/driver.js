@@ -31,6 +31,8 @@ const MAX_SEARCHES = 5;
 const MAX_PAGES = 5;          // scrolls per page (each fetches the next batch)
 const PAGE_DELAY = [2000, 4500];
 const JOB_TIMEOUT_MS = 60 * 1000;
+// How long past the first 3.5s a listing page may take to deliver its feed.
+const FEED_WAIT_MS = 20 * 1000;
 
 const capped = (v, max) => Math.max(1, Math.min(max, Number(v) || max));
 
@@ -46,6 +48,19 @@ function makeDriver(meta) {
     const hit = (meta.setupUrls || []).find(m => url.includes(m));
     if (hit) throw new Error(meta.setupMessage || `${meta.label} sent the page to ${hit} — finish your profile on ${meta.label} first.`);
   };
+
+  // After a navigation: give the page its usual 3.5s, then keep waiting (up to
+  // FEED_WAIT_MS) until a feed response has actually arrived. A fixed 3.5s was
+  // enough on a laptop, but on a 1-CPU cloud VM Hirist's feed answered after
+  // ~10s, so a page with jobs on it was read as empty and the harvest failed
+  // with "zero jobs". Once a response lands, a short settle lets the rest of
+  // that page's responses in.
+  async function waitForFeed(page, feed, since) {
+    await page.waitForTimeout(3500);
+    const deadline = Date.now() + FEED_WAIT_MS;
+    while (feed.lastAt() <= since && Date.now() < deadline) await page.waitForTimeout(500);
+    if (feed.lastAt() > since) await page.waitForTimeout(1500);
+  }
 
   // Open `url`, collect the jobs its feed responses carry, scrolling to load
   // more until nothing new arrives twice or the cap is reached.
@@ -63,8 +78,9 @@ function makeDriver(meta) {
         for (let i = 0; i < maxPages; i++) {
           const before = feed.jobs.size;
           onProgress({ phase: 'searching', label, page: i + 1, pagesTotal: maxPages, found: found() + feed.jobs.size });
+          const since = Date.now();
           await page.goto(i === 0 ? url : meta.pageUrl(url, i + 1), { waitUntil: 'domcontentloaded' });
-          await page.waitForTimeout(3500);
+          await waitForFeed(page, feed, since);
           await check(page, label);
           needsSetup(page);
           if (feed.jobs.size === before) break;
@@ -74,8 +90,9 @@ function makeDriver(meta) {
           ...j, queries: [label], origins: recruiter ? [origin, 'recruiter'] : [origin],
         }));
       }
+      const since = Date.now();
       await page.goto(url, { waitUntil: 'domcontentloaded' });
-      await page.waitForTimeout(3500);
+      await waitForFeed(page, feed, since);
       await check(page, label);
       needsSetup(page);
       let idle = 0;

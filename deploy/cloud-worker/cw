@@ -94,9 +94,19 @@ write_env() {  # write_env <user> <token> <platforms>
 ask_token() {
   local t
   read -r -s -p "Worker token for $1 (from Admin → user → Cloud worker; input hidden): " t; echo >&2
-  t="$(tr -d '[:space:]' <<<"$t")"
+  t="$(clean_secret "$t")"
   [ -n "$t" ] || die "No token entered."
+  check_secret "worker token" "$t"
   echo "$t"
+}
+
+# A pasted secret, minus what pasting drags along: whitespace, CR, and the
+# bracketed-paste markers some terminals wrap a paste in (ESC[200~ … ESC[201~).
+clean_secret() { printf '%s' "$1" | sed $'s/\e\[20[01]~//g' | tr -d '[:space:]'; }
+# clean_secret + "does it look like a token at all" — never echoes the value.
+check_secret() {  # check_secret <what> <value>
+  [[ "$2" =~ ^[A-Za-z0-9_-]{20,}$ ]] && return 0
+  die "That $1 doesn't look right (${#2} characters; tokens are letters, digits, '_' and '-' only). Paste only the token itself, then run the command again."
 }
 
 valid_user() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,19}$ ]] || die "User name must be lowercase letters, digits or '-', up to 20 characters (it becomes screen-<user>.$CF_ZONE)."; }
@@ -142,8 +152,13 @@ cmd_host_setup() {
     read -r -p "Domain [jainprashuk.in]: " zone; zone="${zone:-jainprashuk.in}"
     read -r -p "Your (admin) email, also allowed on every screen for setup help: " admin
     read -r -p "Portal URL [https://outreach-gray.vercel.app]: " url; url="${url:-https://outreach-gray.vercel.app}"
+    tok="$(clean_secret "$tok")"; acct="$(clean_secret "$acct")"
+    check_secret "Cloudflare API token" "$tok"
+    [[ "$acct" =~ ^[0-9a-f]{32}$ ]] || die "The Account ID should be 32 characters of 0-9 and a-f."
     CF_API_TOKEN="$tok"; CF_ACCOUNT_ID="$acct"; CF_ZONE="$zone"; ADMIN_EMAIL="$admin"; OUTREACH_URL="${url%/}"
-    cf GET /user/tokens/verify >/dev/null || die "That token is not valid."
+    # User tokens verify at /user/tokens/verify; account-owned ones at the account.
+    cf_try GET /user/tokens/verify >/dev/null || cf_try GET "/accounts/$CF_ACCOUNT_ID/tokens/verify" >/dev/null \
+      || die "Cloudflare did not accept that token. Check it is the current (rolled) value and has the three permissions."
     CF_ZONE_ID="$(cf GET "/zones?name=$CF_ZONE" | jq -r '.[0].id // empty')"
     [ -n "$CF_ZONE_ID" ] || die "Zone $CF_ZONE not found for this token."
     umask 077
