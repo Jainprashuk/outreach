@@ -321,7 +321,9 @@ cmd_restart() {
 cmd_update() {
   need_root update; need_setup
   say "Pulling $REPO"
-  git -C "$REPO" pull --ff-only
+  # As the checkout's owner, not root: the GitHub deploy key and known_hosts
+  # live in that user's ~/.ssh.
+  sudo -u "$(stat -c %U "$REPO")" git -C "$REPO" pull --ff-only
   build_image
   jq -r '.users[] | [.user, (.port|tostring)] | @tsv' "$USERS" | while IFS=$'\t' read -r u p; do
     say "Restarting cw-$u on the new image"
