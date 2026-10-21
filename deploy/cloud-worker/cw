@@ -5,7 +5,7 @@
 #   sudo cw add <user> <email>         new user: container, screen link, access rule
 #   sudo cw rm <user> [--purge]        remove a user (--purge also deletes their saved logins)
 #   sudo cw token <user>               replace a user's worker token
-#   cw list | cw stats                 who runs here, and what it costs in memory/CPU
+#   cw list | cw stats                 who runs here, and what it costs (sudo is added for you)
 #   cw logs <user> [platform]          follow a user's worker logs
 #   sudo cw restart <user>             restart a user's browser + workers (logins kept)
 #   sudo cw update                     pull, rebuild, restart every user one at a time
@@ -333,6 +333,12 @@ cmd_update() {
   docker image prune -f >/dev/null
   say "Updated."
 }
+
+# Everything here reads root-only state (/srv/cw, the Docker socket), so the
+# read-only commands re-run themselves under sudo instead of failing.
+case "${1:-}" in
+  list|stats|logs) [ "$(id -u)" -eq 0 ] || exec sudo "$SELF" "$@" ;;
+esac
 
 case "${1:-}" in
   host-setup) shift; cmd_host_setup "$@" ;;
