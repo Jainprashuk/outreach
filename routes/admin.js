@@ -31,6 +31,12 @@
  * field stripped by sanitizeForAdmin() — invariant 2 still holds. The per-user
  * actions (pause/resume sending, send a lifecycle email now, check mailbox)
  * act on that account and answer with counts.
+ *
+ * THIRD EXCEPTION (2026-10-21, owner's choice): POST /users/:id/cloud-worker
+ * answers with a freshly issued worker token, ONCE, so the admin can paste it
+ * into the cloud VM that runs that account's job-platform workers
+ * (deploy/cloud-worker/cw). Only the hash is stored; the token is never readable
+ * again, from here or anywhere.
  */
 const express = require('express');
 const mongoose = require('mongoose');
@@ -55,6 +61,7 @@ const CronBeat = require('../models/CronBeat');
 const { notifyStalledCrons } = require('../lib/cronBeat');
 const { buildTimeline, istDateKey, DAILY_SEND_CAP } = require('../lib/campaignRunner');
 const { destroyAllForUser } = require('../lib/session');
+const { issueWorkerToken, revokeWorkerToken } = require('../lib/workerAuth');
 const { logEvent } = require('../lib/activityLog');
 const { sendAccessApproved } = require('../lib/emailOtp');
 const { ONBOARDING_VERSION, checkReadiness } = require('../lib/onboarding');
@@ -139,7 +146,7 @@ router.get('/users', async (req, res) => {
       User.find({}, {
         email: 1, name: 1, createdAt: 1, lastLoginAt: 1, isAdmin: 1, status: 1,
         onboarding: 1, workerTokenHash: 1, shareTokenHash: 1, libraryAccess: 1, libraryOptOut: 1,
-        lastActiveAt: 1, emailOptOut: 1, emailBlockedByAdmin: 1, aiOwnerFallback: 1,
+        lastActiveAt: 1, emailOptOut: 1, emailBlockedByAdmin: 1, aiOwnerFallback: 1, cloudScreenUrl: 1,
       }).sort({ createdAt: 1 }).lean(),
 
       countByUserAnd(Contact, 'status',
@@ -281,6 +288,8 @@ router.get('/users', async (req, res) => {
         librarySharing: u.libraryOptOut !== true,
         // May this account run on the owner's AI keys when it has none (lib/ai/keys.js).
         aiOwnerFallback: u.aiOwnerFallback === true,
+        // Admin-set link to their browser on the cloud VM; null = their own computer.
+        cloudScreenUrl: u.cloudScreenUrl || null,
         status: u.status || 'active',
         createdAt: u.createdAt || null,
         lastLoginAt: u.lastLoginAt || null,
@@ -1259,6 +1268,66 @@ router.post('/users/:id/check-mailbox', async (req, res) => {
     const out = { ok: true, scanned: Number(r.scanned) || 0, replied: size(r.replied), bounced: size(r.bounced) };
     auditAction(req, target, 'check-mailbox', `mailbox checked: ${out.replied} repl(ies), ${out.bounced} bounce(s)`, out);
     res.json(out);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Cloud worker ──────────────────────────────────────────────────────────────
+// An account whose job-platform workers run on the cloud VM (deploy/cloud-worker)
+// rather than their own computer. The VM needs that account's worker token, and
+// the user needs the link to their browser there.
+
+// Only links the cw tool creates: https://screen-<user>.<domain>.
+const SCREEN_DOMAIN = (process.env.CLOUD_SCREEN_DOMAIN || 'jainprashuk.in').toLowerCase();
+const SCREEN_URL_RE = new RegExp(`^https://screen-[a-z0-9][a-z0-9-]{0,19}\\.${SCREEN_DOMAIN.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`);
+const normaliseScreenUrl = (v) => String(v || '').trim().toLowerCase().replace(/\/+$/, '');
+
+/**
+ * POST /api/admin/users/:id/cloud-worker  { screenUrl, issueToken?: boolean }
+ * Saves the link to their cloud browser. With issueToken, also issues a new
+ * worker token and returns it ONCE — this replaces any token they had, so a
+ * worker on their own computer stops being able to claim runs.
+ */
+router.post('/users/:id/cloud-worker', async (req, res) => {
+  try {
+    const target = await loadTarget(req, res);
+    if (!target) return;
+    const screenUrl = normaliseScreenUrl(req.body && req.body.screenUrl);
+    if (!SCREEN_URL_RE.test(screenUrl)) {
+      return res.status(400).json({ error: `The screen link must look like https://screen-<name>.${SCREEN_DOMAIN}` });
+    }
+    const issueToken = req.body && req.body.issueToken === true;
+    await User.updateOne({ _id: target._id }, { $set: { cloudScreenUrl: screenUrl } });
+    const token = issueToken ? await issueWorkerToken(target._id) : null;
+    auditAction(req, target, 'cloud-worker',
+      issueToken ? `cloud browser set to ${screenUrl}; new worker token issued` : `cloud browser set to ${screenUrl}`,
+      { cloudScreenUrl: screenUrl, tokenIssued: issueToken },
+      issueToken ? 'An admin moved your job-platform workers to the cloud. Any worker on your own computer has stopped.'
+                 : 'An admin set the link to your cloud browser.');
+    res.json({ ok: true, cloudScreenUrl: screenUrl, ...(token ? { token } : {}) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * DELETE /api/admin/users/:id/cloud-worker[?revokeToken=1]
+ * Clears the link; with revokeToken also revokes their worker token, so the
+ * cloud container (or anything else holding it) can no longer claim runs.
+ */
+router.delete('/users/:id/cloud-worker', async (req, res) => {
+  try {
+    const target = await loadTarget(req, res);
+    if (!target) return;
+    const revoke = req.query.revokeToken === '1';
+    await User.updateOne({ _id: target._id }, { $unset: { cloudScreenUrl: 1 } });
+    if (revoke) await revokeWorkerToken(target._id);
+    auditAction(req, target, 'cloud-worker-removed',
+      revoke ? 'cloud browser removed; worker token revoked' : 'cloud browser removed',
+      { tokenRevoked: revoke },
+      'An admin removed your cloud browser.');
+    res.json({ ok: true, tokenRevoked: revoke });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

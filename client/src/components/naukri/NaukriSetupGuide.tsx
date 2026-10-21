@@ -24,7 +24,7 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: 'fix', label: 'Troubleshooting', icon: 'ti-lifebuoy' },
 ];
 
-type Progress = { token: boolean | null; overview: NaukriOverview | null };
+type Progress = { token: boolean | null; overview: NaukriOverview | null; cloud: string | null };
 
 function Checklist({ p }: { p: Progress }) {
   const o = p.overview;
@@ -129,10 +129,42 @@ function HowItWorks() {
   );
 }
 
+// An admin hosts this account's workers on the cloud VM: there is nothing to
+// install, only the job sites to log into, in the browser behind this link.
+function CloudSetup({ url, progress }: { url: string; progress: Progress }) {
+  return (
+    <>
+      <Checklist p={progress} />
+      <Note>
+        <strong>Your job platforms run in the cloud.</strong> Nothing to install — your computer can be off.
+        The workers drive a Chrome that runs on the server, and you log in to Naukri, Instahyre and Hirist in it once.
+      </Note>
+      <Step n={1} title="Open your cloud browser">
+        <P>
+          <a className="btn btn-primary btn-sm" href={url} target="_blank" rel="noreferrer">
+            <i className="ti ti-external-link" /> Open cloud browser
+          </a>
+        </P>
+        <P>Cloudflare asks for your email and sends you a 6-digit code. You stay signed in for 30 days.</P>
+      </Step>
+      <Step n={2} title="Log in to your job sites">
+        <P>Naukri, Instahyre and Hirist are already open in tabs. Log in to each as you normally would, including any OTP.</P>
+      </Step>
+      <Step n={3} title="Close the tab">
+        <P>
+          That's it. The browser keeps running on the server with your logins saved, and the checklist above
+          turns green within a minute. If a site ever shows <strong>logged out</strong> here, open the same link and log in again.
+        </P>
+      </Step>
+    </>
+  );
+}
+
 function Setup({ os, setOs, progress, origin }: {
   os: Os; setOs: (o: Os) => void; progress: Progress; origin: string;
 }) {
   const w = progress.overview?.worker;
+  if (progress.cloud) return <CloudSetup url={progress.cloud} progress={progress} />;
   const prereq = os === 'mac'
     ? `# Homebrew first, if you don't have it: https://brew.sh
 brew install node git
@@ -339,7 +371,7 @@ export default function NaukriSetupGuide({ onClose, initialTab = 'how' }: {
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [os, setOs] = useState<Os>(detectOs);
-  const [progress, setProgress] = useState<Progress>({ token: null, overview: null });
+  const [progress, setProgress] = useState<Progress>({ token: null, overview: null, cloud: null });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -349,11 +381,11 @@ export default function NaukriSetupGuide({ onClose, initialTab = 'how' }: {
 
   // Poll while open, so the checklist ticks over as the user works through it.
   const load = useCallback(async () => {
-    const [token, overview] = await Promise.all([
-      workerTokenStatusApi().then(r => r.registered).catch(() => null),
+    const [status, overview] = await Promise.all([
+      workerTokenStatusApi().catch(() => null),
       naukriOverviewApi().catch(() => null),
     ]);
-    setProgress({ token, overview });
+    setProgress({ token: status ? status.registered : null, overview, cloud: status?.cloudScreenUrl || null });
   }, []);
   // Paused while the tab is hidden; refreshes the moment it is visible again.
   useVisibleInterval(load, 5000);

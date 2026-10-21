@@ -1,0 +1,11 @@
+# Build context for deploy/cloud-worker/Dockerfile: only what the image copies.
+*
+!worker/
+!lib/platforms.js
+!lib/naukriFilters.js
+!lib/naukriAnswers.js
+!deploy/cloud-worker/novnc-index.html
+!deploy/cloud-worker/chrome.sh
+!deploy/cloud-worker/chrome-debug.sh
+!deploy/cloud-worker/entrypoint.sh
+worker/**/RECON.md

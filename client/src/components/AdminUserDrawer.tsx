@@ -6,7 +6,7 @@ import Switch from './Switch';
 import { fmtAgo } from '../lib/analytics';
 import {
   adminCheckMailboxApi, adminPauseSendingApi, adminResumeSendingApi, adminRevokeSessionsApi,
-  adminSendEmailNowApi, adminSetLibraryAccessApi, adminSetAiFallbackApi, adminUpdateUserApi, type AdminSendNowType, type AdminUserRow,
+  adminRemoveCloudWorkerApi, adminSetCloudWorkerApi, adminSendEmailNowApi, adminSetLibraryAccessApi, adminSetAiFallbackApi, adminUpdateUserApi, type AdminSendNowType, type AdminUserRow,
 } from '../lib/api';
 
 // Admin → Overview → click an account. Everything an admin can do to ONE
@@ -35,6 +35,93 @@ const SKIP_REASON: Record<string, string> = {
 };
 
 const ago = (v: string | null | undefined) => (v ? fmtAgo(new Date(v).getTime()) : 'never');
+
+// Their job-platform workers on the cloud VM (deploy/cloud-worker). The link is
+// fixed by the name given to `cw add` (screen-<name>.<domain>), so the admin
+// saves it here first, issues the token `cw add` asks for, then runs cw. The
+// token is shown here once and never again.
+function CloudWorker({ row, busy, setBusy, onChanged }: {
+  row: AdminUserRow;
+  busy: string | null;
+  setBusy: (k: string | null) => void;
+  onChanged: () => void;
+}) {
+  const toast = useToast();
+  const id = row.id!;
+  const [url, setUrl] = useState(row.cloudScreenUrl || '');
+  const [token, setToken] = useState<string | null>(null);
+  const saved = row.cloudScreenUrl || null;
+
+  const save = async (issueToken: boolean) => {
+    if (issueToken && row.config.hasWorkerToken && !window.confirm(
+      `Issue a new worker token for ${row.email}? It replaces their current one, so a worker on their own computer stops claiming runs.`)) return;
+    setBusy(issueToken ? 'cw-token' : 'cw-save');
+    try {
+      const r = await adminSetCloudWorkerApi(id, url, issueToken);
+      setUrl(r.cloudScreenUrl);
+      if (r.token) setToken(r.token);
+      toast(issueToken ? 'Link saved and token issued — copy it now' : 'Cloud browser link saved', 'success');
+      onChanged();
+    } catch (e: any) {
+      toast(e.message || 'That did not work', 'error');
+    } finally { setBusy(null); }
+  };
+
+  const remove = async () => {
+    if (!window.confirm(`Remove the cloud browser for ${row.email} and revoke their worker token? Their cloud workers stop claiming runs.`)) return;
+    setBusy('cw-rm');
+    try {
+      await adminRemoveCloudWorkerApi(id, true);
+      setUrl(''); setToken(null);
+      toast('Cloud browser removed and token revoked. Run: sudo cw rm <user> on the VM.', 'success');
+      onChanged();
+    } catch (e: any) {
+      toast(e.message || 'That did not work', 'error');
+    } finally { setBusy(null); }
+  };
+
+  const copy = async () => {
+    if (!token) return;
+    try { await navigator.clipboard.writeText(token); toast('Token copied', 'success'); }
+    catch { toast('Select the token and copy it by hand', 'error'); }
+  };
+
+  return (
+    <>
+      <h3>Cloud worker</h3>
+      <div className="ud-action" style={{ alignItems: 'stretch', flexDirection: 'column', gap: 8 }}>
+        <div className="ud-action-text">
+          <div>Job platforms in the cloud</div>
+          <div>{saved
+            ? <>Naukri, Instahyre and Hirist run on the cloud VM. Their browser: <a href={saved} target="_blank" rel="noreferrer">{saved.replace('https://', '')}</a></>
+            : <>Their workers run on their own computer. To host them on the VM: enter <code>https://screen-&lt;name&gt;.jainprashuk.in</code>, issue a token, then run <code>sudo cw add &lt;name&gt; {row.email}</code> on the VM and paste the token.</>}</div>
+        </div>
+        <input type="url" value={url} placeholder="https://screen-name.jainprashuk.in" onChange={e => setUrl(e.target.value)}
+          aria-label="Cloud browser link" style={{ width: '100%' }} />
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <button className="btn btn-xs" type="button" disabled={!!busy || !url.trim()} onClick={() => save(false)}>
+            <i className="ti ti-device-floppy" /> Save link
+          </button>
+          <button className="btn btn-xs btn-primary" type="button" disabled={!!busy || !url.trim()} onClick={() => save(true)}>
+            <i className="ti ti-key" /> Save + issue token
+          </button>
+          {saved && (
+            <button className="btn btn-xs btn-danger" type="button" disabled={!!busy} onClick={remove}>
+              <i className="ti ti-cloud-off" /> Remove
+            </button>
+          )}
+        </div>
+        {token && (
+          <div className="info-box" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 6 }}>
+            <span><strong>Worker token — shown once.</strong> Paste it where <code>sudo cw add</code> (or <code>cw token</code>) asks for it. Don't send it anywhere else.</span>
+            <code style={{ wordBreak: 'break-all', userSelect: 'all' }}>{token}</code>
+            <div><button className="btn btn-xs" type="button" onClick={copy}><i className="ti ti-copy" /> Copy</button></div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
 
 export default function AdminUserDrawer({ row, isSelf, onClose, onChanged, onOpenEmails }: {
   row: AdminUserRow;
@@ -174,6 +261,8 @@ export default function AdminUserDrawer({ row, isSelf, onClose, onChanged, onOpe
           </div>
           <button className="btn btn-xs" type="button" onClick={onOpenEmails}><i className="ti ti-mail-cog" /> Open</button>
         </div>
+
+        <CloudWorker row={row} busy={busy} setBusy={setBusy} onChanged={onChanged} />
 
         <h3>Access</h3>
         <div className="ud-action">

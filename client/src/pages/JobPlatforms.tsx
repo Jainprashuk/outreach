@@ -6,7 +6,7 @@ import type {
 } from '../lib/api';
 import {
   naukriOverviewApi, naukriConfigApi, queueNaukriRunApi, cancelNaukriRunApi, platformsApi,
-  queuePlatformRunApi, updatePlatformConfigApi, updateNaukriConfigApi, setNaukriPlatform,
+  queuePlatformRunApi, updatePlatformConfigApi, updateNaukriConfigApi, setNaukriPlatform, workerTokenStatusApi,
 } from '../lib/api';
 import Layout from '../components/Layout';
 import { useToast } from '../context/ToastContext';
@@ -525,6 +525,10 @@ export default function JobPlatforms() {
   const [overview, setOverview] = useState<NaukriOverview | null>(null);
   const [config, setConfig] = useState<NaukriConfig | null>(null);
   const [guide, setGuide] = useState<NaukriGuideTab | null>(null);
+  // Set when an admin hosts this account's workers on the cloud VM: the link to
+  // the browser there, where the user logs in to their job sites.
+  const [cloudUrl, setCloudUrl] = useState<string | null>(null);
+  useEffect(() => { workerTokenStatusApi().then(r => setCloudUrl(r.cloudScreenUrl || null)).catch(() => {}); }, []);
   const view = (params.get('tab') as View) || 'activity';
   const setView = (v: View) => setParams(p => { const n = new URLSearchParams(p); n.set('tab', v); return n; }, { replace: true });
   const pick = (p: PlatformScope, tab?: View) => setParams(prev => {
@@ -645,7 +649,9 @@ export default function JobPlatforms() {
       onTurnOn={async (p) => {
         try {
           await updatePlatformConfigApi(p.id as PlatformId, { enabled: true });
-          toast(`${p.label} turned on. Start its worker on your computer and log into ${p.label} in the debug Chrome.`, 'success');
+          toast(cloudUrl
+            ? `${p.label} turned on. Log into ${p.label} in your cloud browser.`
+            : `${p.label} turned on. Start its worker on your computer and log into ${p.label} in the debug Chrome.`, 'success');
           await load();
           pick(p.id);
         } catch (e: any) { toast(e?.message || `Could not turn ${p.label} on`, 'error'); }
@@ -653,6 +659,12 @@ export default function JobPlatforms() {
   );
 
   // ── header actions ──────────────────────────────────────────────────────
+  const cloudButton = cloudUrl ? (
+    <a className="btn btn-sm" href={cloudUrl} target="_blank" rel="noreferrer"
+      title="The browser your workers use, running in the cloud. Log in to your job sites here.">
+      <i className="ti ti-cloud" /> Cloud browser
+    </a>
+  ) : null;
   let actions: React.ReactNode;
   let readinessLine: React.ReactNode;
   if (single && overview) {
@@ -664,6 +676,7 @@ export default function JobPlatforms() {
     const mode = overview.applyMode || 'on';
     actions = (
       <>
+        {cloudButton}
         {scope === 'naukri' && (
           <button className="btn btn-sm" type="button" onClick={() => setGuide(overview.worker.everSeen ? 'how' : 'setup')}
             title="How the Naukri worker works and how to set it up"><i className="ti ti-book" /> Guide</button>
@@ -714,6 +727,7 @@ export default function JobPlatforms() {
     });
     actions = (
       <>
+        {cloudButton}
         <button className="btn btn-sm" type="button" disabled={!ready.length || busy} onClick={() => startAll('harvest')} title={allTip}>
           <i className="ti ti-download" /> Harvest all
         </button>

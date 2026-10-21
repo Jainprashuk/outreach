@@ -1520,6 +1520,8 @@ export interface AdminUserRow {
   libraryAccess?: boolean;
   /** May run on the owner's AI keys when they have none of their own. */
   aiOwnerFallback?: boolean;
+  /** Link to their browser on the cloud VM; null when their workers run on their own computer. */
+  cloudScreenUrl?: string | null;
   /** Their data is part of the shared Library (they have not opted out). */
   librarySharing?: boolean;
   status: 'active' | 'invited' | 'disabled' | 'n/a';
@@ -1629,6 +1631,15 @@ export const adminCheckMailboxApi = (id: string) =>
   apiFetch<{ ok: boolean; skipped?: 'no_credentials'; scanned?: number; replied?: number; bounced?: number }>(
     `/api/admin/users/${id}/check-mailbox`, { method: 'POST' });
 
+/** Cloud browser link for an account; with issueToken also a new worker token, shown once. */
+export const adminSetCloudWorkerApi = (id: string, screenUrl: string, issueToken: boolean) =>
+  apiFetch<{ ok: true; cloudScreenUrl: string; token?: string }>(
+    `/api/admin/users/${id}/cloud-worker`, { method: 'POST', body: JSON.stringify({ screenUrl, issueToken }) });
+
+export const adminRemoveCloudWorkerApi = (id: string, revokeToken: boolean) =>
+  apiFetch<{ ok: true; tokenRevoked: boolean }>(
+    `/api/admin/users/${id}/cloud-worker${revokeToken ? '?revokeToken=1' : ''}`, { method: 'DELETE' });
+
 export const adminOtpHealthApi = () =>
   apiFetch<{ since: string; failures: Array<{ email: string; error: string; at: string }> }>('/api/admin/otp-health');
 
@@ -1678,7 +1689,7 @@ export const revokeShareLinkApi = () =>
   apiFetch<{ ok: true }>('/api/share-link', { method: 'DELETE' });
 
 export const workerTokenStatusApi = () =>
-  apiFetch<{ registered: boolean }>('/api/scrapes/worker-token');
+  apiFetch<{ registered: boolean; cloudScreenUrl?: string | null }>('/api/scrapes/worker-token');
 
 export const issueWorkerTokenApi = () =>
   apiFetch<{ token: string; note: string }>('/api/scrapes/worker-token', { method: 'POST' });

@@ -75,6 +75,10 @@ const userSchema = new mongoose.Schema({
   // cookie, so it authenticates with a bearer token that identifies WHICH
   // account's runs it is claiming — see lib/workerAuth.js.
   workerTokenHash: { type: String, default: null },
+  // The link to this account's browser on the cloud VM (deploy/cloud-worker),
+  // set by an admin. No default on purpose: unset means "runs on their own
+  // computer", and nothing is indexed on it.
+  cloudScreenUrl: { type: String },
   // SHA-256 of this account's read-only export link token — see lib/shareAuth.js.
   shareTokenHash: { type: String, default: null },
 }, { timestamps: true });

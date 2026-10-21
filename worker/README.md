@@ -153,3 +153,9 @@ shared driver in `worker/platforms/shared/`, configured by each
 verified on the live sites — fill in `worker/platforms/<id>/RECON.md` from
 DevTools and update `meta.js`. Real apply is locked off for both
 (`lib/platforms.js` capabilities.apply); only a dry run exists.
+
+### In the cloud instead
+
+The same platform workers can run on a cloud VM, one container per user, with a
+browser each user reaches from a private link. Nothing in this directory changes
+for it. See `deploy/cloud-worker/README.md`. LinkedIn stays here.

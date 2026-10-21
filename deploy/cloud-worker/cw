@@ -1,0 +1,330 @@
+#!/usr/bin/env bash
+# cw — run job-platform workers in the cloud, one isolated container per user.
+#
+#   sudo cw host-setup                 one time: Docker, cloudflared + tunnel, image
+#   sudo cw add <user> <email>         new user: container, screen link, access rule
+#   sudo cw rm <user> [--purge]        remove a user (--purge also deletes their saved logins)
+#   sudo cw token <user>               replace a user's worker token
+#   cw list | cw stats                 who runs here, and what it costs in memory/CPU
+#   cw logs <user> [platform]          follow a user's worker logs
+#   sudo cw restart <user>             restart a user's browser + workers (logins kept)
+#   sudo cw update                     pull, rebuild, restart every user one at a time
+#
+# Each user gets:
+#   container cw-<user>   Xvfb + real Chrome + noVNC + one worker per platform
+#   volume    /srv/cw/<user>        Chrome profile and logs (survives rebuilds)
+#   env       /srv/cw/<user>.env    their worker token (mode 600)
+#   link      https://screen-<user>.<zone>  behind Cloudflare Access (their email only)
+#
+# The screen is published on the host's 127.0.0.1 only; the Cloudflare tunnel is
+# the only way in from the internet. Chrome's debug port never leaves the
+# container. See deploy/cloud-worker/README.md.
+set -euo pipefail
+
+SELF="$(readlink -f "${BASH_SOURCE[0]}")"
+REPO="$(cd "$(dirname "$SELF")/../.." && pwd)"
+STATE=/srv/cw
+USERS="$STATE/users.json"
+CFENV="$STATE/cloudflare.env"
+IMAGE=outreach-cw:latest
+TUNNEL_NAME=outreach-cw
+FIRST_PORT=6001
+DEFAULT_PLATFORMS="naukri instahyre hirist"
+
+say()  { printf '\033[1m%s\033[0m\n' "$*"; }
+warn() { printf '\033[33m! %s\033[0m\n' "$*" >&2; }
+die()  { printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
+need_root() { [ "$(id -u)" -eq 0 ] || die "Run this with sudo: sudo cw $*"; }
+need_setup() { [ -f "$CFENV" ] && [ -f "$USERS" ] || die "Run 'sudo cw host-setup' first."; }
+load_cf() { set -a; . "$CFENV"; set +a; }
+
+# ── Cloudflare API ──────────────────────────────────────────────────────────
+# cf <METHOD> <path> [json]  → prints .result; dies with Cloudflare's own message.
+cf() {
+  local method="$1" path="$2" body="${3:-}" out
+  out="$(curl -sS -X "$method" "https://api.cloudflare.com/client/v4$path" \
+    -H "Authorization: Bearer $CF_API_TOKEN" -H 'Content-Type: application/json' \
+    ${body:+--data "$body"})" || die "Cloudflare API unreachable ($method $path)"
+  if [ "$(jq -r '.success' <<<"$out")" != "true" ]; then
+    die "Cloudflare $method $path failed: $(jq -c '.errors' <<<"$out")"
+  fi
+  jq -c '.result' <<<"$out"
+}
+# Same, but returns non-zero instead of dying (for best-effort calls).
+cf_try() {
+  local out
+  out="$(curl -sS -X "$1" "https://api.cloudflare.com/client/v4$2" \
+    -H "Authorization: Bearer $CF_API_TOKEN" -H 'Content-Type: application/json' \
+    ${3:+--data "$3"})" || return 1
+  [ "$(jq -r '.success' <<<"$out")" = "true" ] || return 1
+  jq -c '.result' <<<"$out"
+}
+
+host_of() { echo "screen-$1.$CF_ZONE"; }
+
+# Rewrites the tunnel's routes from users.json: every user's hostname to their
+# local screen port, everything else 404.
+push_ingress() {
+  local rules
+  rules="$(jq -c --arg zone "$CF_ZONE" '[.users[] | {hostname: ("screen-" + .user + "." + $zone), service: ("http://localhost:" + (.port|tostring))}] + [{service: "http_status:404"}]' "$USERS")"
+  cf PUT "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/configurations" "{\"config\":{\"ingress\":$rules}}" >/dev/null
+}
+
+run_container() {  # run_container <user> <port>
+  local u="$1" port="$2"
+  docker rm -f "cw-$u" >/dev/null 2>&1 || true
+  docker run -d --name "cw-$u" --hostname "cw-$u" \
+    --restart unless-stopped \
+    --memory 2560m --memory-swap 3584m --cpus 1 --pids-limit 1024 \
+    --shm-size 1g \
+    -p "127.0.0.1:$port:6080" \
+    -v "$STATE/$u:/home/worker" \
+    --env-file "$STATE/$u.env" \
+    --log-opt max-size=5m --log-opt max-file=2 \
+    "$IMAGE" >/dev/null
+}
+
+write_env() {  # write_env <user> <token> <platforms>
+  umask 077
+  printf 'WORKER_SECRET=%s\nOUTREACH_URL=%s\nPLATFORMS=%s\n' "$2" "$OUTREACH_URL" "$3" > "$STATE/$1.env"
+  chmod 600 "$STATE/$1.env"
+}
+
+ask_token() {
+  local t
+  read -r -s -p "Worker token for $1 (from Admin → user → Cloud worker; input hidden): " t; echo >&2
+  t="$(tr -d '[:space:]' <<<"$t")"
+  [ -n "$t" ] || die "No token entered."
+  echo "$t"
+}
+
+valid_user() { [[ "$1" =~ ^[a-z0-9][a-z0-9-]{0,19}$ ]] || die "User name must be lowercase letters, digits or '-', up to 20 characters (it becomes screen-<user>.$CF_ZONE)."; }
+user_json() { jq -c --arg u "$1" '.users[] | select(.user == $u)' "$USERS"; }
+
+build_image() {
+  say "Building the worker image (first time takes a few minutes)…"
+  DOCKER_BUILDKIT=1 docker build -f "$REPO/deploy/cloud-worker/Dockerfile" -t "$IMAGE" "$REPO"
+}
+
+# ── commands ────────────────────────────────────────────────────────────────
+cmd_host_setup() {
+  need_root host-setup
+  [ "$(uname -s)" = Linux ] || die "host-setup runs on the Linux VM, not here."
+  mkdir -p "$STATE"; chmod 711 "$STATE"
+
+  say "1/6  Packages (Docker, jq, unattended security updates)"
+  apt-get update -qq
+  apt-get install -y -qq docker.io docker-buildx jq curl unattended-upgrades >/dev/null
+  systemctl enable --now docker >/dev/null
+
+  say "2/6  cloudflared"
+  if ! command -v cloudflared >/dev/null; then
+    mkdir -p --mode=0755 /usr/share/keyrings
+    curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg
+    echo 'deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main' > /etc/apt/sources.list.d/cloudflared.list
+    apt-get update -qq && apt-get install -y -qq cloudflared >/dev/null
+  fi
+
+  say "3/6  Swap (4 GB safety margin for Chrome)"
+  if ! swapon --show | grep -q .; then
+    fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+    grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+  fi
+
+  say "4/6  Cloudflare details"
+  if [ -f "$CFENV" ]; then
+    load_cf; echo "Using saved settings in $CFENV (delete it to re-enter)."
+  else
+    local tok acct zone admin url
+    read -r -s -p "Cloudflare API token (input hidden): " tok; echo
+    read -r -p "Cloudflare Account ID: " acct
+    read -r -p "Domain [jainprashuk.in]: " zone; zone="${zone:-jainprashuk.in}"
+    read -r -p "Your (admin) email, also allowed on every screen for setup help: " admin
+    read -r -p "Portal URL [https://outreach-gray.vercel.app]: " url; url="${url:-https://outreach-gray.vercel.app}"
+    CF_API_TOKEN="$tok"; CF_ACCOUNT_ID="$acct"; CF_ZONE="$zone"; ADMIN_EMAIL="$admin"; OUTREACH_URL="${url%/}"
+    cf GET /user/tokens/verify >/dev/null || die "That token is not valid."
+    CF_ZONE_ID="$(cf GET "/zones?name=$CF_ZONE" | jq -r '.[0].id // empty')"
+    [ -n "$CF_ZONE_ID" ] || die "Zone $CF_ZONE not found for this token."
+    umask 077
+    printf 'CF_API_TOKEN=%s\nCF_ACCOUNT_ID=%s\nCF_ZONE=%s\nCF_ZONE_ID=%s\nADMIN_EMAIL=%s\nOUTREACH_URL=%s\n' \
+      "$CF_API_TOKEN" "$CF_ACCOUNT_ID" "$CF_ZONE" "$CF_ZONE_ID" "$ADMIN_EMAIL" "$OUTREACH_URL" > "$CFENV"
+    chmod 600 "$CFENV"
+  fi
+
+  say "5/6  Tunnel '$TUNNEL_NAME'"
+  if [ -z "${CF_TUNNEL_ID:-}" ]; then
+    CF_TUNNEL_ID="$(cf GET "/accounts/$CF_ACCOUNT_ID/cfd_tunnel?name=$TUNNEL_NAME&is_deleted=false" | jq -r '.[0].id // empty')"
+    if [ -z "$CF_TUNNEL_ID" ]; then
+      CF_TUNNEL_ID="$(cf POST "/accounts/$CF_ACCOUNT_ID/cfd_tunnel" "{\"name\":\"$TUNNEL_NAME\",\"config_src\":\"cloudflare\"}" | jq -r '.id')"
+    fi
+    echo "CF_TUNNEL_ID=$CF_TUNNEL_ID" >> "$CFENV"
+  fi
+  if ! systemctl is-enabled --quiet cloudflared 2>/dev/null; then
+    local ttok; ttok="$(cf GET "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/token" | jq -r '.')"
+    cloudflared service install "$ttok" >/dev/null 2>&1 || die "cloudflared service install failed"
+  fi
+  [ -f "$USERS" ] || echo '{"users":[]}' > "$USERS"
+  push_ingress
+  # One-time PIN is what asks each user for their email code. Checking needs a
+  # permission the token may not have, so this is best effort.
+  if idps="$(cf_try GET "/accounts/$CF_ACCOUNT_ID/access/identity_providers")"; then
+    if [ "$(jq '[.[] | select(.type == "onetimepin")] | length' <<<"$idps")" = 0 ]; then
+      cf_try POST "/accounts/$CF_ACCOUNT_ID/access/identity_providers" '{"name":"One-time PIN","type":"onetimepin","config":{}}' >/dev/null \
+        && echo "Turned on the One-time PIN login method." \
+        || warn "Could not add One-time PIN — add it in Zero Trust → Integrations → Identity providers."
+    fi
+  else
+    warn "Could not read login methods with this token — make sure One-time PIN is on in Zero Trust."
+  fi
+
+  say "6/6  Worker image"
+  build_image
+
+  echo
+  say "Host ready."
+  echo "  tunnel : $TUNNEL_NAME ($CF_TUNNEL_ID) — $(systemctl is-active cloudflared)"
+  echo "  image  : $IMAGE"
+  echo "  next   : sudo cw add <user> <email>"
+}
+
+cmd_add() {
+  need_root add; need_setup; load_cf
+  local u="${1:-}" email="${2:-}" private=0
+  [ -n "$u" ] && [ -n "$email" ] || die "Usage: sudo cw add <user> <email> [--private]"
+  [ "${3:-}" = "--private" ] && private=1
+  valid_user "$u"
+  [[ "$email" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "That does not look like an email address."
+  [ -z "$(user_json "$u")" ] || die "User '$u' already exists (cw list)."
+
+  local port host token platforms
+  port="$(jq --argjson first "$FIRST_PORT" '[.users[].port] | (max // ($first - 1)) + 1' "$USERS")"
+  host="$(host_of "$u")"
+  token="$(ask_token "$u")"
+  read -r -p "Platforms [$DEFAULT_PLATFORMS]: " platforms; platforms="${platforms:-$DEFAULT_PLATFORMS}"
+
+  say "Container cw-$u on 127.0.0.1:$port"
+  mkdir -p "$STATE/$u"; chown 1000:1000 "$STATE/$u"; chmod 700 "$STATE/$u"
+  write_env "$u" "$token" "$platforms"
+  run_container "$u" "$port"
+
+  say "Screen link $host"
+  local tmp; tmp="$(mktemp)"
+  jq --arg u "$u" --arg e "$email" --argjson p "$port" --arg pl "$platforms" --arg t "$(date -u +%FT%TZ)" \
+    '.users += [{user:$u, email:$e, port:$p, platforms:$pl, createdAt:$t}]' "$USERS" > "$tmp" && mv "$tmp" "$USERS"
+  push_ingress
+
+  local dns_id
+  dns_id="$(cf GET "/zones/$CF_ZONE_ID/dns_records?type=CNAME&name=$host" | jq -r '.[0].id // empty')"
+  local rec="{\"type\":\"CNAME\",\"name\":\"$host\",\"content\":\"$CF_TUNNEL_ID.cfargotunnel.com\",\"proxied\":true,\"comment\":\"outreach cloud worker: $u\"}"
+  if [ -n "$dns_id" ]; then cf PUT "/zones/$CF_ZONE_ID/dns_records/$dns_id" "$rec" >/dev/null
+  else dns_id="$(cf POST "/zones/$CF_ZONE_ID/dns_records" "$rec" | jq -r '.id')"; fi
+
+  say "Access rule: only $email$([ $private = 0 ] && echo " and $ADMIN_EMAIL")"
+  local app_id include
+  app_id="$(cf POST "/accounts/$CF_ACCOUNT_ID/access/apps" \
+    "{\"name\":\"Cloud browser — $u\",\"domain\":\"$host\",\"type\":\"self_hosted\",\"session_duration\":\"720h\",\"app_launcher_visible\":false}" | jq -r '.id')"
+  if [ $private = 0 ] && [ "$ADMIN_EMAIL" != "$email" ]; then
+    include="[{\"email\":{\"email\":\"$email\"}},{\"email\":{\"email\":\"$ADMIN_EMAIL\"}}]"
+  else
+    include="[{\"email\":{\"email\":\"$email\"}}]"
+  fi
+  cf POST "/accounts/$CF_ACCOUNT_ID/access/apps/$app_id/policies" \
+    "{\"name\":\"$u only\",\"decision\":\"allow\",\"include\":$include,\"precedence\":1}" >/dev/null
+
+  jq --arg u "$u" --arg a "$app_id" --arg d "$dns_id" \
+    '(.users[] | select(.user == $u)) += {appId:$a, dnsId:$d}' "$USERS" > "$tmp" && mv "$tmp" "$USERS"
+
+  echo
+  say "Added $u."
+  echo "  link     : https://$host   (paste it into Admin → $u → Cloud worker → Screen URL)"
+  echo "  login    : $email gets a 6-digit code from Cloudflare"
+  echo "  then     : they log in to their job sites in that browser and close the tab"
+  echo "  logs     : cw logs $u"
+}
+
+cmd_rm() {
+  need_root rm; need_setup; load_cf
+  local u="${1:-}" purge=0 j
+  [ -n "$u" ] || die "Usage: sudo cw rm <user> [--purge]"
+  [ "${2:-}" = "--purge" ] && purge=1
+  j="$(user_json "$u")"; [ -n "$j" ] || die "No user '$u'."
+  docker rm -f "cw-$u" >/dev/null 2>&1 || true
+  local app dns tmp; app="$(jq -r '.appId // empty' <<<"$j")"; dns="$(jq -r '.dnsId // empty' <<<"$j")"
+  [ -n "$app" ] && { cf_try DELETE "/accounts/$CF_ACCOUNT_ID/access/apps/$app" >/dev/null || warn "Could not delete Access app $app"; }
+  [ -n "$dns" ] && { cf_try DELETE "/zones/$CF_ZONE_ID/dns_records/$dns" >/dev/null || warn "Could not delete DNS record $dns"; }
+  tmp="$(mktemp)"; jq --arg u "$u" '.users |= map(select(.user != $u))' "$USERS" > "$tmp" && mv "$tmp" "$USERS"
+  push_ingress
+  rm -f "$STATE/$u.env"
+  if [ $purge = 1 ]; then rm -rf "${STATE:?}/$u"; say "Removed $u and deleted their saved logins."
+  else say "Removed $u. Their Chrome profile is kept in $STATE/$u (cw rm $u --purge deletes it)."; fi
+  echo "Also revoke their token: Admin → $u → Cloud worker → Revoke."
+}
+
+cmd_token() {
+  need_root token; need_setup; load_cf
+  local u="${1:-}" j; [ -n "$u" ] || die "Usage: sudo cw token <user>"
+  j="$(user_json "$u")"; [ -n "$j" ] || die "No user '$u'."
+  write_env "$u" "$(ask_token "$u")" "$(jq -r '.platforms' <<<"$j")"
+  run_container "$u" "$(jq -r '.port' <<<"$j")"
+  say "Token replaced; cw-$u restarted."
+}
+
+cmd_list() {
+  need_setup
+  [ -r "$CFENV" ] && load_cf || CF_ZONE="(sudo for links)"
+  printf '%-14s %-32s %-6s %-10s %s\n' USER EMAIL PORT STATE LINK
+  jq -r '.users[] | [.user, .email, (.port|tostring)] | @tsv' "$USERS" | while IFS=$'\t' read -r u e p; do
+    local s; s="$(docker inspect -f '{{.State.Status}}' "cw-$u" 2>/dev/null || echo missing)"
+    printf '%-14s %-32s %-6s %-10s https://%s\n' "$u" "$e" "$p" "$s" "$(host_of "$u")"
+  done
+}
+
+cmd_stats() {
+  docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}\t{{.CPUPerc}}' $(docker ps --filter name=^cw- -q) 2>/dev/null || echo "No cw containers running."
+  echo; free -h | sed -n '1,3p'; echo; df -h / | tail -1 | awk '{print "disk: " $3 " used of " $2 " (" $5 ")"}'
+}
+
+cmd_logs() {
+  local u="${1:-}" p="${2:-}" dir
+  [ -n "$u" ] || die "Usage: cw logs <user> [naukri|instahyre|hirist|chrome]"
+  dir="$STATE/$u/.job-leads/logs"
+  [ -d "$dir" ] || die "No logs yet for $u (is the container running? cw list)"
+  if [ -n "$p" ]; then
+    local f="$dir/worker-$p.log"; [ -f "$f" ] || f="$dir/$p.log"
+    tail -n 100 -f "$f"
+  else
+    tail -n 30 -f "$dir"/worker-*.log
+  fi
+}
+
+cmd_restart() {
+  need_root restart; local u="${1:-}"; [ -n "$u" ] || die "Usage: sudo cw restart <user>"
+  docker restart "cw-$u" >/dev/null && say "Restarted cw-$u."
+}
+
+cmd_update() {
+  need_root update; need_setup
+  say "Pulling $REPO"
+  git -C "$REPO" pull --ff-only
+  build_image
+  jq -r '.users[] | [.user, (.port|tostring)] | @tsv' "$USERS" | while IFS=$'\t' read -r u p; do
+    say "Restarting cw-$u on the new image"
+    run_container "$u" "$p"
+    sleep 20
+  done
+  docker image prune -f >/dev/null
+  say "Updated."
+}
+
+case "${1:-}" in
+  host-setup) shift; cmd_host_setup "$@" ;;
+  add)        shift; cmd_add "$@" ;;
+  rm)         shift; cmd_rm "$@" ;;
+  token)      shift; cmd_token "$@" ;;
+  list)       shift; cmd_list "$@" ;;
+  stats)      shift; cmd_stats "$@" ;;
+  logs)       shift; cmd_logs "$@" ;;
+  restart)    shift; cmd_restart "$@" ;;
+  update)     shift; cmd_update "$@" ;;
+  *) sed -n '2,12p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
+esac

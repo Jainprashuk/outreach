@@ -495,8 +495,10 @@ router.delete('/worker-token', async (req, res) => {
 // GET /api/scrapes/worker-token — whether one is registered, never the value.
 router.get('/worker-token', async (req, res) => {
   try {
-    const user = await User.findById(req.userId, { workerTokenHash: 1 }).lean();
-    res.json({ registered: !!(user && user.workerTokenHash) });
+    const user = await User.findById(req.userId, { workerTokenHash: 1, cloudScreenUrl: 1 }).lean();
+    // cloudScreenUrl: set when an admin runs this account's job-platform workers
+    // on the cloud VM; the link to the browser there.
+    res.json({ registered: !!(user && user.workerTokenHash), cloudScreenUrl: (user && user.cloudScreenUrl) || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
