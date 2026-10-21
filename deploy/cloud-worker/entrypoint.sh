@@ -9,6 +9,13 @@ PLATFORMS="${PLATFORMS:-naukri instahyre hirist}"
 
 LOGS="$HOME/.job-leads/logs"
 mkdir -p "$LOGS"
+
+# The workers' PID locks (and the shared chrome.lock) live on the user's volume,
+# so they outlive the container. A fresh container numbers its processes from 1
+# again, and an old lock can name a pid that now belongs to something else —
+# the worker then reads it as "already running" and refuses to start, forever.
+# Nothing has started yet, so every lock found here is stale.
+rm -f "$HOME"/.job-leads/*.lock
 CONF=/tmp/cw-supervisord.conf
 
 # Each program logs to its own file under the user's volume, rotated by

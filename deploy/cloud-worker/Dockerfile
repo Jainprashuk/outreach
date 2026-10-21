@@ -33,9 +33,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
  && rm -rf /var/lib/apt/lists/*
 
 # The real Google Chrome where Google ships one for this architecture (amd64
-# always; arm64 since 2026). Its chrome-sandbox helper is setuid, which keeps
-# Chrome's sandbox working under Docker's default seccomp profile. Otherwise
-# Debian's chromium.
+# always; arm64 since 2026), otherwise Debian's chromium. Chrome's sandbox needs
+# clone/unshare/setns for its namespaces, which Docker's default seccomp profile
+# refuses — cw runs the container with chrome-seccomp.json (Docker's default
+# plus those three) so the sandbox stays ON. Never --no-sandbox.
 RUN set -eux; \
     arch="$(dpkg --print-architecture)"; \
     curl -fsSL https://dl.google.com/linux/linux_signing_key.pub | gpg --dearmor -o /usr/share/keyrings/google-chrome.gpg; \
@@ -68,8 +69,12 @@ COPY deploy/cloud-worker/chrome.sh deploy/cloud-worker/chrome-debug.sh deploy/cl
 RUN chmod 755 /opt/jl/*.sh
 
 # uid 1000 so the host volume (/srv/cw/<user>) can be chowned predictably.
+# (The npm install above ran with HOME=/home/worker, so the directory exists and
+# is root's; hand it over. On the VM the user's volume is mounted over it.)
 RUN userdel -r node 2>/dev/null || true; \
-    useradd --uid 1000 --create-home --home-dir /home/worker --shell /bin/bash worker
+    useradd --uid 1000 --home-dir /home/worker --shell /bin/bash worker; \
+    rm -rf /home/worker/.npm /home/worker/.local; \
+    chown -R worker:worker /home/worker
 
 USER worker
 EXPOSE 6080

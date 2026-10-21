@@ -25,6 +25,7 @@ exec cw-browser \
   --no-default-browser-check \
   --password-store=basic \
   --lang=en-IN \
+  --accept-lang=en-IN,en \
   --window-position=0,0 \
   --window-size=1600,900 \
   --start-maximized \
