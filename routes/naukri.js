@@ -19,6 +19,7 @@ const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = requi
 const { reportIssue } = require('../lib/issues');
 const { notify } = require('../lib/notify');
 const { WORKER_OFFLINE_MS, workerBack } = require('../lib/workerWatch');
+const { inPortal } = require('../lib/portalPresence');
 const {
   isPlatform, labelOf, capabilitiesOf, platformQuery, platformOfDoc, siteOf, applyModeOf,
   kindBlocked, isEnabled, publicRegistry, PLATFORM_IDS, SITE_FIELDS,
@@ -68,6 +69,16 @@ const { profileFromResume } = require('../lib/naukriProfile');
 
 // A worker polls every 20s; 90s of silence means the Mac slept or the process died.
 const ONLINE_MS = 90_000;
+// A worker that understands check-in hints (it sends `hints: true`) is told when
+// to come back: fast while there is work or its owner is in the portal, else at
+// the next scheduled run or after IDLE_POLL_SECONDS. Three workers per user
+// checking in every 20s were ~390k requests a month — most of the hosting
+// plan's free allowance for one person.
+const IDLE_POLL_SECONDS = 300;
+// Online = seen within the interval it was last told, plus a margin; never
+// less than ONLINE_MS, so a worker that ignores hints reads exactly as before.
+const isOnline = (w) => !!(w && w.lastSeenAt)
+  && Date.now() - new Date(w.lastSeenAt).getTime() < Math.max(ONLINE_MS, (w.pollHintSeconds || 0) * 1000 + 60_000);
 // A claimed run whose worker vanished mid-flight: nothing from it — no
 // progress, no result — for this long. Measured from its LAST sign of life,
 // not from when it started, so a long run that is still working is never cut
@@ -212,6 +223,28 @@ const cleanSources = (input, fallback = {}) => {
   };
   return out.searches || out.recommended ? out : null;
 };
+
+// When a hint-aware worker should check in next, in seconds. Fast (its own
+// check-in interval, default 20s) while this platform has a run queued or
+// running, or its owner is in the portal — so "Run now" starts within seconds.
+// Otherwise at the next scheduled run (a few seconds after, so it is due), or
+// after IDLE_POLL_SECONDS, whichever comes first. Remembered on the worker so
+// "online" can allow for it (isOnline).
+async function nextPollFor(userId, platform, config, worker, fastSeconds, fast) {
+  let secs = IDLE_POLL_SECONDS;
+  if (fast
+    || await NaukriRun.exists({ userId, status: { $in: ACTIVE }, ...platformQuery(platform), ...BASE_FILTER })
+    || await inPortal(userId)) {
+    secs = fastSeconds;
+  } else {
+    const next = nextSlot(config.schedule, new Date());
+    if (next) secs = Math.min(secs, Math.max(fastSeconds, Math.ceil((next.at.getTime() - Date.now()) / 1000) + 5));
+  }
+  if (worker.pollHintSeconds !== secs) {
+    await NaukriWorker.updateOne({ _id: worker._id }, { $set: { pollHintSeconds: secs } }).catch(() => {});
+  }
+  return secs;
+}
 
 // A run left 'running' by a worker that was killed would block the queue
 // forever, since /claim only ever starts one at a time.
@@ -485,7 +518,7 @@ async function overviewFor(userId, platform, { config: given = null, light = fal
     history: history.map(serialize),
     worker: {
       everSeen: !!lastSeenAt,
-      online: !!lastSeenAt && Date.now() - lastSeenAt.getTime() < ONLINE_MS,
+      online: isOnline(worker),
       lastSeenAt,
       host: worker.host || '',
       chromeUp: !!worker.chromeUp,
@@ -1977,16 +2010,23 @@ router.post('/claim', async (req, res) => {
     // Sent on EVERY response, idle ones included, so a changed check-in
     // interval reaches the worker without a restart.
     const pollSeconds = (config.worker && config.worker.pollSeconds) || 20;
-    if (!isEnabled(config, platform)) return res.json({ run: null, paused: true, disabled: true, pollSeconds });
-    if (config.safety.pauseAll) return res.json({ run: null, paused: true, pollSeconds });
-    if (blockedUntilOf(worker)) return res.json({ run: null, blockedUntil: worker.blockedUntil, pollSeconds });
+    // Every answer carries the check-in interval, and — for a worker that asked
+    // for hints — when to come back (nextPollFor).
+    const send = async (body, { fast = false } = {}) => res.json({
+      ...body, pollSeconds,
+      ...(req.body && req.body.hints === true
+        ? { nextPollSeconds: await nextPollFor(req.userId, platform, config, worker, pollSeconds, fast) } : {}),
+    });
+    if (!isEnabled(config, platform)) return send({ run: null, paused: true, disabled: true });
+    if (config.safety.pauseAll) return send({ run: null, paused: true });
+    if (blockedUntilOf(worker)) return send({ run: null, blockedUntil: worker.blockedUntil });
 
     // A heartbeat with no appetite for work. The worker sends this when the
     // LinkedIn harvest is holding the shared debug Chrome: it must keep the tab
     // saying "ready" for the length of that run — which can be an hour — but
     // must not claim a run it cannot execute, and must not fire the schedule
     // below on its behalf.
-    if (probeOnly) return res.json({ run: null, busy: true, pollSeconds });
+    if (probeOnly) return send({ run: null, busy: true }, { fast: true });
 
     await failStaleRuns(req.userId);
 
@@ -2023,9 +2063,9 @@ router.post('/claim', async (req, res) => {
           const site = siteOf(fullConfig, other);
           if (!isEnabled(site, other) || site.safety.pauseAll) continue;
           const w = await NaukriWorker.findOne({ userId: req.userId, ...platformQuery(other) }).lean();
-          if (!w || blockedUntilOf(w) || !w.lastSeenAt || Date.now() - new Date(w.lastSeenAt).getTime() > ONLINE_MS) continue;
+          if (!w || blockedUntilOf(w) || !isOnline(w)) continue;
           const older = await NaukriRun.exists({ userId: req.userId, status: 'queued', createdAt: { $lt: mine.createdAt }, ...platformQuery(other), ...BASE_FILTER });
-          if (older) return res.json({ run: null, waiting: labelOf(other), pollSeconds });
+          if (older) return send({ run: null, waiting: labelOf(other) }, { fast: true });
         }
       }
     }
@@ -2035,7 +2075,7 @@ router.post('/claim', async (req, res) => {
       { $set: { status: 'running', claimedAt: new Date(), workerHost: str(host, 200) } },
       { sort: { createdAt: 1 }, new: true }
     );
-    if (!run) return res.json({ run: null, pollSeconds });
+    if (!run) return send({ run: null });
 
     // Everything the worker needs to execute, in the same response — it must not
     // need a second round trip mid-run.
@@ -2134,7 +2174,7 @@ router.post('/claim', async (req, res) => {
       await fullConfig.save();
     }
 
-    res.json(payload);
+    return send(payload, { fast: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

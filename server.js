@@ -30,6 +30,7 @@ const { issueShareToken, revokeShareToken, resolveShareUser, hasShareToken } = r
 const { usersByStaleness, runForUsers } = require('./lib/fanout');
 const { deadline } = require('./lib/http');
 const { touchActivity } = require('./lib/lifecycle/activity');
+const { touchPortal } = require('./lib/portalPresence');
 const { classifyReply } = require('./lib/replyClassifier');
 const actionQueue = require('./lib/actionQueue');
 const { runBackfillBatch } = require('./routes/contacts');
@@ -231,6 +232,9 @@ const requireAuth = async (req, res, next) => {
       req.userId = session.userId;
       // A person is using the app: the inactivity email's "last visit".
       touchActivity(session.userId);
+      // …and, at minute granularity, "is here now" — job workers check in
+      // fast while it is fresh (lib/portalPresence.js).
+      touchPortal(session.userId);
       return next();
     }
   } catch (err) {

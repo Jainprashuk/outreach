@@ -31,6 +31,11 @@ const naukriWorkerSchema = new mongoose.Schema({
   // is in the future neither the buttons nor the schedule may start a run.
   blockedUntil:    { type: Date, default: null },
   blockedReason:   { type: String, default: '' },
+  // The check-in interval the server last told this worker (nextPollSeconds in
+  // the /claim answer). "Online" allows that long plus a margin, so a worker
+  // told to come back in 5 minutes is not shown offline after 90 seconds.
+  // Unset for workers that ignore the hint — they poll every 20s as before.
+  pollHintSeconds: { type: Number },
 }, { timestamps: true });
 
 naukriWorkerSchema.index({ userId: 1, platform: 1 });

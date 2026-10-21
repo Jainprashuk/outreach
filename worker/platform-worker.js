@@ -460,10 +460,14 @@ async function main() {
     + (CFG.stub ? ' [STUB DRIVER — no browser, nothing real is applied to]' : ''));
 
   let lastTick = Date.now();
+  // How long the last poll chose to sleep: the server's hint when it sent one
+  // (nextPollSeconds — minutes while nothing is happening), else pollMs.
+  let sleptMs = CFG.pollMs;
+  let nextSleepMs = CFG.pollMs;
   for (;;) {
-    // A gap much larger than the poll interval means the machine was asleep.
+    // A gap much larger than the intended sleep means the machine was asleep.
     const gap = Date.now() - lastTick;
-    if (gap > CFG.pollMs * 2) {
+    if (gap > sleptMs + CFG.pollMs * 2) {
       log(`woke after ${Math.round(gap / 1000)}s asleep — holding the machine awake for 5 minutes`);
       holdAwake(300);
     }
@@ -496,6 +500,7 @@ async function main() {
       await flushOutbox().catch(err => log('outbox flush failed:', err.message));
 
       let claimed;
+      nextSleepMs = CFG.pollMs;
       try {
         // Read from the cookie jar of the session we already hold — no
         // navigation, no extra attach. Undefined (rather than false) while we
@@ -513,7 +518,16 @@ async function main() {
           // Keep the tab saying "ready" for the length of a LinkedIn harvest,
           // which can be an hour, without claiming work we cannot execute.
           probeOnly: !releaseChrome,
+          // Ask for check-in hints: the server then says when to come back
+          // (fast while there is work or you are in the portal, minutes
+          // otherwise). A server that predates hints ignores this.
+          hints: true,
         });
+
+        // Clamped like pollSeconds, wider: a bad value must neither spin nor
+        // put the worker to sleep for hours.
+        const hint = Number(claimed.nextPollSeconds);
+        if (Number.isFinite(hint) && hint >= 15 && hint <= 900) nextSleepMs = hint * 1000;
 
         // The check-in interval is a setting (Configuration → Schedule), sent
         // back on every claim so a change applies without a restart. Clamped
@@ -556,7 +570,8 @@ async function main() {
     // were measured from the top of the loop, the next iteration would read its
     // own duration as time asleep and hold the Mac awake for nothing.
     lastTick = Date.now();
-    await sleep(CFG.pollMs);
+    sleptMs = nextSleepMs;
+    await sleep(nextSleepMs);
   }
 }
 

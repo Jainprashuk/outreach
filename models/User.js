@@ -79,6 +79,9 @@ const userSchema = new mongoose.Schema({
   // set by an admin. No default on purpose: unset means "runs on their own
   // computer", and nothing is indexed on it.
   cloudScreenUrl: { type: String },
+  // Last request from a person in the portal, minute granularity
+  // (lib/portalPresence.js). No default: unset means "not seen yet".
+  portalSeenAt: { type: Date },
   // SHA-256 of this account's read-only export link token — see lib/shareAuth.js.
   shareTokenHash: { type: String, default: null },
 }, { timestamps: true });
