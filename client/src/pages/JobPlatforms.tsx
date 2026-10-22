@@ -7,10 +7,12 @@ import type {
 import {
   naukriOverviewApi, naukriConfigApi, queueNaukriRunApi, cancelNaukriRunApi, platformsApi,
   queuePlatformRunApi, updatePlatformConfigApi, updateNaukriConfigApi, setNaukriPlatform, workerTokenStatusApi,
+  platformCountsApi, type CountRange, type PlatformCounts,
 } from '../lib/api';
+import { useVisibleInterval } from '../hooks/useVisibleInterval';
 import Layout from '../components/Layout';
 import { useToast } from '../context/ToastContext';
-import StatusHeader, { readiness, runLabel, TONE_COLOR } from '../components/naukri/StatusHeader';
+import StatusHeader, { readiness, runLabel, TONE_COLOR, setCloudHosted } from '../components/naukri/StatusHeader';
 import NaukriSetupGuide, { type NaukriGuideTab } from '../components/naukri/NaukriSetupGuide';
 import CloudBrowserButton from '../components/naukri/CloudBrowserButton';
 import RunTimeline, { ActiveRun } from '../components/naukri/RunTimeline';
@@ -403,11 +405,41 @@ function whenText(at: string): string {
   return `${day} ${d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
+// The cards' date filter. Days run midnight to midnight IST; 7 and 30 days
+// are rolling. Remembered per browser.
+const RANGES: { key: CountRange; label: string; word: string }[] = [
+  { key: 'today', label: 'Today', word: 'today' },
+  { key: 'yesterday', label: 'Yesterday', word: 'yesterday' },
+  { key: '7d', label: 'Last 7 days', word: 'in 7 days' },
+  { key: '30d', label: 'Last 30 days', word: 'in 30 days' },
+];
+const RANGE_KEY = 'jp.cardsRange';
+const readRange = (): CountRange => {
+  try { const v = localStorage.getItem(RANGE_KEY); return (RANGES.some(r => r.key === v) ? v : '7d') as CountRange; } catch { return '7d'; }
+};
+
 function AllActivity({ platforms, onOpen, onOpenWaiting, onRun, busy }: {
   platforms: PlatformInfo[]; onOpen: (p: PlatformId) => void; onOpenWaiting: (p: PlatformId) => void; busy: boolean;
   onRun: (p: PlatformId, kind: NaukriRunKind, sources?: NaukriSources) => void;
 }) {
   const on = platforms.filter(p => p.enabled && p.overview);
+  const [range, setRangeState] = useState<CountRange>(readRange);
+  const [counts, setCounts] = useState<{ range: CountRange; by: Partial<Record<PlatformId, PlatformCounts>> } | null>(null);
+  const setRange = (r: CountRange) => { setRangeState(r); try { localStorage.setItem(RANGE_KEY, r); } catch { /* per-browser nicety only */ } };
+  const loadCounts = useCallback(() => {
+    platformCountsApi(range).then(r => setCounts({ range: r.range, by: r.counts })).catch(() => {});
+  }, [range]);
+  useEffect(() => { loadCounts(); }, [loadCounts]);
+  // A minute is fresh enough for a day's tally, and keeps this off the hot poll.
+  useVisibleInterval(loadCounts, 60000);
+  const word = RANGES.find(r => r.key === range)!.word;
+  // Until the chosen range has loaded, the 7-day numbers from /platforms stand in.
+  const countOf = (p: PlatformInfo) => {
+    const c = counts && counts.range === range ? counts.by[p.id] : null;
+    if (c) return c;
+    if (range === '7d') return { found: p.overview!.foundThisWeek || 0, applied: p.overview!.week.applied };
+    return null;
+  };
   const running = on.filter(p => p.overview!.activeRun);
   const history: NaukriRun[] = on.flatMap(p => p.overview!.history.map(h => ({ ...h, platform: h.platform || p.id })))
     .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)).slice(0, 20);
@@ -422,9 +454,21 @@ function AllActivity({ platforms, onOpen, onOpenWaiting, onRun, busy }: {
           <ActiveRun run={p.overview!.activeRun!} />
         </Card>
       ))}
+      {on.length > 0 && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 10 }}>
+          <Muted style={{ fontSize: 12 }}>Found and applied:</Muted>
+          <div className="seg-toggle" role="group" aria-label="Date range for found and applied">
+            {RANGES.map(r => (
+              <button key={r.key} type="button" className={`btn btn-xs${range === r.key ? ' active' : ''}`}
+                aria-pressed={range === r.key} onClick={() => setRange(r.key)}>{r.label}</button>
+            ))}
+          </div>
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: 14, marginBottom: 14 }}>
         {on.map((p) => {
           const o = p.overview!;
+          const c = countOf(p);
           const r = readiness(o, { withRun: true });
           const choices = sourceChoices(p);
           const def = o.sources || { searches: true, recommended: false };
@@ -450,8 +494,8 @@ function AllActivity({ platforms, onOpen, onOpenWaiting, onRun, busy }: {
                   style={{ marginLeft: 'auto' }} title={r.text}>{r.short}</span>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 10, marginBottom: 10 }}>
-                {([['in inbox', o.reviewCount], ['found this week', o.foundThisWeek || 0], ['applied this week', o.week.applied]] as const).map(([label, n]) => (
-                  <div key={label}><div style={{ fontSize: 20, fontWeight: 700 }}>{n}</div><Muted style={{ fontSize: 11, lineHeight: 1.3, display: 'block' }}>{label}</Muted></div>
+                {([['in inbox', o.reviewCount], [`found ${word}`, c ? c.found : null], [`applied ${word}`, c ? c.applied : null]] as const).map(([label, n]) => (
+                  <div key={label}><div style={{ fontSize: 20, fontWeight: 700 }}>{n ?? '…'}</div><Muted style={{ fontSize: 11, lineHeight: 1.3, display: 'block' }}>{label}</Muted></div>
                 ))}
                 {/* Approved, not sent yet: what the next apply run takes, within the daily limit. */}
                 <button type="button" onClick={() => onOpenWaiting(p.id)} title={`Approved jobs waiting to be applied to on ${p.label} — open the Waiting list`}
@@ -531,7 +575,10 @@ export default function JobPlatforms() {
   const [cloudUrl, setCloudUrl] = useState<string | null>(null);
   const [cloudConsentAt, setCloudConsentAt] = useState<string | null>(null);
   useEffect(() => {
-    workerTokenStatusApi().then(r => { setCloudUrl(r.cloudScreenUrl || null); setCloudConsentAt(r.cloudConsentAt || null); }).catch(() => {});
+    workerTokenStatusApi().then(r => {
+      setCloudHosted(!!r.cloudScreenUrl);
+      setCloudUrl(r.cloudScreenUrl || null); setCloudConsentAt(r.cloudConsentAt || null);
+    }).catch(() => {});
   }, []);
   const view = (params.get('tab') as View) || 'activity';
   const setView = (v: View) => setParams(p => { const n = new URLSearchParams(p); n.set('tab', v); return n; }, { replace: true });
@@ -678,9 +725,9 @@ export default function JobPlatforms() {
     actions = (
       <>
         {cloudButton}
-        {scope === 'naukri' && (
+        {!cloudUrl && (
           <button className="btn btn-sm" type="button" onClick={() => setGuide(overview.worker.everSeen ? 'how' : 'setup')}
-            title="How the Naukri worker works and how to set it up"><i className="ti ti-book" /> Guide</button>
+            title="How the job-platform worker works and how to set it up"><i className="ti ti-book" /> Guide</button>
         )}
         {platformView.capabilities.refresh && (
           <button className="btn btn-sm" type="button" onClick={() => start('refresh')} disabled={!canStart} title={tip}>
@@ -715,7 +762,7 @@ export default function JobPlatforms() {
         )}
       </>
     );
-    readinessLine = <StatusHeader overview={overview} onHelp={scope === 'naukri' ? () => setGuide('setup') : undefined} />;
+    readinessLine = <StatusHeader overview={overview} onHelp={!cloudUrl ? () => setGuide('setup') : undefined} />;
   } else {
     const ready = on.filter(p => readiness(p.overview!, { withRun: true }).canRun);
     const allTip = ready.length ? `Runs on: ${ready.map(p => p.label).join(', ')}` : 'No platform is ready to run';
@@ -729,6 +776,10 @@ export default function JobPlatforms() {
     actions = (
       <>
         {cloudButton}
+        {!cloudUrl && (
+          <button className="btn btn-sm" type="button" onClick={() => setGuide(on.some(p => p.overview!.worker.everSeen) ? 'how' : 'setup')}
+            title="How the job-platform workers work and how to set them up"><i className="ti ti-book" /> Guide</button>
+        )}
         <button className="btn btn-sm" type="button" disabled={!ready.length || busy} onClick={() => startAll('harvest')} title={allTip}>
           <i className="ti ti-download" /> Harvest all
         </button>
@@ -745,6 +796,16 @@ export default function JobPlatforms() {
         <span>
           <strong>{trouble.map(x => x.p.label).join(', ')} need{trouble.length === 1 ? 's' : ''} attention.</strong>{' '}
           {trouble.map(x => x.r.text).join(' ')}
+          {!cloudUrl && trouble.some(x => !x.p.overview!.worker.everSeen) && (
+            <button className="btn btn-xs" type="button" onClick={() => setGuide('setup')} style={{ marginLeft: 8 }}>
+              <i className="ti ti-book" /> Setup guide
+            </button>
+          )}
+          {cloudUrl && trouble.some(x => !x.p.overview!.worker.everSeen) && (
+            <span style={{ marginLeft: 8 }}>
+              <CloudBrowserButton url={cloudUrl} consentedAt={cloudConsentAt} onConsent={setCloudConsentAt} className="btn btn-xs" label="Open cloud browser" />
+            </span>
+          )}
         </span>
       </div>
     ) : (

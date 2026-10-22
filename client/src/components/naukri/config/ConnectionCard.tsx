@@ -70,7 +70,7 @@ export default function ConnectionCard({ overview, onChanged }: {
       <Line ok={w.everSeen && w.online} label={w.host ? `Worker running on ${w.host}` : 'Worker running'}
             fix={w.everSeen
               ? `Your Mac is asleep or the worker stopped. It resumes ${w.nextWakeAt ? `at ${fmtTime(w.nextWakeAt)}` : 'when you open it'}.`
-              : `Never checked in. Run \`npm run ${platformId}-worker\` on your Mac.`} />
+              : `Never checked in. Start the worker on your computer (see the Guide), or ask your admin to host it in the cloud.`} />
       <Line ok={w.chromeUp} label="Chrome on the debug port"
             fix="Run ./chrome-debug.sh in the scraper repo. Chrome refuses the debug port on your default profile, so it needs that dedicated one." />
       <Line ok={w.naukriLoggedIn} label={`Logged into ${site}`}

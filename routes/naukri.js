@@ -48,7 +48,7 @@ router.use((req, res, next) => {
 const ALL_OK = new Set([
   'GET /jobs', 'GET /jobs/outreach', 'POST /jobs/decide', 'GET /needs-answer',
   'POST /needs-answer/draft', 'POST /needs-answer/use', 'POST /needs-answer/auto', 'POST /needs-answer/ignore',
-  'GET /config/unknown-questions', 'POST /config/test-answer', 'GET /platforms', 'GET /runs', 'GET /analytics',
+  'GET /config/unknown-questions', 'POST /config/test-answer', 'GET /platforms', 'GET /runs', 'GET /analytics', 'GET /counts',
   'POST /config/starter-rules', 'POST /config/profile-from-resume', 'GET /resume',
   // Shared settings only (the PATCH refuses any one platform's own fields).
   'GET /config', 'PATCH /config', 'POST /resume', 'DELETE /resume',
@@ -382,7 +382,7 @@ async function setupChecklist(userId, config, worker, platform = 'naukri') {
   const items = [
     { key: 'worker', card: null, label: `Worker running and logged in to ${label}`,
       done: !!(worker && worker.lastSeenAt && (worker.loggedIn || worker.naukriLoggedIn)),
-      hint: `Run \`npm run workers\` on your Mac and log in to ${label} in the debug Chrome.` },
+      hint: `Start the worker on your computer (see the Guide) and log in to ${label} in the debug Chrome, or ask your admin to host it in the cloud.` },
     { key: 'resume', card: 'resume', label: `Resume with readable text${shared}`,
       done: !!(eff && text && text.trim().length > 200),
       hint: 'Upload a PDF resume in Settings (or paste its text in Resume & headline) — AI answers and your profile come from it.' },
@@ -457,6 +457,51 @@ router.get('/platforms', async (req, res) => {
       duplicates: config.duplicates,
       crossPlatformOrder: !!config.crossPlatformOrder,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/p/:platform/counts?range=today|yesterday|7d|30d — found / applied /
+// skipped / failed in a window, per platform, for the Job Platforms cards'
+// date filter. Days start at midnight in the schedule's timezone (IST by
+// default), like the daily apply limit; 7d and 30d are rolling, matching the
+// "this week" numbers /overview has always shown. From the All view it answers
+// for every switched-on platform at once.
+const COUNT_RANGES = ['today', 'yesterday', '7d', '30d'];
+function rangeWindow(range, timeZone) {
+  const now = new Date();
+  let today;
+  try { today = startOfDayIn(timeZone || 'Asia/Kolkata', now); } catch (_) { today = new Date(now); today.setHours(0, 0, 0, 0); }
+  if (range === 'today') return { from: today, to: now };
+  if (range === 'yesterday') return { from: new Date(today.getTime() - 86400000), to: today };
+  return { from: new Date(now.getTime() - (range === '30d' ? 30 : 7) * 86400000), to: now };
+}
+async function countsFor(userId, platform, config) {
+  const pq = platformQuery(platform);
+  const { from, to } = config.__window;
+  const [outcomes, found] = await Promise.all([
+    NaukriJob.aggregate([
+      { $match: { userId: oidOf(userId), 'applyHistory.at': { $gte: from, $lt: to }, ...pq, deleted: { $ne: true } } },
+      { $unwind: '$applyHistory' },
+      { $match: { 'applyHistory.at': { $gte: from, $lt: to }, 'applyHistory.to': { $in: ['applied', 'skipped', 'failed'] } } },
+      { $group: { _id: '$applyHistory.to', n: { $sum: 1 } } },
+    ]),
+    NaukriJob.countDocuments({ userId, firstSeenAt: { $gte: from, $lt: to }, ...pq, ...BASE_FILTER }),
+  ]);
+  const of = (k) => (outcomes.find(o => o._id === k) || {}).n || 0;
+  return { found, applied: of('applied'), skipped: of('skipped'), failed: of('failed') };
+}
+router.get('/counts', async (req, res) => {
+  try {
+    const range = COUNT_RANGES.includes(req.query.range) ? req.query.range : '7d';
+    const config = await NaukriConfig.getForUser(req.userId);
+    const ids = req.platform === 'all' ? PLATFORM_IDS.filter(id => isEnabled(siteOf(config, id), id)) : [req.platform];
+    const tz = siteOf(config, ids[0] || 'naukri').schedule.timezone;
+    const win = rangeWindow(range, tz);
+    const counts = {};
+    for (const id of ids) counts[id] = await countsFor(req.userId, id, { __window: win });
+    res.json({ range, from: win.from, to: win.to, counts });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

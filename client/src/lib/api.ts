@@ -2056,6 +2056,13 @@ const PB = (p: PlatformId) => (p === 'naukri' ? '/api/naukri' : `/api/p/${p}`);
 export const platformsApi = () =>
   apiFetch<{ platforms: PlatformInfo[]; duplicates: DuplicateRules; crossPlatformOrder: boolean }>('/api/naukri/platforms');
 export const platformOverviewApi = (p: PlatformId) => apiFetch<NaukriOverview>(`${PB(p)}/overview`);
+
+/** Found / applied / skipped / failed per platform in a window (days in IST). */
+export type CountRange = 'today' | 'yesterday' | '7d' | '30d';
+export interface PlatformCounts { found: number; applied: number; skipped: number; failed: number }
+export const platformCountsApi = (range: CountRange) =>
+  apiFetch<{ range: CountRange; from: string; to: string; counts: Partial<Record<PlatformId, PlatformCounts>> }>(
+    `/api/p/all/counts?range=${range}`);
 export const queuePlatformRunApi = (p: PlatformId, kind: NaukriRunKind, opts: { sources?: NaukriSources } = {}) =>
   apiFetch<{ run: NaukriRun }>(`${PB(p)}/runs`, { method: 'POST', body: JSON.stringify({ kind, ...opts }) });
 export const updatePlatformConfigApi = (p: PlatformId, patch: Record<string, unknown>) =>

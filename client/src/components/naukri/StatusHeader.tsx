@@ -22,6 +22,13 @@ export interface Readiness {
 const RUN_LABEL: Record<string, string> = { refresh: 'Refresh profile', harvest: 'Harvest', apply: 'Apply', track: 'Check replies', probe: 'Test' };
 export const runLabel = (kind: string, dryRun?: boolean) => (kind === 'apply' && dryRun ? 'Dry run apply' : RUN_LABEL[kind] || kind);
 
+// Whether an admin hosts this account's workers on the cloud VM. Set once by
+// the Job Platforms page from /api/scrapes/worker-token, the way
+// setNaukriPlatform scopes the API calls, so every readiness() caller — the
+// switcher, the cards, the header — words "not connected" for the right setup.
+let cloudHosted = false;
+export const setCloudHosted = (on: boolean) => { cloudHosted = on; };
+
 /** The sentence alone. `withRun` adds the "running" state the switcher shows. */
 export function readiness(o: NaukriOverview, { withRun = false }: { withRun?: boolean } = {}): Readiness {
   const { worker } = o;
@@ -46,18 +53,27 @@ export function readiness(o: NaukriOverview, { withRun = false }: { withRun?: bo
         ? 'Paused. Turn off "Pause all" in Configuration → Apply behaviour & Safety to run anything.'
         : `${L} is paused. Turn off "Pause ${L}" in Configuration → Apply behaviour & safety to run anything.` };
   }
+  // Never checked in: nothing would ever pick a run up, so nothing may be
+  // queued — a run started here used to sit in "queued" for ever.
   if (!worker.everSeen) {
-    return { tone: 'idle', icon: 'ti-plug-connected-x', canRun: true, short: 'Not connected',
-      text: `Worker has never checked in. Run \`npm run ${o.platform || 'naukri'}-worker\` on your Mac.` };
+    return cloudHosted
+      ? { tone: 'warn', icon: 'ti-cloud-off', canRun: false, short: 'Not connected',
+          text: `Your cloud worker for ${L} hasn't connected yet. It usually does within a minute of being set up; if it stays like this, ask your admin.` }
+      : { tone: 'warn', icon: 'ti-plug-connected-x', canRun: false, short: 'Not set up',
+          text: `${L} isn't set up yet: no worker has ever connected, so nothing can run. Set up the worker on your computer (see the Guide), or ask your admin to host it in the cloud.` };
   }
   if (!worker.online) {
+    if (cloudHosted) {
+      return { tone: 'warn', icon: 'ti-cloud-off', canRun: true, short: 'Offline',
+        text: `Your cloud worker for ${L} is offline. Anything you start is queued and runs when it reconnects — usually within minutes. If it stays offline, tell your admin.` };
+    }
     const when = worker.nextWakeAt
       ? `at the next wake, ${fmtTime(worker.nextWakeAt)}`
-      : 'when you next open your Mac';
+      : 'when you next open your computer';
     // Still runnable on purpose: queueing from a phone with the Mac shut is the
     // point of having a queue.
-    return { tone: 'idle', icon: 'ti-zzz', canRun: true, short: 'Mac asleep',
-      text: `Your Mac is asleep. Anything you start will be queued and run ${when}.` };
+    return { tone: 'idle', icon: 'ti-zzz', canRun: true, short: 'Computer asleep',
+      text: `Your computer is asleep or the worker is stopped. Anything you start will be queued and run ${when}.` };
   }
   if (!worker.chromeUp) {
     return { tone: 'warn', icon: 'ti-browser', canRun: true, short: 'Chrome closed',
@@ -123,7 +139,7 @@ export default function StatusHeader({ overview, onHelp }: { overview: NaukriOve
           marginTop: 5, display: 'flex', gap: 14, flexWrap: 'wrap',
           fontSize: 11, color: 'var(--text2)',
         }}>
-          <Dot on={w.online}>{w.online ? 'Mac online' : 'Mac offline'}{w.host ? ` · ${w.host}` : ''}</Dot>
+          <Dot on={w.online}>{w.online ? 'Worker online' : 'Worker offline'}{w.host ? ` · ${w.host}` : ''}</Dot>
           <Dot on={w.chromeUp}>Chrome</Dot>
           <Dot on={w.naukriLoggedIn}>{overview.label || 'Naukri'} session</Dot>
           {overview.dryRun && <span style={{ color: 'var(--orange, var(--text2))' }}>dry run</span>}

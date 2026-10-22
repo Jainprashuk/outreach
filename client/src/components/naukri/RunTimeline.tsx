@@ -153,7 +153,7 @@ export function ActiveRun({ run, onCancel }: { run: NaukriRun; onCancel?: () => 
         <div style={{ fontSize: 12, color: 'var(--red)', marginTop: 6, lineHeight: 1.5 }}>
           <i className="ti ti-alert-triangle" style={{ marginRight: 5 }} />
           No progress for {Math.round(stalledFor / 60000)} minutes. The worker is probably stuck on a page
-          that stopped responding — restart it on your Mac (Ctrl-C, then <code>npm run naukri-worker</code>).
+          that stopped responding — restart the worker on your computer, or tell your admin if it runs in the cloud.
           Anything it already reported is recorded.
         </div>
       )}

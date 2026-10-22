@@ -96,10 +96,10 @@ function platformRow(p: PlatformInfo) {
     return <Row key={p.id} tone="bad" title={p.label} sub={`Stopped after a captcha until ${fmtWhen(o.blockedUntil)}`} pill="Blocked" to={to} />;
   }
   if (o.worker.everSeen && !o.worker.online) {
-    return <Row key={p.id} tone="bad" title={p.label} sub={`Worker offline since ${fmtAgo(o.worker.lastSeenAt)}. Run npm run workers on your computer.`} pill="Offline" to={to} />;
+    return <Row key={p.id} tone="bad" title={p.label} sub={`Worker offline since ${fmtAgo(o.worker.lastSeenAt)}. Start it on your computer, or tell your admin if it runs in the cloud.`} pill="Offline" to={to} />;
   }
   if (!o.worker.everSeen) {
-    return <Row key={p.id} tone="idle" title={p.label} sub="The local worker has never connected" pill="Not set up" to={to} />;
+    return <Row key={p.id} tone="warn" title={p.label} sub="No worker has connected yet, so nothing runs. Open Job Platforms for the setup steps." pill="Not set up" to={to} />;
   }
   if (o.paused) return <Row key={p.id} tone="warn" title={p.label} sub={stats || 'Scheduled runs are paused'} pill="Paused" to={to} />;
   const next = o.nextOccurrence ? `Next run ${fmtWhen(o.nextOccurrence)}` : 'No run scheduled';
