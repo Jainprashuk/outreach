@@ -54,8 +54,8 @@ changes something needs `-t` (it may prompt) and `sudo`.
 | Memory / CPU / disk | `ssh cw 'cw stats'` |
 | Follow a user's worker logs | `ssh cw 'cw logs prashuk'` (all platforms) |
 | One platform's log | `ssh cw 'cw logs prashuk hirist'` (`naukri`, `instahyre`, `hirist`, `chrome`, `supervisord`) |
-| Restart a user's browser + workers (logins kept) | `ssh -t cw 'sudo cw restart prashuk'` |
-| Pull latest `main`, rebuild, restart everyone | `ssh -t cw 'sudo cw update'` |
+| Restart a user's browser + workers (logins kept) | `ssh -t cw 'sudo cw restart prashuk'` — waits up to 15 min for a running job to finish; add `--now` to cut it off |
+| Pull latest `main`, rebuild, restart everyone | `ssh -t cw 'sudo cw update'` — same wait per user; `--now` to skip it |
 | Replace a user's token | `ssh -t cw 'sudo cw token prashuk'` |
 | Add a user | `ssh -t cw 'sudo cw add <name> <email>'` |
 | Remove a user | `ssh -t cw 'sudo cw rm <name>'` (`--purge` also deletes their logins) |

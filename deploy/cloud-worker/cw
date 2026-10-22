@@ -7,8 +7,9 @@
 #   sudo cw token <user>               replace a user's worker token
 #   cw list | cw stats                 who runs here, and what it costs (sudo is added for you)
 #   cw logs <user> [platform]          follow a user's worker logs
-#   sudo cw restart <user>             restart a user's browser + workers (logins kept)
-#   sudo cw update                     pull, rebuild, restart every user one at a time
+#   sudo cw restart <user> [--now]     restart a user's browser + workers (logins kept)
+#   sudo cw update [--now]             pull, rebuild, restart every user one at a time
+#                                      (both wait for a running job to finish unless --now)
 #
 # Each user gets:
 #   container cw-<user>   Xvfb + real Chrome + noVNC + one worker per platform
@@ -276,11 +277,42 @@ cmd_rm() {
   echo "Also revoke their token: Admin → $u → Cloud worker → Revoke."
 }
 
+# Before restarting a user's container, wait until no run is using their Chrome,
+# then hold Chrome so none can start: write the same lock the workers take
+# (worker/chrome-lock.js) in the name of the container's pid 1, which stays
+# alive until the restart. The new container's entrypoint clears it.
+# Gives up after WAIT_IDLE_S (default 15 min) unless --now was passed.
+# A restart once cut a real apply run off 37 s in (2026-10-22).
+NOW=0
+hold_idle() {  # hold_idle <user>
+  local u="$1" waited=0 limit="${WAIT_IDLE_S:-900}"
+  docker inspect "cw-$u" >/dev/null 2>&1 || return 0
+  [ "$(docker inspect -f '{{.State.Running}}' "cw-$u")" = true ] || return 0
+  [ "$NOW" = 1 ] && { warn "--now: not waiting for runs on $u"; return 0; }
+  while :; do
+    # Free = no lock, or a lock whose holder is dead.
+    if docker exec "cw-$u" sh -c '
+      f="$HOME/.job-leads/chrome.lock"
+      [ -f "$f" ] || exit 0
+      pid=$(sed -E "s/.*\"pid\":([0-9]+).*/\1/" "$f")
+      kill -0 "$pid" 2>/dev/null && exit 1 || exit 0'; then
+      docker exec "cw-$u" sh -c 'mkdir -p "$HOME/.job-leads" && printf "{\"pid\":1,\"label\":\"cw-restart\",\"at\":%s000}" "$(date +%s)" > "$HOME/.job-leads/chrome.lock"'
+      return 0
+    fi
+    if [ "$waited" -ge "$limit" ]; then
+      die "A run on $u has been using Chrome for over $((limit / 60)) min. Try again later, or pass --now to restart anyway (it cuts that run off)."
+    fi
+    [ "$waited" = 0 ] && say "Waiting for the run on $u to finish before restarting (up to $((limit / 60)) min; --now to skip)…"
+    sleep 10; waited=$((waited + 10))
+  done
+}
+
 cmd_token() {
   need_root token; need_setup; load_cf
   local u="${1:-}" j; [ -n "$u" ] || die "Usage: sudo cw token <user>"
   j="$(user_json "$u")"; [ -n "$j" ] || die "No user '$u'."
   write_env "$u" "$(ask_token "$u")" "$(jq -r '.platforms' <<<"$j")"
+  hold_idle "$u"
   run_container "$u" "$(jq -r '.port' <<<"$j")"
   say "Token replaced; cw-$u restarted."
 }
@@ -314,7 +346,8 @@ cmd_logs() {
 }
 
 cmd_restart() {
-  need_root restart; local u="${1:-}"; [ -n "$u" ] || die "Usage: sudo cw restart <user>"
+  need_root restart; local u="${1:-}"; [ -n "$u" ] || die "Usage: sudo cw restart <user> [--now]"
+  hold_idle "$u"
   docker restart "cw-$u" >/dev/null && say "Restarted cw-$u."
 }
 
@@ -326,6 +359,7 @@ cmd_update() {
   sudo -u "$(stat -c %U "$REPO")" git -C "$REPO" pull --ff-only
   build_image
   jq -r '.users[] | [.user, (.port|tostring)] | @tsv' "$USERS" | while IFS=$'\t' read -r u p; do
+    hold_idle "$u"
     say "Restarting cw-$u on the new image"
     run_container "$u" "$p"
     sleep 20
@@ -333,6 +367,10 @@ cmd_update() {
   docker image prune -f >/dev/null
   say "Updated."
 }
+
+# --now anywhere on the line: restart without waiting for a run to finish.
+for a in "$@"; do [ "$a" = "--now" ] && NOW=1; done
+set -- $(for a in "$@"; do [ "$a" = "--now" ] || printf '%s ' "$a"; done)
 
 # Everything here reads root-only state (/srv/cw, the Docker socket), so the
 # read-only commands re-run themselves under sudo instead of failing.
