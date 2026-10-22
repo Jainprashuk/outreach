@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Outreach — cold email for your job search</title>
+<meta name="description" content="Find the right people, send personalised emails from your own Gmail, and never lose track of a reply. Outreach runs your job-search outreach end to end.">
+<meta name="theme-color" id="theme-color" content="#f6f6fa">
+<meta name="color-scheme" content="light dark">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23635bff'/%3E%3Cpath d='M8 16.5l16-7-6 16-3.2-6.3L8 16.5z' fill='%23fff'/%3E%3C/svg%3E">
+<script>(function(){try{var t=localStorage.getItem('outreach-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}})();</script>
+<!-- Clarity + BugTrace, same as every other page. -->
+<script src="/js/telemetry.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400..800&display=swap" rel="stylesheet">
+<style>
+  /* Self-contained on purpose: the public page should not inherit the app's
+     layout rules from css/style.css. Same accent and font as the sign-in page,
+     so the first click lands somewhere that looks like the same product. */
+  :root {
+    --accent:#635bff; --accent-hover:#4b41f0; --accent-2:#9d7bff;
+    --accent-bg:#ecebff; --accent-glow:rgba(99,91,255,.35);
+    --canvas:#f6f6fa; --bg:#ffffff; --bg2:#f3f3f7;
+    --text:#14141a; --text2:#55556a; --text3:#8b8ba0;
+    --border:rgba(20,20,40,.09); --border-md:rgba(20,20,40,.16);
+    --green:#16794a; --green-bg:#e6f5ec;
+    --amber:#8a5c00; --amber-bg:#fff5df;
+    --red:#c0392b; --red-bg:#fdeeec;
+    --blue:#1557a0; --blue-bg:#e8f0fb;
+    --shadow-md:0 4px 16px rgba(20,20,40,.07), 0 1px 3px rgba(20,20,40,.04);
+    --shadow-lg:0 24px 60px -12px rgba(30,25,90,.22), 0 6px 16px rgba(20,20,40,.06);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --accent:#7d75ff; --accent-hover:#948dff; --accent-bg:rgba(125,117,255,.16); --accent-glow:rgba(125,117,255,.4);
+      --canvas:#0a0b0f; --bg:#14151b; --bg2:#1b1c24;
+      --text:#f1f1f4; --text2:#a6a7b6; --text3:#6f7082;
+      --border:rgba(255,255,255,.08); --border-md:rgba(255,255,255,.15);
+      --green:#4ade80; --green-bg:rgba(74,222,128,.12);
+      --amber:#fbbf24; --amber-bg:rgba(251,191,36,.12);
+      --red:#f87171; --red-bg:rgba(248,113,113,.12);
+      --blue:#60a5fa; --blue-bg:rgba(96,165,250,.12);
+      --shadow-md:0 4px 16px rgba(0,0,0,.35);
+      --shadow-lg:0 24px 60px -12px rgba(0,0,0,.6), 0 6px 16px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"] {
+    --accent:#7d75ff; --accent-hover:#948dff; --accent-bg:rgba(125,117,255,.16); --accent-glow:rgba(125,117,255,.4);
+    --canvas:#0a0b0f; --bg:#14151b; --bg2:#1b1c24;
+    --text:#f1f1f4; --text2:#a6a7b6; --text3:#6f7082;
+    --border:rgba(255,255,255,.08); --border-md:rgba(255,255,255,.15);
+    --green:#4ade80; --green-bg:rgba(74,222,128,.12);
+    --amber:#fbbf24; --amber-bg:rgba(251,191,36,.12);
+    --red:#f87171; --red-bg:rgba(248,113,113,.12);
+    --blue:#60a5fa; --blue-bg:rgba(96,165,250,.12);
+    --shadow-md:0 4px 16px rgba(0,0,0,.35);
+    --shadow-lg:0 24px 60px -12px rgba(0,0,0,.6), 0 6px 16px rgba(0,0,0,.3);
+  }
+
+  *, *::before, *::after { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body {
+    margin:0; font-family:'Inter', system-ui, sans-serif; color:var(--text);
+    background:var(--canvas); -webkit-font-smoothing:antialiased; line-height:1.55;
+  }
+  a { color:inherit; text-decoration:none; }
+  .wrap { max-width:1120px; margin:0 auto; padding:0 24px; }
+
+  /* ── Nav ── */
+  .nav {
+    position:sticky; top:0; z-index:10;
+    background:color-mix(in srgb, var(--canvas) 82%, transparent);
+    backdrop-filter:saturate(1.4) blur(12px); -webkit-backdrop-filter:saturate(1.4) blur(12px);
+    border-bottom:1px solid var(--border);
+  }
+  .nav .wrap { display:flex; align-items:center; justify-content:space-between; height:64px; }
+  .logo { display:flex; align-items:center; gap:10px; font-weight:650; font-size:17px; }
+  .logo-icon {
+    width:32px; height:32px; border-radius:9px; color:#fff;
+    background:linear-gradient(135deg, var(--accent), var(--accent-2));
+    display:flex; align-items:center; justify-content:center;
+    box-shadow:0 6px 16px -4px var(--accent-glow), inset 0 1px 0 rgba(255,255,255,.3);
+  }
+  .logo-icon svg { width:16px; height:16px; }
+  .nav-links { display:flex; align-items:center; gap:28px; font-size:14px; color:var(--text2); }
+  .nav-links a:not(.btn):hover { color:var(--text); }
+
+  .btn {
+    display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    padding:11px 20px; border-radius:10px; font-size:14px; font-weight:600;
+    border:1px solid transparent; cursor:pointer; white-space:nowrap;
+    transition:background-color .15s, box-shadow .15s, transform .08s, border-color .15s;
+  }
+  .btn:active { transform:scale(.98); }
+  .btn-primary { background:var(--accent); color:#fff; box-shadow:0 6px 18px -4px var(--accent-glow); }
+  .btn-primary:hover { background:var(--accent-hover); box-shadow:0 10px 26px -6px var(--accent-glow); }
+  .btn-ghost { background:var(--bg); color:var(--text); border-color:var(--border-md); }
+  .btn-ghost:hover { border-color:var(--text3); }
+  .btn-sm { padding:8px 14px; font-size:13px; }
+
+  /* ── Hero ── */
+  .hero {
+    padding:88px 0 72px; position:relative; overflow:hidden;
+    background:
+      radial-gradient(900px 460px at 90% -10%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 60%),
+      radial-gradient(700px 380px at 0% 10%, color-mix(in srgb, var(--accent-2) 10%, transparent), transparent 60%);
+  }
+  .hero .wrap { display:grid; grid-template-columns:1.05fr 1fr; gap:56px; align-items:center; }
+  .eyebrow {
+    display:inline-flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600;
+    color:var(--accent); background:var(--accent-bg); padding:6px 12px; border-radius:999px; margin-bottom:22px;
+  }
+  .eyebrow .dot { width:6px; height:6px; border-radius:50%; background:var(--accent); }
+  h1 { font-size:clamp(36px, 5.2vw, 58px); line-height:1.06; letter-spacing:-.035em; margin:0 0 20px; font-weight:750; }
+  h1 .grad { background:linear-gradient(120deg, var(--accent), var(--accent-2)); -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .lede { font-size:18px; color:var(--text2); margin:0 0 32px; max-width:520px; }
+  .cta-row { display:flex; gap:12px; flex-wrap:wrap; }
+  .hero-note { margin-top:18px; font-size:13px; color:var(--text3); }
+
+  /* Product mock — plain HTML, so it stays sharp and themes with the page. */
+  .mock {
+    background:var(--bg); border:1px solid var(--border); border-radius:16px;
+    box-shadow:var(--shadow-lg); overflow:hidden; font-size:13px;
+    transform:perspective(1400px) rotateY(-6deg) rotateX(2deg);
+  }
+  .mock-bar { display:flex; align-items:center; gap:6px; padding:12px 14px; border-bottom:1px solid var(--border); background:var(--bg2); }
+  .mock-bar i { width:10px; height:10px; border-radius:50%; background:var(--border-md); display:block; }
+  .mock-bar span { margin-left:10px; font-size:12px; color:var(--text3); font-weight:500; }
+  .mock-tabs { display:flex; gap:4px; padding:12px 14px 0; }
+  .mock-tab { padding:6px 10px; border-radius:7px; font-weight:600; font-size:12px; color:var(--text2); }
+  .mock-tab.on { background:var(--accent-bg); color:var(--accent); }
+  .mock-tab b { margin-left:4px; font-weight:700; }
+  .mock-list { padding:8px; }
+  .mock-row > div { min-width:0; }
+  .mock-row { display:grid; grid-template-columns:34px minmax(0,1fr) auto; gap:12px; align-items:center; padding:11px 8px; border-radius:10px; }
+  .mock-row + .mock-row { border-top:1px solid var(--border); }
+  .av { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:700; font-size:12px; color:#fff; }
+  .mock-name { font-weight:600; }
+  .mock-sub { color:var(--text3); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .pill { font-size:11px; font-weight:600; padding:3px 8px; border-radius:999px; white-space:nowrap; }
+  .pill.green { color:var(--green); background:var(--green-bg); }
+  .pill.amber { color:var(--amber); background:var(--amber-bg); }
+  .pill.blue { color:var(--blue); background:var(--blue-bg); }
+  .pill.red { color:var(--red); background:var(--red-bg); }
+  .mock-foot { display:flex; justify-content:space-between; align-items:center; padding:12px 16px; border-top:1px solid var(--border); background:var(--bg2); color:var(--text2); font-size:12px; }
+  .bar { height:6px; width:120px; border-radius:99px; background:var(--border); overflow:hidden; }
+  .bar i { display:block; height:100%; width:64%; background:linear-gradient(90deg, var(--accent), var(--accent-2)); }
+
+  /* ── Sections ── */
+  section { padding:88px 0; }
+  .sec-head { max-width:640px; margin:0 auto 52px; text-align:center; }
+  .kicker { font-size:12.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--accent); margin-bottom:12px; }
+  h2 { font-size:clamp(28px, 3.6vw, 40px); line-height:1.12; letter-spacing:-.025em; margin:0 0 14px; font-weight:720; }
+  .sec-head p { color:var(--text2); font-size:16.5px; margin:0; }
+
+  .steps { display:grid; grid-template-columns:repeat(4, 1fr); gap:16px; counter-reset:step; }
+  .step { background:var(--bg); border:1px solid var(--border); border-radius:14px; padding:24px; position:relative; }
+  .step::before {
+    counter-increment:step; content:counter(step);
+    display:flex; align-items:center; justify-content:center; width:30px; height:30px; border-radius:9px;
+    background:var(--accent-bg); color:var(--accent); font-weight:700; font-size:14px; margin-bottom:16px;
+  }
+  .step h3 { margin:0 0 6px; font-size:16px; }
+  .step p { margin:0; color:var(--text2); font-size:14px; }
+
+  .alt { background:var(--bg); border-top:1px solid var(--border); border-bottom:1px solid var(--border); }
+  .features { display:grid; grid-template-columns:repeat(3, 1fr); gap:16px; }
+  .feature { border:1px solid var(--border); border-radius:14px; padding:24px; background:var(--canvas); transition:border-color .15s, transform .15s; }
+  .feature:hover { border-color:color-mix(in srgb, var(--accent) 40%, transparent); transform:translateY(-2px); }
+  .ficon { width:38px; height:38px; border-radius:10px; display:flex; align-items:center; justify-content:center; background:var(--accent-bg); color:var(--accent); margin-bottom:16px; }
+  .ficon svg { width:19px; height:19px; }
+  .feature h3 { margin:0 0 6px; font-size:16px; }
+  .feature p { margin:0; color:var(--text2); font-size:14px; }
+
+  .split { display:grid; grid-template-columns:1fr 1fr; gap:56px; align-items:center; }
+  .checks { list-style:none; padding:0; margin:24px 0 0; display:grid; gap:14px; }
+  .checks li { display:grid; grid-template-columns:24px 1fr; gap:12px; color:var(--text2); font-size:15px; }
+  .checks li b { color:var(--text); font-weight:600; }
+  .tick { width:22px; height:22px; border-radius:50%; background:var(--green-bg); color:var(--green); display:flex; align-items:center; justify-content:center; margin-top:1px; }
+  .tick svg { width:12px; height:12px; }
+  .panel { background:var(--bg); border:1px solid var(--border); border-radius:16px; padding:28px; box-shadow:var(--shadow-md); }
+  .panel-row { display:flex; justify-content:space-between; align-items:center; padding:14px 0; font-size:14px; }
+  .panel-row + .panel-row { border-top:1px solid var(--border); }
+  .panel-row span { color:var(--text2); }
+  .panel-row strong { font-weight:600; }
+
+  .cta {
+    text-align:center; border-radius:24px; padding:64px 24px; color:#fff;
+    background:
+      radial-gradient(600px 300px at 80% 0%, rgba(255,255,255,.18), transparent 60%),
+      linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow:0 30px 70px -20px var(--accent-glow);
+  }
+  .cta h2 { color:#fff; }
+  .cta p { color:rgba(255,255,255,.85); font-size:17px; margin:0 auto 28px; max-width:520px; }
+  .cta .btn-primary { background:#fff; color:#3b33d6; box-shadow:0 10px 26px -8px rgba(0,0,0,.35); }
+  .cta .btn-primary:hover { background:#f2f1ff; }
+
+  footer { padding:36px 0 48px; color:var(--text3); font-size:13px; }
+  footer .wrap { display:flex; justify-content:space-between; align-items:center; gap:16px; flex-wrap:wrap; }
+
+  .reveal { opacity:0; transform:translateY(14px); transition:opacity .6s ease, transform .6s ease; }
+  .reveal.in { opacity:1; transform:none; }
+  @media (prefers-reduced-motion: reduce) {
+    .reveal { opacity:1; transform:none; transition:none; }
+    html { scroll-behavior:auto; }
+  }
+
+  @media (max-width:960px) {
+    .hero .wrap, .split { grid-template-columns:minmax(0,1fr); gap:44px; }
+    .hero .wrap > *, .split > * { min-width:0; }
+    .mock { transform:none; }
+    .steps { grid-template-columns:repeat(2, 1fr); }
+    .features { grid-template-columns:repeat(2, 1fr); }
+  }
+  @media (max-width:640px) {
+    .wrap { padding:0 16px; }
+    .nav-links a:not(.btn) { display:none; }
+    .hero { padding:56px 0 48px; }
+    section { padding:64px 0; }
+    .steps, .features { grid-template-columns:1fr; }
+    .lede { font-size:16.5px; }
+    .cta-row .btn { flex:1 1 auto; }
+    .cta { padding:48px 20px; border-radius:18px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="nav">
+  <div class="wrap">
+    <a href="/" class="logo" aria-label="Outreach home">
+      <span class="logo-icon"><svg viewBox="0 0 24 24" fill="#fff"><path d="M3 11.5 21 4l-7 17-3.4-6.6L3 11.5z"/></svg></span>
+      Outreach
+    </a>
+    <nav class="nav-links">
+      <a href="#how">How it works</a>
+      <a href="#features">Features</a>
+      <a href="#privacy">Your data</a>
+      <a href="/login" class="btn btn-ghost btn-sm">Sign in</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <div>
+        <div class="eyebrow"><span class="dot"></span>Cold email for your job search</div>
+        <h1>Reach the people who hire, <span class="grad">not the job portal.</span></h1>
+        <p class="lede">Outreach finds recruiters and hiring managers, writes each of them a personal email, sends it from your own Gmail, and keeps track of every reply until the interview.</p>
+        <div class="cta-row">
+          <a href="/login" class="btn btn-primary">Request access
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
+          <a href="#how" class="btn btn-ghost">See how it works</a>
+        </div>
+        <div class="hero-note">Invite-only. Enter your email on the sign-in page to request access.</div>
+      </div>
+
+      <div class="mock" aria-hidden="true">
+        <div class="mock-bar"><i></i><i></i><i></i><span>Mailbox</span></div>
+        <div class="mock-tabs">
+          <div class="mock-tab on">Needs you <b>3</b></div>
+          <div class="mock-tab">Replied</div>
+          <div class="mock-tab">Interviews</div>
+        </div>
+        <div class="mock-list">
+          <div class="mock-row">
+            <div class="av" style="background:#635bff">AS</div>
+            <div><div class="mock-name">Ananya S. · Talent, fintech</div><div class="mock-sub">“Happy to chat — are you free Thursday?”</div></div>
+            <span class="pill green">Reply</span>
+          </div>
+          <div class="mock-row">
+            <div class="av" style="background:#0ea5a4">RK</div>
+            <div><div class="mock-name">Rahul K. · Eng Manager</div><div class="mock-sub">“Could you share your resume?”</div></div>
+            <span class="pill amber">Needs answer</span>
+          </div>
+          <div class="mock-row">
+            <div class="av" style="background:#e0679a">MP</div>
+            <div><div class="mock-name">Meera P. · Recruiter</div><div class="mock-sub">Interview — round 2 scheduled</div></div>
+            <span class="pill blue">Interview</span>
+          </div>
+          <div class="mock-row">
+            <div class="av" style="background:#8b8ba0">JD</div>
+            <div><div class="mock-name">j.doe@…</div><div class="mock-sub">Address bounced, removed from the campaign</div></div>
+            <span class="pill red">Bounced</span>
+          </div>
+        </div>
+        <div class="mock-foot"><span>Campaign · 32 of 50 sent today</span><div class="bar"><i></i></div></div>
+      </div>
+    </div>
+  </div>
+
+  <section id="how">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="kicker">How it works</div>
+        <h2>From a company name to a conversation</h2>
+        <p>You choose who to contact and approve every email. Outreach handles the rest.</p>
+      </div>
+      <div class="steps reveal">
+        <div class="step"><h3>Find people</h3><p>Pull hiring posts from LinkedIn, Hacker News and the web, or type a company and find who works there.</p></div>
+        <div class="step"><h3>Write once</h3><p>Templates with variables like <code>{{name}}</code> and <code>{{company}}</code> give each person their own email. Check each one before it goes out.</p></div>
+        <div class="step"><h3>Send from Gmail</h3><p>Emails go out from your own account, a few each day at the hour you pick, with follow-ups when nobody answers.</p></div>
+        <div class="step"><h3>Never miss a reply</h3><p>Replies and bounces are read back from your inbox. The ones waiting on you go to the top.</p></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="alt">
+    <div class="wrap">
+      <div class="sec-head reveal">
+        <div class="kicker">Features</div>
+        <h2>Everything a job search needs, in one place</h2>
+        <p>No more spreadsheets, copied emails and forgotten follow-ups.</p>
+      </div>
+      <div class="features reveal">
+        <div class="feature">
+          <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></div>
+          <h3>Leads</h3><p>Hiring posts from LinkedIn, Hacker News, web search or text you paste in, each with the recruiter's email.</p>
+        </div>
+        <div class="feature">
+          <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.9M16 3.1a4 4 0 0 1 0 7.8"/></svg></div>
+          <h3>Discover</h3><p>Type a company, see who works there, and work out their email address from the company's email format.</p>
+        </div>
+        <div class="feature">
+          <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4z"/><path d="m4 7 8 6 8-6"/></svg></div>
+          <h3>Campaigns</h3><p>Choose how many emails go out each day and at what time. If Gmail hits its daily limit, sending pauses and picks up again later.</p>
+        </div>
+        <div class="feature">
+          <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.7 4H7.3a2 2 0 0 0-1.8 1.1z"/></svg></div>
+          <h3>Mailbox</h3><p>Every reply in one place, with a “Needs you” list of the people waiting for an answer. You can reply without leaving the page.</p>
+        </div>
+        <div class="feature">
+          <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg></div>
+          <h3>Interviews</h3><p>Follow each conversation from first reply to offer, with stages, dates and reminders.</p>
+        </div>
+        <div class="feature">
+          <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 7V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v2"/></svg></div>
+          <h3>Job platforms</h3><p>Keeps your Naukri, Instahyre and Hirist profiles fresh and applies to the jobs you approve.</p>
+        </div>
+        <div class="feature">
+          <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m7 15 4-4 3 3 5-6"/></svg></div>
+          <h3>Analytics</h3><p>See reply rates by template, company and source, plus a weekly PDF report sent to your inbox.</p>
+        </div>
+        <div class="feature">
+          <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 7v5c0 5 3.5 8 8 9 4.5-1 8-4 8-9V7z"/></svg></div>
+          <h3>Blocklist</h3><p>Addresses and whole companies that must never be emailed, enforced on every send.</p>
+        </div>
+        <div class="feature">
+          <div class="ficon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9z"/></svg></div>
+          <h3>One-click actions</h3><p>Ready-made workflows, like a step-by-step send or a whole campaign, start from a button on any page.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="privacy">
+    <div class="wrap split">
+      <div class="reveal">
+        <div class="kicker">Your data</div>
+        <h2>Your inbox, your keys, your call</h2>
+        <p style="color:var(--text2);font-size:16.5px;margin:0">Outreach sends as you, not through a shared server address, so people reply to you and your sender reputation stays your own.</p>
+        <ul class="checks">
+          <li><span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span><span><b>Your own Gmail.</b> Connected with an App Password that is stored encrypted (AES-256-GCM) and used only to send and read your mail.</span></li>
+          <li><span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span><span><b>Your own AI keys.</b> Drafts and scoring use your own free Groq or Gemini key.</span></li>
+          <li><span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span><span><b>You approve first.</b> No guessed address and no auto-applied job goes anywhere until you say so.</span></li>
+          <li><span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg></span><span><b>Sign in without a password.</b> A six-digit code is emailed to you each time you sign in.</span></li>
+        </ul>
+      </div>
+      <div class="panel reveal" aria-hidden="true">
+        <div class="panel-row"><span>Sender</span><strong>you@gmail.com</strong></div>
+        <div class="panel-row"><span>Daily limit</span><strong>50 emails · 10:00 IST</strong></div>
+        <div class="panel-row"><span>Follow-ups</span><strong>When nobody replies</strong></div>
+        <div class="panel-row"><span>Mailbox check</span><strong>Every 2 hours</strong></div>
+        <div class="panel-row"><span>Blocklist</span><strong>Enforced on every send</strong></div>
+      </div>
+    </div>
+  </section>
+
+  <section style="padding-top:0">
+    <div class="wrap">
+      <div class="cta reveal">
+        <h2>Spend your time on interviews, not inboxes</h2>
+        <p>Outreach is invite-only. Request access with your email and you'll get a sign-in code once you're approved.</p>
+        <a href="/login" class="btn btn-primary">Request access</a>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>© <span id="yr">2026</span> Outreach</span>
+    <span><a href="/login">Sign in</a></span>
+  </div>
+</footer>
+
+<script>
+  document.getElementById('yr').textContent = new Date().getFullYear();
+  // Fade sections in as they scroll into view. Without IntersectionObserver
+  // everything is simply shown.
+  (function () {
+    var els = document.querySelectorAll('.reveal');
+    if (!('IntersectionObserver' in window)) { els.forEach(function (el) { el.classList.add('in'); }); return; }
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add('in'); io.unobserve(e.target); } });
+    }, { threshold: 0.12 });
+    els.forEach(function (el) { io.observe(el); });
+  })();
+</script>
+</body>
+</html>

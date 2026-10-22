@@ -256,6 +256,10 @@ const requireAuth = async (req, res, next) => {
   if (req.path.startsWith('/api/')) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
+  // Signed-out visitors to the bare domain get the public landing page rather
+  // than a sign-in form. Only here, after every credential check has failed, so
+  // a signed-in user still falls through to the `/` → /app/ redirect below.
+  if (req.path === '/') return res.sendFile(path.join(__dirname, 'landing.html'));
   res.redirect('/login');
 };
 
