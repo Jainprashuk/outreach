@@ -249,6 +249,7 @@ curl -s -o /dev/null -w "%{http_code}\n" https://screen-prashuk.jainprashuk.in/
 | "tabs not responding" | A frozen tab | Close it in the cloud browser, or `sudo cw restart <user>` |
 | Captcha → platform blocked 7 days | Site rate-limited the account | Intended. Don't work around it. Log in again after the block |
 | Worker says "Another … worker is already running" | Stale lock file | `sudo cw restart <user>` (the entrypoint clears locks) |
+| All of a user's workers "Offline", VM load very high, check-ins time out | Chrome out of memory and swapping | `cw logs <user> watchdog` — it restarts Chrome above 80% of the cap, between runs. If it can't (a run stuck holding Chrome), `sudo cw restart <user>` |
 | Chrome keeps restarting, log mentions "namespace" / "zygote" | Container started without the seccomp profile | Always start containers through `cw` (it passes `chrome-seccomp.json`) |
 | A run shows failed with no worker log line | Another machine with the same token claimed it | Make sure no Naukri/Instahyre/Hirist worker runs on any Mac |
 | `cw update` fails pulling | Deploy key / known_hosts | `ssh cw 'ssh -T git@github.com'` should greet you; key is `~/.ssh/github_outreach` (GitHub → repo → Settings → Deploy keys → `oracle-cw`) |
