@@ -54,6 +54,11 @@ export const EMAIL_TYPES: EmailTypeMeta[] = [
     what: 'The grace period is over and AI is off for them until they add a key. Sending is not affected.',
     when: 'Once, after the grace date, to accounts that still have no key and no fallback. Hourly check.',
   },
+  {
+    key: 'cloud-browser', label: 'Cloud browser ready', icon: 'ti-cloud', pref: null,
+    what: 'Their job platforms now run in the cloud: what that means for their logins (kept on your server, which you can access), the steps, and their link.',
+    when: 'When you click Save + issue token in their Cloud worker section. Once per token issued.',
+  },
 ];
 
 export type EffectiveTone = 'on' | 'off' | 'blocked' | 'optout' | 'test';

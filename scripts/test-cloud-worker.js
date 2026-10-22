@@ -11,7 +11,10 @@
  *     token then authenticates as that account (and no other);
  *   - the user sees their own link in GET /api/scrapes/worker-token;
  *   - the fleet listing carries the link but no token and no hash;
- *   - DELETE clears the link, and with ?revokeToken=1 kills the token.
+ *   - DELETE clears the link, and with ?revokeToken=1 kills the token;
+ *   - issuing a token tries the "cloud-browser" email and reports what happened;
+ *   - consent: only the person, only with a link set, kept once given, and
+ *     reset when the link changes or is removed.
  *
  * Dev database ONLY, with the server already up:
  *   NODE_ENV=dev PORT=4099 node server.js
@@ -107,10 +110,40 @@ async function main() {
     check(String(await resolveWorkerUser(token)) === tid, 'the new token authenticates as this account');
     check(await resolveWorkerUser(OLD_TOKEN) === null, 'the old token no longer works');
 
+    console.log('\nThe email on issue:');
+    check(issued.data.email && typeof issued.data.email.status === 'string',
+      `the answer says what happened to the email (${issued.data.email && issued.data.email.status}${issued.data.email && issued.data.email.reason ? ': ' + issued.data.email.reason : ''})`);
+    check(!('email' in (saved.data || {})), 'Save link alone sends no email');
+    const ledger = await mongoose.connection.db.collection('lifecycleemails').find({ userId: target.insertedId, type: 'cloud-browser' }).toArray();
+    check(['sent', 'skipped'].includes(issued.data.email.status) ? ledger.length >= 0 : true, `ledger rows for it: ${ledger.length}`);
+    const { cloudBrowser } = require('../lib/lifecycle/templates');
+    const msg = cloudBrowser({ name: 'Zz Test', url: good });
+    check(msg.html.includes(good) && /can technically access it/.test(msg.text), 'the email carries their link and the disclosure');
+
+    console.log('\nConsent:');
+    check((await call('POST', '/api/scrapes/cloud-consent', '')).status === 401, 'signed out → 401');
+    const workerTry = await fetch(BASE + '/api/scrapes/cloud-consent', { method: 'POST', headers: { 'X-Worker-Secret': token } });
+    check(workerTry.status === 401 || workerTry.status === 403, `a worker token cannot agree (${workerTry.status})`);
+    let st = await call('GET', '/api/scrapes/worker-token', userCookie);
+    check(st.data.cloudConsentAt === null, 'not agreed yet');
+    const c1 = await call('POST', '/api/scrapes/cloud-consent', userCookie);
+    check(c1.status === 200 && c1.data.cloudConsentAt, 'the person agrees');
+    const c2 = await call('POST', '/api/scrapes/cloud-consent', userCookie);
+    check(c2.data.cloudConsentAt === c1.data.cloudConsentAt, 'agreeing again keeps the first date');
+    await call('POST', path, adminCookie, { screenUrl: good });
+    st = await call('GET', '/api/scrapes/worker-token', userCookie);
+    check(st.data.cloudConsentAt === c1.data.cloudConsentAt, 'saving the SAME link keeps the agreement');
+    await call('POST', path, adminCookie, { screenUrl: `https://screen-zzother.${DOMAIN}` });
+    st = await call('GET', '/api/scrapes/worker-token', userCookie);
+    check(st.data.cloudConsentAt === null, 'a DIFFERENT link asks again');
+    await call('POST', '/api/scrapes/cloud-consent', userCookie);
+    await call('POST', path, adminCookie, { screenUrl: good });
+
     console.log('\nThe fleet listing carries the link, never the token:');
     const fleet = await call('GET', '/api/admin/users', adminCookie);
     const row = (fleet.data.users || []).find(u => u.id === tid);
     check(row && row.cloudScreenUrl === good, 'the row has cloudScreenUrl');
+    check(row && 'cloudConsentAt' in row, 'the row has cloudConsentAt');
     const json = JSON.stringify(fleet.data);
     check(!json.includes(token) && !json.includes(sha(token)), 'neither the token nor its hash appears');
 
@@ -126,10 +159,13 @@ async function main() {
     check(await resolveWorkerUser(token) === null, 'the revoked token no longer authenticates');
     const after = await call('GET', '/api/scrapes/worker-token', userCookie);
     check(after.data.cloudScreenUrl === null && after.data.registered === false, 'the user sees no link and no token');
+    check(after.data.cloudConsentAt === null, 'removing the browser clears the agreement');
+    check((await call('POST', '/api/scrapes/cloud-consent', userCookie)).status === 409, 'no browser → nothing to agree to (409)');
   } finally {
     await users.deleteOne({ _id: target.insertedId });
     await mongoose.connection.db.collection('sessions').deleteMany({ userId: target.insertedId });
     await mongoose.connection.db.collection('activitylogs').deleteMany({ userId: target.insertedId });
+    await mongoose.connection.db.collection('lifecycleemails').deleteMany({ userId: target.insertedId });
     await mongoose.disconnect();
   }
 

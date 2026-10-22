@@ -79,6 +79,10 @@ const userSchema = new mongoose.Schema({
   // set by an admin. No default on purpose: unset means "runs on their own
   // computer", and nothing is indexed on it.
   cloudScreenUrl: { type: String },
+  // When the user agreed, in the portal, to their job-site logins being kept
+  // on the cloud VM (routes/scrapes.js cloud-consent). Cleared whenever the
+  // link changes or is removed, so a new browser is agreed to again.
+  cloudConsentAt: { type: Date },
   // Last request from a person in the portal, minute granularity
   // (lib/portalPresence.js). No default: unset means "not seen yet".
   portalSeenAt: { type: Date },

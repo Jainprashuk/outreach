@@ -146,7 +146,7 @@ router.get('/users', async (req, res) => {
       User.find({}, {
         email: 1, name: 1, createdAt: 1, lastLoginAt: 1, isAdmin: 1, status: 1,
         onboarding: 1, workerTokenHash: 1, shareTokenHash: 1, libraryAccess: 1, libraryOptOut: 1,
-        lastActiveAt: 1, emailOptOut: 1, emailBlockedByAdmin: 1, aiOwnerFallback: 1, cloudScreenUrl: 1,
+        lastActiveAt: 1, emailOptOut: 1, emailBlockedByAdmin: 1, aiOwnerFallback: 1, cloudScreenUrl: 1, cloudConsentAt: 1,
       }).sort({ createdAt: 1 }).lean(),
 
       countByUserAnd(Contact, 'status',
@@ -290,6 +290,8 @@ router.get('/users', async (req, res) => {
         aiOwnerFallback: u.aiOwnerFallback === true,
         // Admin-set link to their browser on the cloud VM; null = their own computer.
         cloudScreenUrl: u.cloudScreenUrl || null,
+        // When they agreed to their logins living on the VM; null = not yet.
+        cloudConsentAt: u.cloudConsentAt || null,
         status: u.status || 'active',
         createdAt: u.createdAt || null,
         lastLoginAt: u.lastLoginAt || null,
@@ -1298,14 +1300,35 @@ router.post('/users/:id/cloud-worker', async (req, res) => {
       return res.status(400).json({ error: `The screen link must look like https://screen-<name>.${SCREEN_DOMAIN}` });
     }
     const issueToken = req.body && req.body.issueToken === true;
-    await User.updateOne({ _id: target._id }, { $set: { cloudScreenUrl: screenUrl } });
+    const before = await User.findById(target._id, { cloudScreenUrl: 1 }).lean();
+    // A different browser is a different thing to agree to: ask again.
+    const linkChanged = !before || before.cloudScreenUrl !== screenUrl;
+    await User.updateOne({ _id: target._id }, {
+      $set: { cloudScreenUrl: screenUrl },
+      ...(linkChanged ? { $unset: { cloudConsentAt: 1 } } : {}),
+    });
     const token = issueToken ? await issueWorkerToken(target._id) : null;
+    // Issuing the token is the moment they are being moved to the cloud: tell
+    // them, with the disclosure (lib/lifecycle/templates.js cloudBrowser). Goes
+    // through every lifecycle switch like any other email; a "no" is reported,
+    // never an error.
+    let email = null;
+    if (issueToken) {
+      try {
+        email = await deliver({ type: 'cloud-browser', userId: target._id, key: `cloud-browser:${Date.now()}` });
+      } catch (err) {
+        email = { status: 'failed', reason: String(err.message).slice(0, 200) };
+      }
+    }
     auditAction(req, target, 'cloud-worker',
       issueToken ? `cloud browser set to ${screenUrl}; new worker token issued` : `cloud browser set to ${screenUrl}`,
       { cloudScreenUrl: screenUrl, tokenIssued: issueToken },
       issueToken ? 'An admin moved your job-platform workers to the cloud. Any worker on your own computer has stopped.'
                  : 'An admin set the link to your cloud browser.');
-    res.json({ ok: true, cloudScreenUrl: screenUrl, ...(token ? { token } : {}) });
+    res.json({
+      ok: true, cloudScreenUrl: screenUrl, ...(token ? { token } : {}),
+      ...(email ? { email: { status: email.status, reason: email.reason || null, testMode: !!email.testMode } } : {}),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1321,7 +1344,7 @@ router.delete('/users/:id/cloud-worker', async (req, res) => {
     const target = await loadTarget(req, res);
     if (!target) return;
     const revoke = req.query.revokeToken === '1';
-    await User.updateOne({ _id: target._id }, { $unset: { cloudScreenUrl: 1 } });
+    await User.updateOne({ _id: target._id }, { $unset: { cloudScreenUrl: 1, cloudConsentAt: 1 } });
     if (revoke) await revokeWorkerToken(target._id);
     auditAction(req, target, 'cloud-worker-removed',
       revoke ? 'cloud browser removed; worker token revoked' : 'cloud browser removed',

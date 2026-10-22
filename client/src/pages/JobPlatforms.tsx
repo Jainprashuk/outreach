@@ -12,6 +12,7 @@ import Layout from '../components/Layout';
 import { useToast } from '../context/ToastContext';
 import StatusHeader, { readiness, runLabel, TONE_COLOR } from '../components/naukri/StatusHeader';
 import NaukriSetupGuide, { type NaukriGuideTab } from '../components/naukri/NaukriSetupGuide';
+import CloudBrowserButton from '../components/naukri/CloudBrowserButton';
 import RunTimeline, { ActiveRun } from '../components/naukri/RunTimeline';
 import ReviewQueue from '../components/naukri/ReviewQueue';
 import JobsTab, { type JobsView } from '../components/naukri/JobsTab';
@@ -528,7 +529,10 @@ export default function JobPlatforms() {
   // Set when an admin hosts this account's workers on the cloud VM: the link to
   // the browser there, where the user logs in to their job sites.
   const [cloudUrl, setCloudUrl] = useState<string | null>(null);
-  useEffect(() => { workerTokenStatusApi().then(r => setCloudUrl(r.cloudScreenUrl || null)).catch(() => {}); }, []);
+  const [cloudConsentAt, setCloudConsentAt] = useState<string | null>(null);
+  useEffect(() => {
+    workerTokenStatusApi().then(r => { setCloudUrl(r.cloudScreenUrl || null); setCloudConsentAt(r.cloudConsentAt || null); }).catch(() => {});
+  }, []);
   const view = (params.get('tab') as View) || 'activity';
   const setView = (v: View) => setParams(p => { const n = new URLSearchParams(p); n.set('tab', v); return n; }, { replace: true });
   const pick = (p: PlatformScope, tab?: View) => setParams(prev => {
@@ -659,12 +663,9 @@ export default function JobPlatforms() {
   );
 
   // ── header actions ──────────────────────────────────────────────────────
-  const cloudButton = cloudUrl ? (
-    <a className="btn btn-sm" href={cloudUrl} target="_blank" rel="noreferrer"
-      title="The browser your workers use, running in the cloud. Log in to your job sites here.">
-      <i className="ti ti-cloud" /> Cloud browser
-    </a>
-  ) : null;
+  const cloudButton = cloudUrl
+    ? <CloudBrowserButton url={cloudUrl} consentedAt={cloudConsentAt} onConsent={setCloudConsentAt} />
+    : null;
   let actions: React.ReactNode;
   let readinessLine: React.ReactNode;
   if (single && overview) {

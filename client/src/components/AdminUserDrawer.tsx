@@ -60,7 +60,9 @@ function CloudWorker({ row, busy, setBusy, onChanged }: {
       const r = await adminSetCloudWorkerApi(id, url, issueToken);
       setUrl(r.cloudScreenUrl);
       if (r.token) setToken(r.token);
-      toast(issueToken ? 'Link saved and token issued — copy it now' : 'Cloud browser link saved', 'success');
+      if (!issueToken) toast('Cloud browser link saved', 'success');
+      else if (r.email?.status === 'sent') toast(`Token issued — copy it now. They were emailed${r.email.testMode ? ' (test mode)' : ''}.`, 'success');
+      else toast(`Token issued — copy it now. Email not sent: ${SKIP_REASON[r.email?.reason || ''] || r.email?.reason || r.email?.status || 'unknown'}. Tell them yourself.`, 'success');
       onChanged();
     } catch (e: any) {
       toast(e.message || 'That did not work', 'error');
@@ -93,7 +95,10 @@ function CloudWorker({ row, busy, setBusy, onChanged }: {
         <div className="ud-action-text">
           <div>Job platforms in the cloud</div>
           <div>{saved
-            ? <>Naukri, Instahyre and Hirist run on the cloud VM. Their browser: <a href={saved} target="_blank" rel="noreferrer">{saved.replace('https://', '')}</a></>
+            ? <>Naukri, Instahyre and Hirist run on the cloud VM. Their browser: <a href={saved} target="_blank" rel="noreferrer">{saved.replace('https://', '')}</a>.{' '}
+                {row.cloudConsentAt
+                  ? <>They agreed to their logins living there on {new Date(row.cloudConsentAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}.</>
+                  : <>They haven't agreed yet — they're asked the first time they open it.</>}</>
             : <>Their workers run on their own computer. To host them on the VM: enter <code>https://screen-&lt;name&gt;.jainprashuk.in</code>, issue a token, then run <code>sudo cw add &lt;name&gt; {row.email}</code> on the VM and paste the token.</>}</div>
         </div>
         <input type="url" value={url} placeholder="https://screen-name.jainprashuk.in" onChange={e => setUrl(e.target.value)}

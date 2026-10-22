@@ -9,6 +9,7 @@ const User = require('../models/User');
 const { reportIssue } = require('../lib/issues');
 const { notify } = require('../lib/notify');
 const { WORKER_OFFLINE_MS, workerBack } = require('../lib/workerWatch');
+const { logEvent } = require('../lib/activityLog');
 
 const router = express.Router();
 
@@ -481,6 +482,27 @@ router.post('/worker-token', async (req, res) => {
   }
 });
 
+// POST /api/scrapes/cloud-consent — the person (never a worker) agrees to
+// their job-site logins being kept on the cloud VM. Only meaningful while an
+// admin has set a cloud browser for them; the first agreement is kept.
+router.post('/cloud-consent', async (req, res) => {
+  try {
+    if (req.isWorker) return res.status(403).json({ error: 'A worker cannot agree on a person\'s behalf' });
+    const user = await User.findById(req.userId, { cloudScreenUrl: 1, cloudConsentAt: 1 }).lean();
+    if (!user || !user.cloudScreenUrl) return res.status(409).json({ error: 'No cloud browser is set up for your account.' });
+    if (!user.cloudConsentAt) {
+      const at = new Date();
+      await User.updateOne({ _id: req.userId, cloudConsentAt: { $exists: false } }, { $set: { cloudConsentAt: at } });
+      logEvent({ userId: req.userId, category: 'account', action: 'cloud-consent',
+        message: 'Agreed to job-site logins being kept on the cloud browser', meta: { cloudScreenUrl: user.cloudScreenUrl } }).catch(() => {});
+      return res.json({ ok: true, cloudConsentAt: at });
+    }
+    res.json({ ok: true, cloudConsentAt: user.cloudConsentAt });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // DELETE /api/scrapes/worker-token — revoke it, e.g. a lost laptop.
 router.delete('/worker-token', async (req, res) => {
   try {
@@ -495,10 +517,15 @@ router.delete('/worker-token', async (req, res) => {
 // GET /api/scrapes/worker-token — whether one is registered, never the value.
 router.get('/worker-token', async (req, res) => {
   try {
-    const user = await User.findById(req.userId, { workerTokenHash: 1, cloudScreenUrl: 1 }).lean();
+    const user = await User.findById(req.userId, { workerTokenHash: 1, cloudScreenUrl: 1, cloudConsentAt: 1 }).lean();
     // cloudScreenUrl: set when an admin runs this account's job-platform workers
-    // on the cloud VM; the link to the browser there.
-    res.json({ registered: !!(user && user.workerTokenHash), cloudScreenUrl: (user && user.cloudScreenUrl) || null });
+    // on the cloud VM; the link to the browser there. cloudConsentAt: when they
+    // agreed to their logins living there (asked before the first open).
+    res.json({
+      registered: !!(user && user.workerTokenHash),
+      cloudScreenUrl: (user && user.cloudScreenUrl) || null,
+      cloudConsentAt: (user && user.cloudConsentAt) || null,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

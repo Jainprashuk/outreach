@@ -1522,6 +1522,8 @@ export interface AdminUserRow {
   aiOwnerFallback?: boolean;
   /** Link to their browser on the cloud VM; null when their workers run on their own computer. */
   cloudScreenUrl?: string | null;
+  /** When they agreed to their logins living on the VM; null = not yet. */
+  cloudConsentAt?: string | null;
   /** Their data is part of the shared Library (they have not opted out). */
   librarySharing?: boolean;
   status: 'active' | 'invited' | 'disabled' | 'n/a';
@@ -1633,7 +1635,8 @@ export const adminCheckMailboxApi = (id: string) =>
 
 /** Cloud browser link for an account; with issueToken also a new worker token, shown once. */
 export const adminSetCloudWorkerApi = (id: string, screenUrl: string, issueToken: boolean) =>
-  apiFetch<{ ok: true; cloudScreenUrl: string; token?: string }>(
+  apiFetch<{ ok: true; cloudScreenUrl: string; token?: string;
+    email?: { status: string; reason: string | null; testMode: boolean } }>(
     `/api/admin/users/${id}/cloud-worker`, { method: 'POST', body: JSON.stringify({ screenUrl, issueToken }) });
 
 export const adminRemoveCloudWorkerApi = (id: string, revokeToken: boolean) =>
@@ -1689,7 +1692,11 @@ export const revokeShareLinkApi = () =>
   apiFetch<{ ok: true }>('/api/share-link', { method: 'DELETE' });
 
 export const workerTokenStatusApi = () =>
-  apiFetch<{ registered: boolean; cloudScreenUrl?: string | null }>('/api/scrapes/worker-token');
+  apiFetch<{ registered: boolean; cloudScreenUrl?: string | null; cloudConsentAt?: string | null }>('/api/scrapes/worker-token');
+
+/** The user agrees to their job-site logins being kept on the cloud VM. */
+export const cloudConsentApi = () =>
+  apiFetch<{ ok: true; cloudConsentAt: string }>('/api/scrapes/cloud-consent', { method: 'POST' });
 
 export const issueWorkerTokenApi = () =>
   apiFetch<{ token: string; note: string }>('/api/scrapes/worker-token', { method: 'POST' });
@@ -2241,7 +2248,7 @@ export const deleteNaukriResumeApi = () =>
 // ── Lifecycle emails & reports ───────────────────────────────────────────────
 
 export type LifecycleType = 'welcome' | 'setup-reminder' | 'inactive' | 'weekly-report' | 'manual-report' | 'admin-daily'
-  | 'ai-key-announce' | 'ai-key-ended';
+  | 'ai-key-announce' | 'ai-key-ended' | 'cloud-browser';
 
 export interface LifecycleConfig {
   enabled: boolean;

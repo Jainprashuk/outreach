@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useVisibleInterval } from '../../hooks/useVisibleInterval';
 import { Link } from 'react-router-dom';
 import { naukriOverviewApi, workerTokenStatusApi, type NaukriOverview } from '../../lib/api';
+import CloudBrowserButton from './CloudBrowserButton';
 import {
   C, Code, H, Note, P, Step, detectOs, PORTAL_REPO, SCRAPER_REPO, type Os,
 } from '../leads/ScraperSetupGuide';
@@ -24,7 +25,7 @@ const TABS: { key: Tab; label: string; icon: string }[] = [
   { key: 'fix', label: 'Troubleshooting', icon: 'ti-lifebuoy' },
 ];
 
-type Progress = { token: boolean | null; overview: NaukriOverview | null; cloud: string | null };
+type Progress = { token: boolean | null; overview: NaukriOverview | null; cloud: string | null; cloudConsentAt: string | null };
 
 function Checklist({ p }: { p: Progress }) {
   const o = p.overview;
@@ -141,9 +142,7 @@ function CloudSetup({ url, progress }: { url: string; progress: Progress }) {
       </Note>
       <Step n={1} title="Open your cloud browser">
         <P>
-          <a className="btn btn-primary btn-sm" href={url} target="_blank" rel="noreferrer">
-            <i className="ti ti-external-link" /> Open cloud browser
-          </a>
+          <CloudBrowserButton url={url} consentedAt={progress.cloudConsentAt} className="btn btn-primary btn-sm" label="Open cloud browser" />
         </P>
         <P>Cloudflare asks for your email and sends you a 6-digit code. You stay signed in for 30 days.</P>
       </Step>
@@ -371,7 +370,7 @@ export default function NaukriSetupGuide({ onClose, initialTab = 'how' }: {
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [os, setOs] = useState<Os>(detectOs);
-  const [progress, setProgress] = useState<Progress>({ token: null, overview: null, cloud: null });
+  const [progress, setProgress] = useState<Progress>({ token: null, overview: null, cloud: null, cloudConsentAt: null });
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
@@ -385,7 +384,7 @@ export default function NaukriSetupGuide({ onClose, initialTab = 'how' }: {
       workerTokenStatusApi().catch(() => null),
       naukriOverviewApi().catch(() => null),
     ]);
-    setProgress({ token: status ? status.registered : null, overview, cloud: status?.cloudScreenUrl || null });
+    setProgress({ token: status ? status.registered : null, overview, cloud: status?.cloudScreenUrl || null, cloudConsentAt: status?.cloudConsentAt || null });
   }, []);
   // Paused while the tab is hidden; refreshes the moment it is visible again.
   useVisibleInterval(load, 5000);
