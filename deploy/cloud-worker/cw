@@ -75,7 +75,7 @@ run_container() {  # run_container <user> <port>
   docker rm -f "cw-$u" >/dev/null 2>&1 || true
   docker run -d --name "cw-$u" --hostname "cw-$u" \
     --restart unless-stopped \
-    --memory 2560m --memory-swap 3584m --cpus 1 --pids-limit 1024 \
+    --memory 2560m --memory-swap 2816m --cpus 1 --pids-limit 1024 \
     --shm-size 1g \
     --security-opt "seccomp=$REPO/deploy/cloud-worker/chrome-seccomp.json" \
     -p "127.0.0.1:$port:6080" \

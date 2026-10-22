@@ -65,7 +65,8 @@ COPY lib/platforms.js lib/naukriFilters.js lib/naukriAnswers.js /app/lib/
 RUN cp -r /usr/share/novnc /opt/novnc
 COPY deploy/cloud-worker/novnc-index.html /opt/novnc/index.html
 
-COPY deploy/cloud-worker/chrome.sh deploy/cloud-worker/chrome-debug.sh deploy/cloud-worker/entrypoint.sh /opt/jl/
+COPY deploy/cloud-worker/chrome.sh deploy/cloud-worker/chrome-debug.sh deploy/cloud-worker/entrypoint.sh \
+     deploy/cloud-worker/watchdog.js deploy/cloud-worker/start.html /opt/jl/
 RUN chmod 755 /opt/jl/*.sh
 
 # uid 1000 so the host volume (/srv/cw/<user>) can be chowned predictably.

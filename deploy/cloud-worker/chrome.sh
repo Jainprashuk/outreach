@@ -18,6 +18,10 @@ rm -f "$PROFILE"/Singleton{Lock,Cookie,Socket}
 # private to this one user. The two --disable-* flags stop Chrome freezing tabs
 # nobody is looking at (worker/chrome-health.js names that failure); they change
 # scheduling, not the fingerprint.
+#
+# It opens one small local page, not the three job sites: those, left open all
+# day with nothing throttling them, grew past the container's memory cap
+# (watchdog.js has the story). The workers open the sites themselves per run.
 exec cw-browser \
   --remote-debugging-port="${CDP_PORT:-9222}" \
   --user-data-dir="$PROFILE" \
@@ -31,4 +35,4 @@ exec cw-browser \
   --start-maximized \
   --disable-backgrounding-occluded-windows \
   --disable-renderer-backgrounding \
-  https://www.naukri.com/ https://www.instahyre.com/ https://www.hirist.tech/
+  file:///opt/jl/start.html

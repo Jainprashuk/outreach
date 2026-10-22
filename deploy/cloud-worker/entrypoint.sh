@@ -61,6 +61,8 @@ EOF
   program chrome 30 "bash -c 'sleep 2; exec /opt/jl/chrome.sh'"
   program x11vnc 40 "bash -c 'sleep 2; exec x11vnc -display :99 -localhost -forever -shared -nopw -quiet -rfbport 5900'"
   program novnc 50 "websockify --web /opt/novnc 6080 localhost:5900"
+  # Restarts Chrome when the container nears its memory cap, between runs.
+  program watchdog 55 "bash -c 'sleep 30; exec node /opt/jl/watchdog.js'"
   for p in $PLATFORMS; do
     case "$p" in
       naukri|instahyre|hirist) ;;

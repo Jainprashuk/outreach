@@ -8,4 +8,6 @@
 !deploy/cloud-worker/chrome.sh
 !deploy/cloud-worker/chrome-debug.sh
 !deploy/cloud-worker/entrypoint.sh
+!deploy/cloud-worker/watchdog.js
+!deploy/cloud-worker/start.html
 worker/**/RECON.md
