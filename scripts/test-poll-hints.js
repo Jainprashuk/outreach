@@ -107,6 +107,13 @@ async function main() {
     check((await overview()).online === false, 'no hint (20s worker), silent 4 min → offline, as before');
     await workers.updateOne({ userId: uid, platform: 'hirist' }, { $set: { lastSeenAt: new Date(Date.now() - 7 * 60 * 1000), pollHintSeconds: 300 } });
     check((await overview()).online === false, 'told 300s, silent 7 min → offline');
+    // Mid-run a worker reports progress instead of checking in.
+    const runRow = await db.collection('naukriruns').insertOne({ userId: uid, platform: 'hirist', kind: 'apply', status: 'running', trigger: 'manual',
+      claimedAt: new Date(Date.now() - 20 * 60 * 1000), progress: { phase: 'applying', updatedAt: new Date(Date.now() - 60 * 1000) }, createdAt: new Date(), updatedAt: new Date() });
+    check((await overview()).online === true, 'silent 7 min but its run reported progress a minute ago → online');
+    await db.collection('naukriruns').updateOne({ _id: runRow.insertedId }, { $set: { 'progress.updatedAt': new Date(Date.now() - 10 * 60 * 1000) } });
+    check((await overview()).online === false, 'run silent for 10 min too → offline');
+    await db.collection('naukriruns').deleteOne({ _id: runRow.insertedId });
 
     console.log('\nNo audit row per check-in:');
     await new Promise(r => setTimeout(r, 1000));

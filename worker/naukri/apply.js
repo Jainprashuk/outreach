@@ -174,8 +174,12 @@ async function answerOne(page, question, config, askAI) {
   const resolved = resolveAnswer(question, config);
   let value;
   let ai = null;
+  // Answered by a rule written for the same question in other words
+  // (lib/naukriAnswers.js meaningKey) — said so in the job's history.
+  let reworded = null;
   if (resolved.matched) {
     value = String(resolved.answer);
+    if (resolved.via === 'reworded') reworded = resolved.similarTo;
   } else {
     const live = askAI && config.autoAnswer && config.autoAnswer.enabled
       ? await askAI(question, labels).catch(() => null) : null;
@@ -206,7 +210,7 @@ async function answerOne(page, question, config, askAI) {
     await jitter(300, 700);
     const send = await firstVisible(page, BOT_SEND, 1500);
     if (send) { await send.click(); await jitter(600, 1200); }
-    return { state: 'answered', question, typed: chosen, ai };
+    return { state: 'answered', question, typed: chosen, ai, reworded };
   }
 
   const box = await firstVisible(page, BOT_TEXTAREA, 1500);
@@ -221,7 +225,7 @@ async function answerOne(page, question, config, askAI) {
   if (!send) return { state: 'stuck', question, reason: 'no send button for this question' };
   await send.click();
   await jitter(700, 1400);
-  return { state: 'answered', question, typed: value, ai };
+  return { state: 'answered', question, typed: value, ai, reworded };
 }
 
 // Walk the questionnaire. Bounded: a chatbot that keeps asking is a loop we must
@@ -381,7 +385,10 @@ async function applyToOne(page, job, { config, dryRun, onStep, askAI }) {
     const byAI = bot.asked.filter(a => a.ai);
     const aiNote = byAI.length
       ? ` · ${byAI.length} answered by AI (${byAI.map(a => `${a.ai}%`).join(', ')})` : '';
-    return { outcome: 'applied', reason: bot.asked.length ? `Applied after ${bot.asked.length} question(s)${aiNote}` : 'Applied' };
+    const byReworded = bot.asked.filter(a => a.reworded);
+    const rewordNote = byReworded.length
+      ? ` · ${byReworded.length} matched an answer you gave in other words (${byReworded.map(a => `"${String(a.reworded).slice(0, 60)}"`).join(', ')})` : '';
+    return { outcome: 'applied', reason: bot.asked.length ? `Applied after ${bot.asked.length} question(s)${aiNote}${rewordNote}` : 'Applied' };
   }
 
   // Clicked, nothing threw, but nothing on the page says it worked. Recorded as

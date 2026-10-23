@@ -5,7 +5,7 @@
 //
 // No database, no network, no browser — every function here is pure.
 
-const { resolveAnswer, pickOption, matchable, STARTER_RULES } = require('../lib/naukriAnswers');
+const { resolveAnswer, pickOption, matchable, STARTER_RULES, meaningKey, similarRules } = require('../lib/naukriAnswers');
 const { parseDraft, quoteIsReal, ruleLines, readConfidence, relevantRules } = require('../lib/naukriDraft');
 
 let pass = 0, fail = 0;
@@ -126,6 +126,42 @@ ok('the quote check still sees ALL answers', parseDraft('{"answer":"1","source":
 
 ok('quoteIsReal is loose on spacing', quoteIsReal('built  payment systems', [resumeText]));
 ok('quoteIsReal rejects tiny quotes', !quoteIsReal('a', [resumeText]));
+
+console.log('\nReworded questions (meaningKey)');
+const same = (a, b) => meaningKey(a) === meaningKey(b);
+ok('CTC wording and units do not matter', same('What is your current CTC (in LPA)?', 'current salary'));
+ok('React = ReactJS, filler ignored', same('How many years of experience in React?', 'Years of experience with ReactJS'));
+ok('"where are you currently located" = "current location"', same('Where are you currently located?', 'current location'));
+ok('current vs expected CTC stay different', !same('current ctc', 'expected ctc'));
+ok('React vs React Native stay different', !same('Years of experience in React?', 'Years of experience in React Native?'));
+ok('night vs day shift stay different', !same('Are you comfortable with night shifts?', 'Are you comfortable with day shifts?'));
+ok('a negation keeps them apart', !same("Don't you have a passport?", 'Do you have a passport?'));
+ok('different cities stay different', !same('Willing to relocate to Pune?', 'Willing to relocate to Bangalore?'));
+ok('notice in days vs months stay different', !same('Notice period in days?', 'Notice period in months?'));
+
+const bank2 = { answers: [
+  { pattern: 'how many years of experience do you have in react', answer: '3' },
+  { pattern: 'expected ctc', answer: '{{expectedCtcLpa}}' },
+], profile: {} };
+const rw = resolveAnswer('Years of experience in ReactJS?', bank2);
+ok('a reworded question is answered by the rule', rw.matched && rw.answer === '3' && rw.via === 'reworded');
+ok('a merely similar one is not', !resolveAnswer('Years of experience in React Native?', bank2).matched);
+ok('a reworded match with an empty placeholder is skipped', !resolveAnswer('What is your expected salary?', bank2).matched);
+const exact = resolveAnswer('how many years of experience do you have in react?', bank2);
+ok('a word-for-word match is not marked reworded', exact.matched && !exact.via);
+
+console.log('\nSimilar answers (suggestions)');
+const sim = similarRules('How many years of experience in React Native?', bank2);
+ok('the React rule is suggested for React Native', sim.length === 1 && sim[0].answer === '3' && sim[0].score >= 50);
+eq('nothing generic-only is suggested', similarRules('How many years of total experience?', bank2), []);
+eq('a rule with an unfilled placeholder is not suggested', similarRules('What is your expected ctc for this role', bank2).length, 0);
+
+console.log('\nWhy a draft was rejected');
+const why = (t, extra = {}) => parseDraft(t, { ...ctx, ...extra });
+eq('quote not in the resume', [why('{"answer":"Yes","quote":"5 years of SAP","confidence":90}').why, why('{"answer":"Yes","quote":"5 years of SAP","confidence":90}').rawAnswer], ['quote-not-found', 'Yes']);
+eq('not one of the options', why('{"answer":"Maybe","quote":"Node.js"}', { options: ['Yes', 'No'] }).why, 'not-an-option');
+eq('years without dates', why('{"answer":"4","quote":"Built payment systems in Node.js"}', { question: 'How many years of experience in Node.js?' }).why, 'years-without-dates');
+eq('the AI saying nothing', why('{"answer":null}').why, 'not-stated');
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

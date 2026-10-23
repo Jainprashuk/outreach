@@ -10,7 +10,7 @@ const Prospect = require('../models/Prospect');
 const Contact = require('../models/Contact');
 const Settings = require('../models/Settings');
 const { dueSlot, nextSlot, upcomingSlots, slotsOf, startOfDayIn, parseTime, MAX_SLOTS } = require('../lib/naukriSchedule');
-const { resolveAnswer, matchable, STARTER_RULES } = require('../lib/naukriAnswers');
+const { resolveAnswer, matchable, STARTER_RULES, similarRules } = require('../lib/naukriAnswers');
 const { scoreJob } = require('../lib/naukriScore');
 // Called through the module object (naukriDraft.draftAnswer), not a
 // destructured copy, so the end-to-end test can swap in a scripted AI.
@@ -75,6 +75,12 @@ const ONLINE_MS = 90_000;
 // checking in every 20s were ~390k requests a month — most of the hosting
 // plan's free allowance for one person.
 const IDLE_POLL_SECONDS = 300;
+// A running run whose worker reported progress (or claimed it) recently.
+// Generous on purpose: the slowest single step, a job with live AI answers, is
+// about 3 minutes; failStaleRuns gives up only after STALE_RUN_MS.
+const RUN_ALIVE_MS = 5 * 60_000;
+const runIsAlive = (run) => !!run && run.status === 'running'
+  && Date.now() - new Date((run.progress && run.progress.updatedAt) || run.claimedAt || 0).getTime() < RUN_ALIVE_MS;
 // Online = seen within the interval it was last told, plus a margin; never
 // less than ONLINE_MS, so a worker that ignores hints reads exactly as before.
 const isOnline = (w) => !!(w && w.lastSeenAt)
@@ -563,7 +569,9 @@ async function overviewFor(userId, platform, { config: given = null, light = fal
     history: history.map(serialize),
     worker: {
       everSeen: !!lastSeenAt,
-      online: isOnline(worker),
+      // A worker in the middle of a run doesn't check in — it reports progress
+      // on the run instead — so a run that reported recently means it is there.
+      online: isOnline(worker) || runIsAlive(activeRun),
       lastSeenAt,
       host: worker.host || '',
       chromeUp: !!worker.chromeUp,
@@ -1069,6 +1077,30 @@ const draftStillGood = (d, basis, rules = [], legacy = null) => {
   return true;
 };
 
+// One AI attempt, for a question's history on Needs answer (drafts[].attempts).
+const ATTEMPTS_KEPT = 3;
+function attemptOf(out, where, min) {
+  const ready = out.status === 'ready';
+  const confidence = ready ? (out.confidence || 0) : (out.rawConfidence || 0);
+  const outcome = ready ? (confidence >= min ? 'used' : 'below-bar')
+    : out.status === 'error' ? 'error' : out.why && out.why !== 'not-stated' ? 'rejected' : 'not-stated';
+  return {
+    at: new Date(), where, outcome, confidence,
+    answer: ready ? out.answer : (out.rawAnswer || ''),
+    quote: ready ? out.quote : (out.rawQuote || ''),
+    why: out.status === 'error' ? (out.note || 'AI busy') : (out.why || ''),
+  };
+}
+// Replace a question's draft, carrying its earlier attempts forward. Two
+// atomic writes rather than config.save(): several drafts are written at once.
+async function saveDraft(userId, draft, attempt) {
+  const cfg = await NaukriConfig.findOne({ userId }, { drafts: 1 }).lean();
+  const prev = ((cfg && cfg.drafts) || []).find(d => sameQuestion(d.question, draft.question));
+  const attempts = [attempt, ...((prev && prev.attempts) || [])].slice(0, ATTEMPTS_KEPT);
+  await NaukriConfig.updateOne({ userId }, { $pull: { drafts: { question: draft.question } } });
+  await NaukriConfig.updateOne({ userId }, { $push: { drafts: { $each: [{ ...draft, attempts }], $slice: -300 } } });
+}
+
 // GET /api/naukri/needs-answer
 // Save a confident AI answer as an 'auto' rule at the top of the bank and put
 // every job parked on its question back in Waiting. One place for it, used by
@@ -1145,7 +1177,8 @@ router.get('/needs-answer', async (req, res) => {
       questions: rows.map((r) => {
         // A stale draft (different resume or profile, or the AI was busy) is
         // reported as missing, so the tab asks for a fresh one.
-        const d = drafts.find(x => sameQuestion(x.question, r._id) && draftStillGood(x, basis, rulesNow, legacy));
+        const stored = drafts.find(x => sameQuestion(x.question, r._id));
+        const d = stored && draftStillGood(stored, basis, rulesNow, legacy) ? stored : null;
         return {
           question: r._id,
           count: r.count,
@@ -1154,6 +1187,10 @@ router.get('/needs-answer', async (req, res) => {
           jobs: r.jobs.slice(0, 5),
           platforms: r.platforms || ['naukri'],
           draft: d ? { answer: d.answer, quote: d.quote, source: d.source, status: d.status, confidence: d.confidence || 0 } : null,
+          // Every time the AI was asked, even when that draft has since gone stale.
+          attempts: (stored && stored.attempts) || [],
+          // Answers you gave to questions LIKE this one — a suggestion, never used on their own.
+          similar: similarRules(r._id, { answers: rulesNow, profile: prof }),
         };
       }),
       autoAnswer: { enabled: !!(config.autoAnswer && config.autoAnswer.enabled), minConfidence: (config.autoAnswer && config.autoAnswer.minConfidence) || 85 },
@@ -1199,13 +1236,14 @@ router.post('/needs-answer/draft', async (req, res) => {
     // questions in parallel, and concurrent document saves would conflict.
     // Sure enough while auto-answer is on: used straight away, like a live answer.
     const auto = config.autoAnswer || {};
-    if (auto.enabled && draft.status === 'ready' && draft.confidence >= (auto.minConfidence || 85)) {
+    const min = auto.enabled ? (auto.minConfidence || 85) : 101;   // off: nothing counts as "used"
+    if (auto.enabled && draft.status === 'ready' && draft.confidence >= min) {
       const { requeued } = await saveAutoRule(req.userId, { question, answer: draft.answer, options, confidence: draft.confidence, quote: draft.quote });
       return res.json({ draft: { answer: draft.answer, quote: draft.quote, source: draft.source, status: draft.status, confidence: draft.confidence }, autoUsed: true, requeued });
     }
-    await NaukriConfig.updateOne({ userId: req.userId }, { $pull: { drafts: { question } } });
-    await NaukriConfig.updateOne({ userId: req.userId }, { $push: { drafts: { $each: [draft], $slice: -300 } } });
-    res.json({ draft: { answer: draft.answer, quote: draft.quote, source: draft.source, status: draft.status, confidence: draft.confidence }, note: out.note || null });
+    const attempt = attemptOf(out, 'page', min);
+    await saveDraft(req.userId, draft, attempt);
+    res.json({ draft: { answer: draft.answer, quote: draft.quote, source: draft.source, status: draft.status, confidence: draft.confidence }, attempt, note: out.note || null });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1320,8 +1358,7 @@ router.post('/ai-answer', async (req, res) => {
         question, answer: out.answer, quote: out.quote, source: out.source, status: out.status, options, confidence,
         basis: draftBasis(text, profile), createdAt: new Date(),
       };
-      await NaukriConfig.updateOne({ userId: req.userId }, { $pull: { drafts: { question } } });
-      await NaukriConfig.updateOne({ userId: req.userId }, { $push: { drafts: { $each: [draft], $slice: -300 } } });
+      await saveDraft(req.userId, draft, attemptOf(out, 'apply', min));
     }
     res.json({
       answer: null, confidence,

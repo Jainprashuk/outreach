@@ -77,6 +77,16 @@ const draftSchema = new mongoose.Schema({
   // question drafted before the resume was there stays "unknown" forever.
   basis:    { type: String, default: '' },
   createdAt: { type: Date, default: Date.now },
+  // The last few times the AI was asked this question, newest first — where
+  // (live during an apply, or on the Needs answer page), what it said, and why
+  // it was not used — so Needs answer can show its reasoning, not just "no".
+  attempts: { type: [{
+    _id: false,
+    at: Date,
+    where: { type: String, enum: ['apply', 'page'] },
+    outcome: { type: String, enum: ['used', 'below-bar', 'rejected', 'not-stated', 'error'] },
+    answer: String, quote: String, confidence: Number, why: String,
+  }], default: [] },
 });
 
 // Settings that belong to ONE other job platform (Instahyre, Hirist), under

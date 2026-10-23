@@ -2103,6 +2103,19 @@ export interface NaukriDraft {
   confidence?: number;
 }
 
+/** One time the AI was asked a question: where, what it said, why it wasn't used. */
+export interface NaukriAiAttempt {
+  at: string;
+  where: 'apply' | 'page';
+  outcome: 'used' | 'below-bar' | 'rejected' | 'not-stated' | 'error';
+  answer?: string; quote?: string; confidence?: number;
+  /** For rejected: 'quote-not-found' | 'not-an-option' | 'years-without-dates'; for error: the provider note. */
+  why?: string;
+}
+
+/** An answer you gave to a question like this one — offered, never used on its own. */
+export interface NaukriSimilarAnswer { pattern: string; answer: string; score: number }
+
 export interface NaukriAutoAnswer {
   pattern: string; answer: string; confidence: number | null; quote: string; createdAt: string | null;
 }
@@ -2118,6 +2131,9 @@ export interface NaukriQuestionGroup {
   /** Which platforms asked it. The answer bank is shared by all of them. */
   platforms?: PlatformId[];
   draft: NaukriDraft | null;
+  /** The last few AI attempts at this question, newest first. */
+  attempts?: NaukriAiAttempt[];
+  similar?: NaukriSimilarAnswer[];
 }
 
 export const naukriNeedsAnswerApi = () =>
@@ -2134,7 +2150,7 @@ export const reviewNaukriAutoAnswerApi = (pattern: string, action: 'keep' | 'edi
   apiFetch<{ ok: true }>(`${NB()}/needs-answer/auto`, { method: 'POST', body: JSON.stringify({ pattern, action, answer }) });
 
 export const draftNaukriAnswerApi = (question: string) =>
-  apiFetch<{ draft: NaukriDraft; note?: string | null; autoUsed?: boolean; requeued?: number }>(
+  apiFetch<{ draft: NaukriDraft; note?: string | null; autoUsed?: boolean; requeued?: number; attempt?: NaukriAiAttempt }>(
     `${NB()}/needs-answer/draft`, { method: 'POST', body: JSON.stringify({ question }) });
 
 /** Make it a rule; every job blocked on it goes back to Waiting. */

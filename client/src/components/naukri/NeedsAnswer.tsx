@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NaukriQuestionGroup, NaukriAutoAnswer } from '../../lib/api';
+import type { NaukriQuestionGroup, NaukriAutoAnswer, NaukriAiAttempt } from '../../lib/api';
 import { naukriNeedsAnswerApi, draftNaukriAnswerApi, useNaukriAnswerApi, ignoreNaukriQuestionApi, isAiKeyRequired, reviewNaukriAutoAnswerApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty, Notice } from './ui';
 import { PLATFORM_LABEL } from './platform';
@@ -59,12 +59,60 @@ function AutoAnswered({ items, busy, onReview }: {
   );
 }
 
-function QuestionCard({ group, busy, auto, onUse, onIgnore }: {
+// What the AI said each time it was asked, in words.
+const WHY: Record<string, string> = {
+  'quote-not-found': 'it could not point to a line in your resume, profile or answers that says it',
+  'not-an-option': 'its answer was not one of the options on the form',
+  'years-without-dates': 'it gave a number of years without a line that carries dates or a duration',
+};
+function attemptText(a: NaukriAiAttempt, auto: AutoMeta) {
+  const said = a.answer ? `answered “${a.answer}”${a.confidence ? `, ${a.confidence}% sure` : ''}` : '';
+  switch (a.outcome) {
+    case 'used': return `${said} — used`;
+    case 'below-bar': return `${said} — ${auto.enabled ? `below your ${auto.minConfidence}% bar, so not used` : 'auto-answer is off, so it waited for you'}`;
+    case 'rejected': return `${said || 'answered'} — not used: ${WHY[a.why || ''] || a.why || 'it failed a check'}`;
+    case 'not-stated': return 'said your resume, profile and earlier answers don’t cover this';
+    default: return `could not answer: ${a.why || 'AI busy'}`;
+  }
+}
+const whenText = (iso: string) => new Date(iso).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+function AiHistory({ attempts, auto, onTake }: { attempts: NaukriAiAttempt[]; auto: AutoMeta; onTake: (v: string) => void }) {
+  const [open, setOpen] = useState(false);
+  if (!attempts.length) return null;
+  const shown = open ? attempts : attempts.slice(0, 1);
+  return (
+    <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text2)', display: 'grid', gap: 4 }}>
+      {shown.map((a, i) => (
+        <div key={i} style={{ display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' }}>
+          <i className="ti ti-sparkles" style={{ color: 'var(--text3)' }} />
+          <span>
+            <strong style={{ fontWeight: 600 }}>{whenText(a.at)}</strong> · {a.where === 'apply' ? 'during an apply' : 'on this page'} — AI {attemptText(a, auto)}
+            {a.quote ? <> · from “{a.quote}”</> : null}
+          </span>
+          {a.answer && a.outcome !== 'used' && (
+            <button className="btn btn-xs" type="button" onClick={() => onTake(a.answer!)} title="Put this answer in the box to check and use">Put in box</button>
+          )}
+        </div>
+      ))}
+      {attempts.length > 1 && (
+        <button type="button" onClick={() => setOpen(v => !v)}
+          style={{ background: 'none', border: 'none', padding: 0, color: 'var(--accent)', cursor: 'pointer', fontSize: 12, justifySelf: 'start' }}>
+          {open ? 'Show less' : `Earlier attempts (${attempts.length - 1})`}
+        </button>
+      )}
+    </div>
+  );
+}
+
+function QuestionCard({ group, busy, auto, onUse, onIgnore, onRetry, aiOn }: {
   group: NaukriQuestionGroup & { drafting?: boolean };
   busy: boolean;
   auto: AutoMeta;
   onUse: (answer: string, pattern?: string) => void;
   onIgnore: () => void;
+  onRetry: () => void;
+  aiOn: boolean;
 }) {
   const d = group.draft;
   const [answer, setAnswer] = useState(d && d.status === 'ready' ? d.answer : '');
@@ -114,12 +162,24 @@ function QuestionCard({ group, busy, auto, onUse, onIgnore }: {
             {auto.enabled && (d.confidence || 0) < auto.minConfidence && ` Below your ${auto.minConfidence}% bar, so it was not used automatically.`}
           </Hint>
         )}
-        {!group.drafting && d && d.status === 'unknown' && (
+        {!group.drafting && d && d.status === 'unknown' && !(group.attempts || []).length && (
           <Hint>Your resume, profile and earlier answers don’t say — type the answer yourself.</Hint>
         )}
-        {!group.drafting && d && d.status === 'error' && (
+        {!group.drafting && d && d.status === 'error' && !(group.attempts || []).length && (
           <Hint>AI was busy; type it yourself, or come back to this tab later for a draft.</Hint>
         )}
+        {(group.similar || []).length > 0 && (
+          <div style={{ marginTop: 8, display: 'grid', gap: 4 }}>
+            {(group.similar || []).map(s => (
+              <div key={s.pattern} style={{ fontSize: 12, color: 'var(--text2)', display: 'flex', gap: 6, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                <i className="ti ti-arrows-shuffle" style={{ color: 'var(--text3)' }} />
+                <span>You answered a question like this: “{s.pattern}” → <strong>{s.answer}</strong></span>
+                <button className="btn btn-xs" type="button" disabled={busy} onClick={() => set(s.answer)}>Use the same answer</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {!group.drafting && <AiHistory attempts={group.attempts || []} auto={auto} onTake={set} />}
       </div>
 
       {showRule && (
@@ -139,6 +199,12 @@ function QuestionCard({ group, busy, auto, onUse, onIgnore }: {
         <button className="btn btn-sm" type="button" disabled={busy} onClick={() => setShowRule(v => !v)}>
           {showRule ? 'Exact question only' : 'Match similar questions'}
         </button>
+        {aiOn && (
+          <button className="btn btn-sm" type="button" disabled={busy || !!group.drafting} onClick={onRetry}
+            title="Ask the AI again — useful after you change your resume, profile or answers">
+            <i className={`ti ${group.drafting ? 'ti-loader' : 'ti-refresh'}`} /> Ask AI again
+          </button>
+        )}
         <button className="btn btn-sm" type="button" disabled={busy} onClick={onIgnore}
           title="Don't answer this one; its jobs are dismissed">
           Ignore
@@ -200,7 +266,8 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
               autoChanged = true;
               continue;
             }
-            setGroups(gs => gs.map(g => (g.question === question ? { ...g, draft: r.draft, drafting: false } : g)));
+            setGroups(gs => gs.map(g => (g.question === question
+              ? { ...g, draft: r.draft, drafting: false, attempts: r.attempt ? [r.attempt, ...(g.attempts || [])].slice(0, 3) : g.attempts } : g)));
           } catch (e) {
             // No AI key: say so once and stop asking — every other question would fail the same way.
             if (isAiKeyRequired(e) && !noKey) { noKey = true; toast((e as Error).message, 'error'); }
@@ -231,6 +298,27 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
       await load(); onChanged();
     } catch (e: any) { toast(e?.message || 'Could not save', 'error'); }
     finally { setBusy(false); }
+  };
+
+  // One question, asked again regardless of the saved draft.
+  const retry = async (question: string) => {
+    setGroups(gs => gs.map(g => (g.question === question ? { ...g, drafting: true } : g)));
+    try {
+      const r = await draftNaukriAnswerApi(question);
+      if (r.autoUsed) {
+        toast(`AI was ${r.draft.confidence}% sure — answered automatically`
+          + (r.requeued ? `, ${r.requeued} job${r.requeued === 1 ? '' : 's'} back in Waiting.` : '.'), 'success');
+        setGroups(gs => gs.filter(g => g.question !== question));
+        onChanged(); load();
+        return;
+      }
+      setGroups(gs => gs.map(g => (g.question === question
+        ? { ...g, draft: r.draft, drafting: false, attempts: r.attempt ? [r.attempt, ...(g.attempts || [])].slice(0, 3) : g.attempts }
+        : g)));
+    } catch (e: any) {
+      toast(e?.message || 'AI could not answer just now', 'error');
+      setGroups(gs => gs.map(g => (g.question === question ? { ...g, drafting: false } : g)));
+    }
   };
 
   const ignore = async (question: string) => {
@@ -287,8 +375,8 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
         Answer each once — it becomes a rule, and every job that asked it goes back to Waiting.
       </Hint>
       {groups.map(g => (
-        <QuestionCard key={g.question} group={g} busy={busy} auto={meta.autoAnswer}
-          onUse={(a, p) => use(g.question, a, p)} onIgnore={() => ignore(g.question)} />
+        <QuestionCard key={g.question} group={g} busy={busy} auto={meta.autoAnswer} aiOn={meta.aiDrafts}
+          onUse={(a, p) => use(g.question, a, p)} onIgnore={() => ignore(g.question)} onRetry={() => retry(g.question)} />
       ))}
     </>
   );
