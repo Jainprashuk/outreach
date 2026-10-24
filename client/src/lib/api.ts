@@ -1592,6 +1592,10 @@ export const adminPlatformRunsApi = (q: { days?: number | 'all'; page?: number; 
     `/api/admin/platform-runs?${params.toString()}`,
   );
 };
+export const adminFailStalePlatformRunsApi = (userId?: string) =>
+  apiFetch<{ ok: true; failed: number; cutoff: string }>('/api/admin/platform-runs/fail-stale', {
+    method: 'POST', body: JSON.stringify(userId ? { userId } : {}),
+  });
 
 /** Creates the account and, unless `notify` is false, emails them to say so. */
 export const adminInviteApi = (email: string, opts?: { name?: string; isAdmin?: boolean; notify?: boolean }) =>

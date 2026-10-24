@@ -17,6 +17,7 @@ const { scoreJob } = require('../lib/naukriScore');
 const naukriDraft = require('../lib/naukriDraft');
 const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = require('../lib/naukriFilters');
 const { reportIssue } = require('../lib/issues');
+const { failStaleNaukriRuns: failStaleRuns } = require('../lib/staleNaukriRuns');
 const { notify } = require('../lib/notify');
 const { WORKER_OFFLINE_MS, workerBack } = require('../lib/workerWatch');
 const { inPortal } = require('../lib/portalPresence');
@@ -77,7 +78,7 @@ const ONLINE_MS = 90_000;
 const IDLE_POLL_SECONDS = 300;
 // A running run whose worker reported progress (or claimed it) recently.
 // Generous on purpose: the slowest single step, a job with live AI answers, is
-// about 3 minutes; failStaleRuns gives up only after STALE_RUN_MS.
+// about 3 minutes; failStaleRuns gives up only after 30 minutes without progress.
 const RUN_ALIVE_MS = 5 * 60_000;
 const runIsAlive = (run) => !!run && run.status === 'running'
   && Date.now() - new Date((run.progress && run.progress.updatedAt) || run.claimedAt || 0).getTime() < RUN_ALIVE_MS;
@@ -90,7 +91,6 @@ const isOnline = (w) => !!(w && w.lastSeenAt)
 // not from when it started, so a long run that is still working is never cut
 // off now that run size has no ceiling. Every job and every page posts
 // progress; the slowest single step (a job with live AI answers) is ~3 min.
-const STALE_RUN_MS = 30 * 60_000;
 // Naukri showed a captcha. Same doctrine as the LinkedIn checkpoint: stop for a
 // week, and do not let a worker restart shrug it off.
 const BLOCK_MS = 7 * 24 * 3600 * 1000;
@@ -251,38 +251,6 @@ async function nextPollFor(userId, platform, config, worker, fastSeconds, fast) 
   }
   return secs;
 }
-
-// A run left 'running' by a worker that was killed would block the queue
-// forever, since /claim only ever starts one at a time.
-const failStaleRuns = (userId) => {
-  const now = new Date();
-  return NaukriRun.updateMany(
-    {
-      userId, status: 'running', claimedAt: { $lt: new Date(Date.now() - STALE_RUN_MS) },
-      $or: [{ 'progress.updatedAt': null }, { 'progress.updatedAt': { $lt: new Date(Date.now() - STALE_RUN_MS) } }],
-      ...BASE_FILTER,
-    },
-    { $set: { status: 'failed', error: 'Worker stopped responding mid-run', finishedAt: now } }
-  ).then(r => reportStaleRuns(NaukriRun, 'naukri', userId, now, r));
-};
-
-// Reported only when a run was actually swept, so the common no-op call costs
-// nothing extra.
-const reportStaleRuns = async (Model, area, userId, since, result) => {
-  if (!result || !result.modifiedCount) return result;
-  const runs = await Model.find(
-    { ...(userId ? { userId } : {}), status: 'failed', error: 'Worker stopped responding mid-run', finishedAt: { $gte: since } },
-    { userId: 1, startedAt: 1, claimedAt: 1 },
-  ).lean().catch(() => []);
-  for (const r of runs) {
-    reportIssue({
-      userId: r.userId, source: 'job', area, kind: 'run_stalled',
-      message: 'Worker stopped responding mid-run — the run was marked failed',
-      meta: { runId: String(r._id), claimedAt: r.claimedAt || null },
-    });
-  }
-  return result;
-};
 
 const blockedUntilOf = (worker) => {
   const until = worker && worker.blockedUntil ? new Date(worker.blockedUntil) : null;

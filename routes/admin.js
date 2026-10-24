@@ -40,6 +40,8 @@
  * FOURTH EXCEPTION (2026-10-25, owner's choice): /platform-runs lists recent
  * job-platform run metadata across accounts (account email, enum status/type,
  * dates, and numeric results only). It never returns job text or raw errors.
+ * Its fail-stale action only changes status for runs with no progress for 30
+ * minutes and returns the count changed.
  */
 const express = require('express');
 const mongoose = require('mongoose');
@@ -79,6 +81,7 @@ const systemMail = require('../lib/systemMail');
 const { buildReportStats } = require('../lib/reportStats');
 const { discoverAnalytics } = require('../lib/prospectAnalytics');
 const { naukriAnalytics } = require('../lib/naukriAnalytics');
+const { failStaleNaukriRuns } = require('../lib/staleNaukriRuns');
 const { istMidnight, resolvePeriod, labelFor } = require('../lib/reportPeriod');
 const { pauseAllForUser, resumeAllForUser, adminPausedCounts } = require('../lib/userSending');
 const unsubscribe = require('../lib/lifecycle/unsubscribe');
@@ -1259,6 +1262,24 @@ router.get('/platform-runs', async (req, res) => {
       meta: { days: days || 'all', page, status: status || 'all', kind: kind || 'all', platform: platform || 'all', accountId: userId || 'all' },
     }).catch(() => {});
     res.json({ runs, total, page, limit, days, pages: Math.ceil(total / limit) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Admin-triggered cleanup for runs whose worker stopped reporting progress.
+// Uses the same 30-minute cutoff and reporting behavior as the user overview.
+router.post('/platform-runs/fail-stale', async (req, res) => {
+  try {
+    const userId = String((req.body || {}).userId || '');
+    if (userId && !mongoose.isValidObjectId(userId)) return res.status(400).json({ error: 'Invalid account' });
+    const result = await failStaleNaukriRuns(userId ? new mongoose.Types.ObjectId(userId) : null);
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'fail-stale-platform-runs',
+      message: `Marked ${result.failed} stale job-platform run(s) failed`,
+      meta: { failed: result.failed, accountId: userId || 'all', cutoff: result.cutoff },
+    }).catch(() => {});
+    res.json({ ok: true, failed: result.failed, cutoff: result.cutoff });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

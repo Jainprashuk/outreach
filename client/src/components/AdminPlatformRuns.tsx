@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
-import { adminPlatformRunsApi, type AdminPlatformRun, type AdminUserRow } from '../lib/api';
+import { useToast } from '../context/ToastContext';
+import { adminFailStalePlatformRunsApi, adminPlatformRunsApi, type AdminPlatformRun, type AdminUserRow } from '../lib/api';
 import { RefreshBar, Refreshing } from './RefreshBar';
 
 const dateTime = (value: string | null) => value
@@ -22,6 +23,7 @@ function resultsText(run: AdminPlatformRun) {
 }
 
 export default function AdminPlatformRuns({ accounts }: { accounts: AdminUserRow[] }) {
+  const toast = useToast();
   const [days, setDays] = useState<number | 'all'>(30);
   const [userId, setUserId] = useState('');
   const [status, setStatus] = useState('');
@@ -30,6 +32,7 @@ export default function AdminPlatformRuns({ accounts }: { accounts: AdminUserRow
   const [page, setPage] = useState(1);
   const [data, setData] = useState<Awaited<ReturnType<typeof adminPlatformRunsApi>> | null>(null);
   const [loading, setLoading] = useState(false);
+  const [acting, setActing] = useState(false);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -44,6 +47,21 @@ export default function AdminPlatformRuns({ accounts }: { accounts: AdminUserRow
 
   useEffect(() => { load(); }, [load]);
   const change = (fn: () => void) => { fn(); setPage(1); };
+  const markStaleFailed = async () => {
+    const account = accounts.find(a => a.id === userId);
+    const scope = userId ? `for ${account?.email || 'the selected account'}` : 'across all accounts';
+    if (!window.confirm(`Mark job-platform runs ${scope} as failed if they have had no progress for at least 30 minutes? This changes run status only; it does not retry applications or undo results already recorded.`)) return;
+    setActing(true);
+    try {
+      const result = await adminFailStalePlatformRunsApi(userId || undefined);
+      toast(result.failed
+        ? `Marked ${result.failed} stale run(s) as failed.`
+        : 'No stale runs met the 30-minute cutoff.', 'success');
+      await load();
+    } catch (e: any) {
+      toast(e?.message || 'Could not clean up stale runs', 'error');
+    } finally { setActing(false); }
+  };
 
   return (
     <>
@@ -65,7 +83,10 @@ export default function AdminPlatformRuns({ accounts }: { accounts: AdminUserRow
           <option value="">All statuses</option><option value="queued">Queued</option><option value="running">Running</option>
           <option value="done">Done</option><option value="failed">Failed</option><option value="blocked">Blocked</option><option value="cancelled">Cancelled</option>
         </select>
-        <button className="btn btn-sm" type="button" onClick={load} disabled={loading} style={{ marginLeft: 'auto' }}>
+        <button className="btn btn-sm" type="button" onClick={markStaleFailed} disabled={loading || acting} title="Mark runs with no progress for 30 minutes as failed" style={{ marginLeft: 'auto' }}>
+          <i className={`ti ${acting ? 'ti-loader-2' : 'ti-alert-triangle'}`} /> Mark stale failed
+        </button>
+        <button className="btn btn-sm" type="button" onClick={load} disabled={loading || acting}>
           <i className={`ti ${loading ? 'ti-loader-2' : 'ti-refresh'}`} /> Refresh
         </button>
       </div>
