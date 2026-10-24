@@ -1572,6 +1572,27 @@ export interface AdminOverview {
 export const adminOverviewApi = (days = 30) =>
   apiFetch<AdminOverview>(`/api/admin/users?days=${days}`);
 
+export interface AdminPlatformRun {
+  account: string;
+  platform: 'naukri' | 'instahyre' | 'hirist';
+  platformLabel: string;
+  kind: 'refresh' | 'harvest' | 'apply' | 'probe' | 'track';
+  status: 'queued' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled';
+  trigger: 'manual' | 'scheduled';
+  dryRun: boolean;
+  createdAt: string | null;
+  claimedAt: string | null;
+  finishedAt: string | null;
+  results: { found: number; new: number; updated: number; applied: number; skipped: number; failed: number; rehearsed: number; tracked: number };
+}
+export const adminPlatformRunsApi = (q: { days?: number | 'all'; page?: number; status?: string; kind?: string; platform?: string; userId?: string } = {}) => {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(q)) if (value !== undefined && value !== '') params.set(key, String(value));
+  return apiFetch<{ runs: AdminPlatformRun[]; total: number; page: number; limit: number; days: number; pages: number }>(
+    `/api/admin/platform-runs?${params.toString()}`,
+  );
+};
+
 /** Creates the account and, unless `notify` is false, emails them to say so. */
 export const adminInviteApi = (email: string, opts?: { name?: string; isAdmin?: boolean; notify?: boolean }) =>
   apiFetch<{ ok: true; id: string; email: string; status: string; emailed: boolean; warning?: string }>(

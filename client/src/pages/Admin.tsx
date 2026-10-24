@@ -9,6 +9,7 @@ import AdminEmailSchedule from '../components/AdminEmailSchedule';
 import AdminIssues from '../components/AdminIssues';
 import AdminSending from '../components/AdminSending';
 import AdminAiLogs from '../components/AdminAiLogs';
+import AdminPlatformRuns from '../components/AdminPlatformRuns';
 import UserEmailsModal from '../components/UserEmailsModal';
 import AdminUserDrawer from '../components/AdminUserDrawer';
 import InfoTip from '../components/InfoTip';
@@ -67,10 +68,10 @@ export default function Admin() {
   };
   // The lifecycle email switches, schedule and history live on their own tab,
   // and so do the Issues log and the Gemini logs.
-  type Tab = 'overview' | 'sending' | 'emails' | 'issues' | 'ai';
+  type Tab = 'overview' | 'sending' | 'emails' | 'issues' | 'ai' | 'platform-runs';
   const [tab, setTab] = useState<Tab>(() => {
     const h = window.location.hash.slice(1);
-    return h === 'sending' || h === 'emails' || h === 'issues' || h === 'ai' ? h : 'overview';
+    return h === 'sending' || h === 'emails' || h === 'issues' || h === 'ai' || h === 'platform-runs' ? h : 'overview';
   });
   const pickTab = (t: Tab) => {
     setTab(t);
@@ -190,6 +191,8 @@ export default function Admin() {
         ? 'Everything that failed for anyone, with the raw error — including recipient addresses.'
         : tab === 'ai'
           ? 'Every AI request for anyone, in full — the prompt (reply text, conversations, profiles) and the raw answer.'
+          : tab === 'platform-runs'
+            ? 'Recent job-platform runs across accounts. Status and numeric results only.'
           : tab === 'sending'
           ? 'How email is moving across every account: live batches, what is scheduled, what ran, and whether the scheduler is firing.'
           : "Every account, in aggregate. No one else's contacts or emails are shown here."}
@@ -209,7 +212,7 @@ export default function Admin() {
       <div className="section" style={{ flex: 1 }}>
         <div className="section-head" style={{ marginBottom: 14 }}>
           <div className="nav-tabs" role="tablist">
-            {([['overview', 'Overview'], ['sending', 'Sending'], ['emails', 'Lifecycle emails'], ['issues', 'Issues'], ['ai', 'Gemini logs']] as const).map(([key, label]) => (
+            {([['overview', 'Overview'], ['sending', 'Sending'], ['platform-runs', 'Job runs'], ['emails', 'Lifecycle emails'], ['issues', 'Issues'], ['ai', 'Gemini logs']] as const).map(([key, label]) => (
               <button type="button" role="tab" aria-selected={tab === key} key={key}
                 className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => pickTab(key)}>
                 {label}
@@ -221,6 +224,7 @@ export default function Admin() {
         </div>
 
         {tab === 'sending' && <AdminSending onAlertCount={setSendingCritical} />}
+        {tab === 'platform-runs' && <AdminPlatformRuns accounts={data?.users || []} />}
         {tab === 'issues' && <AdminIssues onOpenCount={setOpenIssues} />}
         {tab === 'ai' && <AdminAiLogs />}
 

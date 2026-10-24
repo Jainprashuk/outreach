@@ -104,6 +104,7 @@ const naukriRunSchema = new mongoose.Schema({
 naukriRunSchema.index({ userId: 1, status: 1, createdAt: 1 });
 naukriRunSchema.index({ userId: 1, createdAt: -1 });
 naukriRunSchema.index({ userId: 1, platform: 1, status: 1 });
+naukriRunSchema.index({ createdAt: -1 });
 
 naukriRunSchema.set('toJSON', {
   transform: (doc, ret) => {

@@ -12,8 +12,7 @@
  *      email body, no reply text, no token, no hash. The pipelines below $group
  *      and count; none of them $push a document or $first a text field.
  *
- * Deliberately aggregates-only: there is no drill-in to another account's rows
- * and no impersonation. Support questions get answered with counts.
+ * Deliberately counts-only: there is no content drill-in or impersonation.
  *
  * ONE EXCEPTION, BY THE OWNER'S CHOICE (2026-10-08): the /issues endpoints at
  * the bottom of this file return raw error text — failed recipients, SMTP
@@ -37,6 +36,10 @@
  * into the cloud VM that runs that account's job-platform workers
  * (deploy/cloud-worker/cw). Only the hash is stored; the token is never readable
  * again, from here or anywhere.
+ *
+ * FOURTH EXCEPTION (2026-10-25, owner's choice): /platform-runs lists recent
+ * job-platform run metadata across accounts (account email, enum status/type,
+ * dates, and numeric results only). It never returns job text or raw errors.
  */
 const express = require('express');
 const mongoose = require('mongoose');
@@ -50,6 +53,7 @@ const Contact = require('../models/Contact');
 const Campaign = require('../models/Campaign');
 const Lead = require('../models/Lead');
 const ScrapeRun = require('../models/ScrapeRun');
+const NaukriRun = require('../models/NaukriRun');
 const SendJob = require('../models/SendJob');
 const Interview = require('../models/Interview');
 const ActivityLog = require('../models/ActivityLog');
@@ -78,6 +82,7 @@ const { naukriAnalytics } = require('../lib/naukriAnalytics');
 const { istMidnight, resolvePeriod, labelFor } = require('../lib/reportPeriod');
 const { pauseAllForUser, resumeAllForUser, adminPausedCounts } = require('../lib/userSending');
 const unsubscribe = require('../lib/lifecycle/unsubscribe');
+const { platformOfDoc, labelOf: platformLabel } = require('../lib/platforms');
 
 const router = express.Router();
 
@@ -1178,6 +1183,82 @@ router.get('/users/:id/analytics', async (req, res) => {
         lastMailboxCheckAt: (settings && settings.lastMailboxCheckAt) || null,
       },
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Fleet-wide job-platform run history. Deliberately returns only account email,
+// enum fields, timestamps, and numeric progress/results. In particular, never
+// return run.error, progress.label, or per-job results (which contain job text).
+router.get('/platform-runs', async (req, res) => {
+  try {
+    const requestedDays = req.query.days === 'all' ? 0 : Number.parseInt(req.query.days, 10);
+    const days = requestedDays === 0 ? 0 : Math.min(90, Math.max(1, requestedDays || 30));
+    const page = Math.max(1, Number.parseInt(req.query.page, 10) || 1);
+    const limit = Math.min(100, Math.max(10, Number.parseInt(req.query.limit, 10) || 50));
+    const statuses = new Set(['queued', 'running', 'done', 'failed', 'blocked', 'cancelled']);
+    const kinds = new Set(['refresh', 'harvest', 'apply', 'probe', 'track']);
+    const platforms = new Set(['naukri', 'instahyre', 'hirist']);
+    const status = String(req.query.status || '');
+    const kind = String(req.query.kind || '');
+    const platform = String(req.query.platform || '');
+    const userId = String(req.query.userId || '');
+    if (status && !statuses.has(status)) return res.status(400).json({ error: 'Invalid run status' });
+    if (kind && !kinds.has(kind)) return res.status(400).json({ error: 'Invalid run type' });
+    if (platform && !platforms.has(platform)) return res.status(400).json({ error: 'Invalid platform' });
+    if (userId && !mongoose.isValidObjectId(userId)) return res.status(400).json({ error: 'Invalid account' });
+
+    const filter = { deleted: { $ne: true } };
+    if (days) filter.createdAt = { $gte: new Date(Date.now() - days * 86400000) };
+    if (status) filter.status = status;
+    if (kind) filter.kind = kind;
+    if (userId) filter.userId = new mongoose.Types.ObjectId(userId);
+    if (platform) {
+      if (platform === 'naukri') filter.platform = { $in: ['naukri', null] };
+      else filter.platform = platform;
+    }
+    const [rows, total] = await Promise.all([
+      NaukriRun.find(filter, {
+        userId: 1, platform: 1, kind: 1, status: 1, trigger: 1, dryRun: 1,
+        createdAt: 1, claimedAt: 1, finishedAt: 1, progress: 1, stats: 1,
+      }).sort({ createdAt: -1, _id: -1 }).skip((page - 1) * limit).limit(limit).lean(),
+      NaukriRun.countDocuments(filter),
+    ]);
+    const userIds = [...new Set(rows.map(r => r.userId && String(r.userId)).filter(Boolean))];
+    const users = userIds.length ? await User.find({ _id: { $in: userIds } }, { email: 1 }).lean() : [];
+    const emails = new Map(users.map(u => [String(u._id), u.email]));
+    const count = (v) => Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : 0;
+    const runs = rows.map(r => {
+      const progress = r.progress || {}, stats = r.stats || {};
+      const value = (key) => Math.max(count(progress[key]), count(stats[key]));
+      const rawPlatform = platformOfDoc(r);
+      const safePlatform = platforms.has(rawPlatform) ? rawPlatform : 'naukri';
+      return {
+        account: r.userId ? (emails.get(String(r.userId)) || '(deleted account)') : '(no account)',
+        platform: safePlatform,
+        platformLabel: platformLabel(safePlatform),
+        kind: kinds.has(r.kind) ? r.kind : 'probe',
+        status: statuses.has(r.status) ? r.status : 'failed',
+        trigger: r.trigger === 'scheduled' ? 'scheduled' : 'manual',
+        dryRun: r.dryRun === true,
+        createdAt: r.createdAt || null,
+        claimedAt: r.claimedAt || null,
+        finishedAt: r.finishedAt || null,
+        results: {
+          found: value('found'), new: value('new'), updated: count(stats.updated),
+          applied: value('applied'), skipped: value('skipped'), failed: value('failed'),
+          rehearsed: value('rehearsed'), tracked: value('tracked'),
+        },
+      };
+    });
+
+    logEvent({
+      userId: req.userId, category: 'admin', action: 'read-platform-run-history',
+      message: 'Viewed fleet job-platform run history',
+      meta: { days: days || 'all', page, status: status || 'all', kind: kind || 'all', platform: platform || 'all', accountId: userId || 'all' },
+    }).catch(() => {});
+    res.json({ runs, total, page, limit, days, pages: Math.ceil(total / limit) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
