@@ -2,7 +2,8 @@
 # cw — run job-platform workers in the cloud, one isolated container per user.
 #
 #   sudo cw host-setup                 one time: Docker, cloudflared + tunnel, image
-#   sudo cw add <user> <email>         new user: container, screen link, access rule
+#   sudo cw add <user> <email> [--allow-admin]
+#                                      new user; admin access is opt-in
 #   sudo cw rm <user> [--purge]        remove a user (--purge also deletes their saved logins)
 #   sudo cw token <user>               replace a user's worker token
 #   cw list | cw stats                 who runs here, and what it costs (sudo is added for you)
@@ -151,7 +152,7 @@ cmd_host_setup() {
     read -r -s -p "Cloudflare API token (input hidden): " tok; echo
     read -r -p "Cloudflare Account ID: " acct
     read -r -p "Domain [jainprashuk.in]: " zone; zone="${zone:-jainprashuk.in}"
-    read -r -p "Your (admin) email, also allowed on every screen for setup help: " admin
+    read -r -p "Your (admin) email, used only when cw add uses --allow-admin: " admin
     read -r -p "Portal URL [https://outreach-gray.vercel.app]: " url; url="${url:-https://outreach-gray.vercel.app}"
     tok="$(clean_secret "$tok")"; acct="$(clean_secret "$acct")"
     check_secret "Cloudflare API token" "$tok"
@@ -206,9 +207,14 @@ cmd_host_setup() {
 
 cmd_add() {
   need_root add; need_setup; load_cf
-  local u="${1:-}" email="${2:-}" private=0
-  [ -n "$u" ] && [ -n "$email" ] || die "Usage: sudo cw add <user> <email> [--private]"
-  [ "${3:-}" = "--private" ] && private=1
+  local u="${1:-}" email="${2:-}" allow_admin=0
+  [ -n "$u" ] && [ -n "$email" ] || die "Usage: sudo cw add <user> <email> [--allow-admin]"
+  case "${3:-}" in
+    "") ;;
+    --allow-admin) allow_admin=1 ;;
+    --private) ;; # Backward-compatible alias for the default owner-only policy.
+    *) die "Unknown option: $3 (supported: --allow-admin)" ;;
+  esac
   valid_user "$u"
   [[ "$email" =~ ^[^@[:space:]]+@[^@[:space:]]+\.[^@[:space:]]+$ ]] || die "That does not look like an email address."
   [ -z "$(user_json "$u")" ] || die "User '$u' already exists (cw list)."
@@ -236,11 +242,12 @@ cmd_add() {
   if [ -n "$dns_id" ]; then cf PUT "/zones/$CF_ZONE_ID/dns_records/$dns_id" "$rec" >/dev/null
   else dns_id="$(cf POST "/zones/$CF_ZONE_ID/dns_records" "$rec" | jq -r '.id')"; fi
 
-  say "Access rule: only $email$([ $private = 0 ] && echo " and $ADMIN_EMAIL")"
-  local app_id include
+  local admin_rule="" app_id include
+  if [ "$allow_admin" = 1 ] && [ "$ADMIN_EMAIL" != "$email" ]; then admin_rule=" and $ADMIN_EMAIL"; fi
+  say "Access rule: only $email$admin_rule"
   app_id="$(cf POST "/accounts/$CF_ACCOUNT_ID/access/apps" \
     "{\"name\":\"Cloud browser — $u\",\"domain\":\"$host\",\"type\":\"self_hosted\",\"session_duration\":\"720h\",\"app_launcher_visible\":false}" | jq -r '.id')"
-  if [ $private = 0 ] && [ "$ADMIN_EMAIL" != "$email" ]; then
+  if [ $allow_admin = 1 ] && [ "$ADMIN_EMAIL" != "$email" ]; then
     include="[{\"email\":{\"email\":\"$email\"}},{\"email\":{\"email\":\"$ADMIN_EMAIL\"}}]"
   else
     include="[{\"email\":{\"email\":\"$email\"}}]"

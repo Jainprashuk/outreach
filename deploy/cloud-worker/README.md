@@ -45,7 +45,7 @@ It asks for:
 - the Cloudflare API token: Account › Cloudflare Tunnel: Edit, Account › Access: Apps and Policies: Edit, Zone › DNS: Edit;
 - the Account ID;
 - the domain;
-- your email (allowed on every screen, for setup help);
+- your admin email (added to a screen's policy only when `cw add` uses `--allow-admin`);
 - the portal URL.
 
 Answers are kept in `/srv/cw/cloudflare.env` (mode 600). It then installs Docker
@@ -62,8 +62,8 @@ bound to `127.0.0.1`.
 3. **Them:** Job Platforms → **Cloud browser** → email code → log in to the three sites → close the tab.
 
 `cw add` creates the container, the tunnel route, the DNS record (the only
-proxied one) and an Access app that lets in only their email (and yours, unless
-you pass `--private`).
+proxied one) and an Access app that lets in only their email. Admin access is
+opt-in: pass `--allow-admin` to add the configured admin email to that screen.
 
 ## Everyday
 

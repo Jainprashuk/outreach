@@ -94,7 +94,10 @@ at 12 GB total.
 6. **Check:** `ssh cw 'cw list; cw stats'` — their container is `running`; within a
    minute the portal shows their workers online and logged in.
 
-Add `--private` to `cw add` to leave your own email off their access rule.
+By default, only that user's email is allowed on their screen. To grant your
+admin email access to a specific user's screen, add `--allow-admin` to that
+user's `cw add` command. The older `--private` option remains accepted but is
+no longer needed.
 
 ### Adding yourself again (or anyone who also runs LinkedIn on a Mac)
 
@@ -197,6 +200,8 @@ ssh -t cw 'sudo nano /srv/cw/cloudflare.env'
 ```
 
 It is only used by `cw add` / `cw rm` / `cw host-setup`; running containers don't need it.
+`ADMIN_EMAIL` is included in a screen's Access policy only when `cw add` is run
+with `--allow-admin`.
 Permissions: Account › Cloudflare Tunnel: Edit, Account › Access: Apps and Policies: Edit,
 Zone › DNS: Edit (jainprashuk.in).
 
@@ -204,7 +209,7 @@ Zone › DNS: Edit (jainprashuk.in).
 stay on — it is how invited users sign in.
 
 **Who can open a screen:** Zero Trust → Access controls → Applications →
-"Cloud browser — <user>" → Policies (their email, and yours unless `--private`).
+"Cloud browser — <user>" → Policies (their email; yours only if `--allow-admin` was used).
 Sessions last 30 days.
 
 **DNS:** each user has one proxied CNAME `screen-<user>` → the tunnel. Everything
