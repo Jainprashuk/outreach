@@ -8,7 +8,7 @@ worker stays on the Mac (`worker/README.md` explains why).
 VM (Oracle A1.Flex, Ubuntu 24.04 arm64)
 ├─ cloudflared ─ tunnel "outreach-cw" ── the only way in from the internet
 │    screen-<user>.<domain> → 127.0.0.1:600N   (Cloudflare Access: that user's email)
-└─ container cw-<user>      (2.5 GB RAM cap, 1 CPU, restarts on its own)
+└─ container cw-<user>      (3 GB RAM cap, 1 CPU, restarts on its own)
      Xvfb → openbox → Google Chrome (CDP 9222, inside the container only)
      x11vnc → noVNC :6080 → host 127.0.0.1:600N
      worker/platform-worker.js × naukri instahyre hirist
@@ -79,9 +79,10 @@ opt-in: pass `--allow-admin` to add the configured admin email to that screen.
 
 ## Capacity
 
-Chrome plus three workers uses about 1.5–2.5 GB, so the free 12 GB VM holds up to
-four users. Check `cw stats` before adding another. Runs for one user take turns
-on their Chrome (`worker/chrome-lock.js`); different users run side by side.
+Chrome plus three workers may use up to 3 GB during a busy run. On the 12 GB VM,
+plan for up to three concurrent users. Check `cw stats` before adding another.
+Runs for one user take turns on their Chrome (`worker/chrome-lock.js`); different
+users run side by side.
 
 ## Security notes
 

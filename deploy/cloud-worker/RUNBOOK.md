@@ -73,8 +73,8 @@ Email code login. Use it to log in to a site again when the portal says
 ## Adding a user
 
 **Before:** they have a portal account (Admin → Invite if not), and `cw stats`
-shows room — each user can take up to 2.5 GB; the VM has about 10 GB free for users
-at 12 GB total.
+shows room — each user can take up to 3 GB; plan for up to three concurrent users
+on the 12 GB VM.
 
 1. **Tell them** their job-site logins will live on this server and that the admin
    can technically access it.
@@ -306,7 +306,7 @@ Everything else (runs, jobs, settings) is in the portal's database, not on the V
 
 | Service | Free limit | Usage / headroom |
 |---|---|---|
-| Oracle A1 | 4 OCPU / 24 GB shown (kept at 2 / 12) | ~2.5 GB per user → about 4 users now, ~8 at 4 / 24 |
+| Oracle A1 | 4 OCPU / 24 GB shown (kept at 2 / 12) | ~3 GB per user → about 3 users now, ~8 at 4 / 24 |
 | Oracle disk | 200 GB total | 45 GB used of it; ~1 GB per user |
 | Vercel Hobby | 1M requests, 4 h CPU / month | workers check in fast only while needed (≈50–60k requests per cloud user per month); the Mac LinkedIn worker still polls every 20 s (~130k) |
 | MongoDB Atlas free | 512 MB | worker check-ins are no longer logged |

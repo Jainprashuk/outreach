@@ -439,7 +439,12 @@ async function executeRun(runDoc, config, openSession = null) {
     // file's race, not the thing that hung, and printing it would send you
     // looking in the wrong place.
     const detail = timedOut || err.name === 'PortalUnreachable' ? err.message : String(err.stack || err.message);
-    try { await finish('failed', { error: detail.slice(0, 1500) }); } catch (_) {}
+    try {
+      await finish('failed', {
+        error: detail.slice(0, 1500),
+        ...(err.stats && typeof err.stats === 'object' ? { stats: err.stats } : {}),
+      });
+    } catch (_) {}
     return {};
   } finally {
     clearTimeout(deadlineTimer);

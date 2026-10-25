@@ -425,15 +425,18 @@ function makeDriver(meta) {
         : `Real apply on ${meta.label} is not switched on (lib/platforms.js capabilities.apply). Nothing was sent.`);
     }
     const stats = { applied: 0, skipped: 0, failed: 0, rehearsed: 0 };
-    const page = await newPage(session);
+    let page = await newPage(session);
     // "Apply to these similar jobs too" never leaves this browser tab.
     const blocks = (meta.applyFlow.blockRequests || []);
-    if (blocks.length) await page.route((url) => blocks.some(rx => rx.test(String(url))), (route) => route.abort()).catch(() => {});
+    const guardBulkApply = async () => {
+      if (blocks.length) await page.route((url) => blocks.some(rx => rx.test(String(url))), (route) => route.abort()).catch(() => {});
+    };
+    await guardBulkApply();
     try {
       for (let i = 0; i < jobs.length; i++) {
         const job = jobs[i];
         onProgress({ phase: dryRun ? 'rehearsing' : 'applying', label: `${job.title} · ${job.company}`, page: i + 1, pagesTotal: jobs.length, ...stats });
-        let result;
+        let result, pageCrashed = false;
         const state = { clicked: false };
         try {
           result = await Promise.race([
@@ -443,6 +446,7 @@ function makeDriver(meta) {
         } catch (err) {
           if (err && (err.name === 'Checkpoint' || err.fatal)) throw err;
           const why = String(err && err.message || err).slice(0, 200);
+          pageCrashed = /page crashed|target page, context or browser has been closed|browser has been closed/i.test(why);
           result = dryRun
             ? { outcome: 'dry-run', reason: `would have failed: ${why}` }
             // After the click we cannot know whether it went through, so it is
@@ -454,6 +458,19 @@ function makeDriver(meta) {
         await onResult({ jobId: job.id, ...result });
         if (dryRun) stats.rehearsed++;
         else stats[result.outcome === 'applied' ? 'applied' : result.outcome === 'skipped' ? 'skipped' : 'failed']++;
+        if (pageCrashed) {
+          const err = new Error(`${meta.label} browser page crashed; stopped this batch after recording the current job. Remaining jobs were not attempted.`);
+          err.fatal = true;
+          err.stats = { ...stats };
+          throw err;
+        }
+        // A fresh renderer per listing limits memory retained across long apply
+        // batches. Session cookies remain in the shared browser context.
+        await page.close().catch(() => {});
+        if (i + 1 < jobs.length) {
+          page = await newPage(session);
+          await guardBulkApply();
+        }
         const ap = config.apply || {};
         await jitter(Number(ap.delayMinMs) || 2000, Number(ap.delayMaxMs) || 5000);
       }
