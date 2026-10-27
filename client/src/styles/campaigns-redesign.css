@@ -123,3 +123,8 @@
   .cmpx-camp { padding: 14px; }
   .cmpx-calc { position: static; }
 }
+
+/* The shared .stat-grid carries its own page padding (it was built for use outside
+   .section). Here it sits inside the padded page, so it double-padded and the cards
+   were inset against the timeline card below. */
+.stat-grid.cmp-stats-5, .stat-grid.cmp-detail-stats { padding: 0; margin-bottom: 16px; }
