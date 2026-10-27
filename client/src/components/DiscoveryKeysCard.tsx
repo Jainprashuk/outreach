@@ -61,26 +61,27 @@ export default function DiscoveryKeysCard() {
             <div>CREDENTIAL_KEY isn’t set on the server, so keys can’t be stored safely yet.</div>
           </div>
         )}
+        <div className="sr-keylist">
         {PROVIDERS.map(p => {
           const has = !!cfg?.keys[p.key];
           const used = p.usage && cfg ? cfg.usage[p.usage] : null;
           const cap = cfg?.caps[p.key] ?? null;
           return (
-            <div className="form-group" style={{ marginBottom: 14 }} key={p.key}>
-              <label className="form-label">
-                {p.name}
+            <div className="form-group sr-keyrow" key={p.key}>
+              <label className="form-label sr-keyhead">
+                <span className="sr-keyname">{p.name}</span>
                 {has
-                  ? <span className="badge badge-sent" style={{ marginLeft: 8 }}><i className="ti ti-lock" /> stored</span>
-                  : <span className="badge badge-pending" style={{ marginLeft: 8 }}>not set</span>}
+                  ? <span className="sr-ml badge badge-sent"><i className="ti ti-lock" /> stored</span>
+                  : <span className="sr-ml badge badge-pending">not set</span>}
                 {used !== null && cap !== null && has && (
-                  <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--text3)', fontSize: 11 }}>{used} of {cap} used this month</span>
+                  <span className="sr-ml sr-tag">{used} of {cap} used this month</span>
                 )}
               </label>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>
-                {p.what} <a href={p.url} target="_blank" rel="noreferrer" style={{ color: 'var(--blue)' }}>Get a free key</a>
+              <div className="sr-keynote">
+                {p.what} <a href={p.url} target="_blank" rel="noreferrer" className="sr-link">Get a free key</a>
               </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <input type="password" autoComplete="off" style={{ flex: 1, minWidth: 200 }}
+              <div className="sr-keyinput">
+                <input type="password" autoComplete="off"
                   value={values[p.key] || ''} onChange={e => setValues(prev => ({ ...prev, [p.key]: e.target.value }))}
                   placeholder={has ? 'Enter a new one to replace it' : 'Paste the key'}
                   disabled={!cfg?.canStoreKeys}
@@ -93,7 +94,8 @@ export default function DiscoveryKeysCard() {
             </div>
           );
         })}
-        <div className="info-box" style={{ marginBottom: 0 }}>
+        </div>
+        <div className="info-box sr-note">
           <i className="ti ti-info-circle" style={{ fontSize: 15, flexShrink: 0 }} />
           <div>
             Keys are stored <strong>encrypted</strong> and only used for your own searches. Without any key the

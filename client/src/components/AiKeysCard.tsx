@@ -32,14 +32,14 @@ const day = (iso: string) => new Date(iso).toLocaleDateString('en-IN', { weekday
 function StatusPill({ access, p }: { access: AiAccess; p: AiProvider }) {
   if (!access.has[p]) {
     if (access.ownerFallback || !access.enforce || access.inGrace) {
-      return <span className="badge badge-pending" style={{ marginLeft: 8 }}>Using admin’s key</span>;
+      return <span className="sr-ml badge badge-pending">Using admin’s key</span>;
     }
-    return <span className="badge badge-pending" style={{ marginLeft: 8 }}>Not set</span>;
+    return <span className="sr-ml badge badge-pending">Not set</span>;
   }
   const st = access.status[p];
-  if (st?.state === 'invalid') return <span className="badge badge-rejected" style={{ marginLeft: 8 }} title={st.error || ''}>Rejected</span>;
-  if (st?.state === 'quota') return <span className="badge badge-pending" style={{ marginLeft: 8 }}>Daily limit reached</span>;
-  return <span className="badge badge-sent" style={{ marginLeft: 8 }}><i className="ti ti-lock" /> Working</span>;
+  if (st?.state === 'invalid') return <span className="sr-ml badge badge-rejected" title={st.error || ''}>Rejected</span>;
+  if (st?.state === 'quota') return <span className="sr-ml badge badge-pending">Daily limit reached</span>;
+  return <span className="sr-ml badge badge-sent"><i className="ti ti-lock" /> Working</span>;
 }
 
 export default function AiKeysCard() {
@@ -103,7 +103,7 @@ export default function AiKeysCard() {
         </div>
       </div>
       <div className="s-body">
-        <div style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14, lineHeight: 1.55 }}>
+        <div className="sr-intro">
           Outreach uses AI to sort your replies, draft answers, and find people. It runs on your own
           free <strong>Groq</strong> key — about 2 minutes to get, no card. A Gemini key is an optional
           backup for when Groq is busy.
@@ -122,33 +122,35 @@ export default function AiKeysCard() {
           </div>
         )}
 
-        {PROVIDERS.map(p => {
+        <div className="sr-keylist">
+        {PROVIDERS.map((p, idx) => {
           const has = !!access?.has[p.key];
           // A backup on its own would leave the account on a key too slow to carry it.
           const locked = p.key !== 'groq' && !hasGroq && !has;
           return (
-            <div className="form-group" style={{ marginBottom: 14 }} key={p.key}>
-              <label className="form-label">
-                {p.name}
-                <span style={{ marginLeft: 8, fontWeight: 400, fontSize: 11, color: p.key === 'groq' ? 'var(--accent)' : 'var(--text3)' }}>{p.tag}</span>
+            <div className="form-group sr-keyrow" key={p.key}>
+              <label className="form-label sr-keyhead">
+                <span className="sr-num" aria-hidden="true">{idx + 1}</span>
+                <span className="sr-keyname">{p.name}</span>
+                <span className={'sr-tag' + (p.key === 'groq' ? ' req' : '')}>{p.tag}</span>
                 {access && <StatusPill access={access} p={p.key} />}
               </label>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>
+              <div className="sr-keynote">
                 {p.note && <>{p.note} </>}
-                <a href={p.url} target="_blank" rel="noreferrer" style={{ color: 'var(--blue)' }}>Get a free key <i className="ti ti-external-link" /></a>
+                <a href={p.url} target="_blank" rel="noreferrer" className="sr-link">Get a free key <i className="ti ti-external-link" /></a>
                 {' · '}
-                <button type="button" className="btn-link" style={{ background: 'none', border: 0, padding: 0, color: 'var(--blue)', cursor: 'pointer', fontSize: 12 }}
+                <button type="button" className="btn-link sr-link sr-linkbtn"
                   onClick={() => setOpen(open === p.key ? null : p.key)}>
                   How?
                 </button>
               </div>
               {open === p.key && (
-                <ol style={{ fontSize: 12, color: 'var(--text2)', margin: '0 0 8px', paddingLeft: 18, lineHeight: 1.6 }}>
+                <ol className="sr-steps">
                   {p.steps.map(s => <li key={s}>{s}</li>)}
                 </ol>
               )}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <input type="password" autoComplete="off" style={{ flex: 1, minWidth: 200 }}
+              <div className="sr-keyinput">
+                <input type="password" autoComplete="off"
                   value={values[p.key] || ''} onChange={e => setValues(prev => ({ ...prev, [p.key]: e.target.value }))}
                   placeholder={locked ? 'Add your Groq key first' : has ? 'Enter a new one to replace it' : 'Paste the key'}
                   disabled={locked}
@@ -161,8 +163,9 @@ export default function AiKeysCard() {
             </div>
           );
         })}
+        </div>
 
-        <div className="info-box" style={{ marginBottom: 0 }}>
+        <div className="info-box sr-note">
           <i className="ti ti-lock" style={{ fontSize: 15, flexShrink: 0 }} />
           <div>Each key is checked with one tiny request before saving, stored <strong>encrypted</strong>, and used only for your account.</div>
         </div>

@@ -19,20 +19,22 @@ import {
   loadLeadOutcomesApi,
   type ApplyStatus, type Lead, type LeadFile, type LeadOutcomeMap, type MoveToOutreachResult,
 } from '../lib/api';
-import { readFileText } from '../lib/csv';
+import { downloadTextFile, readFileText, toDelimitedText } from '../lib/csv';
+import '../styles/leads-redesign.css';
 import { hasApplyableLink, leadLinkTypes, LINK_TYPE_META } from '../lib/linkTypes';
 import {
-  contactBadgeClass, contactStatusLabel, outcomeOf, stageOf, STAGE_BADGE, STAGE_LABELS,
+  contactBadgeClass, contactStatusLabel, outcomeOf, stageCounts, stageOf, STAGE_BADGE, STAGE_LABELS,
 } from '../lib/leadOutcome';
 import {
   activeChips, applyLeadFilters, countActive, DEFAULT_FILTERS, tabCounts, TAB_LABELS,
   type LeadFilters, type LeadTab,
 } from '../lib/leadFilters';
+import type { OutcomeStage } from '../lib/leadOutcome';
 import {
   APPLY_BADGE_CLASS, APPLY_STATUS_LABELS, APPLY_STATUS_ORDER, isApplyActioned,
 } from '../lib/leads';
 import {
-  deriveCompany, explodeForPreview, isCompanyDerived, isReject, profileUrlOf, sourceLabel,
+  deriveCompany, explodeForPreview, HARD_REJECT, isCompanyDerived, isReject, profileUrlOf, sourceLabel,
   summarisePreview, sourceLeadsFromFile,
   LEAD_BADGE_CLASS, LEAD_STATUS_LABELS,
   type PreviewRow, type PreviewSummary,
@@ -49,7 +51,21 @@ const MAX_UPLOAD_BYTES = 4_000_000;
 const byteLength = (s: string) =>
   typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(s).length : s.length;
 
-const TABS: LeadTab[] = ['all', 'new', 'added-to-outreach', 'direct-apply'];
+// Pipeline cards. Status cards drive filters.status; stage cards drive the
+// existing filters.stage (outcome) filter, so no new filtering logic is needed.
+type CardKey = LeadTab | 'stage-emailed' | 'stage-replied' | 'stage-bounced';
+const CARDS: CardKey[] = ['all', 'new', 'added-to-outreach', 'stage-emailed', 'stage-replied', 'stage-bounced', 'direct-apply'];
+const CARD_STAGE: Record<string, OutcomeStage> = {
+  'stage-emailed': 'emailed', 'stage-replied': 'replied', 'stage-bounced': 'bounced',
+};
+const CARD_LABEL: Record<CardKey, string> = {
+  ...TAB_LABELS, 'stage-emailed': 'Emailed', 'stage-replied': 'Replied', 'stage-bounced': 'Bounced',
+};
+// Shared / role mailboxes rather than a named person.
+const GENERIC_LOCAL = /^(hr|hello|info|contact|careers?|jobs?|recruit(ment|ing|er)?s?|talent|admin|support|team|office|mail|enquiry|enquiries|sales|dl-.*)$/i;
+const isGenericInbox = (email: string | null | undefined) =>
+  !!email && GENERIC_LOCAL.test(email.split('@')[0] || '');
+const fitClass = (n: number) => (n === HARD_REJECT ? 'lr-fit lr-fit-bad' : n >= 22 ? 'lr-fit lr-fit-hi' : 'lr-fit');
 
 interface Preview { rows: PreviewRow[]; summary: PreviewSummary; payload: LeadFile; label: string; }
 
@@ -109,6 +125,8 @@ export default function Leads() {
   // since the checkbox is disabled for every email-less lead.
   const applyableNoEmail = useMemo(
     () => leads.filter(l => !l.email && hasApplyableLink(l)).length, [leads]);
+
+  const stages = useMemo(() => stageCounts(leads, outcomes), [leads, outcomes]);
 
   const stats = useMemo(() => ({
     total: leads.length,
@@ -292,6 +310,20 @@ export default function Leads() {
     } catch (err: any) { toast(err.message, 'error'); }
   };
 
+  // Additive, client-side only: downloads the selected rows as CSV.
+  const exportSelected = () => {
+    const rows = leads.filter(l => selected.has(l.id));
+    if (rows.length === 0) return;
+    const text = toDelimitedText(
+      ['Name', 'Email', 'Company', 'Role', 'Fit', 'Found by', 'Status', 'Post', 'Links'],
+      rows.map(l => [l.authorName, l.email || '', deriveCompany(l), l.role || '', String(l.fitScore),
+        (l.queries || []).join('; '), LEAD_STATUS_LABELS[l.status], l.postUrl || '', (l.links || []).join(' ')]),
+      ',',
+    );
+    downloadTextFile(`leads-${new Date().toISOString().slice(0, 10)}.csv`, text, 'text/csv');
+    toast(`${rows.length} lead${rows.length !== 1 ? 's' : ''} exported.`, 'success');
+  };
+
   const deleteSelected = async () => {
     if (selected.size === 0) return;
     if (!confirm(`Delete ${selected.size} lead${selected.size !== 1 ? 's' : ''}?\nRe-uploading the same file will bring them back.`)) return;
@@ -459,25 +491,43 @@ export default function Leads() {
         </div>
       )}
 
-      <div className="section-head">
-        <div className="nav-tabs">
-          {TABS.map(key => (
-            <button type="button" key={key} className={`nav-tab${filters.status === key ? ' active' : ''}`}
-              onClick={() => setFilter({ status: key })}
+      <nav className="lr-cards" aria-label="Lead views">
+        {CARDS.map(key => {
+          const stage = CARD_STAGE[key];
+          const on = stage
+            ? filters.status === 'all' && filters.stage === stage
+            : filters.status === key && !Object.values(CARD_STAGE).includes(filters.stage as OutcomeStage);
+          const count = stage ? stages[stage] : counts[key as LeadTab];
+          const emailedTotal = stats.emailed || 0;
+          const note = key === 'stage-replied' && emailedTotal ? `${((stages.replied / emailedTotal) * 100).toFixed(1)}%`
+            : key === 'stage-bounced' && emailedTotal ? `${((stages.bounced / emailedTotal) * 100).toFixed(1)}%`
+            : key === 'direct-apply' && applyableNoEmail ? `${applyableNoEmail} no email`
+            : key === 'stage-emailed' ? 'no reply yet' : '';
+          return (
+            <button type="button" key={key} className={`lr-card${on ? ' on' : ''}${stage === 'bounced' ? ' bad' : ''}`}
+              aria-current={on ? 'page' : undefined}
+              onClick={() => {
+                if (stage) setFilter({ status: 'all', stage });
+                else setFilter(Object.values(CARD_STAGE).includes(filters.stage as OutcomeStage)
+                  ? { status: key as LeadTab, stage: 'any' } : { status: key as LeadTab });
+              }}
               title={key === 'direct-apply' ? 'Leads with a real application link — apply yourself instead of emailing' : undefined}>
-              {key === 'direct-apply' && <i className="ti ti-file-check" style={{ marginRight: 4 }} />}
-              {TAB_LABELS[key]}
-              <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{counts[key]}</span>
+              <span className="lr-card-label">{CARD_LABEL[key]}</span>
+              <span className="lr-card-row">
+                <span className="lr-card-count">{count}</span>
+                {note && <span className="lr-card-note">{note}</span>}
+              </span>
             </button>
-          ))}
-        </div>
-        <span className="contact-count-badge">{filtered.length} leads</span>
-      </div>
+          );
+        })}
+      </nav>
 
-      <div className="filter-row" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
-        <input type="text" placeholder="Search name, email, company, links..." value={filters.search}
-          onChange={e => setFilter({ search: e.target.value })}
-          style={{ flex: 1, minWidth: 180, maxWidth: 280 }} />
+      <div className="filter-row lr-filters" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+        <label className="lr-search">
+          <i className="ti ti-search" />
+          <input type="text" placeholder="Search name, email, company, links..." value={filters.search} aria-label="Search leads"
+            onChange={e => setFilter({ search: e.target.value })} />
+        </label>
         {sourceOptions.length > 1 && (
           <select value={sourceValue} aria-label="Source" style={{ width: 'auto' }}
             onChange={e => setFilter({ sources: e.target.value ? e.target.value.split(',').map(v => v) : [] })}>
@@ -509,7 +559,7 @@ export default function Leads() {
         </button>
       </div>
 
-      <div className="quick-select" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
+      <div className="quick-select lr-selbar" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 12 }}>
         <span style={{ fontSize: 12, color: 'var(--text3)' }}>Quick select:</span>
         {[25, 50, 100].map(n => (
           <button key={n} className="btn btn-sm" type="button" disabled={filtered.length === 0}
@@ -556,7 +606,7 @@ export default function Leads() {
       )}
 
 
-      <div className="table-card">
+      <div className="table-card lr-table">
         <table>
           <thead>
             <tr>
@@ -587,7 +637,7 @@ export default function Leads() {
                     title={l.email ? undefined : 'No email — can still be tracked as a direct application'}
                     onChange={e => toggleRow(l.id, e.target.checked)} />
                 </td>
-                <td style={{ color: isReject(l) ? 'var(--red)' : 'var(--text2)' }}>{l.fitScore}</td>
+                <td><span className={fitClass(l.fitScore)}>{l.fitScore}</span></td>
                 <td>
                   <div className="contact-chip">
                     <Avatar name={l.authorName} />
@@ -602,6 +652,7 @@ export default function Leads() {
                       </div>
                       <div className="email">
                         {l.email || <span style={{ color: 'var(--text3)' }}>no email</span>}
+                        {isGenericInbox(l.email) && <span className="lr-tag lr-tag-warn" title="Looks like a shared inbox, not a named person">Generic inbox</span>}
                       </div>
                     </div>
                   </div>
@@ -701,6 +752,13 @@ export default function Leads() {
         </table>
       </div>
 
+      {!busy && !error && filtered.length > 0 && (
+        <div className="lr-foot">
+          <span>Showing {(safePage - 1) * PAGE_SIZE + 1}–{(safePage - 1) * PAGE_SIZE + paged.length} of {filtered.length}</span>
+          <span>{filters.sort === 'fit-desc' ? 'Sorted by fit, high to low' : ''}</span>
+        </div>
+      )}
+
       {totalPages > 1 && (
         <div className="pagination-bar">
           <button className="btn btn-sm" disabled={safePage === 1} onClick={() => setPage(p => p - 1)} type="button">
@@ -727,6 +785,7 @@ export default function Leads() {
           <option value="">Set application status…</option>
           {APPLY_STATUS_ORDER.map(a => <option key={a} value={a}>{APPLY_STATUS_LABELS[a]}</option>)}
         </select>
+        <button className="btn" onClick={exportSelected} type="button"><i className="ti ti-download" /> Export</button>
         <button className="btn btn-del" onClick={deleteSelected} type="button"><i className="ti ti-trash" /> Delete</button>
         <button className="btn btn-send" onClick={() => setMoveOpen(true)} type="button" disabled={selectedLeads.length === 0}
           title={selectedLeads.length === 0 ? 'None of the selected leads have an email address' : undefined}>

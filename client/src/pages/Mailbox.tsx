@@ -23,6 +23,7 @@ import {
   type ActionBucket, type ActionItem, type ActionOp, type Contact, type ReplyCategory, type ThreadEntry,
 } from '../lib/api';
 import { CATEGORY_OPTIONS, actionReasonLabel, relativeDay } from '../lib/format';
+import '../styles/mailbox-redesign.css';
 
 type Tab = ActionBucket | 'all';
 
@@ -45,6 +46,12 @@ const EMPTY: Record<Tab, string> = {
 };
 
 const OP_DONE_LABEL: Record<ActionOp, string> = { done: 'Marked done', snooze: 'Snoozed', reopen: 'Moved to Needs you' };
+
+// Panel open/closed memory is a per-browser convenience; storage can be unavailable.
+const loadFlag = (key: string, fallback: boolean) => {
+  try { const v = localStorage.getItem(key); return v === null ? fallback : v === '1'; } catch { return fallback; }
+};
+const saveFlag = (key: string, on: boolean) => { try { localStorage.setItem(key, on ? '1' : '0'); } catch { /* ignore */ } };
 
 const isTab = (v: string | null): v is Tab => !!v && TABS.some(([k]) => k === v);
 
@@ -110,6 +117,12 @@ export default function Mailbox() {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [unreadOnly, setUnreadOnly] = useState(false);
+
+  const [listOpen, setListOpen] = useState(() => loadFlag('mbx.list', true));
+  const [ctxOpen, setCtxOpen] = useState(() => loadFlag('mbx.ctx', true));
+  const [msgOpen, setMsgOpen] = useState<Record<string, boolean>>({});
+  const toggleList = () => setListOpen(o => { saveFlag('mbx.list', !o); return !o; });
+  const toggleCtx = () => setCtxOpen(o => { saveFlag('mbx.ctx', !o); return !o; });
 
   const refreshBackfillCount = () => backfillReplyCountApi().then(r => setBackfillCount(r.count)).catch(() => {});
 
@@ -283,6 +296,47 @@ export default function Mailbox() {
     }
   };
 
+  // Keyboard: J/K move, X select, E done, H snooze menu, [ ] panels. Ignored while typing
+  // or with a modifier held, so it never competes with the reply editor or browser shortcuts.
+  const keyRef = useRef<(e: KeyboardEvent) => void>(() => {});
+  keyRef.current = (e: KeyboardEvent) => {
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const t = e.target as HTMLElement | null;
+    if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+    const idx = shown.findIndex(c => c.id === selectedId);
+    const k = e.key.toLowerCase();
+    if (k === 'j' || k === 'k') {
+      const next = shown[Math.max(0, Math.min(shown.length - 1, idx + (k === 'j' ? 1 : -1)))];
+      if (next) { e.preventDefault(); open(next); }
+    } else if (k === 'x' && tab !== 'all' && selected) {
+      e.preventDefault();
+      setChecked(prev => { const n = new Set(prev); if (n.has(selected.id)) n.delete(selected.id); else n.add(selected.id); return n; });
+    } else if (k === 'e' && selected && selectedItem && selectedItem.bucket !== 'done' && !busyAction) {
+      e.preventDefault();
+      act([selected.id], 'done');
+    } else if (k === 'h' && selectedItem) {
+      e.preventDefault();
+      setSnoozeOpen(o => !o);
+    } else if (k === '[') {
+      toggleList();
+    } else if (k === ']') {
+      toggleCtx();
+    }
+  };
+  useEffect(() => {
+    const h = (e: KeyboardEvent) => keyRef.current(e);
+    window.addEventListener('keydown', h);
+    return () => window.removeEventListener('keydown', h);
+  }, []);
+
+  // People you've also had a conversation with at the same company.
+  const sameCompany = useMemo(() => {
+    if (!selected || !selected.company) return [];
+    const co = selected.company.trim().toLowerCase();
+    return app.contacts.filter(c => c.id !== selected.id && c.company && c.company.trim().toLowerCase() === co
+      && (queue.byId.has(c.id) || (c.thread || []).length > 0)).slice(0, 6);
+  }, [selected, app.contacts, queue.byId]);
+
   const busy = (loading && app.contacts.length === 0) || !queue.loaded;
   const needsYou = queue.counts['needs-you'];
   const subtitle = needsYou
@@ -324,8 +378,27 @@ export default function Mailbox() {
       ) : inTab.length === 0 ? (
         <div className="empty-state"><i className={`ti ${tab === 'needs-you' ? 'ti-mood-check' : 'ti-inbox'}`} />{EMPTY[tab]}</div>
       ) : (
-        <div className="mailbox-layout">
+        <div className={`mailbox-layout mbx${listOpen ? '' : ' list-collapsed'}${ctxOpen ? '' : ' ctx-collapsed'}`}>
           <div className="mailbox-list-panel" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <div className="mbx-panel-head">
+              <span>Conversations · {shown.length}</span>
+              <button type="button" className="mbx-icon-btn" onClick={toggleList} aria-expanded={listOpen}
+                aria-label={listOpen ? 'Collapse conversation list' : 'Expand conversation list'} title="Toggle list ([)">
+                <i className={`ti ${listOpen ? 'ti-layout-sidebar-left-collapse' : 'ti-layout-sidebar-left-expand'}`} />
+              </button>
+            </div>
+            {!listOpen && (
+              <div className="mbx-mini-list">
+                {shown.slice(0, 60).map(c => (
+                  <button key={c.id} type="button" className={`mbx-mini${c.id === selectedId ? ' active' : ''}`}
+                    title={`${c.name} · ${c.company}`} aria-label={`Open ${c.name}`} onClick={() => open(c)}>
+                    <Avatar name={c.name} />
+                    {!c.replyRead && c.repliedAt && <span className="mbx-mini-dot" />}
+                  </button>
+                ))}
+              </div>
+            )}
+            <div className="mbx-list-body">
             <input
               type="text"
               placeholder="Search name, email or company…"
@@ -420,6 +493,11 @@ export default function Mailbox() {
                 );
               })}
             </div>
+            <div className="mbx-keys">
+              <span><kbd>J</kbd>/<kbd>K</kbd> move</span><span><kbd>X</kbd> select</span>
+              <span><kbd>E</kbd> done</span><span><kbd>H</kbd> snooze</span><span><kbd>[</kbd><kbd>]</kbd> panels</span>
+            </div>
+            </div>
           </div>
 
           <div className="mailbox-thread">
@@ -501,17 +579,77 @@ export default function Mailbox() {
                     {selected.replySnippet}
                   </div>
                 )}
-                {orderedThread.map((m, i) => (
-                  <div key={i} className={`mailbox-bubble ${m.direction}`}>
-                    <div className="mailbox-bubble-meta">
-                      {m.direction === 'outbound' ? 'You' : selected.name} · {fmtDateTime(m.at)}
+                {orderedThread.map((m, i) => {
+                  const mk = `${selected.id}:${i}`;
+                  const isOpen = msgOpen[mk] ?? (m.direction === 'inbound' || i === orderedThread.length - 1);
+                  const body = m.text || '(no content captured)';
+                  return (
+                    <div key={i} className={`mailbox-bubble ${m.direction}${isOpen ? '' : ' collapsed'}`}>
+                      <button type="button" className="mbx-msg-head" aria-expanded={isOpen}
+                        onClick={() => setMsgOpen(o => ({ ...o, [mk]: !isOpen }))}>
+                        <span className="mailbox-bubble-meta">{m.direction === 'outbound' ? 'You' : selected.name} · {fmtDateTime(m.at)}</span>
+                        {!isOpen && <span className="mbx-msg-snip">{body.replace(/\s+/g, ' ').slice(0, 90)}</span>}
+                        <i className={`ti ${isOpen ? 'ti-chevron-up' : 'ti-chevron-down'}`} />
+                      </button>
+                      {isOpen && body}
                     </div>
-                    {m.text || '(no content captured)'}
-                  </div>
-                ))}
+                  );
+                })}
               </>
             )}
           </div>
+
+          <aside className="mbx-ctx" aria-label="Contact context">
+            <div className="mbx-panel-head">
+              {ctxOpen && <span>Details</span>}
+              <button type="button" className="mbx-icon-btn" onClick={toggleCtx} aria-expanded={ctxOpen}
+                aria-label={ctxOpen ? 'Collapse details panel' : 'Expand details panel'} title="Toggle details (])">
+                <i className={`ti ${ctxOpen ? 'ti-layout-sidebar-right-collapse' : 'ti-layout-sidebar-right-expand'}`} />
+              </button>
+            </div>
+            {ctxOpen && selected && (
+              <div className="mbx-ctx-body">
+                <section>
+                  <h4>Timeline</h4>
+                  <ol className="mbx-timeline">
+                    {orderedThread.length === 0 && selected.repliedAt && (
+                      <li className="in"><b>{selected.name.split(' ')[0]} replied</b><span>{fmtDateTime(selected.repliedAt)}</span></li>
+                    )}
+                    {orderedThread.map((m, i) => (
+                      <li key={i} className={m.direction === 'inbound' ? 'in' : 'out'}>
+                        <b>{m.direction === 'outbound' ? 'You sent a message' : `${selected.name.split(' ')[0]} replied`}</b>
+                        <span>{fmtDateTime(m.at)}</span>
+                      </li>
+                    ))}
+                    {selectedItem && (
+                      <li className={`now ${selectedItem.bucket}`}>
+                        <b>{TABS.find(([k]) => k === selectedItem.bucket)?.[1]}</b>
+                        <span>{reasonLine(selectedItem, now)}</span>
+                      </li>
+                    )}
+                  </ol>
+                </section>
+                <section>
+                  <h4>Contact</h4>
+                  <dl className="mbx-dl">
+                    <dt>Company</dt><dd>{selected.company || '—'}</dd>
+                    <dt>Email</dt><dd>{selected.email}</dd>
+                    <dt>Category</dt><dd><ClassifierStatus contact={selected} /></dd>
+                  </dl>
+                </section>
+                <section>
+                  <h4>Other threads{selected.company ? ` at ${selected.company}` : ''}</h4>
+                  {sameCompany.length === 0 ? (
+                    <p className="mbx-muted">No other conversations here.</p>
+                  ) : sameCompany.map(c => (
+                    <button key={c.id} type="button" className="mbx-other" onClick={() => open(c)}>
+                      <Avatar name={c.name} /><span>{c.name}</span>
+                    </button>
+                  ))}
+                </section>
+              </div>
+            )}
+          </aside>
         </div>
       )}
     </Layout>

@@ -1,16 +1,16 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../../components/Layout';
-import { SkeletonRows } from '../../components/Skeleton';
 import SendingTimeline from '../../components/campaigns/SendingTimeline';
 import { useToast } from '../../context/ToastContext';
 import {
-  loadCampaignsApi, loadCampaignMetaApi, pauseCampaignApi, resumeCampaignApi,
+  loadCampaignsApi, loadCampaignMetaApi, pauseCampaignApi, resumeCampaignApi, runCampaignNowApi,
   type Campaign, type CampaignMeta,
 } from '../../lib/api';
 import {
-  CAMPAIGN_STATUS_BADGE, CAMPAIGN_STATUS_LABEL, daysRemaining, dueSince, fmtCountdown,
-  fmtHour, fmtIst, fromNow, isCronStale, nextRunAt, pct,
+  CAMPAIGN_STATUS_LABEL, daysRemaining, dueSince, fmtCountdown,
+  fmtHour, fmtIst, fromNow, isCronStale, nextRunAt, projectedFinish,
 } from '../../lib/campaigns';
 
 type CampaignTab = 'all' | 'active' | 'finished' | 'sending';
@@ -22,6 +22,14 @@ export default function CampaignList() {
   const [meta, setMeta] = useState<CampaignMeta | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [tab, setTab] = useState<CampaignTab>('active');
+  // Same in-page confirm as the detail page — a release can't be recalled.
+  const [runTarget, setRunTarget] = useState<Campaign | null>(null);
+  useEffect(() => {
+    if (!runTarget) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setRunTarget(null); };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [runTarget]);
   // Ticks the per-row countdowns without re-fetching anything.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -52,6 +60,35 @@ export default function CampaignList() {
       } else {
         await resumeCampaignApi(c.id);
         toast('Campaign resumed.', 'success');
+      }
+      await load();
+    } catch (err) {
+      toast((err as Error).message, 'error');
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function runNow() {
+    const c = runTarget;
+    if (!c) return;
+    setRunTarget(null);
+    setBusy(c.id);
+    try {
+      const r = await runCampaignNowApi(c.id);
+      if (!r.ok && r.reason === 'locked_or_already_released') {
+        throw new Error("Today's batch has already gone out.");
+      }
+      if (r.error) throw new Error(r.error);
+      if (r.released === 0) {
+        toast(
+          r.retryable
+            ? `Nobody was released — the scan ${r.timedOut ? 'timed out' : 'hit its row limit'} before finding anyone. Today's release is still scheduled.`
+            : `Nobody was released — ${r.skipped} rows were skipped as duplicates or invalid.`,
+          r.retryable ? 'error' : 'info',
+        );
+      } else {
+        toast(`Released ${r.released} contacts — they'll go out over the next few hours.`, 'success');
       }
       await load();
     } catch (err) {
@@ -190,155 +227,147 @@ export default function CampaignList() {
         </div>
       )}
 
-      <div className="section-head" style={{ marginTop: 6 }}>
-        <div className="section-title">Sending timeline</div>
-      </div>
-      <SendingTimeline />
+      <section className="cmpx-card" aria-label="Sending timeline">
+        <h2 className="cmpx-eyebrow">Sending timeline</h2>
+        <SendingTimeline />
+      </section>
 
-      <div className="section-head" style={{ marginTop: 22 }}>
-        <div className="nav-tabs">
+      <div className="section-head" style={{ marginTop: 4 }}>
+        <div className="nav-tabs cmpx-tabs">
           {(['all', 'active', 'finished', 'sending'] as CampaignTab[]).map(key => (
             <button type="button" key={key} className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => setTab(key)}>
-              {key === 'all' ? 'All' : key === 'active' ? 'Active' : key === 'finished' ? 'Finished' : 'Sending'}
-              <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{tabCounts[key]}</span>
+              {key === 'all' ? 'All' : key === 'active' ? 'Active' : key === 'finished' ? 'Finished' : 'Sending now'}
+              <span className="cmpx-count">{tabCounts[key]}</span>
             </button>
           ))}
         </div>
-        <span className="contact-count-badge">{visibleCampaigns.length}</span>
       </div>
 
-      <div className="table-card">
-        <table>
-          <thead>
-            <tr>
-              <th>Campaign</th>
-              <th style={{ width: 190 }}>Progress</th>
-              <th style={{ width: 120 }}>Status</th>
-              <th style={{ width: 150 }}>Schedule</th>
-              <th style={{ width: 170 }}>Outcomes</th>
-              <th style={{ width: 190 }}>Next run</th>
-              <th style={{ width: 120 }} />
-            </tr>
-          </thead>
-          <tbody>
-            {campaigns === null && <SkeletonRows rows={4} cols={7} />}
-            {campaigns?.length === 0 && (
-              <tr><td colSpan={7}>
-                <div className="empty-state">
-                  <i className="ti ti-calendar-repeat" />
-                  No campaigns yet. Upload a spreadsheet and it'll be emailed a few contacts a day.
-                </div>
-              </td></tr>
-            )}
-            {campaigns && campaigns.length > 0 && visibleCampaigns.length === 0 && (
-              <tr><td colSpan={7}>
-                <div className="empty-state"><i className="ti ti-filter" />No {tab} campaigns</div>
-              </td></tr>
-            )}
-            {visibleCampaigns.map((c) => {
-              const done = c.stats.released + c.stats.skipped;
-              const displayStatus = c.sending ? 'sending' : c.status;
-              return (
-                <tr key={c.id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/campaigns/${c.id}`)}>
-                  <td>
-                    <div style={{ fontWeight: 500 }}>{c.name}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                      {c.fileName || 'spreadsheet'} · {c.stats.total.toLocaleString()} rows
-                    </div>
-                  </td>
-                  <td>
-                    <div className="progress-bar"><div className="progress-fill" style={{ width: `${pct(done, c.stats.total)}%` }} /></div>
-                    <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 4 }}>
-                      {c.stats.released.toLocaleString()} sent · {c.stats.pending.toLocaleString()} to go
-                      {c.status === 'running' && c.stats.pending > 0 && ` · ~${daysRemaining(c)}d`}
-                    </div>
-                  </td>
-                  <td>
-                    <span className={`badge ${displayStatus === 'sending' ? 'badge-sent' : CAMPAIGN_STATUS_BADGE[c.status]}`}>
-                      {displayStatus === 'sending' ? 'Sending mails' : CAMPAIGN_STATUS_LABEL[c.status]}
+      <div className="cmpx-list">
+        {campaigns === null && <div className="empty-state"><i className="ti ti-loader-2" /> Loading…</div>}
+        {campaigns?.length === 0 && (
+          <div className="empty-state">
+            <i className="ti ti-calendar-repeat" />
+            No campaigns yet. Upload a spreadsheet and it'll be emailed a few contacts a day.
+          </div>
+        )}
+        {campaigns && campaigns.length > 0 && visibleCampaigns.length === 0 && (
+          <div className="empty-state"><i className="ti ti-filter" />No {tab} campaigns</div>
+        )}
+        {visibleCampaigns.map((c) => {
+          const displayStatus = c.sending ? 'sending' : c.status;
+          const o = c.outcomes;
+          const total = Math.max(1, c.stats.total);
+          const replied = o?.replied || 0;
+          const bounced = o?.bounced || 0;
+          const sentOnly = Math.max(0, c.stats.released - replied - bounced);
+          const w = (n: number) => `${Math.min(100, (n / total) * 100)}%`;
+          const pillTone = c.sending ? 'blue'
+            : c.status === 'running' ? 'green'
+            : c.status === 'paused' ? 'amber'
+            : c.status === 'failed' ? 'red' : '';
+          const od = dueSince(c);
+          const n = nextRunAt(c);
+          const fin = c.status === 'running' ? projectedFinish(c) : null;
+          return (
+            <article key={c.id} className="cmpx-camp" onClick={() => navigate(`/campaigns/${c.id}`)}>
+              <div className="cmpx-camp-main">
+                <div className="cmpx-camp-head">
+                  <Link to={`/campaigns/${c.id}`} className="cmpx-camp-name" onClick={(e) => e.stopPropagation()}>{c.name}</Link>
+                  <span className={`cmpx-pill ${pillTone}`}>
+                    {displayStatus === 'sending' ? 'Sending mails' : CAMPAIGN_STATUS_LABEL[c.status]}
+                  </span>
+                  {!c.sending && isCronStale(c) && (
+                    <span style={{ fontSize: 11, color: 'var(--amber)' }} title="The scheduled release may have stopped running">
+                      <i className="ti ti-alert-triangle" /> no release in 36h
                     </span>
-                    {!c.sending && isCronStale(c) && (
-                      <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 4 }} title="The scheduled release may have stopped running">
-                        <i className="ti ti-alert-triangle" /> no release in 36h
-                      </div>
-                    )}
-                  </td>
-                  <td style={{ fontSize: 12, color: 'var(--text2)' }}>
-                    {c.contactsPerDay}/day at {fmtHour(c.runHourIst)}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {(() => {
-                      const o = c.outcomes;
-                      if (!o || o.total === 0) {
-                        return <span style={{ color: 'var(--text3)' }}>nothing sent yet</span>;
-                      }
-                      const p = Math.round((o.bounced / o.total) * 100);
-                      const col = p >= 8 ? 'var(--red)' : p >= 4 ? 'var(--amber)' : 'var(--text2)';
-                      return (
-                        <>
-                          <div style={{ color: 'var(--green)' }}>{o.delivered.toLocaleString()} delivered</div>
-                          <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                            <span style={{ color: col }}>{o.bounced} bounced</span>
-                            {o.bounced > 0 && <span style={{ color: col }}> ({p}%)</span>}
-                            {' · '}{o.replied} replied
-                          </div>
-                        </>
-                      );
-                    })()}
-                  </td>
-                  <td style={{ fontSize: 12 }}>
-                    {(() => {
-                      const od = dueSince(c);
-                      if (od) {
-                        return (
-                          <>
-                            <div style={{ color: 'var(--amber)' }}>due now</div>
-                            <div style={{ fontSize: 11, color: 'var(--text3)' }}>
-                              waiting {fmtCountdown(Date.now() - od.getTime())}
-                            </div>
-                          </>
-                        );
-                      }
-                      const n = nextRunAt(c);
-                      if (c.sending) {
-                        return <span style={{ color: 'var(--amber)' }}>sending mails</span>;
-                      }
-                      if (!n) {
-                        return (
-                          <span style={{ color: 'var(--text3)' }}>
-                            {c.status === 'completed' ? 'finished' : 'not scheduled'}
-                            <div style={{ fontSize: 11 }}>last {fromNow(c.lastReleaseAt)}</div>
-                          </span>
-                        );
-                      }
-                      // Overdue was handled above, and nextRunAt only ever
-                      // returns a future slot, so this is always positive.
-                      const ms = n.getTime() - Date.now();
-                      return (
-                        <>
-                          <div style={{ fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>
-                            in {fmtCountdown(ms)}
-                          </div>
-                          <div style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtIst(n)}</div>
-                        </>
-                      );
-                    })()}
-                  </td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    {(c.status === 'running' || c.status === 'paused' || c.status === 'failed') && (
-                      <button className="btn btn-sm" type="button" disabled={busy === c.id} onClick={() => toggle(c)}>
-                        {c.status === 'running'
-                          ? <><i className="ti ti-player-pause" /> Pause</>
-                          : <><i className="ti ti-player-play" /> Continue</>}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+                  )}
+                </div>
+                <span className="cmpx-camp-meta">{c.fileName || 'spreadsheet'} · {c.stats.total.toLocaleString()} rows</span>
+                <div>
+                  <div className="cmpx-seg" aria-hidden="true">
+                    <span className="s-sent" style={{ width: w(sentOnly) }} />
+                    <span className="s-rep" style={{ width: w(replied) }} />
+                    <span className="s-bnc" style={{ width: w(bounced) }} />
+                  </div>
+                  <div className="cmpx-prog-line" style={{ marginTop: 6 }}>
+                    <b>{c.stats.released.toLocaleString()}</b> of {c.stats.total.toLocaleString()} released · {c.stats.pending.toLocaleString()} queued
+                    {c.status === 'running' && c.stats.pending > 0 && ` · ~${daysRemaining(c)}d`}
+                    {o && o.total > 0 && <>
+                      {' · '}<span style={{ color: 'var(--teal)' }}>{replied} replied</span>
+                      {' · '}<span style={{ color: bounced > 0 ? (Math.round((bounced / o.total) * 100) >= 4 ? 'var(--red)' : 'var(--amber)') : undefined }}>
+                        {bounced} bounced{bounced > 0 && ` (${Math.round((bounced / o.total) * 100)}%)`}
+                      </span>
+                    </>}
+                  </div>
+                </div>
+              </div>
+              <dl className="cmpx-dl">
+                <dt>Schedule</dt>
+                <dd>{c.contactsPerDay}/day · {c.ratePerHour}/hr · from {fmtHour(c.runHourIst)}</dd>
+                <dt>Next run</dt>
+                <dd>
+                  {od ? (
+                    <span style={{ color: 'var(--amber)' }}>due now · waiting {fmtCountdown(Date.now() - od.getTime())}</span>
+                  ) : c.sending ? (
+                    <span style={{ color: 'var(--amber)' }}>sending mails</span>
+                  ) : n ? (
+                    <>{fmtIst(n)} <span style={{ color: 'var(--amber)', fontVariantNumeric: 'tabular-nums' }}>· in {fmtCountdown(n.getTime() - Date.now())}</span></>
+                  ) : (
+                    <span style={{ color: 'var(--text3)' }}>
+                      {c.status === 'completed' ? 'finished' : 'not scheduled'} · last {fromNow(c.lastReleaseAt)}
+                    </span>
+                  )}
+                </dd>
+                <dt>Finishes</dt>
+                <dd>{fin ? fmtIst(fin).replace(/,.*/, '') : '—'}</dd>
+              </dl>
+              <div className="cmpx-camp-actions" onClick={(e) => e.stopPropagation()}>
+                {c.status === 'running' && (
+                  <button className="btn btn-sm" type="button" disabled={busy === c.id} onClick={() => setRunTarget(c)}>
+                    <i className="ti ti-player-track-next" /> Run now
+                  </button>
+                )}
+                {(c.status === 'running' || c.status === 'paused' || c.status === 'failed') && (
+                  <button className="btn btn-sm" type="button" disabled={busy === c.id} onClick={() => toggle(c)}>
+                    {c.status === 'running'
+                      ? <><i className="ti ti-player-pause" /> Pause</>
+                      : <><i className="ti ti-player-play" /> Continue</>}
+                  </button>
+                )}
+                <Link to={`/campaigns/${c.id}`} className="btn btn-sm btn-primary">Open <i className="ti ti-arrow-right" /></Link>
+              </div>
+            </article>
+          );
+        })}
       </div>
+
+      {runTarget && createPortal(
+        <div className="edit-modal-wrap open" onClick={(e) => { if (e.target === e.currentTarget) setRunTarget(null); }}>
+          <div className="edit-modal" role="dialog" aria-modal="true" style={{ maxWidth: 480 }}>
+            <div className="reply-modal-header">
+              <div style={{ fontWeight: 600, fontSize: 15 }}>Send {runTarget.contactsPerDay} emails now?</div>
+              <button aria-label="Close" className="btn btn-sm" onClick={() => setRunTarget(null)} type="button">
+                <i className="ti ti-x" />
+              </button>
+            </div>
+            <div style={{ padding: '14px 0', fontSize: 13, lineHeight: 1.6, color: 'var(--text2)' }}>
+              This releases “{runTarget.name}” today&apos;s batch immediately instead of waiting for its scheduled time.
+              The emails go out one every {Math.round(60 / Math.max(1, runTarget.ratePerHour))} minutes and cannot be
+              recalled once sent, and today&apos;s scheduled release will not run again.
+            </div>
+            <div className="reply-modal-footer">
+              <button className="btn btn-sm" onClick={() => setRunTarget(null)} type="button">
+                <i className="ti ti-x" /> Cancel
+              </button>
+              <button className="btn btn-primary" onClick={runNow} type="button">
+                <i className="ti ti-player-track-next" /> Send now
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </Layout>
   );
 }

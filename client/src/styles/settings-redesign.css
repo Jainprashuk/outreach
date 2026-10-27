@@ -1,0 +1,112 @@
+/* Settings redesign: setup-health strip, section nav, section panels, save bar.
+   Colours come from theme tokens only so light and dark both work. */
+.sr-page { display: flex; flex-direction: column; gap: 18px; }
+
+.sr-health { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+.sr-tile {
+  text-align: left; display: flex; flex-direction: column; gap: 4px; padding: 12px 14px;
+  border-radius: var(--radius-lg); background: var(--bg); border: 0.5px solid var(--border);
+  color: var(--text); font-family: inherit; cursor: pointer; box-shadow: var(--shadow-sm);
+  transition: border-color .15s var(--ease), background-color .2s var(--ease);
+}
+.sr-tile:hover { border-color: var(--border-md); }
+.sr-tile.bad { background: var(--red-bg); border-color: var(--red); }
+.sr-tile-label { display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; color: var(--text2); }
+.sr-tile-value { font-size: 14px; font-weight: 600; }
+.sr-tile.bad .sr-tile-value { color: var(--red); }
+.sr-tile.warn .sr-tile-value { color: var(--amber); }
+.sr-tile-note { font-size: 12px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.sr-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); flex-shrink: 0; display: inline-block; }
+.sr-tile.warn .sr-dot, .sr-dot.warn { background: var(--amber); }
+.sr-tile.bad .sr-dot, .sr-dot.bad { background: var(--red); }
+
+.sr-layout { display: flex; flex-wrap: wrap; gap: 24px; align-items: flex-start; }
+.sr-nav { flex: 1 1 200px; max-width: 230px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 12px; }
+.sr-nav-item {
+  display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 12px; border-radius: 10px;
+  border: 0; background: transparent; color: var(--text2); font-family: inherit; font-size: 13px;
+  font-weight: 500; text-align: left; cursor: pointer;
+  transition: background-color .15s var(--ease), color .15s var(--ease);
+}
+.sr-nav-item i { font-size: 16px; color: var(--text3); }
+.sr-nav-item:hover { background: var(--bg2); color: var(--text); }
+.sr-nav-item.on { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.sr-nav-item.on i { color: var(--accent); }
+.sr-nav-label { flex: 1; }
+
+.sr-main { flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 0; }
+.sr-sec[hidden] { display: none; }
+
+.sr-savebar {
+  position: sticky; bottom: 0; z-index: 5; display: flex; align-items: center; justify-content: flex-end;
+  flex-wrap: wrap; gap: 10px 16px; padding: 12px 0 20px;
+  background: linear-gradient(to top, var(--bg2) 60%, transparent);
+}
+.sr-dirty { font-size: 12px; color: var(--text2); }
+.sr-dirty.on { color: var(--amber); font-weight: 600; }
+
+@media (max-width: 900px) {
+  .sr-nav {
+    position: static; max-width: none; flex: 1 1 100%; flex-direction: row; overflow-x: auto;
+    gap: 6px; padding-bottom: 4px; -webkit-overflow-scrolling: touch;
+  }
+  .sr-nav-item { flex-shrink: 0; height: 36px; white-space: nowrap; }
+  .sr-nav-item i { display: none; }
+  .sr-main { flex-basis: 100%; }
+}
+
+/* ── Settings cards (AI keys, usage, Discover keys, tokens, sharing, emails) ── */
+.sr-ml { margin-left: 8px; }
+.sr-faint { color: var(--text3); font-size: 12px; }
+.sr-intro { font-size: 13px; color: var(--text2); line-height: 1.55; margin-bottom: 6px; }
+.sr-note { margin-bottom: 0; margin-top: 8px; }
+.sr-link { color: var(--accent); text-decoration: none; }
+.sr-link:hover { text-decoration: underline; }
+.sr-linkbtn { background: none; border: 0; padding: 0; cursor: pointer; font-size: 12px; font-family: inherit; }
+.sr-h3 { margin: 0 0 6px; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text2); }
+
+.sr-keylist { display: flex; flex-direction: column; }
+.sr-keyrow { margin: 0; padding: 14px 0; border-top: 0.5px solid var(--border); display: flex; flex-direction: column; gap: 6px; }
+.sr-keyrow:first-child { border-top: 0; }
+.sr-keyhead { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 0; margin: 0; }
+.sr-keyname { font-size: 14px; font-weight: 600; color: var(--text); }
+.sr-num {
+  width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; margin-right: 8px;
+  font-size: 11px; font-weight: 700; background: var(--bg2); color: var(--text2); border: 0.5px solid var(--border);
+}
+.sr-tag { margin-left: 8px; font-size: 11px; font-weight: 400; color: var(--text3); }
+.sr-tag.req { color: var(--accent); font-weight: 600; }
+.sr-keynote { font-size: 12px; color: var(--text2); line-height: 1.5; }
+.sr-steps { font-size: 12px; color: var(--text2); margin: 0; padding-left: 18px; line-height: 1.6; }
+.sr-keyinput { display: flex; gap: 8px; flex-wrap: wrap; }
+.sr-keyinput input { flex: 1; min-width: 200px; }
+
+.sr-usage-sec { margin-top: 14px; }
+.sr-usage-foot { font-size: 12px; color: var(--text2); margin-top: 14px; padding-top: 12px; border-top: 0.5px solid var(--border); line-height: 1.55; }
+
+.sr-token { padding: 16px 0; border-bottom: 0.5px solid var(--border); }
+.sr-token-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.sr-token-head strong { font-size: 14px; }
+.sr-token-ico { font-size: 16px; color: var(--text2); }
+.sr-token-desc { font-size: 12.5px; color: var(--text2); margin: 0 0 10px; line-height: 1.5; }
+.sr-secret { display: block; border-color: var(--amber); background: var(--amber-bg); margin-bottom: 10px; }
+.sr-secret-label { font-size: 12px; font-weight: 600; margin-bottom: 6px; color: var(--text); }
+.sr-secret-code {
+  display: block; word-break: break-all; font-size: 12px; background: var(--bg); color: var(--text);
+  border: 0.5px solid var(--border); border-radius: var(--radius); padding: 8px 10px; margin-bottom: 8px;
+}
+.sr-secret-hint { font-size: 12px; color: var(--text2); margin-bottom: 8px; }
+
+.sr-share { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; color: var(--text2); line-height: 1.55; }
+.sr-share-item { padding: 10px 12px; border-radius: 10px; background: var(--green-bg); border: 0.5px solid var(--border); }
+.sr-share-item.never { background: var(--bg2); }
+.sr-share-item strong { color: var(--text); }
+
+.sr-pref { display: flex; gap: 12px; align-items: flex-start; padding: 12px 0; border-top: 0.5px solid var(--border); cursor: pointer; }
+.sr-pref:first-of-type { border-top: 0; }
+.sr-pref.off { cursor: not-allowed; opacity: .8; }
+.sr-pref-box { margin-top: 3px; accent-color: var(--accent); }
+.sr-pref-label { font-weight: 600; font-size: 13px; }
+.sr-pref-help { font-size: 12px; color: var(--text2); margin-top: 2px; }
+.sr-pref-foot { margin: 8px 0 0; }

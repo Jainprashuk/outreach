@@ -42,16 +42,16 @@ export default function AiUsageCard() {
             extra={` · ${f.ok} worked · ${f.tokens.toLocaleString()} tokens`} />
         ))}
         {failed > 0 && (
-          <div style={{ marginTop: 12 }}>
-            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 6 }}>What happened to each call</div>
+          <div className="sr-usage-sec">
+            <h3 className="sr-h3">What happened to each call</h3>
             {data.outcomes.map(o => <HBar key={o.key} label={o.label} n={o.n} d={t.calls} fill={o.key === 'ok' ? teal : red} />)}
           </div>
         )}
-        <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 12, lineHeight: 1.55 }}>
+        <div className="sr-usage-foot">
           {data.providers.map(p => `${PROVIDER[p.provider] || p.provider}: ${p.calls} call${p.calls === 1 ? '' : 's'}, ${p.ok} worked`).join(' · ')}
           {(t.yourKey > 0 || t.adminKey > 0) && <><br />{t.yourKey} on your keys{t.adminKey ? `, ${t.adminKey} on the admin's keys` : ''}.</>}
           {data.lastFailure && <><br />Last problem: {data.lastFailure.label.toLowerCase()} on {PROVIDER[data.lastFailure.provider] || data.lastFailure.provider}, {when(data.lastFailure.at)}.</>}
-          <br /><span style={{ color: 'var(--text3)' }}>AI call records are kept for 30 days.</span>
+          <br /><span className="sr-faint">AI call records are kept for 30 days.</span>
         </div>
       </div>
     </div>

@@ -15,6 +15,7 @@ export default function NextRunPanel({ campaign, cronConfigured }: {
   campaign: Campaign;
   cronConfigured?: boolean;
 }) {
+  const [whyOpen, setWhyOpen] = useState(false);
   // Re-render every second so the countdown ticks.
   const [, setTick] = useState(0);
   useEffect(() => {
@@ -61,8 +62,8 @@ export default function NextRunPanel({ campaign, cronConfigured }: {
           </span>
         </div>
         <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 8, lineHeight: 1.7 }}>
-          It goes out on the next trigger, which GitHub runs when it has capacity — often hours
-          after the scheduled time. Nothing is wrong and nothing is lost; the batch has not been
+          It goes out on the next trigger, which the background scheduler (Inngest) runs — it can be late
+          by a few minutes. Nothing is wrong and nothing is lost; the batch has not been
           skipped. Use <strong>Run now</strong> if you do not want to wait.
         </div>
       </div>
@@ -76,7 +77,7 @@ export default function NextRunPanel({ campaign, cronConfigured }: {
   const finish = projectedFinish(campaign);
 
   return (
-    <div className="info-box" style={{ display: 'block' }}>
+    <div className="info-box cmpx-next" style={{ display: 'flex' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <i className={due ? 'ti ti-player-play' : 'ti ti-clock-play'} style={{ fontSize: 18 }} />
         <span style={{ fontSize: 13 }}>
@@ -97,18 +98,24 @@ export default function NextRunPanel({ campaign, cronConfigured }: {
         {finish && <> At this pace the sheet finishes around <strong>{fmtIst(finish).replace(/,.*/, '')}</strong>.</>}
         {/* The schedule is a cron, not a promise — say so rather than letting a
             precise-looking countdown imply a guarantee. */}
-        <div style={{ color: 'var(--text3)', marginTop: 4 }}>
+        {cronConfigured === false && (
+          <strong style={{ color: 'var(--amber)', display: 'block', marginTop: 4 }}>
+            CRON_SECRET isn't configured, so nothing will fire on its own — use “Run now”.
+          </strong>
+        )}
+      </div>
+      <button type="button" className="cmpx-next-why" aria-expanded={whyOpen}
+        onClick={() => setWhyOpen((v) => !v)}>
+        <i className={`ti ti-chevron-${whyOpen ? 'down' : 'right'}`} /> Why a batch can go out late
+      </button>
+      {whyOpen && (
+        <div style={{ color: 'var(--text3)', fontSize: 12, lineHeight: 1.55 }}>
           This is the earliest the batch can go out, not a guarantee. Releases are triggered by a
-          scheduled job that GitHub runs when it has capacity — often hours late — so the batch goes
+          scheduled job (Inngest) that can run a few minutes late, so the batch goes
           out on the first trigger at or after the time above. An early send hour leaves more of the
           day for one to land.
-          {cronConfigured === false && (
-            <strong style={{ color: 'var(--amber)' }}>
-              {' '}CRON_SECRET isn't configured, so nothing will fire on its own — use “Run now”.
-            </strong>
-          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

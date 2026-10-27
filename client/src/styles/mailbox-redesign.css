@@ -1,0 +1,76 @@
+/* Mailbox redesign: three panes (list / thread / details), collapsible list + details,
+   quick replies, collapsible messages. Theme tokens only. */
+.mbx { gap: 0; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg); overflow: hidden; }
+.mbx .mailbox-list-panel { width: 340px; padding: 0; gap: 0 !important; border-right: 1px solid var(--border); min-width: 0; transition: width .16s ease; }
+.mbx.list-collapsed .mailbox-list-panel { width: 64px; }
+.mbx .mbx-list-body { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; flex: 1; min-height: 0; }
+.mbx.list-collapsed .mbx-list-body { display: none; }
+.mbx .mailbox-list { border: 0; border-radius: 0; background: transparent; margin: 0 -12px; }
+.mbx .mailbox-row { padding: 14px 14px; }
+.mbx .mailbox-thread { border: 0; border-radius: 0; flex: 1 1 0; min-width: 0; padding: 20px 24px; }
+.mbx .mailbox-queue-bar { background: var(--bg2); border: 1px solid var(--border); }
+
+.mbx-panel-head { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 16px; border-bottom: 1px solid var(--border); font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text2); }
+.mbx-panel-head > span { flex: 1; }
+.mbx.list-collapsed .mailbox-list-panel .mbx-panel-head, .mbx.ctx-collapsed .mbx-ctx .mbx-panel-head { justify-content: center; padding: 10px 0; }
+.mbx.list-collapsed .mailbox-list-panel .mbx-panel-head > span { display: none; }
+.mbx-icon-btn { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 8px; border: 1px solid var(--border-md); background: transparent; color: var(--text2); cursor: pointer; }
+.mbx-icon-btn:hover { background: var(--bg2); color: var(--text); }
+
+.mbx-mini-list { display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 10px 0; overflow-y: auto; flex: 1; }
+.mbx-mini { position: relative; border: 0; background: transparent; padding: 2px; border-radius: 10px; cursor: pointer; }
+.mbx-mini.active { outline: 2px solid var(--accent); outline-offset: 1px; }
+.mbx-mini-dot { position: absolute; top: -2px; right: -2px; width: 9px; height: 9px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg); }
+
+.mbx-keys { display: flex; flex-wrap: wrap; gap: 4px 12px; padding: 8px 0 0; border-top: 1px solid var(--border); font-size: 11px; color: var(--text3); }
+.mbx-keys kbd, .mbx-ctx kbd { font-family: ui-monospace, Menlo, monospace; font-size: 10.5px; border: 1px solid var(--border-md); border-radius: 4px; padding: 0 4px; margin: 0 1px; }
+
+/* collapsible messages */
+.mailbox-bubble.collapsed { padding: 0; }
+.mbx-msg-head { display: flex; align-items: center; gap: 10px; width: 100%; background: transparent; border: 0; padding: 0; color: inherit; text-align: left; cursor: pointer; font: inherit; }
+.mbx-msg-head .mailbox-bubble-meta { margin: 0; flex: none; }
+.mbx-msg-head i { margin-left: auto; color: var(--text3); }
+.mbx-msg-snip { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text2); font-size: 12.5px; }
+.mailbox-bubble { max-width: 86%; }
+.mailbox-bubble.collapsed .mbx-msg-head { padding: 9px 14px; }
+.mailbox-bubble:not(.collapsed) .mbx-msg-head { margin-bottom: 4px; }
+
+/* details pane */
+.mbx-ctx { width: 300px; flex-shrink: 0; border-left: 1px solid var(--border); display: flex; flex-direction: column; min-width: 0; overflow-y: auto; transition: width .16s ease; }
+.mbx.ctx-collapsed .mbx-ctx { width: 64px; }
+.mbx-ctx-body { display: flex; flex-direction: column; gap: 22px; padding: 18px 20px; }
+.mbx-ctx h4 { margin: 0 0 10px; font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text2); }
+.mbx-timeline { list-style: none; margin: 0; padding: 0 0 0 4px; }
+.mbx-timeline li { position: relative; display: flex; flex-direction: column; padding: 0 0 12px 18px; border-left: 2px solid var(--border-md); font-size: 13px; }
+.mbx-timeline li:last-child { border-left-color: transparent; padding-bottom: 0; }
+.mbx-timeline li::before { content: ''; position: absolute; left: -6px; top: 3px; width: 10px; height: 10px; border-radius: 50%; background: var(--text3); }
+.mbx-timeline li.in::before { background: var(--accent); }
+.mbx-timeline li.now::before { background: var(--amber); }
+.mbx-timeline li.now b { color: var(--amber); }
+.mbx-timeline li span, .mbx-muted { font-size: 12px; color: var(--text3); margin: 0; }
+.mbx-dl { display: grid; grid-template-columns: 76px minmax(0, 1fr); row-gap: 8px; margin: 0; font-size: 13px; }
+.mbx-dl dt { color: var(--text3); }
+.mbx-dl dd { margin: 0; overflow-wrap: anywhere; }
+.mbx-other { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px; margin-bottom: 4px; border: 0; border-radius: 8px; background: transparent; color: var(--text); font-size: 13px; text-align: left; cursor: pointer; }
+.mbx-other:hover { background: var(--bg2); }
+
+/* quick replies */
+.reply-closed { display: flex; flex-direction: column; gap: 10px; margin: 4px 0 16px; }
+.reply-quick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12px; color: var(--text2); }
+.reply-quick-chip { height: 28px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--border-md); background: transparent; color: var(--text); font-size: 12px; font-weight: 600; cursor: pointer; }
+.reply-quick-chip:hover { background: var(--accent-bg); border-color: var(--accent); }
+
+@media (max-width: 1280px) {
+  .mbx .mailbox-list-panel { width: 300px; }
+  .mbx-ctx { width: 260px; }
+}
+@media (max-width: 1100px) and (min-width: 701px) {
+  .mbx:not(.ctx-collapsed) .mbx-ctx { width: 240px; }
+}
+/* stacked layout (same breakpoint as responsive.css): panes go full width */
+@media (max-width: 700px) {
+  .mbx .mailbox-list-panel, .mbx.list-collapsed .mailbox-list-panel, .mbx-ctx, .mbx.ctx-collapsed .mbx-ctx { width: 100%; border: 0; border-bottom: 1px solid var(--border); }
+  .mbx .mailbox-thread { padding: 14px; }
+  .mbx-keys { display: none; }
+  .mbx-mini-list { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; padding: 10px 12px; }
+}

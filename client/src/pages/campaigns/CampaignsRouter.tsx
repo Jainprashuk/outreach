@@ -5,6 +5,7 @@ import CampaignDetail from './CampaignDetail';
 // The single import site for the campaign styles — a new file importing a new
 // file, so main.tsx stays untouched.
 import '../../styles/campaigns.css';
+import '../../styles/campaigns-redesign.css';
 
 /**
  * Hosts the three campaign screens behind one splat route in App.tsx, so adding

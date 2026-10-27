@@ -40,19 +40,19 @@ export default function EmailPrefsCard() {
       <div className="s-body">
         {!prefs && <div className="skeleton" style={{ height: 48 }} />}
         {prefs && prefs.map(p => (
-          <label key={p.key} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', padding: '8px 0', cursor: p.blockedByAdmin ? 'not-allowed' : 'pointer' }}>
+          <label key={p.key} className={'sr-pref' + (p.blockedByAdmin ? ' off' : '')}>
             <input
               type="checkbox" checked={p.on && !p.blockedByAdmin} disabled={p.blockedByAdmin || busy === p.key}
-              onChange={() => flip(p)} style={{ marginTop: 3 }}
+              onChange={() => flip(p)} className="sr-pref-box"
             />
             <span>
-              <span style={{ fontWeight: 500, fontSize: 13 }}>{p.label}</span>
-              {p.blockedByAdmin && <span className="badge badge-pending" style={{ marginLeft: 8 }}>Turned off by admin</span>}
-              <div style={{ fontSize: 12, color: 'var(--text2)' }}>{HELP[p.key]}</div>
+              <span className="sr-pref-label">{p.label}</span>
+              {p.blockedByAdmin && <span className="sr-ml badge badge-pending">Turned off by admin</span>}
+              <div className="sr-pref-help">{HELP[p.key]}</div>
             </span>
           </label>
         ))}
-        <p style={{ fontSize: 12, color: 'var(--text3)', marginTop: 6 }}>
+        <p className="sr-faint sr-pref-foot">
           The welcome email when you finish setup is always sent. You can make a report for any period under Analytics → Reports.
         </p>
       </div>

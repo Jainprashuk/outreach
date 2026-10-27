@@ -38,12 +38,12 @@ export default function LibrarySharingCard() {
       <div className="s-body">
         {sharing === null && <div className="skeleton" style={{ height: 48 }} />}
         {sharing !== null && (
-          <div style={{ fontSize: 12.5, color: 'var(--text2)', lineHeight: 1.55 }}>
-            <div><strong>Shared:</strong> the name, email, company, role and LinkedIn of your contacts, leads and Discover people,
+          <div className="sr-share">
+            <div className="sr-share-item"><strong>Shared:</strong> the name, email, company, role and LinkedIn of your contacts, leads and Discover people,
               where each came from, and the email formats you set. Your name is shown next to what you added.</div>
-            <div style={{ marginTop: 6 }}><strong>Never shared:</strong> whether you emailed someone, their replies, your notes,
+            <div className="sr-share-item never"><strong>Never shared:</strong> whether you emailed someone, their replies, your notes,
               templates, campaigns or interviews. The one exception is a plain “bounced” mark on an address that doesn’t exist, so nobody else wastes a send on it.</div>
-            <div style={{ marginTop: 6, color: 'var(--text3)' }}>Turning this off removes your data from the Library straight away. Nothing is copied, so nothing is left behind.</div>
+            <div className="sr-faint">Turning this off removes your data from the Library straight away. Nothing is copied, so nothing is left behind.</div>
           </div>
         )}
       </div>

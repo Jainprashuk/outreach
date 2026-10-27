@@ -13,6 +13,18 @@ import { draftReplyApi, sendReplyApi, isAiKeyRequired, type Contact } from '../l
 
 const PLACEHOLDER = /\[[^\]\n]{2,40}\]/g;
 
+// Quick replies: plain text dropped into the editor, nothing is sent until Approve & send.
+const quickReplies = (firstName: string, sender: string) => {
+  const hi = firstName ? `Hi ${firstName}` : 'Hi';
+  const sign = `\n\nBest,\n${sender}`.trimEnd();
+  return [
+    { id: 'resume', label: 'Send resume', resume: true, text: `${hi},\n\nThanks for getting back to me. Please find my resume attached.\n\nHappy to share anything else that helps.${sign}` },
+    { id: 'portal', label: 'Uploaded on portal', resume: false, text: `${hi},\n\nI've uploaded my resume on your careers portal. Could you let me know the next steps?${sign}` },
+    { id: 'role', label: 'Ask about the role', resume: null, text: `${hi},\n\nHappy to share my resume. Could you tell me which role and team this is for, so I can tailor it?${sign}` },
+    { id: 'call', label: 'Suggest a call', resume: null, text: `${hi},\n\nThanks for the reply. Would a quick call work for you this week? Happy to work around your schedule.${sign}` },
+  ];
+};
+
 export default function ReplyComposer({ contact }: { contact: Contact }) {
   const app = useApp();
   const toast = useToast();
@@ -28,6 +40,22 @@ export default function ReplyComposer({ contact }: { contact: Contact }) {
   const [error, setError] = useState('');
   const [needsKey, setNeedsKey] = useState(false);
   const [provider, setProvider] = useState('');
+
+  const quick = quickReplies(contact.name.trim().split(/\s+/)[0] || '', app.sender.name || '');
+  const pickQuick = (q: ReturnType<typeof quickReplies>[number]) => {
+    setOpen(true);
+    setBody(q.text);
+    setConfirming(false);
+    if (q.resume !== null && hasResume) setAttachResume(q.resume);
+  };
+  const quickChips = (
+    <div className="reply-quick">
+      <span>Quick replies</span>
+      {quick.map(q => (
+        <button key={q.id} type="button" className="reply-quick-chip" onClick={() => pickQuick(q)}>{q.label}</button>
+      ))}
+    </div>
+  );
 
   const placeholders = body.match(PLACEHOLDER) || [];
 
@@ -80,13 +108,16 @@ export default function ReplyComposer({ contact }: { contact: Contact }) {
 
   if (!open) {
     return (
-      <div style={{ display: 'flex', gap: 8, margin: '4px 0 16px', flexWrap: 'wrap' }}>
-        <button className="btn btn-sm btn-primary" type="button" onClick={() => draft()}>
-          <i className="ti ti-sparkles" /> Draft reply with AI
-        </button>
-        <button className="btn btn-sm" type="button" onClick={() => { setOpen(true); setBody(''); }}>
-          <i className="ti ti-pencil" /> Write reply
-        </button>
+      <div className="reply-closed">
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button className="btn btn-sm btn-primary" type="button" onClick={() => draft()}>
+            <i className="ti ti-sparkles" /> Draft reply with AI
+          </button>
+          <button className="btn btn-sm" type="button" onClick={() => { setOpen(true); setBody(''); }}>
+            <i className="ti ti-pencil" /> Write reply
+          </button>
+        </div>
+        {quickChips}
       </div>
     );
   }
@@ -99,6 +130,8 @@ export default function ReplyComposer({ contact }: { contact: Contact }) {
           <i className="ti ti-x" />
         </button>
       </div>
+
+      {quickChips}
 
       <div className="reply-composer-note">
         <label htmlFor={`reply-note-${contact.id}`}>Tell the AI what to say (optional)</label>

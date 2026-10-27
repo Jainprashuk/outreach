@@ -31,6 +31,12 @@ export default function CampaignDetail() {
   // Two questions live under Upcoming: who goes next, and when does this finish.
   const [upcomingView, setUpcomingView] = useState<'batch' | 'schedule'>('batch');
   const [busy, setBusy] = useState(false);
+  // Live values of the schedule inputs, only to drive the "With these settings"
+  // panel. Saving is unchanged (blur / change) and the server value wins again
+  // as soon as it comes back.
+  const [draft, setDraft] = useState<{ cpd?: number; rph?: number; hour?: number }>({});
+  const srv = data?.campaign;
+  useEffect(() => { setDraft({}); }, [srv?.contactsPerDay, srv?.ratePerHour, srv?.runHourIst, tab]);
   // In-page, not window.confirm: the browser can dismiss a native dialog by
   // itself (focus change, dialog suppression), which made it flash and vanish.
   const [confirmRun, setConfirmRun] = useState(false);
@@ -150,7 +156,7 @@ export default function CampaignDetail() {
   };
 
   const TABS: [Tab, string, number | null][] = [
-    ['upcoming', 'Upcoming', null],
+    ['upcoming', 'Upcoming', s.pending],
     ['history', 'History', (c.releases || []).length],
     ['skipped', 'Skipped', s.skipped],
     ['removed', 'Removed', s.removed],
@@ -161,6 +167,9 @@ export default function CampaignDetail() {
     <Layout
       title={c.name}
       subtitle={<>
+        <span className={`cmpx-pill ${c.sending ? 'blue' : c.status === 'running' ? 'green' : c.status === 'paused' ? 'amber' : c.status === 'failed' ? 'red' : ''}`}>
+          {c.sending ? 'Sending mails' : CAMPAIGN_STATUS_LABEL[c.status]}
+        </span>{' '}
         {c.fileName || 'spreadsheet'} · {s.total.toLocaleString()} rows · template “{app.templates[c.templateKey]?.name || c.templateKey}”
         {lastUpdated && error && <span style={{ color: 'var(--amber)' }}> · last updated {fromNow(new Date(lastUpdated).toISOString())}</span>}
       </>}
@@ -302,26 +311,45 @@ export default function CampaignDetail() {
         </div>
       </div>
 
-      <div className="progress-bar" style={{ marginTop: 14 }}>
-        <div className="progress-fill" style={{ width: `${pct(handled, s.total)}%` }} />
-      </div>
-      <div style={{ fontSize: 12, color: 'var(--text2)', marginTop: 6 }}>
-        {c.contactsPerDay}/day at {c.ratePerHour}/hour from {fmtHour(c.runHourIst)} IST — each batch takes about{' '}
-        {dripDuration(c.contactsPerDay, c.ratePerHour)}
-        {c.attachResume && <> · <i className="ti ti-paperclip" /> resume attached</>}
-      </div>
+      {(() => {
+        const t = Math.max(1, s.total);
+        const w = (n: number) => `${Math.min(100, (n / t) * 100)}%`;
+        const sentOnly = Math.max(0, s.released - o.replied - o.bounced);
+        return (
+          <section aria-label="Progress" style={{ marginTop: 14 }}>
+            <div className="cmpx-seg lg" aria-hidden="true">
+              <span className="s-sent" style={{ width: w(sentOnly) }} />
+              <span className="s-rep" style={{ width: w(o.replied) }} />
+              <span className="s-bnc" style={{ width: w(o.bounced) }} />
+            </div>
+            <div className="cmpx-legend">
+              <span><b style={{ color: 'var(--text)' }}>{handled.toLocaleString()} of {s.total.toLocaleString()}</b> handled ({pct(handled, s.total)}%)</span>
+              <span><i className="s-sent" />Sent</span>
+              <span><i className="s-rep" />Replied</span>
+              <span><i className="s-bnc" />Bounced</span>
+              <span><i />Queued</span>
+              <span className="grow" />
+              <span>
+                {c.contactsPerDay}/day at {c.ratePerHour}/hour from {fmtHour(c.runHourIst)} IST — each batch takes about{' '}
+                {dripDuration(c.contactsPerDay, c.ratePerHour)}
+                {c.attachResume && <> · <i className="ti ti-paperclip" /> resume attached</>}
+              </span>
+            </div>
+          </section>
+        );
+      })()}
 
       <div style={{ marginTop: 14 }}>
         <NextRunPanel campaign={c} cronConfigured={meta?.cronConfigured} />
       </div>
 
       <div className="section-head" style={{ marginTop: 18 }}>
-        <div className="nav-tabs">
+        <div className="nav-tabs cmpx-tabs">
           {TABS.map(([key, label, count]) => (
             <button type="button" key={key} className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => setTab(key)}>
               {label}
               {count !== null && count > 0 && (
-                <span style={{ marginLeft: 5, opacity: 0.6, fontSize: 11 }}>{count}</span>
+                <span className="cmpx-count">{count}</span>
               )}
             </button>
           ))}
@@ -330,20 +358,19 @@ export default function CampaignDetail() {
 
       {tab === 'upcoming' && (
         <>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 14, flexWrap: 'wrap' }}>
-            <button type="button"
-              className={`btn btn-sm${upcomingView === 'batch' ? ' btn-primary' : ''}`}
-              onClick={() => setUpcomingView('batch')}>
-              <i className="ti ti-users" /> Next batch
-            </button>
-            <button type="button"
-              className={`btn btn-sm${upcomingView === 'schedule' ? ' btn-primary' : ''}`}
-              onClick={() => setUpcomingView('schedule')}>
-              <i className="ti ti-calendar-repeat" /> Full schedule
-              {s.pending > 0 && (
-                <span style={{ marginLeft: 5, opacity: 0.7 }}>{totalBatches(c)}</span>
-              )}
-            </button>
+          <div className="cmpx-toolbar">
+            <div className="cmpx-segctl" role="group" aria-label="Upcoming view">
+              <button type="button" aria-pressed={upcomingView === 'batch'}
+                className={upcomingView === 'batch' ? 'on' : ''}
+                onClick={() => setUpcomingView('batch')}>
+                Next batch
+              </button>
+              <button type="button" aria-pressed={upcomingView === 'schedule'}
+                className={upcomingView === 'schedule' ? 'on' : ''}
+                onClick={() => setUpcomingView('schedule')}>
+                Full schedule{s.pending > 0 && ` · ${totalBatches(c)} ${totalBatches(c) === 1 ? 'day' : 'days'}`}
+              </button>
+            </div>
           </div>
           {upcomingView === 'batch'
             ? <UpcomingBatchTable campaign={c} onChanged={refresh} />
@@ -354,6 +381,7 @@ export default function CampaignDetail() {
       {tab === 'skipped' && <SkippedRowsPanel campaign={c} status="skipped" onChanged={refresh} />}
       {tab === 'removed' && <SkippedRowsPanel campaign={c} status="removed" onChanged={refresh} />}
       {tab === 'setup' && (
+        <div className="cmpx-setup-wrap">
         <div className="cmp-setup">
           <section className="cmp-setup-block">
             <h3 className="cmp-setup-title">Name</h3>
@@ -386,6 +414,7 @@ export default function CampaignDetail() {
                     instead of leaving an invalid number on screen. */}
                 <input key={`cpd-${c.contactsPerDay}`} type="number" min={1} max={500}
                   defaultValue={c.contactsPerDay} disabled={busy}
+                  onChange={(e) => setDraft((d) => ({ ...d, cpd: Number(e.target.value) }))}
                   onBlur={(e) => {
                     const v = Number(e.target.value);
                     if (v !== c.contactsPerDay) save({ contactsPerDay: v });
@@ -395,6 +424,7 @@ export default function CampaignDetail() {
                 <label className="form-label">Emails per hour</label>
                 <input key={`rph-${c.ratePerHour}`} type="number" min={1} max={60}
                   defaultValue={c.ratePerHour} disabled={busy}
+                  onChange={(e) => setDraft((d) => ({ ...d, rph: Number(e.target.value) }))}
                   onBlur={(e) => {
                     const v = Number(e.target.value);
                     if (v !== c.ratePerHour) save({ ratePerHour: v });
@@ -403,7 +433,7 @@ export default function CampaignDetail() {
               <div className="form-group">
                 <label className="form-label">Send each day at (IST)</label>
                 <select value={c.runHourIst} disabled={busy}
-                  onChange={(e) => save({ runHourIst: Number(e.target.value) })}>
+                  onChange={(e) => { setDraft((d) => ({ ...d, hour: Number(e.target.value) })); save({ runHourIst: Number(e.target.value) }); }}>
                   {Array.from({ length: 24 }, (_, h) => <option key={h} value={h}>{fmtHour(h)}</option>)}
                 </select>
               </div>
@@ -474,6 +504,32 @@ export default function CampaignDetail() {
               <i className="ti ti-trash" /> Delete campaign
             </button>
           </section>
+        </div>
+        {(() => {
+          const cpd = draft.cpd && draft.cpd > 0 ? draft.cpd : c.contactsPerDay;
+          const rph = draft.rph && draft.rph > 0 ? draft.rph : c.ratePerHour;
+          const hr = draft.hour ?? c.runHourIst;
+          const batches = Math.ceil(s.pending / Math.max(1, cpd));
+          const warn = hr >= 14
+            ? 'A late send hour leaves less of the day for a delayed trigger to land.'
+            : cpd / rph > 4 ? 'Each batch runs over 4 hours; consider a higher hourly rate.' : '';
+          return (
+            <aside className="cmpx-calc" aria-label="With these settings">
+              <h3>With these settings</h3>
+              <dl>
+                <dt>Each batch</dt><dd><b>{dripDuration(cpd, rph)}</b> ({cpd} contacts)</dd>
+                <dt>One email every</dt><dd>{Math.round(3600 / Math.max(1, rph))} seconds</dd>
+                <dt>Sends at</dt><dd>{fmtHour(hr)} IST</dd>
+                <dt>Left</dt>
+                <dd>{s.pending.toLocaleString()} contacts · {batches === 1 ? '1 batch' : `${batches} batches`} to go</dd>
+              </dl>
+              {warn && <p className="warn">{warn}</p>}
+              <div style={{ fontSize: 11, color: 'var(--text3)' }}>
+                Changes save when you leave a field and apply from the next batch.
+              </div>
+            </aside>
+          );
+        })()}
         </div>
       )}
       {confirmRun && (() => {

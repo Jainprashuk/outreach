@@ -77,6 +77,10 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
   const someChecked = selected.size > 0 && !allChecked;
   useEffect(() => { if (cbRef.current) cbRef.current.indeterminate = someChecked; }, [someChecked]);
 
+  // Hide columns nobody mapped, instead of a wall of dashes.
+  const hasCompany = rows.some((r) => !!r.company);
+  const hasRole = rows.some((r) => !!r.role);
+  const colCount = 5 + (hasCompany ? 1 : 0) + (hasRole ? 1 : 0);
   const minutesApart = useMemo(
     () => Math.round(60 / Math.max(1, campaign.ratePerHour)),
     [campaign.ratePerHour],
@@ -220,14 +224,15 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
                   onChange={(e) => setSelected(e.target.checked ? new Set(rows.map((r) => r.id)) : new Set())} />
               </th>
               <th>Contact</th>
-              <th style={{ width: 170 }}>Company</th>
-              <th style={{ width: 140 }}>Role</th>
+              {hasCompany && <th style={{ width: 170 }}>Company</th>}
+              {hasRole && <th style={{ width: 140 }}>Role</th>}
+              <th style={{ width: 150 }}>Sends around</th>
               <th style={{ width: 90 }}>Sheet row</th>
-              <th style={{ width: 110 }} />
+              <th style={{ width: 170 }} />
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {rows.map((r, idx) => (
               <Fragment key={r.id}>
                 <tr>
                   <td className="cb-col">
@@ -247,21 +252,30 @@ export default function UpcomingBatchTable({ campaign, onChanged }: {
                       </div>
                     </div>
                   </td>
-                  <td>{r.company || '—'}</td>
-                  <td>{r.role || '—'}</td>
+                  {hasCompany && <td>{r.company || '—'}</td>}
+                  {hasRole && <td>{r.role || '—'}</td>}
+                  <td style={{ color: 'var(--text2)', whiteSpace: 'nowrap' }}>
+                    {(() => {
+                      // Same pacing the release uses: one every 60/ratePerHour minutes.
+                      const n = nextRunAt(campaign);
+                      if (!n) return '—';
+                      return fmtIst(new Date(n.getTime() + idx * (3_600_000 / Math.max(1, campaign.ratePerHour))))
+                        .replace(/^[^,]*,\s*/, '');
+                    })()}
+                  </td>
                   <td style={{ color: 'var(--text3)' }}>{r.row}</td>
                   <td className="cell-actions">
                     {/* The exact subject/body that will send — same renderer, so
                         this is the email, not a preview of it. */}
-                    <button aria-label="See the email" className="btn btn-xs" type="button" title="See the email"
-                      onClick={() => setExpanded(expanded === r.id ? null : r.id)}><i className="ti ti-mail" /></button>
-                    <button aria-label="Remove from the campaign" className="btn btn-xs" type="button" disabled={busy}
-                      title="Remove from the campaign" onClick={() => remove([r.id])}><i className="ti ti-trash" /></button>
+                    <button aria-label="See the email" aria-expanded={expanded === r.id} className="btn btn-xs" type="button" title="See the email"
+                      onClick={() => setExpanded(expanded === r.id ? null : r.id)}><i className="ti ti-mail" /> Preview</button>
+                    <button aria-label="Remove from the campaign" className="btn btn-xs btn-danger" type="button" disabled={busy}
+                      title="Remove from the campaign" onClick={() => remove([r.id])}><i className="ti ti-trash" /> Remove</button>
                   </td>
                 </tr>
                 {expanded === r.id && (
                   <tr>
-                    <td colSpan={6} style={{ background: 'var(--bg)', padding: 14 }}>
+                    <td colSpan={colCount} style={{ background: 'var(--bg)', padding: 14 }}>
                       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 4 }}>Subject</div>
                       <div style={{ fontWeight: 500, marginBottom: 10 }}>{r.subject}</div>
                       <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 4 }}>Body</div>

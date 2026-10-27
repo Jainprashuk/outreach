@@ -77,28 +77,22 @@ export default function TokenCard({
   };
 
   return (
-    <div style={{ padding: '14px 0', borderBottom: '1px solid var(--border)' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-        <i className={`ti ${icon}`} style={{ fontSize: 16, color: 'var(--text2)' }} />
-        <strong style={{ fontSize: 13.5 }}>{title}</strong>
+    <div className="sr-token">
+      <div className="sr-token-head">
+        <i className={`ti ${icon} sr-token-ico`} />
+        <strong>{title}</strong>
         {registered === true && <span className="badge badge-sent">{registeredLabel}</span>}
         {registered === false && <span className="badge badge-pending">not set up</span>}
       </div>
-      <p style={{ fontSize: 12.5, color: 'var(--text2)', margin: '0 0 10px' }}>{description}</p>
+      <p className="sr-token-desc">{description}</p>
 
       {secret && (
-        <div className="info-box" style={{ borderColor: 'var(--amber)', marginBottom: 10, display: 'block' }}>
-          <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 6 }}>
+        <div className="info-box sr-secret">
+          <div className="sr-secret-label">
             {secretLabel} — shown once, and never again.
           </div>
-          <code
-            style={{
-              display: 'block', wordBreak: 'break-all', fontSize: 12,
-              background: 'var(--bg)', border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)', padding: '8px 10px', marginBottom: 8,
-            }}
-          >{secret}</code>
-          <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 8 }}>{secretHint}</div>
+          <code className="sr-secret-code">{secret}</code>
+          <div className="sr-secret-hint">{secretHint}</div>
           <button className="btn btn-xs" type="button" onClick={copy}>
             <i className="ti ti-copy" /> Copy
           </button>{' '}

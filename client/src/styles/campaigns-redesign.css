@@ -1,0 +1,125 @@
+/* Campaigns list + detail redesign. Theme tokens only; no hardcoded dark colours. */
+
+/* Underline tabs, scoped to the campaign screens */
+.cmpx-tabs.nav-tabs { gap: 2px; border-bottom: 1px solid var(--border); }
+.cmpx-tabs .nav-tab {
+  height: 42px; padding: 0 14px; border-radius: 0; background: transparent;
+  border-bottom: 2px solid transparent; font-weight: 600;
+}
+.cmpx-tabs .nav-tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.cmpx-count { margin-left: 6px; font-size: 11px; color: var(--text3); }
+.cmpx-tabs .nav-tab.active .cmpx-count { color: var(--accent); }
+
+/* Status pill */
+.cmpx-pill {
+  display: inline-flex; align-items: center; gap: 6px; font-size: 11px; font-weight: 700;
+  padding: 2px 8px; border-radius: 999px; background: var(--bg3); color: var(--text2);
+  vertical-align: middle;
+}
+.cmpx-pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.cmpx-pill.green { background: var(--green-bg); color: var(--green); }
+.cmpx-pill.amber { background: var(--amber-bg); color: var(--amber); }
+.cmpx-pill.red { background: var(--red-bg); color: var(--red); }
+.cmpx-pill.blue { background: var(--accent-bg); color: var(--accent); }
+
+/* Section cards (timeline wrapper, setup blocks) */
+.cmpx-card {
+  border: 1px solid var(--border); border-radius: 14px; background: var(--bg);
+  padding: 16px 18px; margin-bottom: 16px;
+}
+.cmpx-eyebrow {
+  margin: 0 0 12px; font-size: 12px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--text2);
+}
+.cmpx-stats .stat-card, .cmp-detail-stats .stat-card { border-radius: 12px; }
+
+/* Campaign cards on the list */
+.cmpx-list { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+.cmpx-camp {
+  border: 1px solid var(--border); border-radius: 14px; background: var(--bg);
+  padding: 16px 18px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 28px;
+  cursor: pointer; transition: border-color .15s;
+}
+.cmpx-camp:hover { border-color: var(--border-md); }
+.cmpx-camp-main { flex: 2 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.cmpx-camp-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cmpx-camp-name { font-size: 15px; font-weight: 700; color: var(--text); text-decoration: none; }
+.cmpx-camp-name:hover { color: var(--accent); }
+.cmpx-camp-meta { font-size: 12px; color: var(--text2); }
+.cmpx-dl {
+  flex: 1 1 200px; margin: 0; display: grid; grid-template-columns: 76px minmax(0, 1fr);
+  row-gap: 6px; font-size: 13px;
+}
+.cmpx-dl dt { color: var(--text3); }
+.cmpx-dl dd { margin: 0; color: var(--text); }
+.cmpx-camp-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* Segmented progress bar: sent / replied / bounced / queued */
+.cmpx-seg { display: flex; height: 8px; border-radius: 8px; overflow: hidden; background: var(--bg3); }
+.cmpx-seg.lg { height: 10px; border-radius: 10px; }
+.cmpx-seg > span { display: block; height: 100%; }
+.cmpx-seg .s-sent { background: var(--accent); }
+.cmpx-seg .s-rep { background: var(--teal); }
+.cmpx-seg .s-bnc { background: var(--red); }
+.cmpx-prog-line { font-size: 12px; color: var(--text2); }
+.cmpx-prog-line b { color: var(--text); }
+.cmpx-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--text2); margin-top: 8px; }
+.cmpx-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; background: var(--bg3); border: 1px solid var(--border-md); }
+.cmpx-legend i.s-sent { background: var(--accent); border-color: transparent; }
+.cmpx-legend i.s-rep { background: var(--teal); border-color: transparent; }
+.cmpx-legend i.s-bnc { background: var(--red); border-color: transparent; }
+.cmpx-legend .grow { flex: 1; }
+
+/* Next-batch panel */
+.info-box.cmpx-next {
+  padding: 14px 16px; border-radius: 12px; background: var(--accent-bg);
+  border: 1px solid var(--border-md); display: flex; flex-direction: column; gap: 6px;
+}
+.cmpx-next-why {
+  align-self: flex-start; padding: 0; border: 0; background: transparent; color: var(--accent);
+  font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+
+/* Segmented toggle (Next batch / Full schedule) */
+.cmpx-segctl {
+  display: inline-flex; padding: 3px; border-radius: 10px; background: var(--bg2);
+  border: 1px solid var(--border);
+}
+.cmpx-segctl button {
+  height: 30px; padding: 0 12px; border-radius: 7px; border: 0; background: transparent;
+  color: var(--text2); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit;
+}
+.cmpx-segctl button.on { background: var(--accent); color: var(--accent-text, #fff); }
+.cmpx-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 14px; }
+.cmpx-toolbar .hint { font-size: 12px; color: var(--text2); flex: 1 1 280px; }
+
+.cmpx-flag {
+  font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 5px;
+  background: var(--amber-bg); color: var(--amber); margin-left: 6px;
+}
+
+/* Setup: two columns with the live calculator */
+.cmpx-setup-wrap { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
+.cmpx-setup-wrap .cmp-setup { flex: 2 1 520px; min-width: 0; max-width: none; }
+.cmpx-calc {
+  flex: 1 1 280px; min-width: 0; padding: 16px 18px; border-radius: 14px;
+  background: var(--accent-bg); border: 1px solid var(--border-md);
+  display: flex; flex-direction: column; gap: 10px; position: sticky; top: 12px;
+}
+.cmpx-calc h3 {
+  margin: 0; font-size: 12px; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--accent);
+}
+.cmpx-calc dl { margin: 0; display: grid; grid-template-columns: 110px minmax(0, 1fr); row-gap: 8px; font-size: 13px; }
+.cmpx-calc dt { color: var(--text2); }
+.cmpx-calc dd { margin: 0; }
+.cmpx-calc .warn {
+  margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--amber-bg);
+  color: var(--amber); font-size: 12px;
+}
+.cmp-setup-block { border-radius: 14px; }
+
+@media (max-width: 700px) {
+  .cmpx-camp { padding: 14px; }
+  .cmpx-calc { position: static; }
+}
