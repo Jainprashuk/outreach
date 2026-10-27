@@ -26,6 +26,7 @@
 const { connect, disconnect, makeLoggedIn, newPage } = require('./session');
 const { Checkpoint, NotSupported, makeGuard, jitter } = require('./guard');
 const { collectFeed, statusTimeline } = require('./feed');
+const { resolveAnswer, pickOption } = require('../../../lib/naukriAnswers');
 
 const MAX_SEARCHES = 5;
 const MAX_PAGES = 5;          // scrolls per page (each fetches the next batch)
@@ -340,15 +341,105 @@ function makeDriver(meta) {
 
   // One real application. `state.clicked` tells the caller whether the Apply
   // button was pressed, so a crash after the click is never retried blind.
-  async function applyOne(page, job, state) {
+
+  // A site's own "tell the recruiter more" form (Hirist: /job/<id>/screening),
+  // the counterpart of Naukri's questionnaire drawer. Same answer sources, in
+  // the same order: what the site pre-filled from your profile is kept, then a
+  // saved answer rule, then (auto-answer on) the AI. A MANDATORY question none
+  // of them answers skips the job with the question reported, so it can become
+  // a rule under Needs answer; an optional one is left blank.
+  //   Returns null when the form was filled and submitted, else a result.
+  async function fillScreening(page, job, { config, askAI, mandatory }) {
+    const sc = meta.applyFlow.screening;
+    const asked = [];
+    for (let round = 0; round < (sc.maxSteps || 3); round++) {
+      const boxes = page.locator(sc.questionBox);
+      try { await boxes.first().waitFor({ state: 'visible', timeout: round ? 8000 : 15000 }); }
+      catch (_) { return round ? null : { outcome: 'failed', terminal: false, reason: `${meta.label} opened its form but no questions appeared` }; }
+      await page.waitForTimeout(1500);
+      const n = await boxes.count();
+      for (let i = 0; i < n; i++) {
+        const box = boxes.nth(i);
+        const question = ((await box.locator(sc.questionText).first().innerText().catch(() => '')) || '').replace(/\*/g, '').replace(/\s+/g, ' ').trim();
+        if (!question) continue;
+        const pills = box.locator(sc.option);
+        const nPills = await pills.count().catch(() => 0);
+        const labels = [];
+        for (let k = 0; k < nPills; k++) labels.push(((await pills.nth(k).innerText().catch(() => '')) || '').trim());
+        const field = box.locator(sc.input).first();
+        const isMandatory = mandatory.has(question.toLowerCase());
+
+        // Already filled from your Hirist profile → keep it.
+        let have = '';
+        if (nPills) {
+          for (let k = 0; k < nPills; k++) if (/\bselected\b/.test(await pills.nth(k).getAttribute('class').catch(() => '') || '')) have = labels[k];
+        } else if (await field.count().catch(() => 0)) have = (await field.inputValue().catch(() => '')) || '';
+        if (have) { asked.push({ question, prefilled: true }); continue; }
+
+        const resolved = resolveAnswer(question, config);
+        let value = null, ai = null;
+        if (resolved.matched) value = String(resolved.answer);
+        else if (askAI && config.autoAnswer && config.autoAnswer.enabled) {
+          const live = await askAI(question, labels).catch(() => null);
+          if (live && live.answer) {
+            value = String(live.answer); ai = live.confidence || null;
+            if (live.rule) config.answers = [live.rule, ...(config.answers || [])];
+          }
+        }
+        if (value == null) {
+          if (isMandatory) return { outcome: 'skipped', reason: 'Unanswered screening question — answer it under Jobs → Needs answer', question, options: labels };
+          continue;
+        }
+        if (nPills) {
+          const chosen = pickOption(value, labels);
+          if (!chosen) {
+            if (isMandatory) return { outcome: 'skipped', reason: 'Unanswered screening question — answer it under Jobs → Needs answer', question, options: labels };
+            continue;
+          }
+          await pills.nth(labels.indexOf(chosen)).click();
+        } else {
+          const isNumber = (await field.getAttribute('type').catch(() => '')) === 'number';
+          const typed = isNumber ? ((/\d+(\.\d+)?/.exec(value) || [])[0] || '') : value;
+          if (!typed) {
+            if (isMandatory) return { outcome: 'skipped', reason: 'Unanswered screening question — answer it under Jobs → Needs answer', question, options: labels };
+            continue;
+          }
+          await field.click();
+          await field.fill('').catch(() => {});
+          await field.type(typed, { delay: 15 });
+        }
+        asked.push({ question, ai });
+        await jitter(300, 700);
+      }
+      const next = page.locator(sc.submit).first();
+      if (!(await next.count().catch(() => 0))) return { outcome: 'failed', terminal: false, reason: `${meta.label} form has no submit button` };
+      const before = page.url();
+      await next.click();
+      await page.waitForTimeout(3000);
+      // A second step shows more questions on the same page; otherwise done.
+      if (!(await page.locator(sc.questionBox).first().isVisible().catch(() => false)) && page.url() === before) break;
+      if (page.url() !== before && !page.url().includes(sc.urlTest)) break;
+    }
+    job._screened = asked;
+    return null;
+  }
+
+  async function applyOne(page, job, state, { config = {}, askAI = null } = {}) {
     const a = meta.applyFlow;
     const want = job.sourceId != null ? String(job.sourceId) : null;
     let detail = null, sent = null, otherJob = null;
+    const mandatory = new Set();
     const onResponse = async (res) => {
       try {
         const u = res.url();
         const m = res.request().method();
         if (a.detailTest && a.detailTest(u)) { detail = await res.json().catch(() => null); return; }
+        if (a.screening && a.screening.questionnaireTest(u)) {
+          const j = await res.json().catch(() => null);
+          for (const sec of (j && j.data && j.data[0] && j.data[0].sections) || [])
+            for (const q of sec.detailedQuestions || []) if (q.mandatory) mandatory.add(String(q.question || '').replace(/\s+/g, ' ').trim().toLowerCase());
+          return;
+        }
         if (!a.applyRequest || !a.applyRequest(u, m)) return;
         let post = null;
         try { post = res.request().postDataJSON(); } catch (_) {}
@@ -397,12 +488,23 @@ function makeDriver(meta) {
       await pressButton(page, btn, label, state);
 
       // The site's answer, or where the click took us instead.
-      let redirect = null;
+      let redirect = null, screeningHit = false;
       for (let i = 0; i < 30 && !sent && !otherJob; i++) {
         await page.waitForTimeout(500);
         const u = page.url();
+        if (a.screening && u.includes(a.screening.urlTest) && !urlBefore.includes(a.screening.urlTest)) { screeningHit = true; break; }
         redirect = (a.redirects || []).find(r => u.includes(r.test) && !urlBefore.includes(r.test)) || null;
         if (redirect) break;
+      }
+      if (screeningHit) {
+        const out = await fillScreening(page, job, { config, askAI, mandatory });
+        if (out) return out;
+        // The form is in; the application itself is still only counted on the
+        // site's own answer to the apply request.
+        for (let i = 0; i < 30 && !sent && !otherJob; i++) await page.waitForTimeout(500);
+        if (!sent && !otherJob) {
+          return { outcome: 'failed', terminal: true, reason: `Filled and submitted the ${meta.label} form (${(job._screened || []).length} question(s)) but ${meta.label} never confirmed the application — check the listing before re-approving` };
+        }
       }
       for (const p of popups) await p.close().catch(() => {});
 
@@ -417,7 +519,10 @@ function makeDriver(meta) {
         if (sent.ok && !refused(sent.body)) {
           await dismissModals(page);
           const msg = siteMessage(sent.body);
-          return { outcome: 'applied', reason: `Applied on ${meta.label}${msg ? ` — "${msg}"` : ''}` };
+          const sc = job._screened || [];
+          const byAI = sc.filter(x => x.ai);
+          const note = sc.length ? ` after ${sc.length} form question(s)${byAI.length ? ` · ${byAI.length} answered by AI (${byAI.map(x => `${x.ai}%`).join(', ')})` : ''}` : '';
+          return { outcome: 'applied', reason: `Applied on ${meta.label}${note}${msg ? ` — "${msg}"` : ''}` };
         }
         return { outcome: 'failed', terminal: true, reason: `${meta.label} refused the application (HTTP ${sent.status})${siteMessage(sent.body) ? `: ${siteMessage(sent.body)}` : ''}` };
       }
@@ -434,7 +539,7 @@ function makeDriver(meta) {
     }
   }
 
-  async function apply(session, { jobs = [], dryRun = false, onProgress = () => {}, onResult = async () => {}, config = {} } = {}) {
+  async function apply(session, { jobs = [], dryRun = false, onProgress = () => {}, onResult = async () => {}, config = {}, askAI = null } = {}) {
     // The server never hands a real apply to a platform whose apply is not
     // proven; this is the second lock on the same door.
     if (dryRun ? !meta.capabilities.dryRun : !meta.capabilities.apply) {
@@ -458,7 +563,7 @@ function makeDriver(meta) {
         const state = { clicked: false };
         try {
           result = await Promise.race([
-            dryRun ? rehearse(page, job) : applyOne(page, job, state),
+            dryRun ? rehearse(page, job) : applyOne(page, job, state, { config, askAI }),
             new Promise((_, rej) => setTimeout(() => rej(new Error(`did not finish within ${JOB_TIMEOUT_MS / 1000}s`)), JOB_TIMEOUT_MS)),
           ]);
         } catch (err) {

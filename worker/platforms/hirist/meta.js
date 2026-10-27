@@ -137,9 +137,23 @@ module.exports = {
       if (!d || typeof d !== 'object') return null;
       if (Number(d.applied) > 0 || d.isApplied) return 'Hirist says you have already applied to this job';
       if (d.applyUrl && !Number(d.confidential)) return 'Applies on the company site — Hirist hands you over to it, apply there yourself';
-      if (Number(d.assessmentFlags) && !d.assessmentCompleted) return 'Needs a screening test on Hirist first — open the listing to take it';
       if (Number(d.status) === 0) return 'Listing closed — Hirist no longer takes applications for it';
       return null;
+    },
+    // The recruiter's form after Apply (verified live 2026-10-27, job 1680253):
+    // the click goes to /job/<id>/screening, questions from
+    // assessmentapi.hirist.tech/v1/questionnaire (type 5/4 text, 7 number,
+    // 2 pill choice; `mandatory` per question), submit button "Next". Profile
+    // values (salary, notice period) arrive pre-filled and are kept.
+    screening: {
+      urlTest: '/screening',
+      questionnaireTest: (url) => /assessmentapi\.hirist\.tech\/v1\/questionnaire\?/.test(url),
+      questionBox: '.screening-question-container',
+      questionText: '.question-text',
+      input: 'textarea, input[type=number], input[type=text]',
+      option: 'button.pill-option',
+      submit: 'button[type=submit]',
+      maxSteps: 3,
     },
     // Where a click can send you instead of applying.
     redirects: [
