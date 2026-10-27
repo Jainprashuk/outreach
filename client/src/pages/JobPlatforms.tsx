@@ -99,8 +99,10 @@ function scheduleText(o: NaukriOverview): string {
 }
 
 // A small popover menu, closed by an outside click or Escape.
-function Menu({ label, icon, disabled, title, primary, items }: {
+function Menu({ label, icon, disabled, title, primary, align = 'right', items }: {
   label: string; icon: string; disabled?: boolean; title?: string; primary?: boolean;
+  /** Which edge of the button the menu lines up with. 'left' for buttons near the page's left edge. */
+  align?: 'left' | 'right';
   items: Array<{ key: string; label: string; note?: string; checked?: boolean; disabled?: boolean; onPick: () => void }>;
 }) {
   const [open, setOpen] = useState(false);
@@ -121,7 +123,7 @@ function Menu({ label, icon, disabled, title, primary, items }: {
       </button>
       {open && (
         <span role="menu" style={{
-          position: 'absolute', top: 'calc(100% + 4px)', right: 0, zIndex: 50, minWidth: 210,
+          position: 'absolute', top: 'calc(100% + 4px)', [align]: 0, zIndex: 50, minWidth: 210,
           background: 'var(--bg)', border: '1px solid var(--border-md)', borderRadius: 'var(--radius)',
           boxShadow: 'var(--shadow-lg)', padding: 4, display: 'flex', flexDirection: 'column',
         }}>
@@ -525,7 +527,7 @@ function AllActivity({ platforms, onOpen, onOpenWaiting, onRun, busy }: {
               </Hint>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 <Menu label={`Run on ${p.label}`} icon="ti-player-play" primary disabled={!r.canRun || busy}
-                  title={r.canRun ? undefined : r.text} items={items} />
+                  title={r.canRun ? undefined : r.text} align="left" items={items} />
                 <button className="btn btn-sm" type="button" onClick={() => onOpen(p.id)}>Open</button>
               </div>
             </Card>
