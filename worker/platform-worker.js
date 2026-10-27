@@ -346,9 +346,16 @@ async function executeRun(runDoc, config, openSession = null) {
       }
 
       if (runDoc.kind === 'harvest') {
-        const { jobs, searches, recommended = 0 } = await Promise.race([driver.harvest(session, { config, onProgress, loggedOut }), expired]);
+        const { jobs, searches, recommended = 0, answeredEmpty = false } = await Promise.race([driver.harvest(session, { config, onProgress, loggedOut }), expired]);
         // Same doctrine as the LinkedIn harvest's zero-rendered check: a page
         // that painted nothing is a failure, never "no new jobs today".
+        if (jobs.length === 0 && answeredEmpty) {
+          // The site's own feed answered with an empty list (e.g. Instahyre
+          // when every match is already applied): nothing new, not a failure.
+          await finish('done', { exitCode: 0 });
+          log(`harvest done — ${LABEL} had no new jobs (its feed answered empty)`);
+          return {};
+        }
         if (jobs.length === 0) {
           const recOnly = config.sources && config.sources.recommended && config.sources.searches === false;
           // A driver can name its own pages; Naukri's wording is the default.

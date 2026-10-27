@@ -24,7 +24,11 @@ module.exports = {
   apiHosts: ['instahyre.com'],
   // Only JSON that looks like a list endpoint is read (skips analytics beacons).
   // The matched list only (verified) — not its filter counts.
-  feedTest: (url) => /\/candidate_opportunities\/candidate_matching\?/.test(url),
+  // Search results (verified 2026-10-27): GET /api/v1/job_search?…&offset=N, 20 per page.
+  feedTest: (url) => /\/candidate_opportunities\/candidate_matching\?|\/api\/v1\/job_search\?/.test(url),
+  // The search page paginates with an Angular "Next »" link: no URL parameter
+  // and no scrolling loads page 2 (verified), so the driver clicks it.
+  nextText: /^next\s*»/i,
 
   // Logged in = the Django session cookie (verified).
   cookieUrls: [ORIGIN],
@@ -52,7 +56,7 @@ module.exports = {
     { url: `${ORIGIN}/candidate/opportunities/?matching=true`, label: 'Matched opportunities', origin: 'recommended' },
   ],
   recruiterFeed: true,
-  // Search results. verify
+  // Search results (verified 2026-10-27: /search-jobs?skills=react&years=2 → "199 react jobs").
   searchUrl: (s) => {
     const u = new URL(`${ORIGIN}/search-jobs/`);
     if (s.keywords) u.searchParams.set('skills', s.keywords);
@@ -67,14 +71,16 @@ module.exports = {
     id: ['job.id', 'id'],
     title: ['job.title', 'job.candidate_title', 'title'],
     company: ['job.hiring_company_name', 'employer.company_name'],
-    location: ['job.locations'],
-    tags: ['job.keywords'],
+    location: ['job.locations', 'locations'],
+    tags: ['job.keywords', 'keywords'],
     // A recruiter wrote to you about it.
     recruiter: ['message'],
   },
   jobUrl: (o, url) => {
     const rel = o.job && o.job.opportunity_url;
     if (rel) return `${ORIGIN}${rel}`;
+    // Search rows are flat and carry the public listing URL.
+    if (o.public_url) return o.public_url;
     return url || (o.id != null ? `${ORIGIN}/job-${o.id}` : '');
   },
 

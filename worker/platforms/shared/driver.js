@@ -64,6 +64,10 @@ function makeDriver(meta) {
 
   // Open `url`, collect the jobs its feed responses carry, scrolling to load
   // more until nothing new arrives twice or the cap is reached.
+  // True once any listing's feed actually ANSWERED this harvest, even with an
+  // empty list: the site spoke and had nothing, which is not a broken page.
+  let feedAnswered = false;
+
   async function readListing(session, { url, label, origin, maxPages, onProgress, found }) {
     const page = await newPage(session);
     const feed = collectFeed(page, (u) => sameSite(u) && (!meta.feedTest || meta.feedTest(u)), {
@@ -99,6 +103,18 @@ function makeDriver(meta) {
       for (let i = 0; i < maxPages && idle < 2; i++) {
         const before = feed.jobs.size;
         onProgress({ phase: 'searching', label, page: i + 1, pagesTotal: maxPages, found: found() + feed.jobs.size });
+        // A site whose pages are a "Next »" link (meta.nextText): click it, wait
+        // for that page's feed response. Pagination, nothing else.
+        if (meta.nextText) {
+          const next = page.getByText(meta.nextText).first();
+          if (!(await next.count().catch(() => 0))) break;
+          const since = Date.now();
+          await next.click({ timeout: 3000 }).catch(() => {});
+          await waitForFeed(page, feed, since);
+          await check(page, label);
+          idle = feed.jobs.size === before ? idle + 1 : 0;
+          continue;
+        }
         await page.mouse.wheel(0, 4000).catch(() => {});
         await jitter(...PAGE_DELAY);
         // A "Load more" / "Show more" button, if the page uses one instead of
@@ -109,6 +125,7 @@ function makeDriver(meta) {
         idle = feed.jobs.size === before ? idle + 1 : 0;
       }
     } finally {
+      if (feed.lastAt() > 0) feedAnswered = true;
       feed.stop();
       await page.close().catch(() => {});
     }
@@ -119,6 +136,7 @@ function makeDriver(meta) {
 
   async function harvest(session, { config = {}, onProgress = () => {}, loggedOut = false } = {}) {
     const s = config.sources || {};
+    feedAnswered = false;
     // Logged out (a site whose search is public), feeds that need a login are
     // left out: opening one would land on the login wall and the guard would
     // pause the platform for a week over nothing.
@@ -172,7 +190,7 @@ function makeDriver(meta) {
     const { applyFilters } = require('../../../lib/naukriFilters');
     const all = [...byId.values()];
     const { kept, counts } = applyFilters(all, config.filters || {});
-    return { jobs: kept, searches: searches.length, recommended, seen: counts.total, dropped: counts.dropped };
+    return { jobs: kept, searches: searches.length, recommended, seen: counts.total, dropped: counts.dropped, answeredEmpty: feedAnswered && counts.total === 0 };
   }
 
   async function track(session, { onProgress = () => {} } = {}) {
