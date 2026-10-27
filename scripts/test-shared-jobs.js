@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Jobs "Everyone" view test (lib/sharedJobs.js, routes/sharedJobs.js). DEV DATABASE ONLY.
+ * Jobs "Others" view test (lib/sharedJobs.js, routes/sharedJobs.js). DEV DATABASE ONLY.
  * Scratch users and rows, all removed at the end.
  *   node scripts/test-shared-jobs.js
  *
@@ -60,10 +60,10 @@ const tag = `sj${Date.now()}`;
 
     const res = await get(`/api/shared-jobs?q=${tag}&limit=50`);
     const keys = res.jobs.map(j => j.key).sort();
-    ok('shows own + other sharing accounts, one row per job', JSON.stringify(keys) === JSON.stringify([`hirist:${tag}-2`, `naukri:${tag}-1`]), JSON.stringify(keys));
+    ok('shows other accounts’ jobs only, one row per job', JSON.stringify(keys) === JSON.stringify([`hirist:${tag}-2`, `naukri:${tag}-1`]), JSON.stringify(keys));
     ok('opted-out, disabled, stale and deleted never appear', !keys.some(k => /-3$|-4$|-5$|-6$/.test(k)));
     const naukri = res.jobs.find(j => j.key === `naukri:${tag}-1`);
-    ok('seenBy counts accounts, not names', naukri.seenBy === 2);
+    ok('seenBy counts the other accounts, not names', naukri.seenBy === 1);
     ok('mine marks the viewer’s own row', naukri.mine && naukri.mine.applyStatus === 'applied' && res.jobs.find(j => j.key === `hirist:${tag}-2`).mine === null);
     const ALLOWED = ['company', 'experienceMax', 'experienceMin', 'key', 'lastSeenAt', 'location', 'mine', 'platform', 'postedAt', 'postedText', 'salaryText', 'seenBy', 'tags', 'title', 'url'];
     ok('every row has exactly the allowlisted keys', res.jobs.every(j => JSON.stringify(Object.keys(j).sort()) === JSON.stringify(ALLOWED)), JSON.stringify(Object.keys(res.jobs[0])));
@@ -72,9 +72,14 @@ const tag = `sj${Date.now()}`;
     const hirist = await get(`/api/shared-jobs?q=${tag}&platform=hirist`);
     ok('platform filter', hirist.total === 1 && hirist.jobs[0].platform === 'hirist');
 
+    // A job only the viewer has is not "others'": B sees A's job only if someone else also has it.
+    await NaukriJob.create(row(a, 'instahyre', 7));
+    ok('a job only the viewer found is not listed', !(await get(`/api/shared-jobs?q=${tag}`)).jobs.some(j => j.key === `instahyre:${tag}-7`));
     who = optedOut._id;
     const mineView = await get(`/api/shared-jobs?q=${tag}`);
     ok('an opted-out viewer still sees the pool (view is not gated by sharing)', mineView.total >= 2);
+    who = b._id;
+    ok('a job only B found is not listed for B', !(await get(`/api/shared-jobs?q=${tag}`)).jobs.some(j => j.key === `hirist:${tag}-2`));
 
     who = a._id;
     const add = await post('/api/shared-jobs/add', { keys: [`hirist:${tag}-2`, `naukri:${tag}-1`, `instahyre:${tag}-3`, `nope:1`] });

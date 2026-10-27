@@ -67,9 +67,9 @@ function OutreachChip({ company, st, finding, onFind }: {
   );
 }
 
-// "Everyone": the jobs every sharing account's platforms found. Read-only; the only
+// "Others": the jobs other sharing accounts' platforms found. Read-only; the only
 // action is adding a job to your own list (pending, scored on your profile).
-function EveryoneJobs({ onChanged }: { onChanged: () => void }) {
+function OthersJobs({ onChanged }: { onChanged: () => void }) {
   const toast = useToast();
   const [rows, setRows] = useState<SharedJob[]>([]);
   const [total, setTotal] = useState(0);
@@ -162,7 +162,7 @@ function EveryoneJobs({ onChanged }: { onChanged: () => void }) {
 export default function Jobs() {
   const toast = useToast();
   const { canSeeLibrary } = useSession();
-  const [scope, setScope] = useState<'mine' | 'everyone'>('mine');
+  const [scope, setScope] = useState<'mine' | 'others'>('mine');
   const { findPeople, finding } = useFindPeople();
   const navigate = useNavigate();
   const [addingRec, setAddingRec] = useState<string | null>(null);
@@ -368,13 +368,13 @@ export default function Jobs() {
           <button type="button" className={`btn btn-sm${scope === 'mine' ? ' btn-primary' : ''}`} onClick={() => setScope('mine')}>
             <i className="ti ti-user" /> Mine
           </button>
-          <button type="button" className={`btn btn-sm${scope === 'everyone' ? ' btn-primary' : ''}`} onClick={() => setScope('everyone')}
-            title="Jobs found by every account on the platforms. You can only act on your own; add one to yours to work on it.">
-            <i className="ti ti-world" /> Everyone
+          <button type="button" className={`btn btn-sm${scope === 'others' ? ' btn-primary' : ''}`} onClick={() => setScope('others')}
+            title="Jobs found by other accounts on the platforms. You can only act on your own; add one to yours to work on it.">
+            <i className="ti ti-users" /> Others
           </button>
         </div>
       )}
-      {scope === 'everyone' && canSeeLibrary ? <EveryoneJobs onChanged={loadCounts} /> : (
+      {scope === 'others' && canSeeLibrary ? <OthersJobs onChanged={loadCounts} /> : (
         <>
       <div className="nav-tabs" style={{ marginBottom: 12 }}>
         {STAGES.map(s => (
