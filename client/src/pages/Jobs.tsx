@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import MoveToInterviewModal, { type InterviewSeed } from '../components/MoveToInterviewModal';
 import { FitBadge } from '../components/naukri/ReviewQueue';
@@ -11,9 +11,10 @@ import { SkeletonRows } from '../components/Skeleton';
 import { RefreshBar, Refreshing } from '../components/RefreshBar';
 import { useToast } from '../context/ToastContext';
 import {
-  bulkNaukriJobsApi, companyStatusApi, decideNaukriJobsApi, listNaukriJobsApi, updateNaukriJobApi,
+  bulkNaukriJobsApi, companyStatusApi, decideNaukriJobsApi, listNaukriJobsApi, lookupCompanyApi, recruitersToDiscoverApi, updateNaukriJobApi,
   type CompanyOutreach, type NaukriApplyStatus, type NaukriJob, type NaukriJobQuery,
 } from '../lib/api';
+import { autoPick } from '../lib/prospects';
 
 // Every role from every job platform in one pipeline, with where each company
 // stands in your outreach. Job Platforms stays the place for workers and setup;
@@ -40,6 +41,8 @@ const STAGES: { key: Stage; label: string; icon: string; tip: string; query: Nau
 const PAGE = 40;
 const FUNNEL: NaukriApplyStatus[] = ['applied', 'in-review', 'interviewing', 'offer', 'rejected'];
 
+const FREE_MAIL = /@(gmail|googlemail|yahoo|ymail|outlook|hotmail|live|rediffmail|icloud|proton|protonmail|aol)\./i;
+const isPersonalMail = (e: string) => FREE_MAIL.test(e);
 const sameName = (s: string) => s.trim().toLowerCase();
 
 function OutreachChip({ company, st, finding, onFind }: {
@@ -66,6 +69,31 @@ function OutreachChip({ company, st, finding, onFind }: {
 export default function Jobs() {
   const toast = useToast();
   const { findPeople, finding } = useFindPeople();
+  const navigate = useNavigate();
+  const [addingRec, setAddingRec] = useState<string | null>(null);
+
+  // The recruiters the platform showed for a job → Discover people. The company's
+  // domain comes from a recruiter's work address when there is one, else from the
+  // same company lookup Find people uses; if neither is certain, Discover opens
+  // with the name filled in so you pick the company.
+  const addRecruiters = async (j: NaukriJob) => {
+    setAddingRec(j.id);
+    try {
+      const workMail = (j.recruiters || []).map(r => r.email).find(e => e && !isPersonalMail(e));
+      let domain = workMail ? workMail.split('@')[1] : '';
+      let name = j.company;
+      if (!domain) {
+        const sure = autoPick((await lookupCompanyApi(j.company)).candidates);
+        if (!sure) { navigate(`/discover?find=${encodeURIComponent(j.company)}&job=${j.id}`); return; }
+        domain = sure.domain; name = sure.name || j.company;
+      }
+      const r = await recruitersToDiscoverApi({ jobId: j.id, domain, companyName: name });
+      toast(r.added.length ? `Added ${r.added.length} recruiter${r.added.length === 1 ? '' : 's'} to Discover` : 'Already in Discover', 'success');
+      navigate(`/discover?domain=${encodeURIComponent(domain)}`);
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not add the recruiters', 'error');
+    } finally { setAddingRec(null); }
+  };
 
   const [stage, setStage] = useState<Stage>('review');
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
@@ -202,6 +230,18 @@ export default function Jobs() {
       </div>
       {showCompany && <OutreachChip company={j.company} st={status(j.company)} finding={finding === j.id} onFind={() => find(j)} />}
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>{stageActions(j)}</div>
+      {(j.recruiters || []).length > 0 && (
+        <div style={{ flexBasis: '100%', paddingLeft: 44, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+          <i className="ti ti-user-star" style={{ color: 'var(--text2)' }} />
+          <Muted>
+            {j.recruiters!.slice(0, 3).map(r => [r.name, r.title, r.email].filter(Boolean).join(' · ')).join('  |  ')}
+          </Muted>
+          <button className="btn btn-xs" type="button" disabled={addingRec === j.id} onClick={() => addRecruiters(j)}
+            title="Add them to Discover as people to review. Nothing is emailed until you move them to outreach.">
+            <i className="ti ti-user-plus" /> {addingRec === j.id ? 'Adding…' : 'Add to Discover'}
+          </button>
+        </div>
+      )}
     </div>
   );
 

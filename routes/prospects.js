@@ -854,6 +854,62 @@ router.post('/restore', async (req, res) => {
 
 // POST /api/prospects/add-generic — { domain, email }: a shared mailbox (careers@)
 // found on the company's website, added as a prospect of its own.
+// POST /api/prospects/from-job { jobId, domain, companyName?, key? }
+//
+// Turns the recruiters a job platform showed for a job (NaukriJob.recruiters) into
+// Discover people for the company's domain. An address the platform showed is kept
+// as the person's own; a name alone gets the company's decided email format, as a
+// search result would. They land as 'ready' rows for you to review and move.
+router.post('/from-job', async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!isId(b.jobId)) return res.status(400).json({ error: 'Bad jobId' });
+    const domain = ep.normalizeDomain(b.domain);
+    if (!domain || ep.isFreeMail(domain)) return res.status(400).json({ error: 'Need the company’s own domain' });
+    const block = await loadBlocklistSets(req.userId);
+    if (block.domains.has(domain)) return res.status(400).json({ error: `${domain} is on your blocklist` });
+    const job = await NaukriJob.findOne({ _id: b.jobId, userId: req.userId, deleted: { $ne: true } }, { company: 1, recruiters: 1 }).lean();
+    if (!job) return res.status(404).json({ error: 'That job wasn’t found' });
+    const people = (job.recruiters || []).filter(r => !b.key || r.key === b.key);
+    if (!people.length) return res.status(404).json({ error: 'No recruiters were found on this job' });
+
+    const company = String(b.companyName || job.company || '').trim().slice(0, 120);
+    const { decision } = await finder.resolveDomain(req.userId, domain);
+    const SOURCES = Prospect.schema.path('emailSource').enumValues;
+    const added = [], existed = [], skipped = [];
+    for (const r of people) {
+      const name = r.name || '';
+      const key = name ? ep.nameKey(name) : `generic|${ep.localPartOf(r.email)}`;
+      if (!key) { skipped.push(r.key); continue; }
+      const dupe = await Prospect.findOne({ userId: req.userId, domain, nameKey: key, ...BASE_FILTER }).lean();
+      if (dupe) { existed.push(serialize(dupe)); continue; }
+
+      let email = null, pattern = null, confidence = null, source = null, note = '';
+      if (r.email) { email = r.email; confidence = ep.isRoleAddress(r.email) ? 'generic' : 'high'; source = 'manual'; }
+      else {
+        email = ep.generateEmail(name, decision.pattern, domain);
+        pattern = email ? decision.pattern : null;
+        confidence = email ? decision.confidence || 'low' : null;
+        source = email ? (SOURCES.includes(decision.source) ? decision.source : 'default') : null;
+        if (!email) note = 'Name is too short to build an address';
+      }
+      const existing = email ? await Contact.findOne({ userId: req.userId, email, deleted: { $ne: true } }, { _id: 1 })
+        .collation({ locale: 'en', strength: 2 }).lean() : null;
+      const doc = await Prospect.create({
+        userId: req.userId, domain, company,
+        name: name || `${ep.localPartOf(email)} (${company || domain})`,
+        title: r.title || (name ? 'Recruiter' : 'Recruiting mailbox'), nameKey: key,
+        linkedin: r.profileUrl || null, foundVia: ['job'], roleMatch: true,
+        knownEmail: r.email || null, knownEmailVia: r.email ? 'job' : null,
+        email, emailPattern: pattern, emailConfidence: confidence, emailSource: source, note,
+        status: email ? 'ready' : 'new', existingContactId: existing ? String(existing._id) : null,
+      });
+      added.push(serialize(doc.toObject()));
+    }
+    res.status(added.length ? 201 : 200).json({ added, existed, skipped });
+  } catch (err) { err500(res, err); }
+});
+
 router.post('/add-generic', async (req, res) => {
   try {
     const domain = ep.normalizeDomain(req.body && req.body.domain);

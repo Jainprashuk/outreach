@@ -29,7 +29,7 @@ import { CONFIDENCE_LABEL, PATTERN_EXAMPLE, SOURCE_LABEL, autoPick } from '../li
 type Tab = 'open' | 'moved' | 'discarded' | 'all';
 const TAB_LABEL: Record<Tab, string> = { open: 'To review', moved: 'In outreach', discarded: 'Discarded', all: 'All' };
 const OPEN = new Set(['new', 'ready', 'error']);
-const VIA_LABEL: Record<string, string> = { search: 'Web search', github: 'GitHub', website: 'Website' };
+const VIA_LABEL: Record<string, string> = { search: 'Web search', github: 'GitHub', website: 'Website', job: 'Job post' };
 
 const isRunning = (s: ProspectSearch | null) => !!s && (s.status === 'queued' || s.status === 'running');
 const canMove = (p: Prospect) => p.status === 'ready' && !!p.email && !p.existingContactId;

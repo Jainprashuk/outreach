@@ -26,6 +26,7 @@ const {
   kindBlocked, isEnabled, publicRegistry, PLATFORM_IDS, SITE_FIELDS,
 } = require('../lib/platforms');
 const { dupKeyOf, dupesFor, dupText, blocksAuto, blocksApply } = require('../lib/jobDupes');
+const { recruitersFor, MAX_RECRUITERS } = require('../lib/recruiterContacts');
 
 // mergeParams: the same router is mounted at /api/naukri (Naukri) and at
 // /api/p/:platform (every platform), and reads the platform from req.platform.
@@ -2334,6 +2335,16 @@ router.post('/ingest', async (req, res) => {
       if (result.upsertedCount) created++;
       else if (result.modifiedCount) updated++;
       else skipped++;
+
+      // Recruiters this platform showed for the job: addresses in its text plus
+      // any the feed named. Pushed one by one by identity, so a re-harvest adds
+      // what is new and never duplicates or drops what an earlier one found.
+      for (const r of recruitersFor({ description: raw.description, feed: raw.recruiters })) {
+        await NaukriJob.updateOne(
+          { userId: req.userId, sourceKey, 'recruiters.key': { $ne: r.key } },
+          { $push: { recruiters: { $each: [r], $slice: -MAX_RECRUITERS } } },
+        );
+      }
 
       // Auto-approve: NEW rows only, so a job you moved back to Review by hand
       // is never re-approved behind your back by the next harvest. Never a

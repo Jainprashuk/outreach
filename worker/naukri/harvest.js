@@ -182,6 +182,14 @@ function fromFeed(d, tabLabel) {
     url: d.jdURL ? new URL(d.jdURL, 'https://www.naukri.com').toString() : '',
     // Naukri says so outright here; no guessing from the employer's history.
     companySite: d.companyApplyJob === true,
+    // Only if Naukri's own feed names who posted it (field names unverified —
+    // nothing is stored when they are absent). No extra page is opened for this.
+    ...(() => {
+      const o = d.recruiter && typeof d.recruiter === 'object' ? d.recruiter : {};
+      const name = String(d.recruiterName || o.name || o.recruiterName || '').trim();
+      const email = String(d.recruiterEmail || o.email || '').trim();
+      return name || email ? { recruiters: [{ name, email, title: String(o.designation || o.title || '').trim() }] } : {};
+    })(),
     alreadyApplied: false,
     recommendedTab: tabLabel,
   };

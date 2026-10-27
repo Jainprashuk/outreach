@@ -1487,6 +1487,7 @@ export interface NaukriRun {
   updatedAt: string;
 }
 
+export interface JobRecruiter { key: string; name: string; title: string; email: string; profileUrl: string; via: 'feed' | 'text' }
 export interface NaukriJob {
   id: string;
   sourceId: string;
@@ -1521,6 +1522,8 @@ export interface NaukriJob {
   naukriStageAt?: string | null;
   naukriTimeline?: Array<{ id: number; value: string; at: string | null }>;
   listingOpen?: boolean | null;
+  /** Recruiters the job platform itself showed for this role (name from its feed, or an address in the job text). */
+  recruiters?: JobRecruiter[];
   /** Cleared out of the inbox by the tidy rules; Restore brings it back. */
   tidiedAt?: string | null;
   tidyReason?: string;
@@ -2259,6 +2262,10 @@ export const removeDiscoveryKeyApi = (provider: DiscoveryProvider) =>
 
 export const startProspectSearchApi = (body: { domain: string; companyName?: string; roles?: string[]; force?: boolean; naukriJobId?: string }) =>
   apiFetch<{ search: ProspectSearch; reused?: boolean }>('/api/prospects/search', { method: 'POST', ...json(body) });
+
+/** Recruiters a job platform showed for a job → Discover people (ready to review, never emailed). */
+export const recruitersToDiscoverApi = (body: { jobId: string; domain: string; companyName?: string; key?: string }) =>
+  apiFetch<{ added: unknown[]; existed: unknown[]; skipped: string[] }>('/api/prospects/from-job', { method: 'POST', ...json(body) });
 
 // ── Discover: "Worth searching" ──────────────────────────────────────────────
 export interface WorthReason {

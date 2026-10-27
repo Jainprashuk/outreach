@@ -141,6 +141,14 @@ const naukriJobSchema = new mongoose.Schema({
   naukriStageAt:  { type: Date, default: null },
   naukriTimeline: { type: [{ _id: false, id: Number, value: String, at: Date }], default: [] },
   listingOpen:    { type: Boolean, default: null },
+  // Recruiters the job platform itself showed for this role: an address written
+  // in the job text, or a name/title the platform's own feed carried. Added by a
+  // harvest, never removed by one (lib/recruiterContacts.js). `key` is the
+  // identity (address, else name) that makes a re-harvest idempotent.
+  recruiters: {
+    type: [{ _id: false, key: String, name: String, title: String, email: String, profileUrl: String, via: String }],
+    default: [],
+  },
   trackedAt:      { type: Date, default: null },
   applyHistory: {
     type: [{

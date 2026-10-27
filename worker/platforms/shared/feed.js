@@ -50,6 +50,39 @@ const DEFAULT_FIELDS = {
   external: ['is_external', 'isExternal', 'external', 'apply_on_company_site', 'redirect_to_company', 'external_apply'],
 };
 
+// Who posted it, when the platform's own JSON says. Objects and flat fields both
+// seen in job feeds; names are guesses marked `verify` like the rest of F, and
+// nothing is kept unless it has a name or an address. Never reads another page.
+const RECRUITER_OBJECTS = ['recruiter', 'recruiter_details', 'recruiterDetails', 'posted_by', 'postedBy', 'hiring_manager',
+  'hiringManager', 'contact_person', 'contactPerson', 'contact', 'job.recruiter', 'job.posted_by'];
+const RECRUITER_FLAT = {
+  name: ['recruiter_name', 'recruiterName', 'posted_by_name', 'postedByName', 'contact_name', 'contactName', 'hiring_manager_name'],
+  title: ['recruiter_designation', 'recruiterDesignation', 'recruiter_title', 'posted_by_designation'],
+  email: ['recruiter_email', 'recruiterEmail', 'contact_email', 'contactEmail'],
+  profileUrl: ['recruiter_linkedin', 'recruiterLinkedin', 'recruiter_profile_url'],
+};
+const fromObject = (v) => {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null;
+  const pick = (keys) => keys.map(k => v[k]).find(x => typeof x === 'string' && x.trim()) || '';
+  const name = pick(['name', 'full_name', 'fullName', 'display_name', 'recruiter_name']) ||
+    [v.first_name || v.firstName, v.last_name || v.lastName].filter(Boolean).join(' ');
+  const r = {
+    name, title: pick(['designation', 'title', 'role', 'job_title', 'position']),
+    email: pick(['email', 'email_id', 'emailId', 'work_email']),
+    profileUrl: pick(['linkedin', 'linkedin_url', 'linkedinUrl', 'profile_url', 'profileUrl']),
+  };
+  return r.name || r.email ? r : null;
+};
+function recruitersIn(o) {
+  const out = [];
+  for (const k of RECRUITER_OBJECTS) { const r = fromObject(first(o, [k])); if (r) out.push(r); }
+  const flat = Object.fromEntries(Object.entries(RECRUITER_FLAT).map(([f, keys]) => [f, first(o, keys)]));
+  if (typeof flat.name === 'string' && flat.name.trim() || typeof flat.email === 'string' && flat.email.trim()) {
+    out.push({ name: flat.name || '', title: flat.title || '', email: flat.email || '', profileUrl: flat.profileUrl || '' });
+  }
+  return out;
+}
+
 const stripHtml = (s) => String(s || '').replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&')
   .replace(/\s+/g, ' ').trim();
 
@@ -123,6 +156,7 @@ function toJob(raw, { fields = {}, baseUrl = '', urlFor = null } = {}) {
     description: stripHtml(first(o, F.description) || '').slice(0, 5000),
     ...posted(first(o, F.posted)),
     ...(ext === true || ext === 'true' || ext === 1 ? { companySite: true } : {}),
+    ...(() => { const r = recruitersIn(o); return r.length ? { recruiters: r.slice(0, 5) } : {}; })(),
     // true, or (Instahyre) a recruiter's message object / text.
     ...((() => { const r = first(o, F.recruiter); return r === true || (r && typeof r === 'object') || (typeof r === 'string' && r.trim()); })() ? { recruiter: true } : {}),
   };
