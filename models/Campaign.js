@@ -61,7 +61,7 @@ const campaignSchema = new mongoose.Schema({
   lastReleaseAt: { type: Date, default: null },
   lastJobId:     { type: String, default: null },
   lastError:     { type: String, default: null },
-  // Advisory lease, same shape as Settings.postingSyncLockAt (lib/postingSync.js).
+  // Advisory lease: stops two runners from releasing the same campaign at once.
   // Held at most LOCK_TTL_MS so a killed invocation self-heals.
   releaseLockAt: { type: Date, default: null },
 

@@ -66,7 +66,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
 
   // The routes worth reaching in one click stay at the top level; the rest
   // live in a group that remembers whether it was open.
-  const OTHERS = ['/library', '/logs', '/add-contacts', '/jobs', '/templates', '/blocklist', '/export-contacts'];
+  const OTHERS = ['/library', '/logs', '/add-contacts', '/templates', '/blocklist', '/export-contacts'];
   const inOthers = OTHERS.some(p => pathname === p || pathname.startsWith(p + '/'));
   const [othersOpen, setOthersOpen] = useState(() => {
     try { return localStorage.getItem('outreach-nav-others') === 'open'; } catch { return false; }
@@ -106,6 +106,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
         { badge: needsYou, badgeTitle: 'Replies waiting on you' })}
       {item('/interviews', 'ti-user-check', 'Interviews', 'People who got back to you, and the interviews in progress — stages, dates and reminders.',
         { badge: needsAttention, badgeTitle: 'Upcoming interviews or follow-ups due' })}
+      {item('/jobs', 'ti-briefcase', 'Jobs', 'Every role from Naukri, Instahyre and Hirist in one pipeline — review, apply, follow up — with who you’ve emailed at each company and a one-click way to find people there.')}
       {item('/job-platforms', 'ti-briefcase-2', 'Job Platforms', 'Naukri, Instahyre and Hirist in one place: harvests jobs, applies to the ones you approve and tracks what recruiters do, using a worker on your computer for each platform.')}
       {item('/campaigns', 'ti-calendar-repeat', 'Campaigns', 'Hands-off sending: give it a list and it emails a set number of people a day for you.')}
       {item('/leads', 'ti-target-arrow', 'Leads', 'Hiring posts collected from LinkedIn, with recruiters’ emails and apply links. Move the good ones to outreach.')}
@@ -125,7 +126,6 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
         {canSeeLibrary && item('/library', 'ti-books', 'Library', 'Contacts, leads, Discover people and companies from every user, in one shared list. Only the details — never anyone’s sends or replies. Add the ones you want to your outreach.')}
         {item('/logs', 'ti-list-details', 'Logs', 'A record of everything the app did — sends, imports, scrapes, errors — for checking what happened and when.')}
         {item('/add-contacts', 'ti-user-plus', 'Add Contacts', 'Add people to your outreach — upload a CSV or type them in.')}
-        {item('/jobs', 'ti-briefcase', 'Jobs', 'Open roles pulled from company job boards (Greenhouse, Lever and others) that match what you’re looking for.')}
         {item('/templates', 'ti-file-text', 'Templates', 'The emails you send, written once with {{name}}-style blanks that fill in for each person.')}
         {item('/blocklist', 'ti-ban', 'Blocklist', 'Addresses and whole companies that must never be emailed.')}
         {item('/export-contacts', 'ti-file-export', 'Export Contacts', 'Download your contacts as a spreadsheet, or share a read-only link to them.')}

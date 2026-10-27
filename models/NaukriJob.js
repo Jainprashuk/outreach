@@ -2,13 +2,9 @@ const mongoose = require('mongoose');
 
 // One role harvested from Naukri.
 //
-// Deliberately NOT a JobPosting. JobPosting models a role pulled from a public
-// ATS board over HTTP, keyed by `${source}:${boardToken}:${sourceId}` and synced
-// against a board that tells us when a listing closes. A NaukriJob comes from a
-// browser session driving a site that exposes no API, has no board token, and
-// never tells us a job closed. It also carries a field JobPosting has no reason
-// to know about: `approval`, the human gate that decides whether the worker may
-// apply. Keeping the two apart is what lets Naukri be deleted in one revert.
+// A browser session drives a site that exposes no API, so there is no board
+// token, and the site never tells us a job closed. It carries `approval`, the
+// human gate that decides whether the worker may apply.
 const naukriJobSchema = new mongoose.Schema({
   userId:   { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
   // Which job site it came from (lib/platforms.js). Rows from before platforms

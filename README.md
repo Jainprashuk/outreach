@@ -60,7 +60,7 @@ The UI is a React single-page app served at `/app/`. Its source is in [client/sr
 | Discover | Type a company, find people who work there, and guess their work email from its pattern |
 | Companies | One page per company combining contacts, posts, jobs, interviews and the email format |
 | Library | Data shared across users (contacts, leads, companies only). Admin-gated, and each user can opt out |
-| Jobs | Open roles pulled from company job boards (Greenhouse, Lever and others) |
+| Jobs | Every role from Naukri, Instahyre and Hirist in one pipeline, with your outreach state per company |
 | Naukri | Keeps a Naukri profile fresh and applies to jobs you approve, using a local worker |
 | Templates | Email templates with `{{variables}}` |
 | Blocklist | Addresses and whole companies that must never be emailed |
@@ -104,7 +104,6 @@ Sending and scheduled work run as Inngest functions served at `/api/inngest`. Th
 
 These workflows call the app with the `X-Cron-Secret` header. Set `CRON_SECRET` in Vercel and as a GitHub secret, and set `VERCEL_APP_URL` as a GitHub secret too.
 
-- `sync-postings.yml`: pulls job-board postings every 6 hours. This one stays on GitHub.
 - `check-mailbox.yml` and `run-campaigns.yml`: now duplicated by the Inngest crons above and being retired. Running both at once is safe because campaign claims are atomic.
 
 GitHub turns off scheduled workflows after 60 days with no repo activity.

@@ -13,7 +13,7 @@ export default function Logs() {
   const [logs, setLogs] = useState<ActivityLog[]>([]);
   const [error, setError] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [feature, setFeature] = useState<'all' | 'campaign' | 'outreach' | 'leads' | 'interviews' | 'postings' | 'classifier'>('all');
+  const [feature, setFeature] = useState<'all' | 'campaign' | 'outreach' | 'leads' | 'interviews' | 'classifier'>('all');
   const [eventType, setEventType] = useState<'all' | 'email' | 'changes' | 'failures'>('all');
   const newestRef = useRef<string | null>(null);
   const [unchanged, setUnchanged] = useState(0);
@@ -42,7 +42,7 @@ export default function Logs() {
       <button className="btn btn-sm" type="button" onClick={() => { setUnchanged(0); load(); }}><i className="ti ti-refresh" /> Refresh</button>
     </div>
     {filtersOpen && <div className="info-box" style={{ marginBottom: 14, display: 'flex', gap: 10, alignItems: 'end', flexWrap: 'wrap' }}>
-      <label><div style={{ fontSize: 12, marginBottom: 4 }}>Feature</div><select value={feature} onChange={e => setFeature(e.target.value as typeof feature)}><option value="all">All features</option><option value="campaign">Campaigns</option><option value="outreach">Outreach</option><option value="leads">Leads</option><option value="interviews">Interviews</option><option value="postings">Job postings</option><option value="classifier">Reply classifier</option></select></label>
+      <label><div style={{ fontSize: 12, marginBottom: 4 }}>Feature</div><select value={feature} onChange={e => setFeature(e.target.value as typeof feature)}><option value="all">All features</option><option value="campaign">Campaigns</option><option value="outreach">Outreach</option><option value="leads">Leads</option><option value="interviews">Interviews</option><option value="classifier">Reply classifier</option></select></label>
       <label><div style={{ fontSize: 12, marginBottom: 4 }}>Event</div><select value={eventType} onChange={e => setEventType(e.target.value as typeof eventType)}><option value="all">All events</option><option value="email">Mail sent / failed</option><option value="changes">Creates, edits, deletes</option><option value="failures">Failures only</option></select></label>
       <button className="btn btn-sm" type="button" onClick={() => { setFeature('all'); setEventType('all'); }}>Clear filters</button>
     </div>}

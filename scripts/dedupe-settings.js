@@ -54,8 +54,8 @@ const isBlank = (doc, field) => {
 
 const MERGEABLE = [
   'gmailEmail', 'gmailAppPasswordEnc', 'resume', 'customVariables',
-  'jobCriteria', 'senderName', 'senderCompany',
-  'lastMailboxCheckAt', 'lastPostingSyncAt',
+  'senderName', 'senderCompany',
+  'lastMailboxCheckAt',
 ];
 
 /**

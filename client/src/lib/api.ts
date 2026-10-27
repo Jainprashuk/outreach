@@ -625,311 +625,6 @@ export const deleteLeadsApi = (ids: string[]) =>
     method: 'POST', body: JSON.stringify({ ids }),
   });
 
-// ── Job postings ────────────────────────────────────────────────────────────
-// A Posting is a role a company currently lists on a public ATS board. It is
-// deliberately NOT a Lead: there is no join key between them (postings carry no
-// email, and Lever/Ashby expose no company name), so they are two independent
-// journeys that share a vocabulary. See lib/postings.ts.
-
-export type BoardSource = 'greenhouse' | 'lever' | 'ashby' | 'muse' | 'jobicy';
-/** 'board' = one company's ATS page (authoritative, so vanishing = closed).
- *  'search' = a query across many employers (a partial slice, so it never closes). */
-export type SourceKind = 'board' | 'search';
-export type ListingStatus = 'open' | 'closed';
-
-/** ApplyStatus plus 'saved'. A SEPARATE type on purpose — widening ApplyStatus
- *  would change Lead's enum, the server Lead schema and the Leads filter panel,
- *  i.e. modify a working feature for no benefit. */
-export type TrackStatus =
-  | 'not-applied' | 'saved' | 'applied' | 'in-review'
-  | 'interviewing' | 'offer' | 'rejected' | 'skipped';
-
-export type BoardSyncStatus = 'never' | 'ok' | 'empty' | 'not-found' | 'error' | 'skipped';
-
-export interface TrackHistoryEntry {
-  status: TrackStatus;
-  changedAt: string;
-  note?: string;
-}
-
-export interface Posting {
-  id: string;
-  source: BoardSource;
-  boardToken: string;
-  boardId: string | null;
-  sourceId: string;
-  sourceKey: string;
-  title: string;
-  company: string;
-  department: string;
-  team: string;
-  location: string;
-  locations: string[];
-  remote: boolean;
-  workplaceType: string;
-  employmentType: string;
-  country: string;
-  url: string;
-  applyUrl: string;
-  requisitionId: string;
-  /** Which saved searches surfaced this. Only used by 'search' sources, where
-   *  one job is stored once no matter how many queries found it. */
-  queries: string[];
-  salaryMin: number | null;
-  salaryMax: number | null;
-  salaryCurrency: string;
-  salaryPeriod: string;
-  postedAt: string | null;
-  sourceUpdatedAt: string | null;
-  firstSeenAt: string;
-  lastSeenAt: string;
-  seenCount: number;
-  listingStatus: ListingStatus;
-  closedAt: string | null;
-  reopenedAt: string | null;
-  closeCount: number;
-  applyStatus: TrackStatus;
-  appliedAt: string | null;
-  appliedVia: string | null;
-  applyNote: string;
-  applyHistory?: TrackHistoryEntry[];
-  createdAt: string;
-  updatedAt: string;
-}
-
-/** Search parameters. Empty for company boards; each search source validates
- *  its own vocabulary server-side. */
-export interface BoardQuery {
-  category?: string;   // muse
-  company?: string;    // muse — scopes a search to one employer
-  industry?: string;   // jobicy
-  level?: string;      // both
-  location?: string;   // muse
-  geo?: string;        // jobicy
-  tag?: string;        // jobicy
-}
-
-export interface JobBoard {
-  id: string;
-  source: BoardSource;
-  token: string;
-  label: string;
-  enabled: boolean;
-  query?: BoardQuery;
-  lastSyncAt: string | null;
-  lastSuccessAt: string | null;
-  /** Set once, on a board's first success. firstSeenAt equal to this means
-   *  "imported with the board", not "new to the world". */
-  firstSyncAt: string | null;
-  lastSyncStatus: BoardSyncStatus;
-  lastError: string;
-  lastHttpStatus: number | null;
-  lastPostingCount: number;
-  lastNewCount: number;
-  lastClosedCount: number;
-  consecutiveFailures: number;
-  createdAt: string;
-  updatedAt: string;
-}
-
-export interface BoardSyncReport {
-  boardId: string;
-  source: BoardSource;
-  token: string;
-  label: string;
-  status: BoardSyncStatus;
-  httpStatus: number | null;
-  error: string | null;
-  fetched: number;
-  filtered: number;
-  /** Listed by the source but not stored, because your criteria excluded it.
-   *  These are NOT closed — the company still has them open. */
-  filteredOut: number;
-  kind: SourceKind;
-  inserted: number;
-  updated: number;
-  reopened: number;
-  closed: number;
-  firstSync: boolean;
-  /** The board fetched nothing and closed a lot — could be a hiring freeze,
-   *  could be a renamed board. Reversible either way. */
-  massClosed: boolean;
-  writeErrors: number;
-  ms: number;
-  enrichError?: string;
-}
-
-export interface SyncRunReport {
-  ok: boolean;
-  reason?: 'locked' | 'no-boards';
-  since?: string | null;
-  startedAt: string;
-  finishedAt: string;
-  ms: number;
-  previousSyncAt: string | null;
-  boards: BoardSyncReport[];
-  criteriaEnabled?: boolean;
-  totals: {
-    boards: number; ok: number; empty: number; notFound: number;
-    errored: number; skipped: number; fetched: number; filteredOut: number;
-    inserted: number; updated: number; reopened: number; closed: number;
-  };
-  massCloseWarnThreshold?: number;
-}
-
-export interface PostingsMeta {
-  lastSyncAt: string | null;
-  previousSyncAt: string | null;
-  cronConfigured: boolean;
-  syncRunning: boolean;
-  counts: { open: number; closed: number; tracked: number; newSinceLastSync: number };
-}
-
-export interface JobCriteria {
-  enabled: boolean;
-  include: string[];
-  /** A blocklist, and it WINS over `include` — so "Solution Engineer
-   *  (Pre-Sales)" is dropped despite containing "engineer". */
-  exclude: string[];
-  locations: string[];
-  remoteOnly: boolean;
-}
-
-export interface CriteriaTestResult {
-  total: number;
-  kept: number;
-  dropped: number;
-  keptSample: string[];
-  droppedSample: string[];
-}
-
-export interface SourceInfo {
-  label: string;
-  kind: SourceKind;
-  closes: boolean;
-  tokenHint: string;
-  categories: string[] | null;
-  industries: string[] | null;
-  levels: string[] | null;
-}
-
-export interface MuseCompany {
-  name: string;
-  token: string;
-  size: string;
-  industries: string[];
-}
-
-/** A curated, pre-verified company board. `approxRoles` is a snapshot and goes
- *  stale — the live count comes from the preview. */
-export interface StarterBoard {
-  source: BoardSource;
-  token: string;
-  name: string;
-  approxRoles: number;
-}
-
-export interface BoardPreview {
-  kind: 'ok' | 'empty' | 'not-found' | 'error';
-  httpStatus: number | null;
-  token: string;
-  count: number;
-  filtered: number;
-  sample: Array<{ title: string; location: string }>;
-  suggestedLabel: string;
-  error: string | null;
-}
-
-export const loadPostingsApi = (params?: Record<string, string>) =>
-  apiFetch<Posting[]>(`/api/postings${params ? '?' + new URLSearchParams(params) : ''}`);
-
-export const loadPostingsMetaApi = () => apiFetch<PostingsMeta>('/api/postings/meta');
-
-export const loadBoardsApi = () => apiFetch<{ boards: JobBoard[] }>('/api/postings/boards');
-
-export const createBoardApi = (body: { source: BoardSource; token: string; label?: string } & BoardQuery) =>
-  apiFetch<{ board: JobBoard; revived?: boolean }>('/api/postings/boards', {
-    method: 'POST', body: JSON.stringify(body),
-  });
-
-export const updateBoardApi = (id: string, patch: { label?: string; enabled?: boolean; query?: BoardQuery }) =>
-  apiFetch<{ board: JobBoard }>(`/api/postings/boards/${id}`, {
-    method: 'PATCH', body: JSON.stringify(patch),
-  });
-
-export const deleteBoardApi = (id: string, mode: 'keep' | 'delete' = 'keep') =>
-  apiFetch<{ ok: boolean; board: JobBoard; postingsDeleted: number }>(
-    `/api/postings/boards/${id}?postings=${mode}`, { method: 'DELETE' });
-
-export const previewBoardApi = (body: { source: BoardSource; token: string } & BoardQuery) =>
-  apiFetch<BoardPreview>('/api/postings/boards/preview', {
-    method: 'POST', body: JSON.stringify(body),
-  });
-
-/** The Muse's employer directory — the only source here that publishes one. */
-export const loadCompaniesApi = (refresh = false) =>
-  apiFetch<{ companies: MuseCompany[]; cached: boolean; pages: number; error: string | null }>(
-    `/api/postings/companies${refresh ? '?refresh=1' : ''}`);
-
-export const loadStarterBoardsApi = () =>
-  apiFetch<{ starterBoards: StarterBoard[] }>('/api/postings/starter-boards');
-
-export const loadSourcesApi = () =>
-  apiFetch<{ sources: Record<BoardSource, SourceInfo> }>('/api/postings/sources');
-
-export const loadCriteriaApi = () =>
-  apiFetch<{ criteria: JobCriteria; defaults: JobCriteria }>('/api/postings/criteria');
-
-export const saveCriteriaApi = (criteria: JobCriteria) =>
-  apiFetch<{ criteria: JobCriteria }>('/api/postings/criteria', {
-    method: 'PUT', body: JSON.stringify(criteria),
-  });
-
-/** Preview a profile against what you already have, before turning it on. */
-export const testCriteriaApi = (criteria: JobCriteria) =>
-  apiFetch<CriteriaTestResult>('/api/postings/criteria/test', {
-    method: 'POST', body: JSON.stringify(criteria),
-  });
-
-/**
- * A sync is the likeliest endpoint here to hit an edge timeout, and apiFetch
- * calls res.json() unconditionally — so a plain-text 504 from Vercel surfaces as
- * an opaque SyntaxError. Translate it into something true: the run is idempotent
- * (one runStartedAt is both the lastSeenAt stamp and the close cutoff), so
- * re-running really does lose nothing.
- */
-export const syncPostingsApi = async (body?: { boardIds?: string[]; dryRun?: boolean }) => {
-  try {
-    return await apiFetch<SyncRunReport>('/api/postings/sync', {
-      method: 'POST', body: JSON.stringify(body || {}),
-    });
-  } catch (err) {
-    if (err instanceof SyntaxError) {
-      throw new Error('The sync took too long to respond — run it again; nothing was lost.');
-    }
-    throw err;
-  }
-};
-
-export const updatePostingApi = (
-  id: string,
-  patch: { applyStatus?: TrackStatus; applyNote?: string; appliedVia?: string | null; note?: string },
-) => apiFetch<Posting>(`/api/postings/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
-
-export const bulkUpdatePostingsApi = (
-  updates: Array<{ id: string; applyStatus?: TrackStatus; applyNote?: string; note?: string }>,
-) => apiFetch<{ ok: boolean; count: number }>('/api/postings', {
-  method: 'PATCH', body: JSON.stringify(updates),
-});
-
-export const deletePostingApi = (id: string) =>
-  apiFetch<{ ok: boolean }>(`/api/postings/${id}`, { method: 'DELETE' });
-
-export const deletePostingsApi = (ids: string[]) =>
-  apiFetch<{ ok: boolean; deleted: number }>('/api/postings/bulk-delete', {
-    method: 'POST', body: JSON.stringify({ ids }),
-  });
-
 // ── Interviews ──────────────────────────────────────────────────────────────
 // People who actually got back to you. A separate store from Contact/Lead: the
 // source row keeps its own journey, this record carries the conversation.
@@ -2076,7 +1771,7 @@ const NB = () => {
 };
 export const setNaukriPlatform = (p: PlatformScope) => { naukriScope = p; };
 export const currentNaukriPlatform = () => naukriScope;
-const PB = (p: PlatformId) => (p === 'naukri' ? '/api/naukri' : `/api/p/${p}`);
+const PB = (p: PlatformScope) => (p === 'naukri' ? '/api/naukri' : `/api/p/${p}`);
 
 export const platformsApi = () =>
   apiFetch<{ platforms: PlatformInfo[]; duplicates: DuplicateRules; crossPlatformOrder: boolean }>('/api/naukri/platforms');
@@ -2228,11 +1923,13 @@ export interface NaukriJobQuery {
   limit?: number;
 }
 
-export const listNaukriJobsApi = (params: NaukriJobQuery = {}) => {
+export const listNaukriJobsApi = (params: NaukriJobQuery = {}, platform?: PlatformScope) => {
   const qs = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
     if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
   }
+  // `platform` is explicit so a page outside /job-platforms (the Jobs tab) can
+  // read every platform without touching the URL-scoped default in NB().
   return apiFetch<{
     jobs: NaukriJob[]; total: number; page: number; limit: number; pages: number;
     /** Set when salary/age refinement hit its scan ceiling, so the count is a floor. */
@@ -2243,7 +1940,7 @@ export const listNaukriJobsApi = (params: NaukriJobQuery = {}) => {
     originCounts?: { all: number; search: number; recommended: number };
     /** Applied only: how many sit at each recruiter stage. */
     stageCounts?: Record<'none' | 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted', number> | null;
-  }>(`${NB()}/jobs?${qs.toString()}`);
+  }>(`${platform ? PB(platform) : NB()}/jobs?${qs.toString()}`);
 };
 
 /** The authorisation point: approving is what permits an application, and it queues the run. */
@@ -2656,6 +2353,10 @@ export interface NaukriJobOutreach {
 }
 export const naukriJobsOutreachApi = (ids: string[]) =>
   apiFetch<{ jobs: Record<string, NaukriJobOutreach> }>(`${NB()}/jobs/outreach?ids=${ids.join(',')}`);
+export interface CompanyOutreach { key: string; contacts: number; sent: number; replied: number; bounced: number }
+/** Your contacts / emails / replies per company NAME, for the Jobs tab's outreach chip. */
+export const companyStatusApi = (names: string[]) =>
+  apiFetch<{ companies: Record<string, CompanyOutreach> }>('/api/companies/status', { method: 'POST', body: JSON.stringify({ names }) });
 export const prospectSearchApi = (id: string) => apiFetch<{ search: ProspectSearch }>(`/api/prospects/search/${id}`);
 export const cancelSearchApi = (id: string) =>
   apiFetch<{ ok: boolean; cancelled: boolean; search: ProspectSearch }>(`/api/prospects/search/${id}/cancel`, { method: 'POST' });

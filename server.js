@@ -97,9 +97,9 @@ const tokenMatches = (candidate, expected) => {
   }
 };
 
-// EXACT paths only, never a prefix — so a future /api/postings/* endpoint is not
-// reachable with a cron secret just because the sync endpoint is.
-const CRON_PATHS = new Set(['/api/postings/sync', '/api/check-mailbox', '/api/campaigns/run-due']);
+// EXACT paths only, never a prefix — so a sibling endpoint is not reachable with
+// a cron secret just because one of these is.
+const CRON_PATHS = new Set(['/api/check-mailbox', '/api/campaigns/run-due']);
 
 // Same exact-match rule. These carry the run id in the BODY rather than the
 // path precisely so they can be matched exactly — /api/scrapes/:id/... could
@@ -642,9 +642,6 @@ app.use('/api/p/:platform', requireDb, withPlatform(), require('./routes/naukri'
 // People who actually got back to you. A separate store from Contact/Lead so the
 // outreach and apply journeys above are never written to — see models/Interview.js.
 app.use('/api/interviews', requireDb, require('./routes/interviews'));
-// Job postings pulled from public ATS boards. NOT /api/jobs — that is taken by
-// the email SendJob routes above, and these are job *postings* anyway.
-app.use('/api/postings', requireDb, require('./routes/postings'));
 app.use('/api/campaigns', requireDb, require('./routes/campaigns'));
 // The floating Action Center: counts and the id lists its workflows start from.
 app.use('/api/action-center', requireDb, require('./routes/actionCenter'));

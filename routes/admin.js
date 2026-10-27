@@ -1552,7 +1552,6 @@ const CRONS = [
   { name: '/api/campaigns/run-due', label: 'Campaign releases (GitHub)', everyMin: 60 },
   { name: 'inngest:mailbox-sweep', label: 'Mailbox check', everyMin: 120 },
   { name: 'inngest:campaigns-run-due', label: 'Campaign releases', everyMin: 60 },
-  { name: '/api/postings/sync', label: 'Job postings sync', everyMin: 360 },
 ];
 
 const countWhere = (cond) => ({ $size: { $filter: { input: '$items', as: 'i', cond } } });

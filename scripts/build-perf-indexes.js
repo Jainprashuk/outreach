@@ -20,7 +20,6 @@ const apply = process.argv.includes('--apply');
 // [collection, key] — each backs a find().sort() that today scans past other users' rows.
 const INDEXES = [
   ['leads',        { userId: 1, fitScore: -1, createdAt: -1 }],   // GET /api/leads
-  ['jobpostings',  { userId: 1, listingStatus: 1, postedAt: -1, firstSeenAt: -1 }], // GET /api/postings
   ['contacts',     { userId: 1, status: 1, createdAt: -1 }],     // contact tabs
   ['campaigns',    { userId: 1, createdAt: -1 }],                // GET /api/campaigns
   ['sendjobs',     { userId: 1, status: 1, createdAt: -1 }],     // /active, /active-all
