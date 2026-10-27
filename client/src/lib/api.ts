@@ -2263,6 +2263,20 @@ export const removeDiscoveryKeyApi = (provider: DiscoveryProvider) =>
 export const startProspectSearchApi = (body: { domain: string; companyName?: string; roles?: string[]; force?: boolean; naukriJobId?: string }) =>
   apiFetch<{ search: ProspectSearch; reused?: boolean }>('/api/prospects/search', { method: 'POST', ...json(body) });
 
+/** A job from the "Everyone" view: the job only, never what anyone did with it. `mine` is the viewer's own copy. */
+export interface SharedJob {
+  key: string; platform: PlatformId; title: string; company: string; location: string;
+  experienceMin: number | null; experienceMax: number | null; salaryText: string; tags: string[];
+  url: string; postedText: string; postedAt: string | null; lastSeenAt: string; seenBy: number;
+  mine: { id: string; approval: NaukriApproval; applyStatus: NaukriApplyStatus } | null;
+}
+export const sharedJobsApi = (p: { q?: string; platform?: string; page?: number; limit?: number } = {}) => {
+  const qs = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== '') as [string, string][]).toString();
+  return apiFetch<{ jobs: SharedJob[]; total: number; page: number; pages: number }>(`/api/shared-jobs${qs ? `?${qs}` : ''}`);
+};
+export const addSharedJobsApi = (keys: string[]) =>
+  apiFetch<{ added: number; existed: number; missing: number }>('/api/shared-jobs/add', { method: 'POST', ...json({ keys }) });
+
 /** Recruiters a job platform showed for a job → Discover people (ready to review, never emailed). */
 export const recruitersToDiscoverApi = (body: { jobId: string; domain: string; companyName?: string; key?: string }) =>
   apiFetch<{ added: unknown[]; existed: unknown[]; skipped: string[] }>('/api/prospects/from-job', { method: 'POST', ...json(body) });

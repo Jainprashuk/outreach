@@ -658,6 +658,8 @@ app.use('/api/admin', requireDb, requireAdmin, require('./routes/admin'));
 // The shared Library: other accounts' contact data, so it has its own gate —
 // an admin turns it on per account (lib/requireLibraryAccess.js).
 app.use('/api/library', requireDb, requireLibraryAccess, require('./routes/library'));
+// Jobs from every sharing account (read-only), same gate as the Library.
+app.use('/api/shared-jobs', requireDb, requireLibraryAccess, require('./routes/sharedJobs'));
 
 // ── Configure Gmail credentials ────────────────────────────────────────────
 app.post('/api/config', requireDb, async (req, res) => {

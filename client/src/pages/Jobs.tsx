@@ -10,8 +10,9 @@ import { useFindPeople } from '../components/naukri/useFindPeople';
 import { SkeletonRows } from '../components/Skeleton';
 import { RefreshBar, Refreshing } from '../components/RefreshBar';
 import { useToast } from '../context/ToastContext';
+import { useSession } from '../context/SessionContext';
 import {
-  bulkNaukriJobsApi, companyStatusApi, decideNaukriJobsApi, listNaukriJobsApi, lookupCompanyApi, recruitersToDiscoverApi, updateNaukriJobApi,
+  addSharedJobsApi, bulkNaukriJobsApi, companyStatusApi, sharedJobsApi, type SharedJob, decideNaukriJobsApi, listNaukriJobsApi, lookupCompanyApi, recruitersToDiscoverApi, updateNaukriJobApi,
   type CompanyOutreach, type NaukriApplyStatus, type NaukriJob, type NaukriJobQuery,
 } from '../lib/api';
 import { autoPick } from '../lib/prospects';
@@ -66,8 +67,102 @@ function OutreachChip({ company, st, finding, onFind }: {
   );
 }
 
+// "Everyone": the jobs every sharing account's platforms found. Read-only; the only
+// action is adding a job to your own list (pending, scored on your profile).
+function EveryoneJobs({ onChanged }: { onChanged: () => void }) {
+  const toast = useToast();
+  const [rows, setRows] = useState<SharedJob[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pages, setPages] = useState(1);
+  const [q, setQ] = useState('');
+  const [query, setQuery] = useState('');
+  const [platform, setPlatform] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [adding, setAdding] = useState<Set<string>>(new Set());
+  const [sel, setSel] = useState<Set<string>>(new Set());
+
+  useEffect(() => { const t = setTimeout(() => { setQuery(q.trim()); setPage(1); }, 300); return () => clearTimeout(t); }, [q]);
+  const load = useCallback(async () => {
+    setError('');
+    try {
+      const r = await sharedJobsApi({ q: query || undefined, platform: platform || undefined, page, limit: 40 });
+      setRows(r.jobs); setTotal(r.total); setPages(r.pages);
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
+  }, [query, platform, page]);
+  useEffect(() => { setLoading(true); setSel(new Set()); load(); }, [load]);
+
+  const add = async (keys: string[]) => {
+    setAdding(new Set(keys));
+    try {
+      const r = await addSharedJobsApi(keys);
+      toast(r.added ? `Added ${r.added} to your jobs (Review)` : 'Already in your jobs', 'success');
+      await load(); onChanged();
+    } catch (e) { toast(e instanceof Error ? e.message : 'Could not add', 'error'); } finally { setAdding(new Set()); }
+  };
+  const addable = rows.filter(r => !r.mine).map(r => r.key);
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+        <input type="text" placeholder="Search title, company, skill…" value={q} onChange={e => setQ(e.target.value)} style={{ maxWidth: 320 }} />
+        <select value={platform} onChange={e => { setPlatform(e.target.value); setPage(1); }} style={{ width: 'auto' }} aria-label="Platform">
+          <option value="">All platforms</option>
+          <option value="naukri">Naukri</option><option value="instahyre">Instahyre</option><option value="hirist">Hirist</option>
+        </select>
+        <Muted>{total} job{total === 1 ? '' : 's'} seen in the last 30 days · you can add them to your own list, nothing is applied for you</Muted>
+      </div>
+      {error && <div className="badge badge-failed" style={{ marginBottom: 10 }}>{error}</div>}
+      {loading && rows.length === 0 ? <SkeletonRows rows={6} cols={4} /> : rows.length === 0 ? (
+        <Empty icon="ti-world-search">{query ? 'Nothing matches that search.' : 'No jobs from other accounts yet.'}</Empty>
+      ) : (
+        <>
+          <SelectionBar ids={addable} selected={sel} onChange={setSel}
+            note={addable.length ? undefined : 'Everything shown is already in your list'}>
+            <button className="btn btn-sm btn-primary" type="button" disabled={adding.size > 0}
+              onClick={() => add([...sel])}>Add {sel.size} to my jobs</button>
+          </SelectionBar>
+          <Refreshing active={loading}>
+            {rows.map(j => (
+              <div key={j.key} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap', padding: '9px 0', borderBottom: '0.5px solid var(--border)' }}>
+                <input type="checkbox" disabled={!!j.mine} checked={sel.has(j.key)} style={{ marginTop: 4 }} aria-label={`Select ${j.title}`}
+                  onChange={() => setSel(prev => { const n = new Set(prev); n.has(j.key) ? n.delete(j.key) : n.add(j.key); return n; })} />
+                <div style={{ flex: 1, minWidth: 220 }}>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'baseline', flexWrap: 'wrap' }}>
+                    <a href={j.url} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{j.title}</a>
+                    <PlatformTag id={j.platform} />
+                    {j.seenBy > 1 && <span className="badge badge-seen" title="How many accounts' harvests found it">{j.seenBy} accounts</span>}
+                  </div>
+                  <Muted>{[j.company, j.location,
+                    j.experienceMin != null ? `${j.experienceMin}${j.experienceMax != null ? `-${j.experienceMax}` : '+'} yrs` : '',
+                    j.salaryText, j.postedText].filter(Boolean).join(' · ')}</Muted>
+                </div>
+                {j.mine
+                  ? <span className="badge badge-sent" title="It is in your jobs">In your jobs · {j.mine.applyStatus !== 'none' ? j.mine.applyStatus : j.mine.approval}</span>
+                  : <button className="btn btn-xs" type="button" disabled={adding.has(j.key)} onClick={() => add([j.key])}>
+                      <i className="ti ti-plus" /> Add to my jobs
+                    </button>}
+              </div>
+            ))}
+          </Refreshing>
+          {pages > 1 && (
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginTop: 12 }}>
+              <button className="btn btn-sm" type="button" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</button>
+              <Muted>Page {page} of {pages}</Muted>
+              <button className="btn btn-sm" type="button" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next</button>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
 export default function Jobs() {
   const toast = useToast();
+  const { canSeeLibrary } = useSession();
+  const [scope, setScope] = useState<'mine' | 'everyone'>('mine');
   const { findPeople, finding } = useFindPeople();
   const navigate = useNavigate();
   const [addingRec, setAddingRec] = useState<string | null>(null);
@@ -268,6 +363,19 @@ export default function Jobs() {
       subtitle={`${needsYou} to review · ${counts.queued ?? 0} queued · ${counts.applied ?? 0} applied. Workers and setup are in Job Platforms.`}
       actions={<Link className="btn btn-sm" to="/job-platforms"><i className="ti ti-briefcase-2" /> Job Platforms</Link>}
     >
+      {canSeeLibrary && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }} role="group" aria-label="Whose jobs">
+          <button type="button" className={`btn btn-sm${scope === 'mine' ? ' btn-primary' : ''}`} onClick={() => setScope('mine')}>
+            <i className="ti ti-user" /> Mine
+          </button>
+          <button type="button" className={`btn btn-sm${scope === 'everyone' ? ' btn-primary' : ''}`} onClick={() => setScope('everyone')}
+            title="Jobs found by every account on the platforms. You can only act on your own; add one to yours to work on it.">
+            <i className="ti ti-world" /> Everyone
+          </button>
+        </div>
+      )}
+      {scope === 'everyone' && canSeeLibrary ? <EveryoneJobs onChanged={loadCounts} /> : (
+        <>
       <div className="nav-tabs" style={{ marginBottom: 12 }}>
         {STAGES.map(s => (
           <button key={s.key} type="button" className={`nav-tab${stage === s.key ? ' active' : ''}`}
@@ -319,6 +427,9 @@ export default function Jobs() {
               <button className="btn btn-sm" type="button" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next</button>
             </div>
           )}
+        </>
+      )}
+
         </>
       )}
 
