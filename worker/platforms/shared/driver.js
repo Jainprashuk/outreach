@@ -367,13 +367,34 @@ function makeDriver(meta) {
         const labels = [];
         for (let k = 0; k < nPills; k++) labels.push(((await pills.nth(k).innerText().catch(() => '')) || '').trim());
         const field = box.locator(sc.input).first();
-        const isMandatory = mandatory.has(question.toLowerCase());
+        const hasField = await field.count().catch(() => 0) > 0;
+        const choices = box.locator(sc.choice);
+        const nChoices = nPills ? 0 : await choices.count().catch(() => 0);
+        const hasSelect = !nPills && !hasField && await box.locator('select').count().catch(() => 0) > 0;
+        if (!nPills && !hasField && !nChoices && !hasSelect) {
+          // A control type nobody has recorded yet. Say what it is instead of
+          // guessing: the markup goes in the reason so the next fix is exact.
+          const html = ((await box.innerHTML().catch(() => '')) || '').replace(/\s+/g, ' ').slice(0, 500);
+          return { outcome: 'skipped', reason: `Unrecognised ${meta.label} form question "${question.slice(0, 80)}" — nothing was sent. Markup: ${html}`, question, options: [] };
+        }
+        const choiceLabels = [];
+        for (let k = 0; k < nChoices; k++) choiceLabels.push(((await choices.nth(k).innerText().catch(() => '')) || '').trim());
+        if (hasSelect) {
+          for (const o of await box.locator('select option').allInnerTexts().catch(() => [])) if (o.trim() && !/^select|^choose/i.test(o.trim())) choiceLabels.push(o.trim());
+        }
+        if (choiceLabels.length && !labels.length) labels.push(...choiceLabels);
+        const isMandatory = mandatory.has(question.toLowerCase())
+          || (sc.mandatory ? await box.locator(sc.mandatory).count().catch(() => 0) > 0 : false);
 
         // Already filled from your Hirist profile → keep it.
         let have = '';
         if (nPills) {
           for (let k = 0; k < nPills; k++) if (/\bselected\b/.test(await pills.nth(k).getAttribute('class').catch(() => '') || '')) have = labels[k];
-        } else if (await field.count().catch(() => 0)) have = (await field.inputValue().catch(() => '')) || '';
+        } else if (hasField) have = (await field.inputValue().catch(() => '')) || '';
+        else if (hasSelect) have = (await box.locator('select').first().inputValue().catch(() => '')) || '';
+        else if (nChoices) {
+          for (let k = 0; k < nChoices; k++) if (await choices.nth(k).locator('input').first().isChecked().catch(() => false)) have = choiceLabels[k];
+        }
         if (have) { asked.push({ question, prefilled: true }); continue; }
 
         const resolved = resolveAnswer(question, config);
@@ -397,6 +418,14 @@ function makeDriver(meta) {
             continue;
           }
           await pills.nth(labels.indexOf(chosen)).click();
+        } else if (nChoices || hasSelect) {
+          const chosen = pickOption(value, choiceLabels);
+          if (!chosen) {
+            if (isMandatory) return { outcome: 'skipped', reason: 'Unanswered screening question — answer it under Jobs → Needs answer', question, options: choiceLabels };
+            continue;
+          }
+          if (hasSelect) await box.locator('select').first().selectOption({ label: chosen }, { timeout: 5000 });
+          else await choices.nth(choiceLabels.indexOf(chosen)).click({ timeout: 5000 });
         } else {
           const isNumber = (await field.getAttribute('type').catch(() => '')) === 'number';
           const typed = isNumber ? ((/\d+(\.\d+)?/.exec(value) || [])[0] || '') : value;
@@ -404,7 +433,7 @@ function makeDriver(meta) {
             if (isMandatory) return { outcome: 'skipped', reason: 'Unanswered screening question — answer it under Jobs → Needs answer', question, options: labels };
             continue;
           }
-          await field.click();
+          await field.click({ timeout: 5000 });
           await field.fill('').catch(() => {});
           await field.type(typed, { delay: 15 });
         }
@@ -412,7 +441,13 @@ function makeDriver(meta) {
         await jitter(300, 700);
       }
       const next = page.locator(sc.submit).first();
-      if (!(await next.count().catch(() => 0))) return { outcome: 'failed', terminal: false, reason: `${meta.label} form has no submit button` };
+      if (!(await next.count().catch(() => 0))) {
+        const seen = await page.evaluate(() => [...document.querySelectorAll('button, [role=button]')].filter(b => b.offsetParent).map(b => `"${(b.innerText || '').trim().slice(0, 25)}"`).slice(0, 8)).catch(() => []);
+        return { outcome: 'failed', terminal: true, reason: `${meta.label} form has no submit button (${page.url().slice(0, 90)} · buttons: ${seen.join(', ') || 'none'}) — after ${asked.length} question(s); check the listing before re-approving` };
+      }
+      if (await next.isDisabled().catch(() => false)) {
+        return { outcome: 'skipped', reason: `${meta.label} will not let the form go on (its "${(await next.innerText().catch(() => '') || 'Next').trim()}" button stays disabled) — a required question has no answer. Answer it on ${meta.label} or under Jobs → Needs answer.` };
+      }
       const before = page.url();
       await next.click();
       await page.waitForTimeout(3000);

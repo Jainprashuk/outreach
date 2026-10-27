@@ -152,7 +152,12 @@ module.exports = {
       questionText: '.question-text',
       input: 'textarea, input[type=number], input[type=text]',
       option: 'button.pill-option',
-      submit: 'button[type=submit]',
+      // Verified: the mandatory question's text div has this class.
+      mandatory: '.mandatory-question',
+      // Not seen yet (radio / checkbox rows) — a guess, used only when no
+      // verified control is present.
+      choice: 'label:has(input[type=radio]), label:has(input[type=checkbox])',
+      submit: 'button[type=submit], button:has-text("Submit"), button:has-text("Next")',
       maxSteps: 3,
     },
     // Where a click can send you instead of applying.
