@@ -119,10 +119,19 @@ export default function Mailbox() {
   const [unreadOnly, setUnreadOnly] = useState(false);
 
   const [listOpen, setListOpen] = useState(() => loadFlag('mbx.list', true));
-  const [ctxOpen, setCtxOpen] = useState(() => loadFlag('mbx.ctx', true));
+  const [ctxOpen, setCtxOpen] = useState(() => loadFlag('mbx.ctx', false));
   const [msgOpen, setMsgOpen] = useState<Record<string, boolean>>({});
-  const toggleList = () => setListOpen(o => { saveFlag('mbx.list', !o); return !o; });
-  const toggleCtx = () => setCtxOpen(o => { saveFlag('mbx.ctx', !o); return !o; });
+  // Only one side panel at a time: opening either one closes the other.
+  const toggleList = () => {
+    const next = !listOpen;
+    setListOpen(next); saveFlag('mbx.list', next);
+    if (next && ctxOpen) { setCtxOpen(false); saveFlag('mbx.ctx', false); }
+  };
+  const toggleCtx = () => {
+    const next = !ctxOpen;
+    setCtxOpen(next); saveFlag('mbx.ctx', next);
+    if (next && listOpen) { setListOpen(false); saveFlag('mbx.list', false); }
+  };
 
   const refreshBackfillCount = () => backfillReplyCountApi().then(r => setBackfillCount(r.count)).catch(() => {});
 
