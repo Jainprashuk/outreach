@@ -47,6 +47,34 @@ const TEXT_MARKERS = [
 // A login wall reached from a page we expected to be authenticated.
 const LOGIN_TEXT = ['login to your account', 'sign in to continue', 'login id / password'];
 
+// Text the EMPLOYER wrote: the description on a listing, the snippet on a search
+// card. A fraud-detection role that says "detect unusual activity" is not a
+// challenge — on 2026-10-24 one such listing paused Naukri for a week, four
+// times in a row, because it stayed first in the queue.
+const JOB_TEXT_SELECTORS = [
+  '[class*="job-desc"]',
+  '[class*="JDC__"]',
+  '[class*="dang-inner-html"]',
+];
+
+// <body> text with every employer-written block cut out. Falls back to the
+// whole body if the page script fails, so a broken selector can only make the
+// check stricter, never blind.
+async function pageTextWithoutJobText(page) {
+  try {
+    return await page.evaluate((selectors) => {
+      let text = document.body ? document.body.innerText : '';
+      for (const el of document.querySelectorAll(selectors.join(','))) {
+        const part = el.innerText;
+        if (part) text = text.split(part).join(' ');
+      }
+      return text;
+    }, JOB_TEXT_SELECTORS);
+  } catch (_) {
+    return page.innerText('body', { timeout: 5000 });
+  }
+}
+
 // Throws Checkpoint if the page is a challenge. Cheap enough to call after every
 // navigation: one URL read plus one innerText of <body>.
 async function check(page, where = 'a page') {
@@ -63,7 +91,7 @@ async function check(page, where = 'a page') {
 
   let body = '';
   try {
-    body = (await page.innerText('body', { timeout: 5000 }) || '').toLowerCase();
+    body = (await pageTextWithoutJobText(page) || '').toLowerCase();
   } catch (_) {
     // A body we cannot read is not evidence of a challenge — it is usually a
     // navigation in flight. The next check() call will see it.
