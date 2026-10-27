@@ -11,8 +11,15 @@ const router = express.Router();
 router.get('/', async (req, res) => {
   try {
     res.json(await sharedJobs.list(req.userId, {
-      q: req.query.q, platform: req.query.platform, page: req.query.page, limit: req.query.limit,
+      q: req.query.q, platform: req.query.platform, hideMine: req.query.hideMine, page: req.query.page, limit: req.query.limit,
     }));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /api/shared-jobs/keys?q=&platform=&hideMine= — every addable key across ALL pages.
+router.get('/keys', async (req, res) => {
+  try {
+    res.json(await sharedJobs.matchingKeys(req.userId, { q: req.query.q, platform: req.query.platform, hideMine: req.query.hideMine }));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

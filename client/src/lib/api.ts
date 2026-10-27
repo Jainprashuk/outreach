@@ -2270,8 +2270,16 @@ export interface SharedJob {
   url: string; postedText: string; postedAt: string | null; lastSeenAt: string; seenBy: number;
   mine: { id: string; approval: NaukriApproval; applyStatus: NaukriApplyStatus } | null;
 }
-export const sharedJobsApi = (p: { q?: string; platform?: string; page?: number; limit?: number } = {}) => {
-  const qs = new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== '') as [string, string][]).toString();
+type SharedQuery = { q?: string; platform?: string; hideMine?: boolean; page?: number; limit?: number };
+const sharedQs = (p: SharedQuery) =>
+  new URLSearchParams(Object.entries(p).filter(([, v]) => v !== undefined && v !== '' && v !== false).map(([k, v]) => [k, String(v)])).toString();
+/** Every addable job key matching the filter, across all pages (for "select all N"). */
+export const sharedJobKeysApi = (p: SharedQuery = {}) => {
+  const qs = sharedQs(p);
+  return apiFetch<{ keys: string[]; total: number; capped: boolean }>(`/api/shared-jobs/keys${qs ? `?${qs}` : ''}`);
+};
+export const sharedJobsApi = (p: SharedQuery = {}) => {
+  const qs = sharedQs(p);
   return apiFetch<{ jobs: SharedJob[]; total: number; page: number; pages: number }>(`/api/shared-jobs${qs ? `?${qs}` : ''}`);
 };
 export const addSharedJobsApi = (keys: string[]) =>

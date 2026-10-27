@@ -12,7 +12,7 @@ import { RefreshBar, Refreshing } from '../components/RefreshBar';
 import { useToast } from '../context/ToastContext';
 import { useSession } from '../context/SessionContext';
 import {
-  addSharedJobsApi, bulkNaukriJobsApi, companyStatusApi, sharedJobsApi, type SharedJob, decideNaukriJobsApi, listNaukriJobsApi, lookupCompanyApi, recruitersToDiscoverApi, updateNaukriJobApi,
+  addSharedJobsApi, bulkNaukriJobsApi, companyStatusApi, sharedJobKeysApi, sharedJobsApi, type SharedJob, decideNaukriJobsApi, listNaukriJobsApi, lookupCompanyApi, recruitersToDiscoverApi, updateNaukriJobApi,
   type CompanyOutreach, type NaukriApplyStatus, type NaukriJob, type NaukriJobQuery,
 } from '../lib/api';
 import { autoPick } from '../lib/prospects';
@@ -78,26 +78,43 @@ function OthersJobs({ onChanged }: { onChanged: () => void }) {
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
   const [platform, setPlatform] = useState('');
+  // On by default: this view is for finding jobs you do not have yet.
+  const [hideMine, setHideMine] = useState(true);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState<Set<string>>(new Set());
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [matching, setMatching] = useState<{ total: number; capped: boolean } | null>(null);
+  const [picking, setPicking] = useState(false);
 
   useEffect(() => { const t = setTimeout(() => { setQuery(q.trim()); setPage(1); }, 300); return () => clearTimeout(t); }, [q]);
   const load = useCallback(async () => {
     setError('');
     try {
-      const r = await sharedJobsApi({ q: query || undefined, platform: platform || undefined, page, limit: 40 });
+      const r = await sharedJobsApi({ q: query || undefined, platform: platform || undefined, hideMine, page, limit: 40 });
       setRows(r.jobs); setTotal(r.total); setPages(r.pages);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); } finally { setLoading(false); }
-  }, [query, platform, page]);
-  useEffect(() => { setLoading(true); setSel(new Set()); load(); }, [load]);
+  }, [query, platform, hideMine, page]);
+  useEffect(() => { setLoading(true); load(); }, [load]);
+  // A new search or filter is a new selection; paging keeps it, so a selection can span pages.
+  useEffect(() => { setSel(new Set()); setMatching(null); }, [query, platform, hideMine]);
+
+  const selectAllMatching = async () => {
+    setPicking(true);
+    try {
+      const r = await sharedJobKeysApi({ q: query || undefined, platform: platform || undefined, hideMine });
+      setSel(new Set(r.keys)); setMatching({ total: r.total, capped: r.capped });
+    } catch (e) { toast(e instanceof Error ? e.message : 'Could not select them all', 'error'); } finally { setPicking(false); }
+  };
 
   const add = async (keys: string[]) => {
     setAdding(new Set(keys));
     try {
-      const r = await addSharedJobsApi(keys);
-      toast(r.added ? `Added ${r.added} to your jobs (Review)` : 'Already in your jobs', 'success');
+      // The server takes 100 at a time; a select-all can be far more.
+      let added = 0;
+      for (let i = 0; i < keys.length; i += 100) added += (await addSharedJobsApi(keys.slice(i, i + 100))).added;
+      toast(added ? `Added ${added} to your jobs (Review)` : 'Already in your jobs', 'success');
+      setSel(new Set()); setMatching(null);
       await load(); onChanged();
     } catch (e) { toast(e instanceof Error ? e.message : 'Could not add', 'error'); } finally { setAdding(new Set()); }
   };
@@ -111,6 +128,10 @@ function OthersJobs({ onChanged }: { onChanged: () => void }) {
           <option value="">All platforms</option>
           <option value="naukri">Naukri</option><option value="instahyre">Instahyre</option><option value="hirist">Hirist</option>
         </select>
+        <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
+          <input type="checkbox" checked={hideMine} onChange={e => { setHideMine(e.target.checked); setPage(1); }} />
+          Hide ones I already have
+        </label>
         <Muted>{total} job{total === 1 ? '' : 's'} seen in the last 30 days · you can add them to your own list, nothing is applied for you</Muted>
       </div>
       {error && <div className="badge badge-failed" style={{ marginBottom: 10 }}>{error}</div>}
@@ -123,6 +144,21 @@ function OthersJobs({ onChanged }: { onChanged: () => void }) {
             <button className="btn btn-sm btn-primary" type="button" disabled={adding.size > 0}
               onClick={() => add([...sel])}>Add {sel.size} to my jobs</button>
           </SelectionBar>
+          {/* Ticking "select all shown" only covers this page — offer the rest, as Gmail does. */}
+          {!matching && addable.length > 0 && addable.every(k => sel.has(k)) && total > addable.length && (
+            <div style={{ fontSize: 13, padding: '6px 0' }}>
+              All {addable.length} on this page are selected.{' '}
+              <button className="btn btn-xs" type="button" disabled={picking} onClick={selectAllMatching}>
+                {picking ? 'Selecting…' : 'Select all matching'}
+              </button>
+            </div>
+          )}
+          {matching && (
+            <div style={{ fontSize: 13, padding: '6px 0' }}>
+              All {sel.size} matching jobs are selected{matching.capped ? ` (the first ${sel.size} of ${matching.total})` : ''}.{' '}
+              <button className="btn btn-xs" type="button" onClick={() => { setSel(new Set()); setMatching(null); }}>Clear selection</button>
+            </div>
+          )}
           <Refreshing active={loading}>
             {rows.map(j => (
               <div key={j.key} style={{ display: 'flex', gap: 10, alignItems: 'flex-start', flexWrap: 'wrap', padding: '9px 0', borderBottom: '0.5px solid var(--border)' }}>

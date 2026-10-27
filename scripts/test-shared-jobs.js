@@ -82,6 +82,19 @@ const tag = `sj${Date.now()}`;
     ok('a job only B found is not listed for B', !(await get(`/api/shared-jobs?q=${tag}`)).jobs.some(j => j.key === `hirist:${tag}-2`));
 
     who = a._id;
+    // Hide ones I already have: A has naukri-1, so only B's other job is left.
+    const hid = await get(`/api/shared-jobs?q=${tag}&hideMine=1`);
+    ok('hideMine drops what the viewer already has', hid.total === 1 && hid.jobs[0].key === `hirist:${tag}-2` && hid.jobs[0].mine === null, JSON.stringify(hid.jobs.map(j => j.key)));
+    // Select all across pages: keys covers every page, minus what the viewer has.
+    const many = Array.from({ length: 45 }, (_, i) => row(b, 'hirist', `bulk${i}`));
+    await NaukriJob.insertMany(many);
+    const pg1 = await get(`/api/shared-jobs?q=${tag}&hideMine=1&limit=40`);
+    const allKeys = await get(`/api/shared-jobs/keys?q=${tag}&hideMine=1`);
+    ok('list pages (40) but keys returns every addable job across pages', pg1.jobs.length === 40 && pg1.pages === 2 && allKeys.keys.length === 46 && allKeys.total === 46, JSON.stringify([pg1.jobs.length, pg1.pages, allKeys.keys.length]));
+    ok('keys without hideMine still leaves out jobs the viewer has', !(await get(`/api/shared-jobs/keys?q=${tag}`)).keys.includes(`naukri:${tag}-1`));
+    const addAll = await post('/api/shared-jobs/add', { keys: allKeys.keys.slice(0, 100) });
+    ok('adding the selected keys works', addAll.added === 46, JSON.stringify(addAll));
+    await NaukriJob.deleteMany({ userId: a._id, sourceKey: { $in: allKeys.keys } });
     const add = await post('/api/shared-jobs/add', { keys: [`hirist:${tag}-2`, `naukri:${tag}-1`, `instahyre:${tag}-3`, `nope:1`] });
     ok('add: new one added, own one existed, opted-out one is not addable', add.added === 1 && add.existed === 1 && add.missing === 2, JSON.stringify(add));
     const copy = await NaukriJob.findOne({ userId: a._id, sourceKey: `hirist:${tag}-2` }).lean();
