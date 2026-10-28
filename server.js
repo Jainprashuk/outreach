@@ -121,7 +121,7 @@ const WORKER_PATHS = new Set([
   // Naukri again under its platform path), each listed EXACTLY — never a
   // /api/p/ prefix, which would expose the owner routes under it too.
   ...require('./lib/platforms').PLATFORM_IDS.flatMap(id => [
-    'claim', 'ingest', 'finish', 'progress', 'result', 'worker-resume', 'ai-answer', 'track',
+    'claim', 'ingest', 'finish', 'progress', 'result', 'worker-resume', 'ai-answer', 'ai-note', 'track',
   ].map(r => `/api/p/${id}/${r}`)),
 ]);
 

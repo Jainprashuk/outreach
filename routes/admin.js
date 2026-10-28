@@ -1202,7 +1202,7 @@ router.get('/platform-runs', async (req, res) => {
     const limit = Math.min(100, Math.max(10, Number.parseInt(req.query.limit, 10) || 50));
     const statuses = new Set(['queued', 'running', 'done', 'failed', 'blocked', 'cancelled']);
     const kinds = new Set(['refresh', 'harvest', 'apply', 'probe', 'track']);
-    const platforms = new Set(['naukri', 'instahyre', 'hirist']);
+    const platforms = new Set(require('../lib/platforms').PLATFORM_IDS);
     const status = String(req.query.status || '');
     const kind = String(req.query.kind || '');
     const platform = String(req.query.platform || '');
@@ -1778,7 +1778,7 @@ router.get('/sending/timeline', async (req, res) => {
 // Every request to an AI provider, for anybody, in full. Written by lib/aiCallLog.js.
 
 const AI_RANGES = { '1h': HOUR, '24h': DAY, '7d': 7 * DAY, '30d': 30 * DAY };
-const AI_FEATURES = ['classify', 'draft', 'discover', 'sources', 'naukri', 'other'];
+const AI_FEATURES = ['classify', 'draft', 'discover', 'sources', 'naukri', 'applynote', 'other'];
 const AI_FAILED = ['rate-limited', 'auth', 'transient', 'bad-output', 'aborted'];
 const preview = (v, n) => { const t = String(v || '').replace(/\s+/g, ' ').trim(); return t.length > n ? `${t.slice(0, n)}…` : t; };
 
@@ -1880,6 +1880,11 @@ router.get('/ai-calls', async (req, res) => {
     // 'owner' includes rows from before keySource existed: those were all the owner's keys.
     if (req.query.keySource === 'user') filter.keySource = 'user';
     else if (req.query.keySource === 'owner') filter.keySource = { $ne: 'user' };
+    // Which of an account's keys: its position (1 = key 1) and/or its last 4 characters.
+    const keyNo = Number(req.query.keyNo);
+    if (Number.isInteger(keyNo) && keyNo > 0) filter.keyNo = keyNo;
+    const keyTail = String(req.query.keyTail || '').trim().slice(0, 8);
+    if (keyTail) filter.keyTail = keyTail;
     if (req.query.model) filter.model = String(req.query.model).slice(0, 120);
     if (['live', 'history'].includes(req.query.source)) filter.source = req.query.source === 'live' ? { $ne: 'history' } : 'history';
     if (req.query.outcome === 'failed') filter.outcome = { $ne: 'ok' };
@@ -1898,7 +1903,7 @@ router.get('/ai-calls', async (req, res) => {
     }
 
     const sum = (cond) => ({ $sum: { $cond: [cond, 1, 0] } });
-    const [rows, total, byProvider, byFeature, geminiToday, models, users] = await Promise.all([
+    const [rows, total, byProvider, byFeature, byKey, geminiToday, models, users] = await Promise.all([
       AiCall.find(page, { system: 0, params: 0 }).sort({ createdAt: -1 }).limit(limit).lean(),
       AiCall.countDocuments(filter),
       AiCall.aggregate([
@@ -1924,6 +1929,21 @@ router.get('/ai-calls', async (req, res) => {
         { $match: base },
         { $group: { _id: '$feature', calls: { $sum: 1 }, ok: sum({ $eq: ['$outcome', 'ok'] }) } },
       ]),
+      // Per key: each account's own keys side by side (key 1 / key 2 …), so an uneven
+      // spread, an exhausted key or a rejected one is visible. Owner calls are one row per provider.
+      AiCall.aggregate([
+        { $match: base },
+        { $group: {
+          _id: { provider: '$provider', own: { $eq: ['$keySource', 'user'] }, keyNo: '$keyNo', keyTail: '$keyTail', userId: { $cond: [{ $eq: ['$keySource', 'user'] }, '$userId', null] } },
+          calls: { $sum: 1 },
+          ok: sum({ $eq: ['$outcome', 'ok'] }),
+          rateLimited: sum({ $eq: ['$outcome', 'rate-limited'] }),
+          auth: sum({ $eq: ['$outcome', 'auth'] }),
+          tokens: { $sum: { $ifNull: ['$tokens.total', 0] } },
+          lastAt: { $max: '$createdAt' },
+        } },
+        { $sort: { calls: -1 } }, { $limit: 60 },
+      ]),
       // The OWNER key's allowance only — a user's own Gemini key has its own.
       AiCall.countDocuments({ provider: 'gemini', keySource: { $ne: 'user' }, createdAt: { $gte: pacificMidnight(new Date()) } }),
       AiCall.distinct('model', { createdAt: { $gte: since } }),
@@ -1938,7 +1958,7 @@ router.get('/ai-calls', async (req, res) => {
         userId: id(r.userId), userEmail: r.userId ? (emailOf.get(id(r.userId)) || '(deleted account)') : null,
         feature: r.feature, runId: r.runId, attempt: r.attempt, provider: r.provider, model: r.model, method: r.method,
         outcome: r.outcome, status: r.status, latencyMs: r.latencyMs, error: r.error,
-        keySource: r.keySource || 'owner',
+        keySource: r.keySource || 'owner', keyNo: r.keyNo || null, keyTail: r.keyTail || null,
         finishReason: r.finishReason, tokens: r.tokens || {}, result: r.result || null, context: r.context || {},
         promptPreview: preview(r.prompt, 160), outputPreview: preview(r.output, 200),
         source: r.source || 'live', note: r.note || null,
@@ -1947,6 +1967,11 @@ router.get('/ai-calls', async (req, res) => {
       nextBefore: rows.length === limit ? rows[rows.length - 1].createdAt : null,
       providers: byProvider.map(p => ({ provider: p._id, ...p, _id: undefined })),
       features: Object.fromEntries(byFeature.map(f => [f._id, { calls: f.calls, ok: f.ok }])),
+      keys: byKey.map(k => ({
+        provider: k._id.provider, own: !!k._id.own, keyNo: k._id.keyNo || null, keyTail: k._id.keyTail || null,
+        userId: id(k._id.userId), userEmail: k._id.userId ? (emailOf.get(id(k._id.userId)) || '(deleted account)') : null,
+        calls: k.calls, ok: k.ok, rateLimited: k.rateLimited, auth: k.auth, tokens: k.tokens, lastAt: k.lastAt,
+      })),
       geminiToday,
       geminiModel: process.env.GEMINI_MODEL || 'gemini-3-flash-preview',
       providerOrder: require('../lib/classify/providers').order(),
@@ -1974,6 +1999,7 @@ router.get('/ai-calls/:id', async (req, res) => {
       userId: id(r.userId), userEmail: r.userId ? (user ? user.email : '(deleted account)') : null,
       feature: r.feature, runId: r.runId, attempt: r.attempt, provider: r.provider, model: r.model, method: r.method,
       outcome: r.outcome, status: r.status, latencyMs: r.latencyMs, error: r.error, finishReason: r.finishReason,
+      keySource: r.keySource || 'owner', keyNo: r.keyNo || null, keyTail: r.keyTail || null,
       tokens: r.tokens || {}, params: r.params || null, result: r.result || null, context: r.context || {},
       system: r.system, prompt: r.prompt, output: r.output,
       source: r.source || 'live', note: r.note || null,

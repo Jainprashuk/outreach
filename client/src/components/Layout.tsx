@@ -106,8 +106,8 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
         { badge: needsYou, badgeTitle: 'Replies waiting on you' })}
       {item('/interviews', 'ti-user-check', 'Interviews', 'People who got back to you, and the interviews in progress — stages, dates and reminders.',
         { badge: needsAttention, badgeTitle: 'Upcoming interviews or follow-ups due' })}
-      {item('/jobs', 'ti-briefcase', 'Jobs', 'Every role from Naukri, Instahyre and Hirist in one pipeline — review, apply, follow up — with who you’ve emailed at each company and a one-click way to find people there.')}
-      {item('/job-platforms', 'ti-briefcase-2', 'Job Platforms', 'Naukri, Instahyre and Hirist in one place: harvests jobs, applies to the ones you approve and tracks what recruiters do, using a worker on your computer for each platform.')}
+      {item('/jobs', 'ti-briefcase', 'Jobs', 'Every role from Naukri, Instahyre, Hirist, Cutshort and Wellfound in one pipeline — review, apply, follow up — with who you’ve emailed at each company and a one-click way to find people there.')}
+      {item('/job-platforms', 'ti-briefcase-2', 'Job Platforms', 'Naukri, Instahyre, Hirist, Cutshort and Wellfound in one place: harvests jobs, applies to the ones you approve and tracks what recruiters do, using a worker on your computer for each platform.')}
       {item('/campaigns', 'ti-calendar-repeat', 'Campaigns', 'Hands-off sending: give it a list and it emails a set number of people a day for you.')}
       {item('/leads', 'ti-target-arrow', 'Leads', 'Hiring posts collected from LinkedIn, with recruiters’ emails and apply links. Move the good ones to outreach.')}
       {item('/discover', 'ti-compass', 'Discover', 'Type a company: find people who work there and guess their work email. You choose who moves to outreach.')}

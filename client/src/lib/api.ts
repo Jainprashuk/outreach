@@ -1269,7 +1269,7 @@ export const adminOverviewApi = (days = 30) =>
 
 export interface AdminPlatformRun {
   account: string;
-  platform: 'naukri' | 'instahyre' | 'hirist';
+  platform: PlatformId;
   platformLabel: string;
   kind: 'refresh' | 'harvest' | 'apply' | 'probe' | 'track';
   status: 'queued' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled';
@@ -1743,7 +1743,7 @@ export interface NaukriOverview {
 // everything else (the Action Center, Analytics) names its platform
 // explicitly, so a page left on Instahyre can never send another surface's
 // call there. 'all' is the All platforms view: job lists and Needs answer only.
-export type PlatformId = 'naukri' | 'instahyre' | 'hirist';
+export type PlatformId = 'naukri' | 'instahyre' | 'hirist' | 'cutshort' | 'wellfound';
 export type PlatformScope = PlatformId | 'all';
 export type ApplyMode = 'off' | 'dry-run' | 'on';
 export interface PlatformCapabilities {
@@ -2490,6 +2490,8 @@ export interface AiUsage {
   features: Array<{ key: string; label: string; calls: number; ok: number; tokens: number }>;
   outcomes: Array<{ key: string; label: string; n: number }>;
   providers: Array<{ provider: string; calls: number; ok: number }>;
+  /** Your own keys one by one (key 1 = the first saved). */
+  keys: Array<{ provider: string; keyNo: number; keyTail: string; calls: number; ok: number; rateLimited: number; tokens: number }>;
   lastFailure: { at: string; provider: string; outcome: string; label: string } | null;
 }
 export const aiUsageApi = (days = 30) => apiFetch<AiUsage>(`/api/settings/ai-usage?days=${days}`);
@@ -2643,7 +2645,7 @@ export const adminSendingTimelineApi = (range: TimelineRange, scope: TimelineSco
   apiFetch<Timeline>(`/api/admin/sending/timeline?range=${range}&scope=${scope}`);
 
 // ── Admin: Gemini logs ───────────────────────────────────────────────────────
-export type AiFeature = 'classify' | 'draft' | 'discover' | 'sources' | 'naukri' | 'other';
+export type AiFeature = 'classify' | 'draft' | 'discover' | 'sources' | 'naukri' | 'applynote' | 'other';
 export type AiOutcome = 'ok' | 'rate-limited' | 'auth' | 'transient' | 'bad-output' | 'aborted';
 export interface AiTokens { input?: number | null; output?: number | null; thinking?: number | null; total?: number | null }
 export interface AiContext { contactEmail?: string | null; contactName?: string | null; contactId?: string | null; company?: string | null }
@@ -2657,6 +2659,9 @@ export interface AiCallRow {
   promptPreview: string; outputPreview: string;
   /** Whose key paid: the account's own, or the owner's env keys. */
   keySource?: 'user' | 'owner';
+  /** Which of the account's own keys ran it: 1 = key 1 … and its last 4 characters. */
+  keyNo?: number | null;
+  keyTail?: string | null;
   /** 'history': rebuilt from the activity log for a call made before this log existed. */
   source: 'live' | 'history'; note: string | null;
 }
@@ -2666,8 +2671,15 @@ export interface AiProviderStats {
   tokensIn: number; tokensOut: number; tokensThinking: number;
   lastAt: string | null; lastFailure: { at: string; error: string | null; outcome: string } | null;
 }
+/** One key's share of the calls: an account's own key (key 1, 2 …) or the owner's key for a provider. */
+export interface AiKeyUsageRow {
+  provider: string; own: boolean; keyNo: number | null; keyTail: string | null;
+  userId: string | null; userEmail: string | null;
+  calls: number; ok: number; rateLimited: number; auth: number; tokens: number; lastAt: string | null;
+}
 export interface AiCallsView {
   range: string;
+  keys: AiKeyUsageRow[];
   calls: AiCallRow[];
   total: number;
   nextBefore: string | null;
@@ -2740,12 +2752,18 @@ export const setLibrarySharingApi = (sharing: boolean) =>
 // ── Your own AI keys (routes/settings.js → lib/ai/keys.js) ─────────────────
 export type AiProvider = 'gemini' | 'groq' | 'cerebras';
 export interface AiKeyStatus { state: 'ok' | 'invalid' | 'quota'; checkedAt: string; error: string | null }
+export type AiKeyMode = 'failover' | 'balance';
 export interface AiAccess {
   enforce: boolean;
   graceUntil: string | null;
   inGrace: boolean;
   ownerFallback: boolean;
   has: Record<AiProvider, boolean>;
+  /** Every saved key per provider, in order (key 1 first): its last 4 characters and what the last call said. */
+  keys: Record<AiProvider, { id: string; last4: string; status: AiKeyStatus | null }[]>;
+  /** failover = key 2 only when key 1 is exhausted · balance = requests rotate across the keys. */
+  mode: AiKeyMode;
+  maxKeys: number;
   keyCount: number;
   /** Has the required Groq key. */
   ready: boolean;
@@ -2754,10 +2772,14 @@ export interface AiAccess {
   aiOn: boolean;
 }
 export const aiAccessApi = () => apiFetch<AiAccess>('/api/settings/ai-keys');
-export const saveAiKeyApi = (provider: AiProvider, key: string) =>
-  apiFetch<AiAccess>('/api/settings/ai-keys', { method: 'PUT', body: JSON.stringify({ provider, key }) });
-export const removeAiKeyApi = (provider: AiProvider) =>
-  apiFetch<AiAccess>(`/api/settings/ai-keys/${provider}`, { method: 'DELETE' });
+/** `add` saves it as one more key for the provider instead of replacing key 1. */
+export const saveAiKeyApi = (provider: AiProvider, key: string, add = false) =>
+  apiFetch<AiAccess>('/api/settings/ai-keys', { method: 'PUT', body: JSON.stringify({ provider, key, add }) });
+/** Without `id`, removes key 1 (the next key moves up); with it, that extra key. */
+export const removeAiKeyApi = (provider: AiProvider, id?: string) =>
+  apiFetch<AiAccess>(`/api/settings/ai-keys/${provider}${id && id !== 'main' ? `?id=${encodeURIComponent(id)}` : ''}`, { method: 'DELETE' });
+export const setAiKeyModeApi = (mode: AiKeyMode) =>
+  apiFetch<AiAccess>('/api/settings/ai-keys/mode', { method: 'PUT', body: JSON.stringify({ mode }) });
 /** Fired after a key is saved or removed, so the banner re-checks without a reload. */
 export const AI_KEYS_CHANGED_EVENT = 'outreach:ai-keys-changed';
 

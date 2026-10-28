@@ -65,7 +65,7 @@ EOF
   program watchdog 55 "bash -c 'sleep 30; exec node /opt/jl/watchdog.js'"
   for p in $PLATFORMS; do
     case "$p" in
-      naukri|instahyre|hirist) ;;
+      naukri|instahyre|hirist|cutshort|wellfound) ;;
       *) echo "Skipping unknown platform \"$p\" in PLATFORMS" >&2; continue ;;
     esac
     program "worker-$p" 60 "bash -c 'sleep 8; exec env PLATFORM=$p node /app/worker/platform-worker.js'"

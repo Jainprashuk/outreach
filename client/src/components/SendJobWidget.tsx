@@ -27,6 +27,7 @@ const fmtTime = (ms: number) => {
 const RUN_LIVE_MS = 5000;   // poll while a run card is showing
 const RUN_DOT: Record<string, string> = {
   linkedin: 'var(--blue, #0a66c2)', naukri: 'var(--blue, #1557a0)', instahyre: 'var(--teal, #0f766e)', hirist: 'var(--purple, #7e22ce)',
+  cutshort: 'var(--orange, #c2410c)', wellfound: 'var(--pink, #be185d)',
 };
 const runFinished = (r: WorkerRunCard) => !['queued', 'running'].includes(r.status);
 

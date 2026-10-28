@@ -95,9 +95,10 @@ function Loading() {
   );
 }
 
-const SITE_LABEL: Record<string, string> = { all: 'job platform', naukri: 'Naukri', instahyre: 'Instahyre', hirist: 'Hirist' };
+const SITE_LABEL: Record<string, string> = { all: 'job platform', naukri: 'Naukri', instahyre: 'Instahyre', hirist: 'Hirist', cutshort: 'Cutshort', wellfound: 'Wellfound' };
 const RECOMMENDED_LABEL: Record<string, string> = {
   all: 'Recommended / matched feeds', naukri: "Naukri's Recommended jobs", instahyre: "Instahyre's Matched opportunities", hirist: 'Your Hirist job feed',
+  cutshort: "Cutshort's Matched jobs", wellfound: 'Your Wellfound search',
 };
 
 /** All platforms: each site side by side, so you can see which one works. */
@@ -327,7 +328,7 @@ export function NaukriAnalyticsView({ data, admin = false, platform = 'all' }: {
   );
 }
 
-const SCOPES: Array<[PlatformScope, string]> = [['all', 'All platforms'], ['naukri', 'Naukri'], ['instahyre', 'Instahyre'], ['hirist', 'Hirist']];
+const SCOPES: Array<[PlatformScope, string]> = [['all', 'All platforms'], ['naukri', 'Naukri'], ['instahyre', 'Instahyre'], ['hirist', 'Hirist'], ['cutshort', 'Cutshort'], ['wellfound', 'Wellfound']];
 const SCOPE_KEY = 'analytics-jp-scope';
 
 export default function NaukriAnalytics({ refreshToken }: { refreshToken: number }) {

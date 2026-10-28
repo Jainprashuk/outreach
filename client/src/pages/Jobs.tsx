@@ -146,7 +146,7 @@ function OthersJobs({ onChanged }: { onChanged: () => void }) {
         <input type="text" placeholder="Search title, company, skill…" value={q} onChange={e => setQ(e.target.value)} style={{ maxWidth: 320 }} />
         <select value={platform} onChange={e => { setPlatform(e.target.value); setPage(1); }} style={{ width: 'auto' }} aria-label="Platform">
           <option value="">All platforms</option>
-          <option value="naukri">Naukri</option><option value="instahyre">Instahyre</option><option value="hirist">Hirist</option>
+          <option value="naukri">Naukri</option><option value="instahyre">Instahyre</option><option value="hirist">Hirist</option><option value="cutshort">Cutshort</option><option value="wellfound">Wellfound</option>
         </select>
         <label style={{ display: 'flex', gap: 6, alignItems: 'center', fontSize: 13, cursor: 'pointer' }}>
           <input type="checkbox" checked={hideMine} onChange={e => { setHideMine(e.target.checked); setPage(1); }} />

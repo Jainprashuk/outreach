@@ -263,10 +263,30 @@ router.put('/ai-keys', async (req, res) => {
         return res.status(400).json({ error: 'Add your Groq key first — it does the work. Gemini and Cerebras are backups to it.' });
       }
     }
+    await Settings.getForUser(req.userId);
+
+    // { add: true }: one more key for the same provider (key 2, 3, …) instead of
+    // replacing key 1. Used by the "Add another key" box.
+    const saved = await Settings.findOne({ userId: req.userId }, { aiKeys: 1 }).lean();
+    const hasMain = !!(saved && saved.aiKeys && saved.aiKeys[`${provider}Enc`]);
+    if ((req.body || {}).add === true && hasMain) {
+      const rows = (saved.aiKeys.more && saved.aiKeys.more[provider]) || [];
+      if (1 + rows.length >= aiKeys.MAX_KEYS) return res.status(400).json({ error: `You can save up to ${aiKeys.MAX_KEYS} ${aiKeys.LABEL[provider]} keys.` });
+      const same = [saved.aiKeys[`${provider}Enc`], ...rows.map(r => r.enc)].some((enc) => { try { return credentials.decrypt(enc) === key; } catch (_) { return false; } });
+      if (same) return res.status(400).json({ error: 'That key is already saved.' });
+      const check = await checkKey(provider, key);
+      if (!check.ok) return res.status(check.status).json({ error: check.error });
+      const id = require('crypto').randomBytes(4).toString('hex');
+      await Settings.updateOne({ userId: req.userId }, {
+        $push: { [`aiKeys.more.${provider}`]: { id, enc: credentials.encrypt(key) } },
+        $set: { [`aiKeyStatus.${aiKeys.statusName(provider, id)}`]: { state: check.state, checkedAt: new Date(), error: null } },
+      });
+      aiKeys.forget(req.userId);
+      return res.json(await aiKeys.aiAccess(req.userId));
+    }
+
     const check = await checkKey(provider, key);
     if (!check.ok) return res.status(check.status).json({ error: check.error });
-
-    await Settings.getForUser(req.userId);
     await Settings.updateOne({ userId: req.userId }, {
       $set: {
         [`aiKeys.${provider}Enc`]: credentials.encrypt(key),
@@ -280,10 +300,48 @@ router.put('/ai-keys', async (req, res) => {
   }
 });
 
+// PUT /api/settings/ai-keys/mode { mode: 'failover' | 'balance' } — how an account's
+// several keys for one provider are used (lib/ai/keys.js orderKeys).
+router.put('/ai-keys/mode', async (req, res) => {
+  try {
+    const mode = String((req.body || {}).mode || '');
+    if (!['failover', 'balance'].includes(mode)) return res.status(400).json({ error: "mode must be 'failover' or 'balance'" });
+    await Settings.getForUser(req.userId);
+    await Settings.updateOne({ userId: req.userId }, { $set: { aiKeyMode: mode } });
+    aiKeys.forget(req.userId);
+    res.json(await aiKeys.aiAccess(req.userId));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /api/settings/ai-keys/:provider[?id=…] — removes key 1, or the extra key with that id.
+// Removing key 1 while more are saved promotes the next one, so the order stays "key 1, 2, …".
 router.delete('/ai-keys/:provider', async (req, res) => {
   try {
     const provider = req.params.provider;
     if (!aiKeys.PROVIDERS.includes(provider)) return res.status(404).json({ error: 'Unknown provider' });
+    const id = String(req.query.id || aiKeys.MAIN);
+    if (id !== aiKeys.MAIN) {
+      await Settings.updateOne({ userId: req.userId }, {
+        $pull: { [`aiKeys.more.${provider}`]: { id } },
+        $unset: { [`aiKeyStatus.${aiKeys.statusName(provider, id)}`]: '' },
+      });
+      aiKeys.forget(req.userId);
+      return res.json(await aiKeys.aiAccess(req.userId));
+    }
+    const cur = await Settings.findOne({ userId: req.userId }, { aiKeys: 1, aiKeyStatus: 1 }).lean();
+    const rows = (cur && cur.aiKeys && cur.aiKeys.more && cur.aiKeys.more[provider]) || [];
+    if (rows.length) {
+      const [next, ...rest] = rows;
+      const st = cur.aiKeyStatus && cur.aiKeyStatus[aiKeys.statusName(provider, next.id)];
+      await Settings.updateOne({ userId: req.userId }, {
+        $set: { [`aiKeys.${provider}Enc`]: next.enc, [`aiKeys.more.${provider}`]: rest, ...(st ? { [`aiKeyStatus.${provider}`]: st } : {}) },
+        $unset: { ...(st ? {} : { [`aiKeyStatus.${provider}`]: '' }), [`aiKeyStatus.${aiKeys.statusName(provider, next.id)}`]: '' },
+      });
+      aiKeys.forget(req.userId);
+      return res.json(await aiKeys.aiAccess(req.userId));
+    }
     await Settings.updateOne({ userId: req.userId }, {
       $set: { [`aiKeys.${provider}Enc`]: '' },
       $unset: { [`aiKeyStatus.${provider}`]: '' },

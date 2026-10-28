@@ -182,6 +182,8 @@ const naukriConfigSchema = new mongoose.Schema({
   platforms: {
     instahyre: { type: siteSchemaFor('instahyre'), default: () => ({}) },
     hirist:    { type: siteSchemaFor('hirist'), default: () => ({}) },
+    cutshort:  { type: siteSchemaFor('cutshort'), default: () => ({}) },
+    wellfound: { type: siteSchemaFor('wellfound'), default: () => ({}) },
   },
   // The same role turns up on several sites. Shared: one rule for all of them.
   duplicates: {

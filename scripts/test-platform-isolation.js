@@ -98,9 +98,9 @@ async function main() {
     ok('All refuses a config write', (await call('PATCH', '/api/p/all/config', { searches: [] })).status === 400);
     ok('All lists jobs', (await call('GET', '/api/p/all/jobs')).status === 200);
     const reg = await call('GET', '/api/naukri/platforms');
-    ok('/platforms lists all three, only Naukri on by default',
-      reg.platforms && reg.platforms.length === 3 && reg.platforms.find(p => p.id === 'naukri').enabled
-      && !reg.platforms.find(p => p.id === 'instahyre').enabled, JSON.stringify((reg.platforms || []).map(p => [p.id, p.enabled])));
+    ok('/platforms lists every platform, only Naukri on by default',
+      reg.platforms && reg.platforms.length === require('../lib/platforms').PLATFORM_IDS.length && reg.platforms.find(p => p.id === 'naukri').enabled
+      && reg.platforms.filter(p => p.id !== 'naukri').every(p => !p.enabled), JSON.stringify((reg.platforms || []).map(p => [p.id, p.enabled])));
 
     console.log('\nsettings stay per platform');
     await call('PATCH', '/api/naukri/config', { searches: [{ keywords: 'backend engineer' }], profile: { skills: ['node'] }, apply: { maxPerRun: 20 } });

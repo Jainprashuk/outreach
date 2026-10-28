@@ -16,6 +16,7 @@ const FEATURES: Array<{ key: AiFeature; label: string; hint: string }> = [
   { key: 'discover', label: 'Discover', hint: "Reading names off a company's team page" },
   { key: 'sources', label: 'Lead sources', hint: 'Reading job posts from Paste text, HN and Hiring posts' },
   { key: 'naukri', label: 'Naukri answers', hint: 'Drafting answers to Naukri screening questions from the resume' },
+  { key: 'applynote', label: 'Application messages', hint: 'The message / open answers written for one job application (Cutshort, Wellfound)' },
   { key: 'other', label: 'Other', hint: 'Calls made without a feature label (scripts, tests)' },
 ];
 const featureLabel = (f: string) => FEATURES.find(x => x.key === f)?.label || f;
@@ -53,6 +54,7 @@ export default function AdminAiLogs() {
   const [slowMs, setSlowMs] = useState('');
   const [source, setSource] = useState('');
   const [keySource, setKeySource] = useState('');
+  const [keyNo, setKeyNo] = useState('');
   const [runId, setRunId] = useState('');
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');   // q, debounced
@@ -77,10 +79,11 @@ export default function AdminAiLogs() {
     if (slowMs) p.slowMs = slowMs;
     if (source) p.source = source;
     if (keySource) p.keySource = keySource;
+    if (keyNo) p.keyNo = keyNo;
     if (runId) p.runId = runId;
     if (query) p.q = query;
     return p;
-  }, [range, provider, feature, outcome, userId, model, slowMs, source, keySource, runId, query]);
+  }, [range, provider, feature, outcome, userId, model, slowMs, source, keySource, keyNo, runId, query]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -112,9 +115,9 @@ export default function AdminAiLogs() {
     }
   };
 
-  const filtered = !!(provider || feature || outcome || userId || model || slowMs || source || keySource || runId || query);
+  const filtered = !!(provider || feature || outcome || userId || model || slowMs || source || keySource || keyNo || runId || query);
   const clear = () => {
-    setProvider(''); setFeature(''); setOutcome(''); setUserId(''); setModel(''); setSlowMs(''); setSource(''); setKeySource(''); setRunId(''); setQ('');
+    setProvider(''); setFeature(''); setOutcome(''); setUserId(''); setModel(''); setSlowMs(''); setSource(''); setKeySource(''); setKeyNo(''); setRunId(''); setQ('');
   };
 
   const totalCalls = (data?.providers || []).reduce((n, p) => n + p.calls, 0);
@@ -181,6 +184,44 @@ export default function AdminAiLogs() {
         })}
       </div>
 
+      {data && data.keys.some(k => k.own) && (
+        <div className="an-card" style={{ marginTop: 16 }}>
+          <div className="an-card-head">
+            <div className="an-card-title"><i className="ti ti-key" /> By key · {range}</div>
+            <div className="an-card-sub">
+              Each account's own keys side by side (follows the Account and Feature filters). An uneven split, a key that keeps hitting its
+              limit, or one being rejected shows here. Click a row to filter the logs to that key.
+            </div>
+          </div>
+          <div className="an-card-body">
+            <div className="table-card" style={{ boxShadow: 'none' }}>
+              <table>
+                <thead>
+                  <tr><th>Account</th><th>Provider</th><th>Key</th><th style={{ textAlign: 'right' }}>Calls</th><th style={{ textAlign: 'right' }}>Worked</th>
+                    <th style={{ textAlign: 'right' }}>Hit limit</th><th style={{ textAlign: 'right' }}>Rejected</th><th style={{ textAlign: 'right' }}>Tokens</th><th>Last used</th></tr>
+                </thead>
+                <tbody>
+                  {data.keys.filter(k => k.own).map((k, i) => (
+                    <tr key={i} style={{ cursor: 'pointer' }}
+                      onClick={() => { setProvider(k.provider); setKeySource('user'); if (k.userId) setUserId(k.userId); setKeyNo(k.keyNo ? String(k.keyNo) : ''); }}>
+                      <td style={{ fontSize: 12.5 }}>{k.userEmail || '—'}</td>
+                      <td style={{ fontWeight: 600, fontSize: 12.5 }}>{k.provider}</td>
+                      <td style={{ fontSize: 12.5 }}>{k.keyNo ? `Key ${k.keyNo}` : 'Key 1'}{k.keyTail ? <span style={{ color: 'var(--text3)' }}> …{k.keyTail}</span> : null}</td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{num(k.calls)}</td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{pct(k.ok, k.calls)}</td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: k.rateLimited ? 'var(--amber)' : undefined }}>{num(k.rateLimited)}</td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: k.auth ? 'var(--red)' : undefined }}>{num(k.auth)}</td>
+                      <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums', color: 'var(--text2)' }}>{num(k.tokens)}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text2)' }}>{ago(k.lastAt)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="an-card" style={{ marginTop: 16 }}>
         <div className="an-card-head" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
           <div>
@@ -244,6 +285,11 @@ export default function AdminAiLogs() {
               <option value="owner">Your keys</option>
               <option value="user">Their own keys</option>
             </select>
+            <select value={keyNo} onChange={e => { setKeyNo(e.target.value); if (e.target.value) setKeySource('user'); }} aria-label="Which key" style={{ width: 'auto' }}
+              title="An account's own keys: key 1 is the first it saved, key 2 the next …">
+              <option value="">Any key number</option>
+              {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>Key {n}</option>)}
+            </select>
             {runId && (
               <span className="badge" style={{ display: 'inline-flex', gap: 6, alignItems: 'center' }}>
                 One request's attempts
@@ -296,7 +342,11 @@ export default function AdminAiLogs() {
                               <span className="badge">{featureLabel(r.feature)}</span>
                               {r.attempt > 1 && <span className="badge badge-pending" title="An earlier provider failed first">attempt {r.attempt}</span>}
                               {r.source === 'history' && <span className="badge" title={r.note || ''}>history</span>}
-                              {r.keySource === 'user' && <span className="badge badge-sent" title="Ran on the account's own key">own key</span>}
+                              {r.keySource === 'user' && (
+                                <span className="badge badge-sent" title={`Ran on the account's own key${r.keyNo ? ` — key ${r.keyNo}${r.keyTail ? `, ending ${r.keyTail}` : ''}` : ''}`}>
+                                  own key{r.keyNo ? ` ${r.keyNo}` : ''}{r.keyTail ? ` …${r.keyTail}` : ''}
+                                </span>
+                              )}
                             </div>
                             <div style={{ fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                               {r.userEmail || <span style={{ color: 'var(--text3)' }}>no account</span>}

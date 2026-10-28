@@ -78,8 +78,8 @@ start linkedin scrape-worker.js
 for P in ${PLATFORMS:-naukri instahyre hirist}; do
   case "$P" in
     naukri)           start naukri naukri-worker.js ;;
-    instahyre|hirist) start "$P" platform-worker.js "$P" ;;
-    *) echo "Skipping unknown platform \"$P\" in PLATFORMS (use naukri, instahyre, hirist)." >&2 ;;
+    instahyre|hirist|cutshort|wellfound) start "$P" platform-worker.js "$P" ;;
+    *) echo "Skipping unknown platform \"$P\" in PLATFORMS (use naukri, instahyre, hirist, cutshort, wellfound)." >&2 ;;
   esac
 done
 

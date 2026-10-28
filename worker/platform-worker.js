@@ -3,7 +3,7 @@
 
 // Job platform worker — runs on Prashuk's Mac, not on Vercel.
 //
-// One loop for every job platform (Naukri, Instahyre, Hirist), started as one
+// One loop for every job platform (Naukri, Instahyre, Hirist, Cutshort, Wellfound), started as one
 // process per platform:
 //
 //   PLATFORM=instahyre node worker/platform-worker.js   (npm run instahyre-worker)
@@ -30,7 +30,7 @@
 // over approved ones, and a screening question with no matching answer skips the
 // job rather than guessing.
 //
-//   npm run naukri-worker | instahyre-worker | hirist-worker
+//   npm run naukri-worker | instahyre-worker | hirist-worker | cutshort-worker | wellfound-worker
 //   (macOS or Linux; holds sleep off itself)
 
 const path0 = require('path');
@@ -50,7 +50,7 @@ const { isPlatform, labelOf } = require('../lib/platforms');
 
 const PLATFORM = process.env.PLATFORM || 'naukri';
 if (!isPlatform(PLATFORM)) {
-  console.error(`Unknown PLATFORM "${PLATFORM}". Use one of: naukri, instahyre, hirist.`);
+  console.error(`Unknown PLATFORM "${PLATFORM}". Use one of: naukri, instahyre, hirist, cutshort, wellfound.`);
   process.exit(1);
 }
 const LABEL = labelOf(PLATFORM);
@@ -87,7 +87,9 @@ function runTimeoutFor(runDoc, config) {
   const d = loadDriver();
   const JOB_TIMEOUT_MS = d.JOB_TIMEOUT_MS || require('./naukri/apply').JOB_TIMEOUT_MS;
   const JOB_TIMEOUT_AI_MS = d.JOB_TIMEOUT_AI_MS || require('./naukri/apply').JOB_TIMEOUT_AI_MS;
-  const perJob = (config.autoAnswer && config.autoAnswer.enabled ? JOB_TIMEOUT_AI_MS : JOB_TIMEOUT_MS)
+  const af = (d.meta && d.meta.applyFlow) || {};
+  const writesNotes = !!((af.confirm && af.confirm.message) || (af.screening && af.screening.aiNote));
+  const perJob = (writesNotes || (config.autoAnswer && config.autoAnswer.enabled) ? JOB_TIMEOUT_AI_MS : JOB_TIMEOUT_MS)
     + (Number(config.apply && config.apply.delayMaxMs) || 4000);
   const jobs = Array.isArray(runDoc.jobs) ? runDoc.jobs.length : 0;
   return Math.max(RUN_TIMEOUT_MS, jobs * perJob + 10 * 60 * 1000);
@@ -404,9 +406,20 @@ async function executeRun(runDoc, config, openSession = null) {
             return null;
           }
         };
+        // The message that goes with an application, written for that job
+        // (lib/applyNote.js). Same one-try rule; null = nothing was written, and
+        // the driver then sends no application.
+        const askNote = async (job, { kind = 'message', question = '', maxChars } = {}) => {
+          try {
+            return await api(`${API}/ai-note`, { runId: runDoc.id, jobId: job.id, kind, question, maxChars }, 60 * 1000);
+          } catch (err) {
+            log('AI note unavailable:', err.message.split('\n')[0]);
+            return null;
+          }
+        };
         const out = await Promise.race([
           driver.apply(session, {
-            config, jobs, resumePath, dryRun: !!runDoc.dryRun, onProgress, onResult, askAI,
+            config, jobs, resumePath, dryRun: !!runDoc.dryRun, onProgress, onResult, askAI, askNote,
           }),
           expired,
         ]);

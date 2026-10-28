@@ -8,6 +8,7 @@
 #   bash worker/install-worker.sh naukri         # Naukri worker
 #   bash worker/install-worker.sh instahyre      # Instahyre worker
 #   bash worker/install-worker.sh hirist         # Hirist worker
+#   bash worker/install-worker.sh cutshort       # Cutshort worker (also: wellfound)
 #
 #   macOS — a launchd agent   (uninstall: launchctl bootout gui/$UID/com.prashuk.scrape-worker)
 #   Linux — a systemd user unit (uninstall: systemctl --user disable --now outreach-scrape-worker)
@@ -20,10 +21,10 @@ TARGET="${1:-scrape}"
 case "$TARGET" in
   scrape) LABEL="com.prashuk.scrape-worker"; SCRIPT="scrape-worker.js"; UNIT="outreach-scrape-worker"
           LOGNAME="worker.log"; DESC="LinkedIn scrape worker"; PLATFORM_ENV="" ;;
-  naukri|instahyre|hirist)
+  naukri|instahyre|hirist|cutshort|wellfound)
           LABEL="com.prashuk.$TARGET-worker"; SCRIPT="platform-worker.js"; UNIT="outreach-$TARGET-worker"
           LOGNAME="$TARGET-worker.log"; DESC="$TARGET worker"; PLATFORM_ENV="$TARGET" ;;
-  *) echo "Unknown worker \"$TARGET\". Use: scrape (default), naukri, instahyre or hirist." >&2; exit 1 ;;
+  *) echo "Unknown worker \"$TARGET\". Use: scrape (default), naukri, instahyre, hirist, cutshort or wellfound." >&2; exit 1 ;;
 esac
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"

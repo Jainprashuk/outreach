@@ -5,8 +5,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useToast } from '../context/ToastContext';
 import {
-  aiAccessApi, removeAiKeyApi, saveAiKeyApi, AI_KEYS_CHANGED_EVENT,
-  type AiAccess, type AiProvider,
+  aiAccessApi, removeAiKeyApi, saveAiKeyApi, setAiKeyModeApi, AI_KEYS_CHANGED_EVENT,
+  type AiAccess, type AiProvider, type AiKeyMode,
 } from '../lib/api';
 
 const PROVIDERS: { key: AiProvider; name: string; url: string; steps: string[]; tag: string; note?: string }[] = [
@@ -49,6 +49,8 @@ export default function AiKeysCard() {
   const [values, setValues] = useState<Partial<Record<AiProvider, string>>>({});
   const [open, setOpen] = useState<AiProvider | null>(null);
   const [busy, setBusy] = useState<AiProvider | null>(null);
+  // The "add another key" box per provider.
+  const [more, setMore] = useState<Partial<Record<AiProvider, string>>>({});
 
   useEffect(() => { aiAccessApi().then(setAccess).catch(() => setAccess(null)); }, []);
   // The banner and the bell link here as /settings#ai-keys.
@@ -74,13 +76,32 @@ export default function AiKeysCard() {
     } finally { setBusy(null); }
   };
 
-  const remove = async (p: AiProvider) => {
-    const msg = p === 'groq'
+  const addMore = async (p: AiProvider) => {
+    const v = (more[p] || '').trim();
+    if (!v) return;
+    setBusy(p);
+    try {
+      changed(await saveAiKeyApi(p, v, true));
+      setMore(prev => ({ ...prev, [p]: '' }));
+      toast('Key checked and added', 'success');
+    } catch (err: any) {
+      toast(err.message || 'Could not add the key', 'error');
+    } finally { setBusy(null); }
+  };
+
+  const setMode = async (m: AiKeyMode) => {
+    try { changed(await setAiKeyModeApi(m)); toast(m === 'balance' ? 'Keys will share the load' : 'Extra keys are used as backups', 'success'); }
+    catch (err: any) { toast(err.message || 'Could not change this', 'error'); }
+  };
+
+  const remove = async (p: AiProvider, id?: string) => {
+    const onlyGroq = p === 'groq' && (access?.keys.groq.length ?? 1) <= 1;
+    const msg = onlyGroq
       ? 'Remove your Groq key? Groq does almost all the AI work — without it, AI may stop for your account.'
       : 'Remove this key?';
     if (!window.confirm(msg)) return;
     setBusy(p);
-    try { changed(await removeAiKeyApi(p)); toast('Key removed', 'success'); }
+    try { changed(await removeAiKeyApi(p, id)); toast('Key removed', 'success'); }
     catch (err: any) { toast(err.message || 'Could not remove it', 'error'); }
     finally { setBusy(null); }
   };
@@ -158,12 +179,53 @@ export default function AiKeysCard() {
                 <button className="btn btn-primary" type="button" disabled={locked || busy !== null || !(values[p.key] || '').trim()} onClick={() => save(p.key)}>
                   {busy === p.key ? <><i className="ti ti-loader" /> Checking…</> : has ? 'Replace' : 'Save'}
                 </button>
-                {has && <button className="btn btn-danger" type="button" disabled={busy !== null} onClick={() => remove(p.key)}>Remove</button>}
+                {has && (access?.keys[p.key]?.length ?? 1) <= 1 && <button className="btn btn-danger" type="button" disabled={busy !== null} onClick={() => remove(p.key)}>Remove</button>}
               </div>
+              {has && (access?.keys[p.key]?.length ?? 0) > 1 && (
+                <ul className="sr-steps" style={{ listStyle: 'none', paddingLeft: 0, margin: '8px 0 0' }}>
+                  {access!.keys[p.key].map((k, n) => (
+                    <li key={k.id} style={{ display: 'flex', gap: 8, alignItems: 'center', padding: '3px 0' }}>
+                      <span className="sr-num" aria-hidden="true">{n + 1}</span>
+                      <span>Key {n + 1} · …{k.last4 || '????'}</span>
+                      {k.status?.state === 'invalid' ? <span className="badge badge-rejected" title={k.status.error || ''}>Rejected</span>
+                        : k.status?.state === 'quota' ? <span className="badge badge-pending">Daily limit reached</span>
+                        : <span className="badge badge-sent">Working</span>}
+                      <button className="btn btn-danger btn-xs" type="button" style={{ marginLeft: 'auto' }}
+                        disabled={busy !== null} onClick={() => remove(p.key, k.id)}>Remove</button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {has && (access?.keys[p.key]?.length ?? 1) < (access?.maxKeys ?? 5) && (
+                <div className="sr-keyinput" style={{ marginTop: 8 }}>
+                  <input type="password" autoComplete="off"
+                    value={more[p.key] || ''} onChange={e => setMore(prev => ({ ...prev, [p.key]: e.target.value }))}
+                    placeholder={`Add another ${p.name} key (from a different account)`}
+                    onKeyDown={e => { if (e.key === 'Enter') addMore(p.key); }} />
+                  <button className="btn" type="button" disabled={busy !== null || !(more[p.key] || '').trim()} onClick={() => addMore(p.key)}>
+                    <i className="ti ti-plus" /> Add key
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
         </div>
+
+ {access && Object.values(access.keys).some(l => l.length > 1) && (
+          <div className="form-group" style={{ marginTop: 14 }}>
+            <div className="form-label">When you have more than one key for a provider</div>
+            {([
+              ['failover', 'Use the next key only when the first is used up', 'Key 1 does the work. Key 2 takes over when Key 1 hits its daily or per-minute limit.'],
+              ['balance', 'Share the load across all keys', 'Requests rotate between the keys, so each one gets about the same amount. If one runs out, the others carry on.'],
+            ] as [AiKeyMode, string, string][]).map(([m, title, sub]) => (
+              <label key={m} style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, marginBottom: 6, cursor: 'pointer' }}>
+                <input type="radio" name="ai-key-mode" style={{ marginTop: 3 }} checked={access.mode === m} onChange={() => setMode(m)} />
+                <span>{title}<div style={{ color: 'var(--text2)', fontSize: 11 }}>{sub}</div></span>
+              </label>
+            ))}
+          </div>
+        )}
 
         <div className="info-box sr-note">
           <i className="ti ti-lock" style={{ fontSize: 15, flexShrink: 0 }} />

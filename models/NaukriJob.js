@@ -81,6 +81,10 @@ const naukriJobSchema = new mongoose.Schema({
   },
   appliedAt:    { type: Date, default: null },
   applyNote:    { type: String, default: '' },
+  // The message written for this job by lib/applyNote.js (Cutshort's message,
+  // Wellfound's open answers), kept so you can read what went to the recruiter.
+  sentMessage:  { type: String, default: '' },
+  sentAnswers:  { type: [{ _id: false, q: String, a: String }], default: [] },
   // Whether a future run should try this job again.
   //
   // Not every skip is the same. A skip caused by an unanswered screening

@@ -16,7 +16,11 @@
     "instahyre-worker": "PLATFORM=instahyre node worker/platform-worker.js",
     "hirist-worker": "PLATFORM=hirist node worker/platform-worker.js",
     "instahyre-worker:stub": "PLATFORM=instahyre PLATFORM_STUB=1 node worker/platform-worker.js",
-    "hirist-worker:stub": "PLATFORM=hirist PLATFORM_STUB=1 node worker/platform-worker.js"
+    "hirist-worker:stub": "PLATFORM=hirist PLATFORM_STUB=1 node worker/platform-worker.js",
+    "cutshort-worker": "PLATFORM=cutshort node worker/platform-worker.js",
+    "wellfound-worker": "PLATFORM=wellfound node worker/platform-worker.js",
+    "cutshort-worker:stub": "PLATFORM=cutshort PLATFORM_STUB=1 node worker/platform-worker.js",
+    "wellfound-worker:stub": "PLATFORM=wellfound PLATFORM_STUB=1 node worker/platform-worker.js"
   },
   "dependencies": {
     "@google/generative-ai": "^0.24.1",

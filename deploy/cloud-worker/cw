@@ -341,7 +341,7 @@ cmd_stats() {
 
 cmd_logs() {
   local u="${1:-}" p="${2:-}" dir
-  [ -n "$u" ] || die "Usage: cw logs <user> [naukri|instahyre|hirist|chrome]"
+  [ -n "$u" ] || die "Usage: cw logs <user> [naukri|instahyre|hirist|cutshort|wellfound|chrome]"
   dir="$STATE/$u/.job-leads/logs"
   [ -d "$dir" ] || die "No logs yet for $u (is the container running? cw list)"
   if [ -n "$p" ]; then

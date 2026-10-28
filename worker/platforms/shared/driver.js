@@ -32,6 +32,7 @@ const MAX_SEARCHES = 5;
 const MAX_PAGES = 5;          // scrolls per page (each fetches the next batch)
 const PAGE_DELAY = [2000, 4500];
 const JOB_TIMEOUT_MS = 60 * 1000;
+const JOB_TIMEOUT_AI_MS = 150 * 1000;
 // How long past the first 3.5s a listing page may take to deliver its feed.
 const FEED_WAIT_MS = 20 * 1000;
 
@@ -71,8 +72,9 @@ function makeDriver(meta) {
 
   async function readListing(session, { url, label, origin, maxPages, onProgress, found }) {
     const page = await newPage(session);
-    const feed = collectFeed(page, (u) => sameSite(u) && (!meta.feedTest || meta.feedTest(u)), {
+    const feed = collectFeed(page, (u, req) => sameSite(u) && (!meta.feedTest || meta.feedTest(u, req)), {
       fields: meta.fields, baseUrl: meta.origin, urlFor: meta.jobUrl,
+      prepare: meta.prepare, rawJobs: meta.jobsFromBody,
     });
     try {
       await page.bringToFront().catch(() => {});
@@ -116,7 +118,18 @@ function makeDriver(meta) {
           idle = feed.jobs.size === before ? idle + 1 : 0;
           continue;
         }
-        await page.mouse.wheel(0, 4000).catch(() => {});
+        // A list that scrolls inside its own panel (Cutshort) only moves when the
+        // pointer is over it, so rest the pointer there first, like a person.
+        if (meta.scrollOverList) {
+          const at = await page.evaluate(() => {
+            const el = [...document.querySelectorAll('div')].find(e => e.scrollHeight > e.clientHeight + 200 && /auto|scroll/.test(getComputedStyle(e).overflowY));
+            if (!el) return null;
+            const r = el.getBoundingClientRect();
+            return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+          }).catch(() => null);
+          if (at) await page.mouse.move(at.x, at.y).catch(() => {});
+        }
+        await page.mouse.wheel(0, meta.scrollOverList ? 1500 : 4000).catch(() => {});
         await jitter(...PAGE_DELAY);
         // A "Load more" / "Show more" button, if the page uses one instead of
         // infinite scroll. Clicking it is pagination, nothing else.
@@ -249,10 +262,14 @@ function makeDriver(meta) {
     return { rows: [...rows.values()], expected: null, sawFeed: rows.size > 0 };
   }
 
+  // Where a job is applied for. Usually its own listing page; a site whose
+  // public page only hands you on to an in-app view (Cutshort) says so.
+  const listingOf = (job) => (meta.applyFlow.listingUrl ? meta.applyFlow.listingUrl(job) : job.url);
+
   // Dry run: look, report, click nothing.
   async function rehearse(page, job) {
     await page.bringToFront().catch(() => {});
-    await page.goto(job.url, { waitUntil: 'domcontentloaded' });
+    await page.goto(listingOf(job), { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2000);
     await check(page, `the listing for "${job.title}"`);
     const body = (await page.innerText('body', { timeout: 5000 }).catch(() => '') || '').toLowerCase().replace(/\s+/g, ' ');
@@ -335,9 +352,14 @@ function makeDriver(meta) {
 
   // A site answer that says no, even with HTTP 200.
   const refused = (b) => !!(b && typeof b === 'object' && (b.success === false || b.error
+    || (Array.isArray(b.errors) && b.errors.length)
     || (b.status && typeof b.status === 'object' && Number(b.status.code) >= 400)));
-  const siteMessage = (b) => (b && typeof b === 'object' && String(b.message || b.error
-    || (b.status && typeof b.status === 'object' && b.status.message) || '').slice(0, 160)) || '';
+  // Only text counts: some sites answer { message: { …the new record… } }.
+  const siteMessage = (b) => {
+    if (!b || typeof b !== 'object') return '';
+    const t = [b.message, b.error, b.status && typeof b.status === 'object' && b.status.message].find(x => typeof x === 'string' && x);
+    return t ? t.slice(0, 160) : '';
+  };
 
   // One real application. `state.clicked` tells the caller whether the Apply
   // button was pressed, so a crash after the click is never retried blind.
@@ -349,13 +371,18 @@ function makeDriver(meta) {
   // of them answers skips the job with the question reported, so it can become
   // a rule under Needs answer; an optional one is left blank.
   //   Returns null when the form was filled and submitted, else a result.
-  async function fillScreening(page, job, { config, askAI, mandatory }) {
+  async function fillScreening(page, job, { config, askAI, askNote, mandatory }) {
     const sc = meta.applyFlow.screening;
     const asked = [];
+    const written = [];
     for (let round = 0; round < (sc.maxSteps || 3); round++) {
       const boxes = page.locator(sc.questionBox);
       try { await boxes.first().waitFor({ state: 'visible', timeout: round ? 8000 : 15000 }); }
-      catch (_) { return round ? null : { outcome: 'failed', terminal: false, reason: `${meta.label} opened its form but no questions appeared` }; }
+      catch (_) {
+        // A modal that only asks "Send application?" has no questions at all.
+        const bare = sc.inline && await page.locator(sc.submit).first().isVisible().catch(() => false);
+        if (!bare) return round ? null : { outcome: 'failed', terminal: false, reason: `${meta.label} opened its form but no questions appeared` };
+      }
       await page.waitForTimeout(1500);
       const n = await boxes.count();
       for (let i = 0; i < n; i++) {
@@ -400,6 +427,16 @@ function makeDriver(meta) {
         const resolved = resolveAnswer(question, config);
         let value = null, ai = null;
         if (resolved.matched) value = String(resolved.answer);
+        else if (sc.aiNote && askNote && hasField && (await field.getAttribute('type').catch(() => '')) !== 'number') {
+          // An open question: written for THIS job from your resume and its own
+          // text, never saved as a reusable rule. Declined (the resume does not
+          // say) is a decision; anything else is a failure and nothing is sent.
+          const n = await askNote(job, { kind: 'question', question });
+          if (n && n.text) { value = n.text; written.push(question); }
+          else if (!(n && n.declined)) {
+            return { outcome: 'failed', terminal: false, reason: `Could not write an answer to "${question.slice(0, 80)}" (${(n && n.reason) || 'AI unavailable'}) — nothing was sent` };
+          }
+        }
         else if (askAI && config.autoAnswer && config.autoAnswer.enabled) {
           const live = await askAI(question, labels).catch(() => null);
           if (live && live.answer) {
@@ -456,10 +493,11 @@ function makeDriver(meta) {
       if (page.url() !== before && !page.url().includes(sc.urlTest)) break;
     }
     job._screened = asked;
+    job._written = written.length;
     return null;
   }
 
-  async function applyOne(page, job, state, { config = {}, askAI = null } = {}) {
+  async function applyOne(page, job, state, { config = {}, askAI = null, askNote = null } = {}) {
     const a = meta.applyFlow;
     const want = job.sourceId != null ? String(job.sourceId) : null;
     let detail = null, sent = null, otherJob = null;
@@ -468,16 +506,21 @@ function makeDriver(meta) {
       try {
         const u = res.url();
         const m = res.request().method();
-        if (a.detailTest && a.detailTest(u)) { detail = await res.json().catch(() => null); return; }
-        if (a.screening && a.screening.questionnaireTest(u)) {
-          const j = await res.json().catch(() => null);
-          for (const sec of (j && j.data && j.data[0] && j.data[0].sections) || [])
-            for (const q of sec.detailedQuestions || []) if (q.mandatory) mandatory.add(String(q.question || '').replace(/\s+/g, ' ').trim().toLowerCase());
-          return;
-        }
-        if (!a.applyRequest || !a.applyRequest(u, m)) return;
         let post = null;
         try { post = res.request().postDataJSON(); } catch (_) {}
+        if (a.detailTest && a.detailTest(u, res.request())) { detail = await res.json().catch(() => null); return; }
+        if (a.screening && a.screening.questionnaireTest(u, res.request())) {
+          const j = await res.json().catch(() => null);
+          // A site says which questions are required (Wellfound), or the Hirist shape.
+          if (a.screening.mandatoryFrom) {
+            for (const q of a.screening.mandatoryFrom(j) || []) mandatory.add(String(q || '').replace(/\s+/g, ' ').trim().toLowerCase());
+          } else {
+            for (const sec of (j && j.data && j.data[0] && j.data[0].sections) || [])
+              for (const q of sec.detailedQuestions || []) if (q.mandatory) mandatory.add(String(q.question || '').replace(/\s+/g, ' ').trim().toLowerCase());
+          }
+          return;
+        }
+        if (!a.applyRequest || !a.applyRequest(u, m, post)) return;
         const id = a.jobIdOf ? a.jobIdOf(u, post) : null;
         if (want && id && id !== want) { otherJob = id; return; }
         let body = null;
@@ -491,7 +534,7 @@ function makeDriver(meta) {
     page.on('popup', onPopup);
     try {
       await page.bringToFront().catch(() => {});
-      await page.goto(job.url, { waitUntil: 'domcontentloaded' });
+      await page.goto(listingOf(job), { waitUntil: 'domcontentloaded' });
       await page.waitForTimeout(2500);
       await check(page, `the listing for "${job.title}"`);
       needsSetup(page);
@@ -521,18 +564,61 @@ function makeDriver(meta) {
 
       const urlBefore = page.url();
       await pressButton(page, btn, label, state);
+      // A site that asks "Send?" in a dialog (Cutshort): nothing has been sent
+      // until that second button, so the click above is not yet an application.
+      if (a.confirm) {
+        state.clicked = false;
+        const dlg = page.locator(a.confirm.dialog).first();
+        try { await dlg.waitFor({ state: 'visible', timeout: 10000 }); }
+        catch (_) { return { outcome: 'failed', reason: `${meta.label} did not open its confirm dialog after "${label || 'Apply'}" — nothing was sent` }; }
+        await page.waitForTimeout(800);
+        // The site says there is nothing to send because you already applied.
+        const said = ((await dlg.innerText().catch(() => '')) || '').replace(/\s+/g, ' ');
+        if (a.confirm.already && a.confirm.already.test(said)) {
+          await page.keyboard.press('Escape').catch(() => {});
+          return { outcome: 'skipped', terminal: true, reason: `${meta.label} says you have already applied to this job` };
+        }
+        // Side effects the dialog would add (Cutshort pre-ticks "Follow <company>").
+        if (a.confirm.untick) {
+          const box = dlg.locator(a.confirm.untick).first();
+          if (await box.count().catch(() => 0)) await box.click({ timeout: 3000 }).catch(() => {});
+        }
+        // The message box: written for this job, never sent empty. The dialog
+        // stays open while it is written; a failure closes it and sends nothing.
+        if (a.confirm.message) {
+          const box = dlg.locator(a.confirm.message.selector).first();
+          if (await box.count().catch(() => 0)) {
+            const n = askNote ? await askNote(job, { kind: 'message', maxChars: a.confirm.message.maxChars }) : null;
+            if (!n || !n.text) {
+              await page.keyboard.press('Escape').catch(() => {});
+              return { outcome: 'failed', terminal: false, reason: `No application message could be written (${(n && n.reason) || 'AI unavailable'}) — nothing was sent` };
+            }
+            await box.fill(n.text);
+            job._message = n.text;
+            if ((await box.inputValue().catch(() => '')) !== n.text) {
+              await page.keyboard.press('Escape').catch(() => {});
+              return { outcome: 'failed', terminal: false, reason: `${meta.label}'s message box did not take the text — nothing was sent` };
+            }
+          }
+        }
+        const send = dlg.getByRole('button', { name: a.confirm.button }).first();
+        if (!(await send.count().catch(() => 0))) return { outcome: 'failed', reason: `${meta.label}'s confirm dialog has no "${a.confirm.button.source}" button — nothing was sent` };
+        await pressButton(page, send, 'Send', state);
+      }
 
       // The site's answer, or where the click took us instead.
       let redirect = null, screeningHit = false;
       for (let i = 0; i < 30 && !sent && !otherJob; i++) {
         await page.waitForTimeout(500);
         const u = page.url();
-        if (a.screening && u.includes(a.screening.urlTest) && !urlBefore.includes(a.screening.urlTest)) { screeningHit = true; break; }
+        if (a.screening && a.screening.urlTest && u.includes(a.screening.urlTest) && !urlBefore.includes(a.screening.urlTest)) { screeningHit = true; break; }
+        // A form in a modal on the same page (Wellfound): recognised by its submit button.
+        if (a.screening && a.screening.inline && await page.locator(a.screening.submit).first().isVisible().catch(() => false)) { screeningHit = true; break; }
         redirect = (a.redirects || []).find(r => u.includes(r.test) && !urlBefore.includes(r.test)) || null;
         if (redirect) break;
       }
       if (screeningHit) {
-        const out = await fillScreening(page, job, { config, askAI, mandatory });
+        const out = await fillScreening(page, job, { config, askAI, askNote, mandatory });
         if (out) return out;
         // The form is in; the application itself is still only counted on the
         // site's own answer to the apply request.
@@ -557,7 +643,8 @@ function makeDriver(meta) {
           const sc = job._screened || [];
           const byAI = sc.filter(x => x.ai);
           const note = sc.length ? ` after ${sc.length} form question(s)${byAI.length ? ` · ${byAI.length} answered by AI (${byAI.map(x => `${x.ai}%`).join(', ')})` : ''}` : '';
-          return { outcome: 'applied', reason: `Applied on ${meta.label}${note}${msg ? ` — "${msg}"` : ''}` };
+          const wrote = job._message ? ' · with an AI-written message' : job._written ? ` · ${job._written} open answer(s) written by AI` : '';
+          return { outcome: 'applied', reason: `Applied on ${meta.label}${note}${wrote}${msg ? ` — "${msg}"` : ''}` };
         }
         return { outcome: 'failed', terminal: true, reason: `${meta.label} refused the application (HTTP ${sent.status})${siteMessage(sent.body) ? `: ${siteMessage(sent.body)}` : ''}` };
       }
@@ -574,7 +661,9 @@ function makeDriver(meta) {
     }
   }
 
-  async function apply(session, { jobs = [], dryRun = false, onProgress = () => {}, onResult = async () => {}, config = {}, askAI = null } = {}) {
+  async function apply(session, { jobs = [], dryRun = false, onProgress = () => {}, onResult = async () => {}, config = {}, askAI = null, askNote = null } = {}) {
+    // Writing the message takes an AI call or two on top of the page.
+    const jobTimeout = askNote ? JOB_TIMEOUT_AI_MS : JOB_TIMEOUT_MS;
     // The server never hands a real apply to a platform whose apply is not
     // proven; this is the second lock on the same door.
     if (dryRun ? !meta.capabilities.dryRun : !meta.capabilities.apply) {
@@ -598,8 +687,8 @@ function makeDriver(meta) {
         const state = { clicked: false };
         try {
           result = await Promise.race([
-            dryRun ? rehearse(page, job) : applyOne(page, job, state, { config, askAI }),
-            new Promise((_, rej) => setTimeout(() => rej(new Error(`did not finish within ${JOB_TIMEOUT_MS / 1000}s`)), JOB_TIMEOUT_MS)),
+            dryRun ? rehearse(page, job) : applyOne(page, job, state, { config, askAI, askNote }),
+            new Promise((_, rej) => setTimeout(() => rej(new Error(`did not finish within ${jobTimeout / 1000}s`)), jobTimeout)),
           ]);
         } catch (err) {
           if (err && (err.name === 'Checkpoint' || err.fatal)) throw err;
@@ -650,7 +739,7 @@ function makeDriver(meta) {
 
   return {
     meta, connect, disconnect, loggedIn, refresh, harvest, apply, track, Checkpoint, NotSupported,
-    emptyHarvestHint, JOB_TIMEOUT_MS, JOB_TIMEOUT_AI_MS: JOB_TIMEOUT_MS,
+    emptyHarvestHint, JOB_TIMEOUT_MS, JOB_TIMEOUT_AI_MS,
   };
 }
 

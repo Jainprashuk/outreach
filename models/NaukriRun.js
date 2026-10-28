@@ -66,6 +66,7 @@ const naukriRunSchema = new mongoose.Schema({
     // many of them were confident enough to use.
     aiAsked:    { type: Number, default: 0 },
     aiAnswered: { type: Number, default: 0 },
+    aiNotes:    { type: Number, default: 0 },
     // Track only: applications read from Naukri, and how many of ours moved.
     tracked:    { type: Number, default: 0 },
     // Apply only: jobs left out at claim because another platform had already

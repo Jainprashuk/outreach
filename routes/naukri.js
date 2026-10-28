@@ -15,6 +15,7 @@ const { scoreJob } = require('../lib/naukriScore');
 // Called through the module object (naukriDraft.draftAnswer), not a
 // destructured copy, so the end-to-end test can swap in a scripted AI.
 const naukriDraft = require('../lib/naukriDraft');
+const applyNote = require('../lib/applyNote');
 const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = require('../lib/naukriFilters');
 const { reportIssue } = require('../lib/issues');
 const { failStaleNaukriRuns: failStaleRuns } = require('../lib/staleNaukriRuns');
@@ -380,10 +381,11 @@ async function setupChecklist(userId, config, worker, platform = 'naukri') {
       done: !!(site.inboxTidy && site.inboxTidy.enabled),
       hint: 'Turn on inbox tidy in Filters so old and poor-fit jobs clear themselves away.' },
   ];
-  // Instahyre and Hirist apply in one click — no screening questions (verified
+  // Wellfound's apply form can ask questions (verified 2026-10-28), so it keeps
+  // the answers items. Instahyre and Hirist apply in one click — no screening questions (verified
   // 2026-10-21) — so answers and AI answers do nothing there, and inbox tidy
   // is a nicety, not setup. Their list is only what changes results.
-  const list = platform === 'naukri' ? items : items.filter(i => !['answers', 'autoAnswer', 'tidy'].includes(i.key));
+  const list = (platform === 'naukri' || platform === 'wellfound') ? items : items.filter(i => !['answers', 'autoAnswer', 'tidy'].includes(i.key));
   return { items: list, done: list.filter(i => i.done).length, total: list.length };
 }
 
@@ -1335,6 +1337,49 @@ router.post('/ai-answer', async (req, res) => {
         : out.status === 'ready' ? `AI was ${confidence}% sure — below your ${min}%`
         : out.status === 'error' ? (out.note || 'AI busy') : 'Your resume and answers do not say',
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/naukri/ai-note { runId, jobId, kind, question? } — worker token. The
+// message (or one open answer) that goes with an application, written for THIS
+// job from the resume and the job's own text (lib/applyNote.js). Never saved as
+// an answer rule: it belongs to one company. No note → the worker sends no
+// application rather than an empty or doubtful one.
+const MAX_NOTES_PER_RUN = 30;
+
+router.post('/ai-note', async (req, res) => {
+  try {
+    const { runId, jobId, kind: rawKind, question: rawQ, maxChars } = req.body || {};
+    const kind = rawKind === 'question' ? 'question' : 'message';
+    const question = str(rawQ, 1000);
+    if (!runId || !jobId) return res.status(400).json({ error: 'runId and jobId are required' });
+    if (kind === 'question' && !question) return res.status(400).json({ error: 'question is required' });
+
+    const job = await NaukriJob.findOne({ _id: jobId, userId: req.userId, ...PQ(req), ...BASE_FILTER }).lean();
+    if (!job) return res.status(404).json({ error: 'No such job' });
+
+    const slot = await NaukriRun.findOneAndUpdate(
+      { _id: runId, userId: req.userId, status: 'running', 'stats.aiNotes': { $lt: MAX_NOTES_PER_RUN }, ...PQ(req), ...BASE_FILTER },
+      { $inc: { 'stats.aiNotes': 1 } },
+      { new: true, projection: { _id: 1 } },
+    );
+    if (!slot) return res.json({ text: null, reason: `AI note limit for this run (${MAX_NOTES_PER_RUN}) reached, or the run is not running` });
+
+    const config = await NaukriConfig.getForUser(req.userId);
+    const profile = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
+    const out = await applyNote.writeNote({
+      job, resumeText: await resumeTextFor(req.userId, config), profile, userId: req.userId,
+      kind, question, maxChars: Number(maxChars) || undefined,
+      recruiter: (job.recruiters && job.recruiters[0] && job.recruiters[0].name) || '',
+    });
+    if (out.text) {
+      await NaukriJob.updateOne({ _id: job._id }, kind === 'message'
+        ? { $set: { sentMessage: out.text } }
+        : { $push: { sentAnswers: { $each: [{ q: question.slice(0, 300), a: out.text }], $slice: -10 } } });
+    }
+    res.json({ text: out.text || null, reason: out.reason || '', code: out.code || '', declined: !!out.declined });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

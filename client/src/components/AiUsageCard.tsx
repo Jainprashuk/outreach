@@ -47,6 +47,16 @@ export default function AiUsageCard() {
             {data.outcomes.map(o => <HBar key={o.key} label={o.label} n={o.n} d={t.calls} fill={o.key === 'ok' ? teal : red} />)}
           </div>
         )}
+        {data.keys.length > 0 && data.keys.some(k => k.keyNo > 1) && (
+          <div className="sr-usage-sec">
+            <h3 className="sr-h3">Each of your keys</h3>
+            {data.keys.map(k => (
+              <HBar key={`${k.provider}${k.keyNo}`} label={`${PROVIDER[k.provider] || k.provider} · key ${k.keyNo}${k.keyTail ? ` …${k.keyTail}` : ''}`}
+                n={k.calls} d={Math.max(1, data.keys.reduce((n, x) => n + x.calls, 0))} fill={accent}
+                extra={` · ${k.ok} worked${k.rateLimited ? ` · ${k.rateLimited} hit the limit` : ''}`} />
+            ))}
+          </div>
+        )}
         <div className="sr-usage-foot">
           {data.providers.map(p => `${PROVIDER[p.provider] || p.provider}: ${p.calls} call${p.calls === 1 ? '' : 's'}, ${p.ok} worked`).join(' · ')}
           {(t.yourKey > 0 || t.adminKey > 0) && <><br />{t.yourKey} on your keys{t.adminKey ? `, ${t.adminKey} on the admin's keys` : ''}.</>}

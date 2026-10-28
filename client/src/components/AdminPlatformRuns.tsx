@@ -73,7 +73,7 @@ export default function AdminPlatformRuns({ accounts }: { accounts: AdminUserRow
           <option value="">All accounts</option>{accounts.filter(a => a.id).map(a => <option key={a.id!} value={a.id!}>{a.email}</option>)}
         </select>
         <select className="login-input" aria-label="Platform" value={platform} onChange={e => change(() => setPlatform(e.target.value))} style={{ width: 'auto' }}>
-          <option value="">All platforms</option><option value="naukri">Naukri</option><option value="instahyre">Instahyre</option><option value="hirist">Hirist</option>
+          <option value="">All platforms</option><option value="naukri">Naukri</option><option value="instahyre">Instahyre</option><option value="hirist">Hirist</option><option value="cutshort">Cutshort</option><option value="wellfound">Wellfound</option>
         </select>
         <select className="login-input" aria-label="Run type" value={kind} onChange={e => change(() => setKind(e.target.value))} style={{ width: 'auto' }}>
           <option value="">All run types</option><option value="harvest">Harvest</option><option value="apply">Apply</option>

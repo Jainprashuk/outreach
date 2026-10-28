@@ -138,7 +138,7 @@ function CloudSetup({ url, progress }: { url: string; progress: Progress }) {
       <Checklist p={progress} />
       <Note>
         <strong>Your job platforms run in the cloud.</strong> Nothing to install — your computer can be off.
-        The workers drive a Chrome that runs on the server, and you log in to Naukri, Instahyre and Hirist in it once.
+        The workers drive a Chrome that runs on the server, and you log in to Naukri, Instahyre, Hirist, Cutshort and Wellfound in it once.
       </Note>
       <Step n={1} title="Open your cloud browser">
         <P>

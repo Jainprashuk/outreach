@@ -122,8 +122,10 @@ function posted(v, now = Date.now()) {
 }
 
 // One raw object → the /ingest shape, or null if it is not a job.
-function toJob(raw, { fields = {}, baseUrl = '', urlFor = null } = {}) {
+function toJob(raw, { fields = {}, baseUrl = '', urlFor = null, prepare = null } = {}) {
   if (!raw || typeof raw !== 'object') return null;
+  // A site's own reshaping of a row (meta.prepare) before the field lookup.
+  if (prepare) raw = prepare(raw) || raw;
   // Opportunity wrappers ({ id, job: {...}, employer: {...} }) are flattened so
   // the job's own fields win and the wrapper fills the gaps.
   const o = raw.job && typeof raw.job === 'object' ? { ...raw, ...raw.job, job: raw.job } : raw;
@@ -195,12 +197,17 @@ function collectFeed(page, test, opts = {}) {
   const onResponse = async (res) => {
     try {
       const url = res.url();
-      if (!test(url)) return;
+      if (!test(url, res.request())) return;
       const type = (res.headers()['content-type'] || '');
       if (!/json/i.test(type)) return;
       const body = await res.json();
       lastAt = Date.now();
-      for (const j of jobsInJson(body, opts)) {
+      // A site whose jobs are nested with their company (Wellfound's GraphQL)
+      // says where they are (meta.jobsFromBody); otherwise any job-shaped list.
+      const found = opts.rawJobs
+        ? (opts.rawJobs(body, url) || []).map(r => toJob(r, opts)).filter(Boolean)
+        : jobsInJson(body, opts);
+      for (const j of found) {
         if (!jobs.has(j.sourceId)) jobs.set(j.sourceId, j);
         if (opts.onJob) opts.onJob(j, body);
       }

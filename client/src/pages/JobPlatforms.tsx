@@ -66,7 +66,8 @@ const CAP_LABEL: Array<['refresh' | 'harvest' | 'apply' | 'track', string]> = [
 
 // The harvest choices a platform offers, from its registry entry.
 function sourceChoices(info: PlatformInfo | undefined): Array<[string, string, NaukriSources]> {
-  if (!info || !info.sources.recommended) return [];
+  // Feed-only sites (Cutshort, Wellfound) have one source, so no choice to offer.
+  if (!info || !info.sources.recommended || !info.sources.searches) return [];
   return [
     ['searches', info.sources.searches, { searches: true, recommended: false }],
     ['recommended', info.sources.recommended, { searches: false, recommended: true }],

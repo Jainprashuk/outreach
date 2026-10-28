@@ -43,7 +43,17 @@ const settingsSchema = new mongoose.Schema({
     geminiEnc:   { type: String, default: '' },
     groqEnc:     { type: String, default: '' },
     cerebrasEnc: { type: String, default: '' },
+    // More keys for the same provider (key 2, 3, …), each { id, enc }. The field
+    // above stays "key 1", so an account that never adds one is untouched.
+    more: {
+      gemini:   { type: [{ _id: false, id: String, enc: String }], default: [] },
+      groq:     { type: [{ _id: false, id: String, enc: String }], default: [] },
+      cerebras: { type: [{ _id: false, id: String, enc: String }], default: [] },
+    },
   },
+  // How several keys of one provider are used: 'failover' = the next key only
+  // when the one before it is exhausted; 'balance' = requests rotate across them.
+  aiKeyMode: { type: String, enum: ['failover', 'balance'], default: 'failover' },
   aiKeyStatus: { type: mongoose.Schema.Types.Mixed, default: () => ({}) },
 }, { timestamps: true });
 

@@ -21,9 +21,10 @@ const mongoose = require('mongoose');
 const aiCallSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   // classify: sorting an inbound reply · draft: writing a reply · discover: reading
-  // a team page for names · sources: reading job posts for the Leads sources
+  // a team page for names · applynote: the message / open answers sent with a job application
+  // (lib/applyNote.js) · sources: reading job posts for the Leads sources
   // (paste / HN / hiring posts) · other: anything without a caller label (scripts)
-  feature: { type: String, enum: ['classify', 'draft', 'discover', 'sources', 'naukri', 'other'], default: 'other' },
+  feature: { type: String, enum: ['classify', 'draft', 'discover', 'sources', 'naukri', 'applynote', 'other'], default: 'other' },
   runId: { type: String, default: null },       // shared by every attempt of one feature call
   attempt: { type: Number, default: 1 },        // 1 = the first provider tried in that run
   provider: { type: String, required: true },   // gemini | groq | cerebras
@@ -31,6 +32,10 @@ const aiCallSchema = new mongoose.Schema({
   // Whose key paid for it: 'user' (their own, lib/ai/keys.js) or 'owner' (the env
   // keys). Null on rows written before per-user keys existed — those were all owner.
   keySource: { type: String, enum: ['user', 'owner', null], default: null },
+  // Which of the account's own keys ran it: 1 = key 1, 2 = the second one saved, …, and its
+  // last 4 characters. Null for the owner's keys and for rows before several keys existed.
+  keyNo:   { type: Number, default: null },
+  keyTail: { type: String, default: null },
   method: { type: String, enum: ['classify', 'complete'], required: true },
   // ok · rate-limited · auth · transient · bad-output · aborted (lib/classify/providers/kinds.js)
   outcome: { type: String, required: true },
@@ -65,6 +70,7 @@ const aiCallSchema = new mongoose.Schema({
 aiCallSchema.index({ createdAt: -1 });
 aiCallSchema.index({ provider: 1, createdAt: -1 });
 aiCallSchema.index({ userId: 1, createdAt: -1 });
+aiCallSchema.index({ keyNo: 1, createdAt: -1 }, { sparse: true });
 aiCallSchema.index({ runId: 1 });
 // Full prompts are large; a month is enough to see how the providers behave.
 // Set per row by lib/aiCallLog.js (createdAt + 30 days); a null never expires.

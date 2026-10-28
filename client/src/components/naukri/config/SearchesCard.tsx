@@ -34,6 +34,9 @@ export default function SearchesCard({ config, onSaved }: {
   // A site with no matched feed harvests searches only (none today; Hirist's
   // job feed was mapped 2026-10-21).
   const recLabel = siteSources.recommended;
+  // Cutshort and Wellfound have no URL-controlled search: they harvest their
+  // own feed only (the search is set on the site itself).
+  const feedOnly = !isNaukri && !siteSources.searches;
   const toast = useToast();
   const [limits, setLimits] = useState(config.searchLimits || { maxSearches: 10, maxPages: 8 });
   const [sources, setSources] = useState({
@@ -57,7 +60,7 @@ export default function SearchesCard({ config, onSaved }: {
       // Rows with neither keywords nor a URL are dropped server-side; say so
       // rather than letting them vanish silently.
       const usable = rows.filter(r => r.keywords.trim() || r.url.trim());
-      if (!sources.searches && !(recLabel && sources.recommended)) throw new Error(recLabel ? `Pick at least one: your searches or ${recLabel.toLowerCase()}` : 'Add a search and keep My searches ticked');
+      if (!feedOnly && !sources.searches && !(recLabel && sources.recommended)) throw new Error(recLabel ? `Pick at least one: your searches or ${recLabel.toLowerCase()}` : 'Add a search and keep My searches ticked');
       const r = await updateNaukriConfigApi({ searches: usable, searchLimits: limits, sources });
       setLimits(r.config.searchLimits);
       setSources(s => ({ ...s, ...r.config.sources, recommendedTabs: r.config.sources.recommendedTabs?.length ? r.config.sources.recommendedTabs : ALL_TABS }));
@@ -70,11 +73,16 @@ export default function SearchesCard({ config, onSaved }: {
 
   return (
     <Card title="Searches" icon="ti-search" collapsible id="searches" defaultOpen={false} scope="site"
-      right={<button className="btn btn-xs" type="button" onClick={() => setRows(r => [...r, blank()])}>
+      right={feedOnly ? undefined : <button className="btn btn-xs" type="button" onClick={() => setRows(r => [...r, blank()])}>
         <i className="ti ti-plus" /> Add
       </button>}>
 
-      {rows.map((row, i) => (
+      {feedOnly && (
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 10 }}>
+          {site} can&apos;t be searched from here: it harvests {recLabel?.toLowerCase()}. Change what that list shows on {site} itself.
+        </div>
+      )}
+      {!feedOnly && rows.map((row, i) => (
         <div key={i} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
             <input type="text"
@@ -113,11 +121,11 @@ export default function SearchesCard({ config, onSaved }: {
 
       <div style={{ margin: '14px 0 6px' }}>
         <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 6 }}>Harvest from (default — scheduled harvests use this)</div>
-        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, marginBottom: 6 }}>
+        {!feedOnly && <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13, marginBottom: 6 }}>
           <input type="checkbox" checked={sources.searches} style={{ marginTop: 3 }}
             onChange={e => setSources(s => ({ ...s, searches: e.target.checked }))} />
           <span>My searches<div style={{ color: 'var(--text2)', fontSize: 11 }}>The searches listed above.</div></span>
-        </label>
+        </label>}
         {!recLabel && (
           <div style={{ color: 'var(--text2)', fontSize: 11 }}>{site} has no recommended feed, so harvest uses these searches only.</div>
         )}
@@ -145,11 +153,11 @@ export default function SearchesCard({ config, onSaved }: {
       </div>
 
       <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', margin: '12px 0 4px' }}>
-        <label style={{ fontSize: 13 }}>
+        {!feedOnly && <label style={{ fontSize: 13 }}>
           <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Searches per harvest</div>
           <input type="number" min={1} max={10} style={{ width: 90 }} value={limits.maxSearches}
             onChange={e => setLimits(l => ({ ...l, maxSearches: Number(e.target.value) }))} />
-        </label>
+        </label>}
         <label style={{ fontSize: 13 }}>
           <div style={{ color: 'var(--text2)', fontSize: 12, marginBottom: 4 }}>Pages per search</div>
           <input type="number" min={1} max={8} style={{ width: 90 }} value={limits.maxPages}

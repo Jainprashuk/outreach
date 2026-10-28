@@ -35,11 +35,15 @@ export const usePlatform = () => useContext(Ctx);
 // The platform colours from the prototype, as theme tokens.
 export const PLATFORM_COLOR: Record<string, string> = {
   naukri: 'var(--blue, #1557a0)', instahyre: 'var(--teal, #0f766e)', hirist: 'var(--purple, #7e22ce)',
+  cutshort: 'var(--orange, #c2410c)', wellfound: 'var(--pink, #be185d)',
 };
 export const PLATFORM_BG: Record<string, string> = {
   naukri: 'var(--blue-bg, #eaf1fb)', instahyre: 'var(--teal-bg, #e1f5ee)', hirist: 'var(--purple-bg, #f7edfd)',
+  cutshort: 'var(--orange-bg, #fdf0e6)', wellfound: 'var(--pink-bg, #fdecf4)',
 };
-export const PLATFORM_LABEL: Record<PlatformId, string> = { naukri: 'Naukri', instahyre: 'Instahyre', hirist: 'Hirist' };
+export const PLATFORM_LABEL: Record<PlatformId, string> = {
+  naukri: 'Naukri', instahyre: 'Instahyre', hirist: 'Hirist', cutshort: 'Cutshort', wellfound: 'Wellfound',
+};
 
 /** The small coloured platform tag used in tables, cards and the timeline. */
 export function PlatformTag({ id, style }: { id?: string | null; style?: React.CSSProperties }) {
