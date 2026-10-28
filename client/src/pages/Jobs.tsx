@@ -7,7 +7,7 @@ import SelectionBar from '../components/naukri/SelectionBar';
 import { Empty, Muted } from '../components/naukri/ui';
 import { DupBadge, PlatformTag } from '../components/naukri/platform';
 import { useFindPeople } from '../components/naukri/useFindPeople';
-import { SkeletonRows } from '../components/Skeleton';
+import { Skeleton } from '../components/Skeleton';
 import { RefreshBar, Refreshing } from '../components/RefreshBar';
 import { useToast } from '../context/ToastContext';
 import { useSession } from '../context/SessionContext';
@@ -40,6 +40,26 @@ const STAGES: { key: Stage; label: string; icon: string; tip: string; query: Nau
 ];
 
 const PAGE = 40;
+
+// Placeholder rows shaped like a job row (checkbox, score, two text lines, a button),
+// for lists made of divs. The shared SkeletonRows renders table rows.
+function JobRowsSkeleton({ rows = 6 }: { rows?: number }) {
+  return (
+    <div aria-busy="true" aria-label="Loading jobs">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '12px 0', borderBottom: '0.5px solid var(--border)' }}>
+          <Skeleton w={15} h={15} r={4} style={{ flexShrink: 0 }} />
+          <Skeleton w={30} h={22} r={6} style={{ flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <Skeleton w={`${48 + (i % 3) * 14}%`} h={12} style={{ marginBottom: 7 }} />
+            <Skeleton w={`${30 + (i % 4) * 8}%`} h={9} />
+          </div>
+          <Skeleton w={84} h={26} r={7} style={{ flexShrink: 0 }} />
+        </div>
+      ))}
+    </div>
+  );
+}
 const FUNNEL: NaukriApplyStatus[] = ['applied', 'in-review', 'interviewing', 'offer', 'rejected'];
 
 const FREE_MAIL = /@(gmail|googlemail|yahoo|ymail|outlook|hotmail|live|rediffmail|icloud|proton|protonmail|aol)\./i;
@@ -135,7 +155,7 @@ function OthersJobs({ onChanged }: { onChanged: () => void }) {
         <Muted>{total} job{total === 1 ? '' : 's'} seen in the last 30 days · you can add them to your own list, nothing is applied for you</Muted>
       </div>
       {error && <div className="badge badge-failed" style={{ marginBottom: 10 }}>{error}</div>}
-      {loading && rows.length === 0 ? <SkeletonRows rows={6} cols={4} /> : rows.length === 0 ? (
+      {loading && rows.length === 0 ? <JobRowsSkeleton /> : rows.length === 0 ? (
         <Empty icon="ti-world-search">{query ? 'Nothing matches that search.' : 'No jobs from other accounts yet.'}</Empty>
       ) : (
         <>
@@ -434,7 +454,7 @@ export default function Jobs() {
 
       {error && <div className="badge badge-failed" style={{ marginBottom: 10 }}>{error}</div>}
 
-      {loading && jobs.length === 0 ? <SkeletonRows rows={6} cols={4} /> : jobs.length === 0 ? (
+      {loading && jobs.length === 0 ? <JobRowsSkeleton /> : jobs.length === 0 ? (
         <Empty icon={def.icon}>
           {query ? 'Nothing matches that search.' : stage === 'review'
             ? 'Nothing to review. New jobs appear here after a harvest on Job Platforms.'
