@@ -111,4 +111,6 @@ ok('cutshort writes its message into the dialog box before Send', ca.confirm.mes
 ok('wellfound writes open questions with AI', wa.screening.aiNote === true);
 ok('the note endpoint is a worker path on every platform', require('fs').readFileSync(require('path').join(__dirname, '..', 'server.js'), 'utf8').includes("'ai-note'"));
 
+ok('wellfound skips a form locked behind a location question', wa.screening.blocked && wa.screening.blocked[0].selector.includes('qualification.location.action') && /locations on your profile/.test(wa.screening.blocked[0].reason));
+
 console.log(`\n${pass} checks passed`);

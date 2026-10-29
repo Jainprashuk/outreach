@@ -141,6 +141,13 @@ module.exports = {
       choice: 'label:has(input[type=radio]), label:has(input[type=checkbox])',
       submit: '[data-test="JobApplicationModal--SubmitButton"]',
       maxSteps: 2,
+      // Verified 2026-10-28 (Loopr AI, job 4897494): a job outside your profile's locations opens
+      // the form with a location question first (relocate / currently in …); the answer box and
+      // Send stay disabled until it is answered. Never answered for you: skipped.
+      blocked: [{
+        selector: '[data-test="RadioGroup-qualification.location.action"]',
+        reason: "Wellfound says this job does not support the locations on your profile (it asks where you are or whether you would relocate). Nothing was sent — apply on Wellfound yourself if you want it, or update your location preferences there.",
+      }],
     },
     redirects: [],
   },

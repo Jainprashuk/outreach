@@ -371,7 +371,7 @@ function makeDriver(meta) {
   // of them answers skips the job with the question reported, so it can become
   // a rule under Needs answer; an optional one is left blank.
   //   Returns null when the form was filled and submitted, else a result.
-  async function fillScreening(page, job, { config, askAI, askNote, mandatory }) {
+  async function fillScreening(page, job, { config, askAI, askNote, mandatory, state = {} }) {
     const sc = meta.applyFlow.screening;
     const asked = [];
     const written = [];
@@ -384,6 +384,16 @@ function makeDriver(meta) {
         if (!bare) return round ? null : { outcome: 'failed', terminal: false, reason: `${meta.label} opened its form but no questions appeared` };
       }
       await page.waitForTimeout(1500);
+      // A form that cannot be submitted as it stands (Wellfound: "This job does not
+      // support the locations on your profile" — a location question to answer first,
+      // with the answer box and Send disabled). Answering it would mean claiming to be
+      // somewhere or to relocate on your behalf, so the job is skipped, nothing sent.
+      for (const b of sc.blocked || []) {
+        if (await page.locator(b.selector).first().count().catch(() => 0)) {
+          await page.keyboard.press('Escape').catch(() => {});
+          return { outcome: 'skipped', terminal: true, reason: b.reason };
+        }
+      }
       const n = await boxes.count();
       for (let i = 0; i < n; i++) {
         const box = boxes.nth(i);
@@ -395,6 +405,10 @@ function makeDriver(meta) {
         for (let k = 0; k < nPills; k++) labels.push(((await pills.nth(k).innerText().catch(() => '')) || '').trim());
         const field = box.locator(sc.input).first();
         const hasField = await field.count().catch(() => 0) > 0;
+        if (hasField && await field.isDisabled().catch(() => false)) {
+          await page.keyboard.press('Escape').catch(() => {});
+          return { outcome: 'skipped', terminal: true, reason: `${meta.label}'s form is locked: "${question.slice(0, 60)}" is disabled until a required profile step is done on the site — nothing was sent` };
+        }
         const choices = box.locator(sc.choice);
         const nChoices = nPills ? 0 : await choices.count().catch(() => 0);
         const hasSelect = !nPills && !hasField && await box.locator('select').count().catch(() => 0) > 0;
@@ -486,6 +500,8 @@ function makeDriver(meta) {
         return { outcome: 'skipped', reason: `${meta.label} will not let the form go on (its "${(await next.innerText().catch(() => '') || 'Next').trim()}" button stays disabled) — a required question has no answer. Answer it on ${meta.label} or under Jobs → Needs answer.` };
       }
       const before = page.url();
+      // From here on an application may be on its way; before this, nothing was sent.
+      state.clicked = true;
       await next.click();
       await page.waitForTimeout(3000);
       // A second step shows more questions on the same page; otherwise done.
@@ -618,7 +634,10 @@ function makeDriver(meta) {
         if (redirect) break;
       }
       if (screeningHit) {
-        const out = await fillScreening(page, job, { config, askAI, askNote, mandatory });
+        // The form is open; nothing has been sent until its own Send is pressed
+        // (fillScreening sets this again at that moment).
+        state.clicked = false;
+        const out = await fillScreening(page, job, { config, askAI, askNote, mandatory, state });
         if (out) return out;
         // The form is in; the application itself is still only counted on the
         // site's own answer to the apply request.
