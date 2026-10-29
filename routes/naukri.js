@@ -1673,7 +1673,7 @@ const recruiterKind = (v) => {
 const OWN_SEND = /^(applied|application sent|application submitted)$/i;
 router.get('/activity', async (req, res) => {
   try {
-    const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
+    const days = Math.min(3650, Math.max(1, parseInt(req.query.days, 10) || 7));
     const limit = Math.min(400, Math.max(20, parseInt(req.query.limit, 10) || 100));
     const since = new Date(Date.now() - days * 86400000);
     const wanted = new Set(String(req.query.types || '').split(',').filter(Boolean));

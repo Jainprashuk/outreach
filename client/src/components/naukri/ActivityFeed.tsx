@@ -86,7 +86,7 @@ export default function ActivityFeed() {
         </select>
         <select value={days} onChange={e => setDays(Number(e.target.value))} style={{ maxWidth: 150 }} aria-label="Period">
           <option value={1}>Last 24 hours</option><option value={3}>Last 3 days</option>
-          <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option>
+          <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option><option value={3650}>All time</option>
         </select>
         <Muted>{updated ? `updated ${fmtAgo(updated)}` : ''}</Muted>
       </div>
@@ -99,7 +99,15 @@ export default function ActivityFeed() {
 
       {loading && events.length === 0 ? <Muted>Loading recruiter activity…</Muted> : shown.length === 0 ? (
         <Empty icon="ti-user-search">
-          No recruiter activity in this period{responded > 0 ? ` — but ${responded} job${responded === 1 ? ' has' : 's have'} an older response, so try a longer period` : ''}. When a recruiter views, shortlists or contacts you on a job you applied to, it shows up here after the daily check.
+          {responded > 0 ? (
+            <>
+              Nothing {type ? `of that kind ` : ''}in this period, but {responded} job{responded === 1 ? ' has' : 's have'} a recruiter response overall.
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'center', marginTop: 10 }}>
+                {days < 3650 && <button type="button" className="btn btn-sm btn-primary" onClick={() => setDays(3650)}>Show all time</button>}
+                {type && <button type="button" className="btn btn-sm" onClick={() => setType('')}>Clear the {META[type].label} filter</button>}
+              </div>
+            </>
+          ) : 'No recruiter activity yet. When a recruiter views, shortlists or contacts you on a job you applied to, it shows up here after the daily check.'}
         </Empty>
       ) : groups.map(g => (
         <div key={g.label} style={{ marginBottom: 14 }}>
