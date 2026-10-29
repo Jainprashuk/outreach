@@ -1679,17 +1679,20 @@ router.get('/activity', async (req, res) => {
     const wanted = new Set(String(req.query.types || '').split(',').filter(Boolean));
 
     const base = { userId: oidOf(req.userId), ...PQ(req), deleted: { $ne: true } };
-    const jobs = await NaukriJob.find({ ...base, 'naukriTimeline.at': { $gte: since } },
-      { title: 1, company: 1, platform: 1, url: 1, naukriTimeline: 1, naukriStage: 1, recruiters: 1 })
+    // Some sites (Instahyre) print no date on a status, so the job's own stage time
+    // — when the track run first saw it — stands in, rather than hiding the job.
+    const jobs = await NaukriJob.find({ ...base, $or: [{ 'naukriTimeline.at': { $gte: since } }, { naukriStageAt: { $gte: since } }] },
+      { title: 1, company: 1, platform: 1, url: 1, naukriTimeline: 1, naukriStage: 1, naukriStageAt: 1, recruiters: 1 })
       .sort({ naukriStageAt: -1 }).limit(1500).lean();
 
     const all = [];
     for (const j of jobs) {
       for (const t of j.naukriTimeline || []) {
-        if (!t.at || t.at < since || !t.value || OWN_SEND.test(String(t.value).trim())) continue;
+        const when = t.at || j.naukriStageAt || null;
+        if (!when || when < since || !t.value || OWN_SEND.test(String(t.value).trim())) continue;
         all.push({
           jobId: String(j._id), title: j.title, company: j.company || '', platform: j.platform || 'naukri', url: j.url || '',
-          at: t.at, type: recruiterKind(t.value), label: String(t.value).slice(0, 80), stage: j.naukriStage || null,
+          at: when, type: recruiterKind(t.value), label: String(t.value).slice(0, 80), stage: j.naukriStage || null,
           recruiter: ((j.recruiters || [])[0] || {}).name || '',
         });
       }
@@ -1710,9 +1713,9 @@ router.get('/activity', async (req, res) => {
       counts.responded += r.n;
       if (r._id.s === 'shortlisted' || r._id.s === 'contacted') counts.shortlisted += r.n;
     }
-    // Filter chips pick the jobs whose furthest stage is that one.
     counts.stages.other = new Set(all.filter((e) => e.type === 'other').map((e) => e.jobId)).size;
-    const events = wanted.size ? all.filter((e) => wanted.has(e.stage || '') || (wanted.has('other') && e.type === 'other')) : all;
+    // A chip lists the updates OF that kind (a Shortlisted chip shows the shortlistings, not the views that led up to them).
+    const events = wanted.size ? all.filter((e) => wanted.has(e.type)) : all;
     res.json({ since, days, total: events.length, counts, events: events.slice(0, limit) });
   } catch (err) {
     res.status(500).json({ error: err.message });

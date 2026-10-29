@@ -83,7 +83,7 @@ export default function ActivityFeed() {
         <Muted>{updated ? `updated ${fmtAgo(updated)}` : ''}</Muted>
       </div>
       <Muted style={{ display: 'block', marginBottom: 10 }}>
-        {counts.responded} jobs have a recruiter response · {counts.shortlisted} shortlisted or contacted (same as Analytics). Chips count jobs by the furthest step; the list below shows each update in the chosen period.
+        {counts.responded} jobs have a recruiter response · {counts.shortlisted} shortlisted or contacted (same as Analytics). The chip numbers are jobs by their furthest step; picking a chip lists just that kind of update in the chosen period.
       </Muted>
 
       {error && <div className="badge badge-failed" style={{ marginBottom: 10 }}>{error}</div>}
