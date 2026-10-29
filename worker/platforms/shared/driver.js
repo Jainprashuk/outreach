@@ -607,6 +607,9 @@ function makeDriver(meta) {
             const n = askNote ? await askNote(job, { kind: 'message', maxChars: a.confirm.message.maxChars }) : null;
             if (!n || !n.text) {
               await page.keyboard.press('Escape').catch(() => {});
+              // Declined = the resume does not support an honest message for this
+              // role: a decision, so skip for good instead of retrying every run.
+              if (n && n.declined) return { outcome: 'skipped', terminal: true, reason: `Your resume does not support an honest message for this role (${n.reason || 'no matching experience'}) — nothing was sent` };
               return { outcome: 'failed', terminal: false, reason: `No application message could be written (${(n && n.reason) || 'AI unavailable'}) — nothing was sent` };
             }
             await box.fill(n.text);
