@@ -1946,6 +1946,28 @@ export const listNaukriJobsApi = (params: NaukriJobQuery = {}, platform?: Platfo
   }>(`${platform ? PB(platform) : NB()}/jobs?${qs.toString()}`);
 };
 
+export type ActivityType = 'applied' | 'failed' | 'skipped' | 'recruiter' | 'approved';
+export interface ActivityEvent {
+  jobId: string; title: string; company: string; platform: PlatformId; url: string;
+  at: string; type: ActivityType; note: string; aiMessage?: boolean;
+}
+export interface ActivityRun {
+  id: string; platform: PlatformId; kind: 'refresh' | 'harvest' | 'apply' | 'probe' | 'track';
+  status: 'queued' | 'running' | 'done' | 'failed' | 'blocked' | 'cancelled'; trigger: 'manual' | 'scheduled';
+  dryRun: boolean; at: string;
+  progress: { phase: string; label: string; page: number; pagesTotal: number; found: number; new: number; applied: number; skipped: number; failed: number } | null;
+  stats: { found: number; new: number; applied: number; skipped: number; failed: number; rehearsed: number } | null;
+}
+/** What is happening across your job platforms: events, runs in flight, recent runs. Read-only. */
+export const activityApi = (params: { days?: number; types?: string; limit?: number; platform?: PlatformScope } = {}) => {
+  const qs = new URLSearchParams();
+  if (params.days) qs.set('days', String(params.days));
+  if (params.limit) qs.set('limit', String(params.limit));
+  if (params.types) qs.set('types', params.types);
+  return apiFetch<{ since: string; days: number; total: number; events: ActivityEvent[]; live: ActivityRun[]; runs: ActivityRun[] }>(
+    `${PB(params.platform || 'all')}/activity?${qs.toString()}`);
+};
+
 /** The authorisation point: approving is what permits an application, and it queues the run. */
 export const decideNaukriJobsApi = (ids: string[], decision: NaukriApproval, reason?: string) =>
   apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(

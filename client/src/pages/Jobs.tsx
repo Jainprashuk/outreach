@@ -5,6 +5,7 @@ import MoveToInterviewModal, { type InterviewSeed } from '../components/MoveToIn
 import { FitBadge } from '../components/naukri/ReviewQueue';
 import SelectionBar from '../components/naukri/SelectionBar';
 import { Empty, Muted } from '../components/naukri/ui';
+import ActivityFeed from '../components/naukri/ActivityFeed';
 import { DupBadge, PlatformTag } from '../components/naukri/platform';
 import { useFindPeople } from '../components/naukri/useFindPeople';
 import { Skeleton } from '../components/Skeleton';
@@ -218,7 +219,7 @@ function OthersJobs({ onChanged }: { onChanged: () => void }) {
 export default function Jobs() {
   const toast = useToast();
   const { canSeeLibrary } = useSession();
-  const [scope, setScope] = useState<'mine' | 'others'>('mine');
+  const [scope, setScope] = useState<'mine' | 'others' | 'activity'>('mine');
   const { findPeople, finding } = useFindPeople();
   const navigate = useNavigate();
   const [addingRec, setAddingRec] = useState<string | null>(null);
@@ -419,18 +420,22 @@ export default function Jobs() {
       subtitle={`${needsYou} to review · ${counts.queued ?? 0} queued · ${counts.applied ?? 0} applied. Workers and setup are in Job Platforms.`}
       actions={<Link className="btn btn-sm" to="/job-platforms"><i className="ti ti-briefcase-2" /> Job Platforms</Link>}
     >
-      {canSeeLibrary && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12 }} role="group" aria-label="Whose jobs">
-          <button type="button" className={`btn btn-sm${scope === 'mine' ? ' btn-primary' : ''}`} onClick={() => setScope('mine')}>
-            <i className="ti ti-user" /> Mine
-          </button>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }} role="group" aria-label="Jobs view">
+        <button type="button" className={`btn btn-sm${scope === 'mine' ? ' btn-primary' : ''}`} onClick={() => setScope('mine')}>
+          <i className="ti ti-user" /> Mine
+        </button>
+        <button type="button" className={`btn btn-sm${scope === 'activity' ? ' btn-primary' : ''}`} onClick={() => setScope('activity')}
+          title="What is happening across your job platforms right now: applications, recruiter replies, runs.">
+          <i className="ti ti-activity" /> Activity
+        </button>
+        {canSeeLibrary && (
           <button type="button" className={`btn btn-sm${scope === 'others' ? ' btn-primary' : ''}`} onClick={() => setScope('others')}
             title="Jobs found by other accounts on the platforms. You can only act on your own; add one to yours to work on it.">
             <i className="ti ti-users" /> Others
           </button>
-        </div>
-      )}
-      {scope === 'others' && canSeeLibrary ? <OthersJobs onChanged={loadCounts} /> : (
+        )}
+      </div>
+      {scope === 'activity' ? <ActivityFeed /> : scope === 'others' && canSeeLibrary ? <OthersJobs onChanged={loadCounts} /> : (
         <>
       <div className="nav-tabs" style={{ marginBottom: 12 }}>
         {STAGES.map(s => (
