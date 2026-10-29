@@ -1656,63 +1656,53 @@ const rx = (v, max = 100) => new RegExp(str(v, max).replace(/[.*+?^${}()|[\]\\]/
 // reached in practice — and if it were, the count would be honest about it.
 const REFINE_CAP = 1000;
 
-// ── Activity: what is happening across your job platforms ───────────────────
-// A read-only feed built from facts already stored — nothing is written. Per
-// job: each apply outcome (applyHistory), each recruiter status the site showed
-// (naukriTimeline), and approvals. Plus the runs going on right now.
-const ACTIVITY_APPLY = { applied: 'applied', failed: 'failed', skipped: 'skipped' };
+// ── Activity: what recruiters are doing on your jobs ───────────────────────
+// Read-only. Every status a job site showed for one of your applications —
+// viewed, resume viewed, shortlisted, contacted, not shortlisted — newest first,
+// across platforms. "Applied" / "Application Sent" are your own send, not a
+// recruiter action, so they are left out. Built from naukriTimeline (the track
+// run's reading of the site); nothing is written.
+const recruiterKind = (v) => {
+  const t = String(v || '').toLowerCase();
+  if (/not\s*shortlisted|rejected|not selected|declined/.test(t)) return 'not-shortlisted';
+  if (/shortlist/.test(t)) return 'shortlisted';
+  if (/contact|message|reply|replied|interested|invited|interview|offer/.test(t)) return 'contacted';
+  if (/view|seen|opened|read/.test(t)) return 'viewed';
+  return 'other';
+};
+const OWN_SEND = /^(applied|application sent|application submitted)$/i;
 router.get('/activity', async (req, res) => {
   try {
-    const days = Math.min(30, Math.max(1, parseInt(req.query.days, 10) || 3));
-    const limit = Math.min(300, Math.max(20, parseInt(req.query.limit, 10) || 120));
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days, 10) || 7));
+    const limit = Math.min(400, Math.max(20, parseInt(req.query.limit, 10) || 100));
     const since = new Date(Date.now() - days * 86400000);
-    const pq = PQ(req);
-    const uid = oidOf(req.userId);
     const wanted = new Set(String(req.query.types || '').split(',').filter(Boolean));
-    const want = (t) => !wanted.size || wanted.has(t);
 
     const jobs = await NaukriJob.find({
-      userId: uid, ...pq, deleted: { $ne: true },
-      $or: [
-        { 'applyHistory.at': { $gte: since } }, { 'naukriTimeline.at': { $gte: since } },
-        { approvedAt: { $gte: since } },
-      ],
-    }, {
-      title: 1, company: 1, platform: 1, url: 1, applyStatus: 1, approvedAt: 1, approvedBy: 1,
-      applyHistory: 1, naukriTimeline: 1, sentMessage: 1,
-    }).sort({ updatedAt: -1 }).limit(600).lean();
+      userId: oidOf(req.userId), ...PQ(req), deleted: { $ne: true },
+      'naukriTimeline.at': { $gte: since },
+    }, { title: 1, company: 1, platform: 1, url: 1, naukriTimeline: 1, recruiters: 1 }).sort({ naukriStageAt: -1 }).limit(1500).lean();
 
-    const events = [];
+    const all = [];
     for (const j of jobs) {
-      const base = { jobId: String(j._id), title: j.title, company: j.company || '', platform: j.platform || 'naukri', url: j.url || '' };
-      for (const h of j.applyHistory || []) {
-        if (!h.at || h.at < since) continue;
-        const type = ACTIVITY_APPLY[h.to];
-        if (!type || !want(type)) continue;
-        events.push({ ...base, at: h.at, type, note: String(h.note || '').slice(0, 300), aiMessage: type === 'applied' && !!j.sentMessage });
-      }
       for (const t of j.naukriTimeline || []) {
-        if (!t.at || t.at < since || !want('recruiter')) continue;
-        events.push({ ...base, at: t.at, type: 'recruiter', note: String(t.value || '').slice(0, 120) });
-      }
-      if (j.approvedAt && j.approvedAt >= since && want('approved')) {
-        events.push({ ...base, at: j.approvedAt, type: 'approved', note: j.approvedBy === 'auto' ? 'Auto-approved by score' : 'Approved by you' });
+        if (!t.at || t.at < since || !t.value || OWN_SEND.test(String(t.value).trim())) continue;
+        all.push({
+          jobId: String(j._id), title: j.title, company: j.company || '', platform: j.platform || 'naukri', url: j.url || '',
+          at: t.at, type: recruiterKind(t.value), label: String(t.value).slice(0, 80),
+          recruiter: ((j.recruiters || [])[0] || {}).name || '',
+        });
       }
     }
-    events.sort((a, b) => b.at - a.at);
-
-    // Runs in flight, and the last few that finished (new jobs found, applies).
-    const runs = await NaukriRun.find({ userId: req.userId, ...pq, $or: [{ status: { $in: ['queued', 'running'] } }, { createdAt: { $gte: since } }] })
-      .sort({ createdAt: -1 }).limit(40).lean();
-    const runRow = (r) => ({
-      id: String(r._id), platform: r.platform || 'naukri', kind: r.kind, status: r.status, trigger: r.trigger,
-      dryRun: !!r.dryRun, at: r.finishedAt || r.claimedAt || r.createdAt,
-      progress: r.status === 'running' ? r.progress : null, stats: r.stats || null,
-    });
-    const live = runs.filter((r) => r.status === 'running' || r.status === 'queued').map(runRow);
-    const recentRuns = runs.filter((r) => r.status === 'done' || r.status === 'failed').slice(0, 15).map(runRow);
-
-    res.json({ since, days, total: events.length, events: events.slice(0, limit), live, runs: recentRuns });
+    all.sort((a, b) => b.at - a.at);
+    // Counts over the whole window, so the filter chips show sizes before filtering.
+    const counts = { types: {}, platforms: {} };
+    for (const e of all) {
+      counts.types[e.type] = (counts.types[e.type] || 0) + 1;
+      counts.platforms[e.platform] = (counts.platforms[e.platform] || 0) + 1;
+    }
+    const events = (wanted.size ? all.filter((e) => wanted.has(e.type)) : all);
+    res.json({ since, days, total: events.length, counts, events: events.slice(0, limit) });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
