@@ -49,7 +49,7 @@ router.use((req, res, next) => {
 });
 // What the All platforms view may call. Everything else needs one platform.
 const ALL_OK = new Set([
-  'GET /jobs', 'GET /jobs/outreach', 'POST /jobs/decide', 'GET /needs-answer',
+  'GET /jobs', 'GET /jobs/outreach', 'POST /jobs/decide', 'GET /activity', 'GET /needs-answer',
   'POST /needs-answer/draft', 'POST /needs-answer/use', 'POST /needs-answer/auto', 'POST /needs-answer/ignore',
   'GET /config/unknown-questions', 'POST /config/test-answer', 'GET /platforms', 'GET /runs', 'GET /analytics', 'GET /counts',
   'POST /config/starter-rules', 'POST /config/profile-from-resume', 'GET /resume',
