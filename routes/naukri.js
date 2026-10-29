@@ -1664,10 +1664,10 @@ const REFINE_CAP = 1000;
 // run's reading of the site); nothing is written.
 const recruiterKind = (v) => {
   const t = String(v || '').toLowerCase();
-  if (/not\s*shortlisted|rejected|not selected|declined/.test(t)) return 'not-shortlisted';
+  if (/not\s*shortlisted|not\s*suitable|unsuitable|rejected|not selected|declined/.test(t)) return 'not-shortlisted';
   if (/shortlist/.test(t)) return 'shortlisted';
   if (/contact|message|reply|replied|interested|invited|interview|offer/.test(t)) return 'contacted';
-  if (/view|seen|opened|read/.test(t)) return 'viewed';
+  if (/view|seen|opened|read|download/.test(t)) return 'viewed';
   return 'other';
 };
 const OWN_SEND = /^(applied|application sent|application submitted)$/i;
@@ -1678,10 +1678,10 @@ router.get('/activity', async (req, res) => {
     const since = new Date(Date.now() - days * 86400000);
     const wanted = new Set(String(req.query.types || '').split(',').filter(Boolean));
 
-    const jobs = await NaukriJob.find({
-      userId: oidOf(req.userId), ...PQ(req), deleted: { $ne: true },
-      'naukriTimeline.at': { $gte: since },
-    }, { title: 1, company: 1, platform: 1, url: 1, naukriTimeline: 1, recruiters: 1 }).sort({ naukriStageAt: -1 }).limit(1500).lean();
+    const base = { userId: oidOf(req.userId), ...PQ(req), deleted: { $ne: true } };
+    const jobs = await NaukriJob.find({ ...base, 'naukriTimeline.at': { $gte: since } },
+      { title: 1, company: 1, platform: 1, url: 1, naukriTimeline: 1, naukriStage: 1, recruiters: 1 })
+      .sort({ naukriStageAt: -1 }).limit(1500).lean();
 
     const all = [];
     for (const j of jobs) {
@@ -1689,19 +1689,30 @@ router.get('/activity', async (req, res) => {
         if (!t.at || t.at < since || !t.value || OWN_SEND.test(String(t.value).trim())) continue;
         all.push({
           jobId: String(j._id), title: j.title, company: j.company || '', platform: j.platform || 'naukri', url: j.url || '',
-          at: t.at, type: recruiterKind(t.value), label: String(t.value).slice(0, 80),
+          at: t.at, type: recruiterKind(t.value), label: String(t.value).slice(0, 80), stage: j.naukriStage || null,
           recruiter: ((j.recruiters || [])[0] || {}).name || '',
         });
       }
     }
     all.sort((a, b) => b.at - a.at);
-    // Counts over the whole window, so the filter chips show sizes before filtering.
-    const counts = { types: {}, platforms: {} };
-    for (const e of all) {
-      counts.types[e.type] = (counts.types[e.type] || 0) + 1;
-      counts.platforms[e.platform] = (counts.platforms[e.platform] || 0) + 1;
+
+    // The headline numbers are JOBS, counted exactly as Analytics counts them:
+    // sent applications by the furthest stage a recruiter took them to, all time
+    // (the period only narrows the list below, not these).
+    const stageRows = await NaukriJob.aggregate([
+      { $match: { ...base, applyStatus: { $in: SENT_STATUSES }, naukriStage: { $in: ['viewed', 'shortlisted', 'contacted', 'not-shortlisted'] } } },
+      { $group: { _id: { p: { $ifNull: ['$platform', 'naukri'] }, s: '$naukriStage' }, n: { $sum: 1 } } },
+    ]);
+    const counts = { stages: {}, platforms: {}, responded: 0, shortlisted: 0 };
+    for (const r of stageRows) {
+      counts.stages[r._id.s] = (counts.stages[r._id.s] || 0) + r.n;
+      counts.platforms[r._id.p] = (counts.platforms[r._id.p] || 0) + r.n;
+      counts.responded += r.n;
+      if (r._id.s === 'shortlisted' || r._id.s === 'contacted') counts.shortlisted += r.n;
     }
-    const events = (wanted.size ? all.filter((e) => wanted.has(e.type)) : all);
+    // Filter chips pick the jobs whose furthest stage is that one.
+    counts.stages.other = new Set(all.filter((e) => e.type === 'other').map((e) => e.jobId)).size;
+    const events = wanted.size ? all.filter((e) => wanted.has(e.stage || '') || (wanted.has('other') && e.type === 'other')) : all;
     res.json({ since, days, total: events.length, counts, events: events.slice(0, limit) });
   } catch (err) {
     res.status(500).json({ error: err.message });

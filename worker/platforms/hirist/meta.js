@@ -93,14 +93,24 @@ module.exports = {
       // entries were still empty; strings or { action/name/status } are read.
       const word = (a) => (typeof a === 'string' ? a
         : a && typeof a === 'object' ? (a.action || a.actionName || a.name || a.status || a.type || '') : '');
+      // Recruiter actions arrive as { recruiterId, actionId, date } (verified
+      // 2026-10-29): actionId is the same number as the row's app_status, which
+      // Hirist's own page prints as 2 = "Not suitable", 5 = "Downloaded" (resume).
+      // Any other id is kept under its number rather than dropped, until its
+      // wording is seen on the site.
+      const ACTION = { 2: 'Not suitable', 5: 'Resume downloaded' };
+      const act = (a) => {
+        if (!a || typeof a !== 'object' || a.actionId == null) return word(a);
+        return { word: ACTION[a.actionId] || `Hirist recruiter action ${a.actionId}`, at: a.date ? new Date(Number(a.date)).toISOString() : null };
+      };
       return (Array.isArray(list) ? list : []).map(r => r && ({
         jobId: (r.jobDetail && r.jobDetail.id) || (r.job && r.job.id) || r.jobId || r.job_id || null,
         statuses: [
           r.applicationStatus, r.stage,
-          ...[].concat(r.recruiterAction || []).map(word),
-          ...[].concat((r.appliedData && r.appliedData.recruiterActions) || []).map(word),
+          ...[].concat(r.recruiterAction || []).map(act),
+          ...[].concat((r.appliedData && r.appliedData.recruiterActions) || []).map(act),
           typeof r.status === 'string' ? r.status : null,
-        ].filter(x => typeof x === 'string' && x),
+        ].filter(x => x && (typeof x === 'string' || typeof x === 'object')),
         // applicationDate runs 5h30m behind the real moment (applied at
         // 20:56:36Z, row said 15:26:36Z — verified 2026-10-21), so add it back.
         at: r.applicationDate ? new Date(Number(r.applicationDate) + 330 * 60000).toISOString() : (r.updatedAt || null),

@@ -26,7 +26,7 @@ const dayLabel = (iso: string) => {
 
 export default function ActivityFeed() {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
-  const [counts, setCounts] = useState<{ types: Partial<Record<ActivityType, number>>; platforms: Partial<Record<PlatformId, number>> }>({ types: {}, platforms: {} });
+  const [counts, setCounts] = useState<{ stages: Partial<Record<ActivityType, number>>; platforms: Partial<Record<PlatformId, number>>; responded: number; shortlisted: number }>({ stages: {}, platforms: {}, responded: 0, shortlisted: 0 });
   const [days, setDays] = useState(7);
   const [type, setType] = useState<ActivityType | ''>('');
   const [platform, setPlatform] = useState<PlatformId | ''>('');
@@ -65,11 +65,11 @@ export default function ActivityFeed() {
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-        {KINDS.filter(k => k.key !== 'other' || counts.types.other).map(k => (
+        {KINDS.filter(k => k.key !== 'other' || counts.stages.other).map(k => (
           <button key={k.key} type="button" className={`btn btn-sm${type === k.key ? ' btn-primary' : ''}`}
             onClick={() => setType(t => (t === k.key ? '' : k.key))}>
             <i className={`ti ${k.icon}`} /> {k.label}
-            <span className="contact-count-badge" style={{ marginLeft: 6 }}>{counts.types[k.key] ?? 0}</span>
+            <span className="contact-count-badge" style={{ marginLeft: 6 }}>{counts.stages[k.key] ?? 0}</span>
           </button>
         ))}
         <select value={platform} onChange={e => setPlatform(e.target.value as PlatformId | '')} style={{ maxWidth: 170 }} aria-label="Platform">
@@ -82,6 +82,9 @@ export default function ActivityFeed() {
         </select>
         <Muted>{updated ? `updated ${fmtAgo(updated)}` : ''}</Muted>
       </div>
+      <Muted style={{ display: 'block', marginBottom: 10 }}>
+        {counts.responded} jobs have a recruiter response · {counts.shortlisted} shortlisted or contacted (same as Analytics). Chips count jobs by the furthest step; the list below shows each update in the chosen period.
+      </Muted>
 
       {error && <div className="badge badge-failed" style={{ marginBottom: 10 }}>{error}</div>}
 

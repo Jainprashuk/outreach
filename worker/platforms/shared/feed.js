@@ -222,18 +222,26 @@ function collectFeed(page, test, opts = {}) {
 // 1 applied · 4 viewed · 6 shortlisted · 9 contacted · 7 not shortlisted), so
 // /track reads every platform with one parser.
 const STATUS_WORDS = [
-  [/not[\s_-]*(shortlisted|selected)|reject|declin|unsuccessful|closed by recruiter/i, 7, 'Not Shortlisted'],
+  [/not[\s_-]*(shortlisted|selected|suitable)|unsuitable|reject|declin|unsuccessful|closed by recruiter/i, 7, 'Not Shortlisted'],
   [/contact|interview|call|message|chat|invite/i, 9, 'Contacted'],
   [/shortlist|accept|interested|selected|in[\s_-]?process/i, 6, 'Shortlisted'],
-  [/view|seen|read|open/i, 4, 'Application Viewed'],
+  [/view|seen|read|open|download/i, 4, 'Application Viewed'],
   [/appl|sent|submit/i, 1, 'Applied'],
 ];
+// A status the site shows that none of the rules above recognise is kept, not
+// dropped: id 99 ("other") sits in the timeline and the Activity feed under its
+// own words, and moves no stage. Each entry is a word, or { word, at } when the
+// site dates the action itself (otherwise it takes the application's time).
+const OTHER_STATUS = 99;
 function statusTimeline(words, at = null) {
-  const list = (Array.isArray(words) ? words : [words]).filter(Boolean).map(String);
+  const list = (Array.isArray(words) ? words : [words]).filter(Boolean)
+    .map((w) => (typeof w === 'object' ? { word: String(w.word || ''), at: w.at || at } : { word: String(w), at }))
+    .filter((w) => w.word);
   const out = [{ statusId: 1, statusValue: 'Applied', dateTime: at }];
   for (const w of list) {
-    const hit = STATUS_WORDS.find(([rx]) => rx.test(w));
-    if (hit && hit[1] !== 1) out.push({ statusId: hit[1], statusValue: w.slice(0, 80) || hit[2], dateTime: at });
+    const hit = STATUS_WORDS.find(([rx]) => rx.test(w.word));
+    if (hit && hit[1] === 1) continue;
+    out.push({ statusId: hit ? hit[1] : OTHER_STATUS, statusValue: w.word.slice(0, 80) || (hit && hit[2]) || 'Update', dateTime: w.at });
   }
   return out;
 }

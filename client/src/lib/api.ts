@@ -1949,7 +1949,7 @@ export const listNaukriJobsApi = (params: NaukriJobQuery = {}, platform?: Platfo
 export type ActivityType = 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted' | 'other';
 export interface ActivityEvent {
   jobId: string; title: string; company: string; platform: PlatformId; url: string;
-  at: string; type: ActivityType; label: string; recruiter: string;
+  at: string; type: ActivityType; label: string; recruiter: string; stage?: string | null;
 }
 /** What recruiters are doing on your jobs, across platforms (viewed, shortlisted, contacted…). Read-only. */
 export const activityApi = (params: { days?: number; types?: string; limit?: number; platform?: PlatformScope } = {}) => {
@@ -1958,7 +1958,7 @@ export const activityApi = (params: { days?: number; types?: string; limit?: num
   if (params.limit) qs.set('limit', String(params.limit));
   if (params.types) qs.set('types', params.types);
   return apiFetch<{ since: string; days: number; total: number; events: ActivityEvent[];
-    counts: { types: Partial<Record<ActivityType, number>>; platforms: Partial<Record<PlatformId, number>> } }>(
+    counts: { stages: Partial<Record<ActivityType, number>>; platforms: Partial<Record<PlatformId, number>>; responded: number; shortlisted: number } }>(
     `${PB(params.platform || 'all')}/activity?${qs.toString()}`);
 };
 
