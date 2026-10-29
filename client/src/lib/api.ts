@@ -1958,7 +1958,8 @@ export const activityApi = (params: { days?: number; types?: string; limit?: num
   if (params.limit) qs.set('limit', String(params.limit));
   if (params.types) qs.set('types', params.types);
   return apiFetch<{ since: string; days: number; total: number; events: ActivityEvent[];
-    counts: { stages: Partial<Record<ActivityType, number>>; platforms: Partial<Record<PlatformId, number>>; responded: number; shortlisted: number } }>(
+    counts: { stages: Partial<Record<ActivityType, number>>; platforms: Partial<Record<PlatformId, number>>; responded: number; shortlisted: number;
+      byPlatform: Partial<Record<PlatformId, Partial<Record<ActivityType, number>>>>; window: Partial<Record<PlatformId, Partial<Record<ActivityType, number>>>> } }>(
     `${PB(params.platform || 'all')}/activity?${qs.toString()}`);
 };
 

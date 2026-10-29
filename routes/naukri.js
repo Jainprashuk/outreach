@@ -1706,14 +1706,26 @@ router.get('/activity', async (req, res) => {
       { $match: { ...base, applyStatus: { $in: SENT_STATUSES }, naukriStage: { $in: ['viewed', 'shortlisted', 'contacted', 'not-shortlisted'] } } },
       { $group: { _id: { p: { $ifNull: ['$platform', 'naukri'] }, s: '$naukriStage' }, n: { $sum: 1 } } },
     ]);
-    const counts = { stages: {}, platforms: {}, responded: 0, shortlisted: 0 };
+    // all-time, per platform: { naukri: { viewed: n, … }, … } — what Analytics counts.
+    const counts = { stages: {}, platforms: {}, responded: 0, shortlisted: 0, byPlatform: {}, window: {} };
     for (const r of stageRows) {
       counts.stages[r._id.s] = (counts.stages[r._id.s] || 0) + r.n;
       counts.platforms[r._id.p] = (counts.platforms[r._id.p] || 0) + r.n;
       counts.responded += r.n;
       if (r._id.s === 'shortlisted' || r._id.s === 'contacted') counts.shortlisted += r.n;
+      (counts.byPlatform[r._id.p] = counts.byPlatform[r._id.p] || {})[r._id.s] = r.n;
     }
-    counts.stages.other = new Set(all.filter((e) => e.type === 'other').map((e) => e.jobId)).size;
+    // In the chosen period, per platform: jobs that had at least one update of each
+    // kind — so the chips follow the platform and period filters like the list does.
+    const seen = {};
+    for (const e of all) {
+      const k = `${e.platform}|${e.type}`;
+      (seen[k] = seen[k] || new Set()).add(e.jobId);
+    }
+    for (const [k, set] of Object.entries(seen)) {
+      const [p, t] = k.split('|');
+      (counts.window[p] = counts.window[p] || {})[t] = set.size;
+    }
     // A chip lists the updates OF that kind (a Shortlisted chip shows the shortlistings, not the views that led up to them).
     const events = wanted.size ? all.filter((e) => wanted.has(e.type)) : all;
     res.json({ since, days, total: events.length, counts, events: events.slice(0, limit) });

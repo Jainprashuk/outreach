@@ -26,7 +26,7 @@ const dayLabel = (iso: string) => {
 
 export default function ActivityFeed() {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
-  const [counts, setCounts] = useState<{ stages: Partial<Record<ActivityType, number>>; platforms: Partial<Record<PlatformId, number>>; responded: number; shortlisted: number }>({ stages: {}, platforms: {}, responded: 0, shortlisted: 0 });
+  const [counts, setCounts] = useState<Awaited<ReturnType<typeof activityApi>>['counts']>({ stages: {}, platforms: {}, responded: 0, shortlisted: 0, byPlatform: {}, window: {} });
   const [days, setDays] = useState(7);
   const [type, setType] = useState<ActivityType | ''>('');
   const [platform, setPlatform] = useState<PlatformId | ''>('');
@@ -52,6 +52,14 @@ export default function ActivityFeed() {
 
   const shown = useMemo(() => events.filter(e => !platform || e.platform === platform), [events, platform]);
   const visible = shown.slice(0, limit);
+  const sum = (m: Partial<Record<ActivityType, number>> | undefined, keys: ActivityType[]) => keys.reduce((n, k) => n + ((m && m[k]) || 0), 0);
+  // Chips: jobs with that kind of update in the chosen period, for the chosen platform (all platforms when none).
+  const chipCount = (k: ActivityType) => platform ? ((counts.window[platform] || {})[k] || 0)
+    : (Object.values(counts.window) as Partial<Record<ActivityType, number>>[]).reduce((n, m) => n + ((m && m[k]) || 0), 0);
+  // Headline: all-time, as Analytics counts, for the chosen platform.
+  const allTime = platform ? counts.byPlatform[platform] : counts.stages;
+  const responded = sum(allTime, ['viewed', 'shortlisted', 'contacted', 'not-shortlisted']);
+  const shortlisted = sum(allTime, ['shortlisted', 'contacted']);
   const groups = useMemo(() => {
     const out: { label: string; rows: ActivityEvent[] }[] = [];
     for (const e of visible) {
@@ -65,11 +73,11 @@ export default function ActivityFeed() {
   return (
     <div>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-        {KINDS.filter(k => k.key !== 'other' || counts.stages.other).map(k => (
+        {KINDS.filter(k => k.key !== 'other' || chipCount('other') > 0).map(k => (
           <button key={k.key} type="button" className={`btn btn-sm${type === k.key ? ' btn-primary' : ''}`}
             onClick={() => setType(t => (t === k.key ? '' : k.key))}>
             <i className={`ti ${k.icon}`} /> {k.label}
-            <span className="contact-count-badge" style={{ marginLeft: 6 }}>{counts.stages[k.key] ?? 0}</span>
+            <span className="contact-count-badge" style={{ marginLeft: 6 }}>{chipCount(k.key)}</span>
           </button>
         ))}
         <select value={platform} onChange={e => setPlatform(e.target.value as PlatformId | '')} style={{ maxWidth: 170 }} aria-label="Platform">
@@ -83,14 +91,15 @@ export default function ActivityFeed() {
         <Muted>{updated ? `updated ${fmtAgo(updated)}` : ''}</Muted>
       </div>
       <Muted style={{ display: 'block', marginBottom: 10 }}>
-        {counts.responded} jobs have a recruiter response · {counts.shortlisted} shortlisted or contacted (same as Analytics). The chip numbers are jobs by their furthest step; picking a chip lists just that kind of update in the chosen period.
+        {platform ? `${platform[0].toUpperCase()}${platform.slice(1)}` : 'All platforms'} · all time: {responded} job{responded === 1 ? '' : 's'} with a recruiter response, {shortlisted} shortlisted or contacted (same as Analytics).
+        Chips: jobs with that kind of update in the period you picked.
       </Muted>
 
       {error && <div className="badge badge-failed" style={{ marginBottom: 10 }}>{error}</div>}
 
       {loading && events.length === 0 ? <Muted>Loading recruiter activity…</Muted> : shown.length === 0 ? (
         <Empty icon="ti-user-search">
-          No recruiter activity in this period. When a recruiter views, shortlists or contacts you on a job you applied to, it shows up here after the daily check.
+          No recruiter activity in this period{responded > 0 ? ` — but ${responded} job${responded === 1 ? ' has' : 's have'} an older response, so try a longer period` : ''}. When a recruiter views, shortlists or contacts you on a job you applied to, it shows up here after the daily check.
         </Empty>
       ) : groups.map(g => (
         <div key={g.label} style={{ marginBottom: 14 }}>
