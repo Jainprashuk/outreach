@@ -29,3 +29,7 @@
   (`confirm.already`) — skipped, nothing sent. `GET /api/auth/ats/my-applications-for-job/<id>` returns the application.
 - Replies verified: `GET /conversations-v2/candidate?…&convo_status=awaiting|shortlisted|nottakenforward`,
   `{ results[] }`, row `jobSignal._id`; the default tab ("Interested in you") is recruiters writing first.
+
+## Status audit 2026-11-02 (scripts/audit-platform-status.js, read-only)
+
+Read 10 applications. The tab buttons read 'Shortlisted1' / 'Closed1' (the count is glued on), so the old word-boundary regexes never clicked them. The Shortlisted tab asks for conversations-v2/candidate WITHOUT convo_status. 'Interested in you' is convo_status=unread, with jobseekersignal rows that have no jobSignal. Seen: Shortlisted 1, Not shortlisted 1.

@@ -211,12 +211,15 @@ function makeDriver(meta) {
     if (!meta.applications) throw new NotSupported(`${meta.label} has no check replies step`);
     const page = await newPage(session);
     const rows = new Map();
+    let feedHits = 0;          // application-list responses seen, even empty ones
+    const warnings = [];       // said on the run, so a broken read is not mistaken for "no news"
     const onResponse = async (res) => {
       try {
         const url = res.url();
         if (!sameSite(url) || (meta.applications.test && !meta.applications.test(url))) return;
         if (!/json/i.test(res.headers()['content-type'] || '')) return;
         const body = await res.json();
+        feedHits++;
         for (const r of meta.applications.rowsFrom(body, url)) {
           if (!r || !r.jobId) continue;
           // The same application can appear under two status filters
@@ -241,25 +244,35 @@ function makeDriver(meta) {
       for (const rx of meta.applications.tabs || []) {
         const tab = page.getByText(rx).first();
         if (await tab.count().catch(() => 0)) {
-          await tab.click({ timeout: 5000 }).catch(() => {});
+          await tab.click({ timeout: 5000 }).catch(() => { warnings.push(`could not click the ${rx} tab`); });
           await jitter(1800, 3000);
           await check(page, 'your applications');
+        } else {
+          // The site renamed or moved a status tab: its statuses would silently
+          // never be read. Say so.
+          warnings.push(`the ${rx} tab was not found on ${meta.label}`);
         }
       }
+      // Long lists load a page per scroll (Hirist: 50 a page, 313 applications on
+      // the audited account — the old 15 short scrolls stopped at 50). Jump to the
+      // bottom each time and allow a slow page a few quiet rounds before stopping.
       let idle = 0;
-      for (let i = 0; i < 15 && idle < 2; i++) {
+      const MAX_SCROLLS = 60;
+      for (let i = 0; i < MAX_SCROLLS && idle < 3; i++) {
         const before = rows.size;
+        await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight)).catch(() => {});
         await page.mouse.wheel(0, 3000).catch(() => {});
         await jitter(1500, 2500);
         idle = rows.size === before ? idle + 1 : 0;
-        onProgress({ phase: 'tracking', label: 'Reading application statuses', page: i + 1, pagesTotal: 15, found: rows.size });
+        onProgress({ phase: 'tracking', label: 'Reading application statuses', page: i + 1, pagesTotal: MAX_SCROLLS, found: rows.size });
       }
       await check(page, 'your applications');
     } finally {
       page.off('response', onResponse);
       await page.close().catch(() => {});
     }
-    return { rows: [...rows.values()], expected: null, sawFeed: rows.size > 0 };
+    if (feedHits === 0) warnings.push(`no application list loaded from ${meta.label}`);
+    return { rows: [...rows.values()], expected: null, sawFeed: feedHits > 0, warnings };
   }
 
   // Where a job is applied for. Usually its own listing page; a site whose

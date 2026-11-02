@@ -51,7 +51,7 @@ router.use((req, res, next) => {
 const ALL_OK = new Set([
   'GET /jobs', 'GET /jobs/outreach', 'POST /jobs/decide', 'GET /activity', 'GET /needs-answer',
   'POST /needs-answer/draft', 'POST /needs-answer/use', 'POST /needs-answer/auto', 'POST /needs-answer/ignore',
-  'GET /config/unknown-questions', 'POST /config/test-answer', 'GET /platforms', 'GET /runs', 'GET /analytics', 'GET /counts',
+  'GET /config/unknown-questions', 'POST /config/test-answer', 'GET /platforms', 'GET /jobs-overview', 'GET /runs', 'GET /analytics', 'GET /counts',
   'POST /config/starter-rules', 'POST /config/profile-from-resume', 'GET /resume',
   // Shared settings only (the PATCH refuses any one platform's own fields).
   'GET /config', 'PATCH /config', 'POST /resume', 'DELETE /resume',
@@ -68,6 +68,7 @@ const BASE_FILTER = { deleted: { $ne: true } };
 const ACTIVE = ['queued', 'running'];
 const KINDS = ['refresh', 'harvest', 'apply', 'probe', 'track'];
 const { queueOrder, tidyReason, readStatus, STAGE_RANK } = require('../lib/naukriQueue');
+const { classifyStatus } = require('../lib/jobStatus');
 const { profileFromResume } = require('../lib/naukriProfile');
 
 // A worker polls every 20s; 90s of silence means the Mac slept or the process died.
@@ -434,6 +435,91 @@ router.get('/platforms', async (req, res) => {
       duplicates: config.duplicates,
       crossPlatformOrder: !!config.crossPlatformOrder,
     });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/p/all/jobs-overview — the Jobs tab's landing view in ONE call, read-only:
+// what needs you, where each platform stands, and what happened lately. Built from
+// the same overviewFor() the Job Platforms page uses, so the numbers agree.
+router.get('/jobs-overview', async (req, res) => {
+  try {
+    await failStaleRuns(req.userId);
+    const userId = oidOf(req.userId);
+    const config = await NaukriConfig.getForUser(req.userId);
+    const days = Math.min(30, Math.max(1, parseInt(req.query.days, 10) || 7));
+    const since = new Date(Date.now() - days * 86400000);
+    const ids = PLATFORM_IDS.filter((id) => isEnabled(siteOf(config, id), id));
+    const base = { userId, deleted: { $ne: true } };
+    const pOf = (j) => j.platform || 'naukri';
+
+    const [overviews, failed, stageRows, trackRows, own, recruiterJobs] = await Promise.all([
+      Promise.all(ids.map((id) => overviewFor(req.userId, id, { config, light: true }))),
+      NaukriJob.aggregate([{ $match: { ...base, approval: 'approved', applyStatus: 'failed' } },
+        { $group: { _id: { $ifNull: ['$platform', 'naukri'] }, n: { $sum: 1 } } }]),
+      NaukriJob.aggregate([{ $match: { ...base, applyStatus: { $in: SENT_STATUSES } } },
+        { $group: { _id: { p: { $ifNull: ['$platform', 'naukri'] }, s: { $ifNull: ['$naukriStage', 'applied'] } }, n: { $sum: 1 } } }]),
+      NaukriJob.aggregate([{ $match: { ...base, applyStatus: { $in: SENT_STATUSES } } },
+        { $group: { _id: { $ifNull: ['$platform', 'naukri'] }, last: { $max: '$trackedAt' } } }]),
+      NaukriJob.aggregate([
+        { $match: { ...base, 'applyHistory.at': { $gte: since } } }, { $unwind: '$applyHistory' },
+        { $match: { 'applyHistory.at': { $gte: since }, 'applyHistory.to': { $in: ['applied', 'failed'] } } },
+        { $sort: { 'applyHistory.at': -1 } }, { $limit: 60 },
+        { $project: { title: 1, company: 1, platform: 1, url: 1, at: '$applyHistory.at', to: '$applyHistory.to', note: '$applyHistory.note' } },
+      ]),
+      NaukriJob.find({ ...base, applyStatus: { $in: SENT_STATUSES }, naukriStageAt: { $gte: since }, naukriStage: { $in: ['viewed', 'shortlisted', 'contacted', 'not-shortlisted'] } },
+        { title: 1, company: 1, platform: 1, url: 1, naukriStage: 1, naukriStageAt: 1, naukriTimeline: 1 }).sort({ naukriStageAt: -1 }).limit(60).lean(),
+    ]);
+
+    const failedBy = Object.fromEntries(failed.map((r) => [r._id, r.n]));
+    const lastTrack = Object.fromEntries(trackRows.map((r) => [r._id, r.last]));
+    const stages = {};
+    for (const r of stageRows) (stages[r._id.p] = stages[r._id.p] || {})[r._id.s] = r.n;
+    const STALE_MS = 2 * 86400000;
+
+    const platforms = overviews.map((o) => {
+      const st = stages[o.platform] || {};
+      const applied = Object.values(st).reduce((a, b) => a + b, 0);
+      const last = lastTrack[o.platform] || null;
+      const trackStale = applied > 0 && (!last || Date.now() - new Date(last).getTime() > STALE_MS);
+      const problems = [];
+      if (o.worker && !o.worker.online) problems.push({ kind: 'offline', text: o.worker.everSeen ? 'Worker is offline' : 'Worker never connected' });
+      else if (o.worker && !o.worker.loggedIn && o.worker.everSeen) problems.push({ kind: 'login', text: 'Logged out of the site' });
+      if (o.blockedUntil && new Date(o.blockedUntil) > new Date()) problems.push({ kind: 'blocked', text: o.blockedReason || 'Blocked by the site for now' });
+      if (o.paused) problems.push({ kind: 'paused', text: 'Paused' });
+      const lastTrackRun = (o.history || []).find((r) => r.kind === 'track');
+      if (lastTrackRun && lastTrackRun.status === 'done' && lastTrackRun.error) problems.push({ kind: 'stale', text: String(lastTrackRun.error).slice(0, 200) });
+      if (trackStale) problems.push({ kind: 'stale', text: last ? 'Statuses not checked for 2+ days' : 'Statuses never checked' });
+      return {
+        platform: o.platform, label: o.label, applyMode: o.applyMode,
+        review: o.reviewCount, needsAnswer: o.needsAnswerCount, failed: failedBy[o.platform] || 0,
+        queued: o.waitingCount, applied, appliedToday: o.appliedToday, perDay: o.perDay,
+        viewed: st.viewed || 0, shortlisted: (st.shortlisted || 0), contacted: (st.contacted || 0), notShortlisted: st['not-shortlisted'] || 0,
+        week: o.week, foundThisWeek: o.foundThisWeek,
+        lastTrackAt: last, trackStale, worker: { online: !!(o.worker && o.worker.online), lastSeenAt: o.worker && o.worker.lastSeenAt },
+        activeRun: o.activeRun ? { kind: o.activeRun.kind, startedAt: o.activeRun.startedAt || o.activeRun.createdAt } : null,
+        lastRun: (o.history || [])[0] ? { kind: o.history[0].kind, status: o.history[0].status, at: o.history[0].finishedAt || o.history[0].createdAt } : null,
+        problems,
+      };
+    });
+
+    const sum = (k) => platforms.reduce((a, p) => a + (p[k] || 0), 0);
+    const needs = {
+      review: sum('review'), needsAnswer: sum('needsAnswer'), failed: sum('failed'),
+      recruiter: platforms.reduce((a, p) => a + p.shortlisted + p.contacted, 0),
+      problems: platforms.filter((p) => p.problems.length).map((p) => ({ platform: p.platform, label: p.label, problems: p.problems })),
+    };
+
+    const timeline = [
+      ...own.map((e) => ({ at: e.at, platform: pOf(e), kind: e.to === 'failed' ? 'failed' : 'applied', title: e.title, company: e.company || '', url: e.url || '', label: e.to === 'failed' ? 'Apply failed' : 'You applied', note: e.note || '' })),
+      ...recruiterJobs.map((j) => {
+        const latest = [...(j.naukriTimeline || [])].filter((t) => t.value && !/^(applied|application sent|application submitted)$/i.test(t.value)).pop();
+        return { at: j.naukriStageAt, platform: pOf(j), kind: j.naukriStage, title: j.title, company: j.company || '', url: j.url || '', label: (latest && latest.value) || j.naukriStage, note: '' };
+      }),
+    ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 80);
+
+    res.json({ days, needs, platforms, timeline, generatedAt: new Date() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1663,12 +1749,8 @@ const REFINE_CAP = 1000;
 // recruiter action, so they are left out. Built from naukriTimeline (the track
 // run's reading of the site); nothing is written.
 const recruiterKind = (v) => {
-  const t = String(v || '').toLowerCase();
-  if (/not\s*shortlisted|not\s*suitable|unsuitable|rejected|not selected|declined/.test(t)) return 'not-shortlisted';
-  if (/shortlist/.test(t)) return 'shortlisted';
-  if (/contact|message|reply|replied|interested|invited|interview|offer/.test(t)) return 'contacted';
-  if (/view|seen|opened|read|download/.test(t)) return 'viewed';
-  return 'other';
+  const hit = classifyStatus(v);
+  return hit && hit.stage !== 'applied' && hit.stage !== 'closed' ? hit.stage : 'other';
 };
 const OWN_SEND = /^(applied|application sent|application submitted)$/i;
 router.get('/activity', async (req, res) => {
@@ -2644,17 +2726,23 @@ router.post('/track', async (req, res) => {
         listingOpen: row.isOpen === undefined ? null : String(row.isOpen) === 'true',
         trackedAt: now,
       };
-      const changed = stage !== job.naukriStage;
+      // A site that stops listing a status must not lower a stage already reached
+      // (a rejection may still replace a positive stage).
+      const regress = job.naukriStage && stage !== 'not-shortlisted' && (STAGE_RANK[stage] ?? 0) < (STAGE_RANK[job.naukriStage] ?? 0);
+      const changed = stage !== job.naukriStage && !regress;
       if (changed) {
         set.naukriStage = stage;
         set.naukriStageAt = ist(at) || now;
       }
       const update = { $set: set };
       // Move the pipeline only from 'applied' — never over your own edits.
-      if (changed && job.applyStatus === 'applied' && (stage === 'shortlisted' || stage === 'contacted' || stage === 'not-shortlisted')) {
+      // A rejection also closes a job the track itself moved to in-review earlier.
+      const wasTrackMoved = job.applyStatus === 'in-review' && (job.naukriStage === 'shortlisted' || job.naukriStage === 'contacted');
+      if (changed && (job.applyStatus === 'applied' || (stage === 'not-shortlisted' && wasTrackMoved)) && (stage === 'shortlisted' || stage === 'contacted' || stage === 'not-shortlisted')) {
         const to = stage === 'not-shortlisted' ? 'rejected' : 'in-review';
+        const from = job.applyStatus;
         set.applyStatus = to;
-        update.$push = { applyHistory: { at: now, from: 'applied', to, note: `${LABEL(req)}: ${stage.replace('-', ' ')}` } };
+        update.$push = { applyHistory: { at: now, from, to, note: `${LABEL(req)}: ${stage.replace('-', ' ')}` } };
         moved++;
       }
       if (changed && (stage === 'shortlisted' || stage === 'contacted')) news.push(`${job.title} · ${job.company}`);

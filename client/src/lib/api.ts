@@ -1963,6 +1963,31 @@ export const activityApi = (params: { days?: number; types?: string; limit?: num
     `${PB(params.platform || 'all')}/activity?${qs.toString()}`);
 };
 
+export interface JobsOverviewPlatform {
+  platform: PlatformId; label: string; applyMode: string;
+  review: number; needsAnswer: number; failed: number; queued: number;
+  applied: number; appliedToday: number; perDay: number;
+  viewed: number; shortlisted: number; contacted: number; notShortlisted: number;
+  week: { applied: number; skipped: number; failed: number }; foundThisWeek: number;
+  lastTrackAt: string | null; trackStale: boolean;
+  worker: { online: boolean; lastSeenAt: string | null };
+  activeRun: { kind: string; startedAt: string | null } | null;
+  lastRun: { kind: string; status: string; at: string | null } | null;
+  problems: Array<{ kind: 'offline' | 'login' | 'blocked' | 'paused' | 'stale'; text: string }>;
+}
+export interface JobsOverviewEvent {
+  at: string; platform: PlatformId; kind: string; title: string; company: string; url: string; label: string; note: string;
+}
+/** The Jobs tab's landing view: what needs you, each platform's state, what happened lately. Read-only. */
+export interface JobsOverview {
+  days: number; generatedAt: string;
+  needs: { review: number; needsAnswer: number; failed: number; recruiter: number;
+    problems: Array<{ platform: PlatformId; label: string; problems: JobsOverviewPlatform['problems'] }> };
+  platforms: JobsOverviewPlatform[];
+  timeline: JobsOverviewEvent[];
+}
+export const jobsOverviewApi = (days = 7) => apiFetch<JobsOverview>(`${PB('all')}/jobs-overview?days=${days}`);
+
 /** The authorisation point: approving is what permits an application, and it queues the run. */
 export const decideNaukriJobsApi = (ids: string[], decision: NaukriApproval, reason?: string) =>
   apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(

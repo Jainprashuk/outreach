@@ -6,6 +6,7 @@ import { listNaukriJobsApi, updateNaukriJobApi, naukriJobsOutreachApi } from '..
 import { useFindPeople } from './useFindPeople';
 import { Card, Muted, Empty } from './ui';
 import { fmtRunTime } from './format';
+import StageBadge from './StageBadge';
 import { usePlatform, PlatformTag } from './platform';
 import { useToast } from '../../context/ToastContext';
 
@@ -24,13 +25,6 @@ const STAGES: NaukriApplyStatus[] = ['applied', 'in-review', 'interviewing', 'of
 const BADGE: Partial<Record<NaukriApplyStatus, string>> = {
   applied: 'badge-sent', 'in-review': 'badge-pending', interviewing: 'badge-pending',
   offer: 'badge-sent', rejected: 'badge-rejected',
-};
-
-const STAGE_TEXT: Record<string, string> = {
-  viewed: 'Viewed by recruiter', shortlisted: 'Shortlisted', contacted: 'Recruiter contacted you', 'not-shortlisted': 'Not shortlisted',
-};
-const STAGE_BADGE: Record<string, string> = {
-  viewed: 'badge-queued', shortlisted: 'badge-approved', contacted: 'badge-approved', 'not-shortlisted': 'badge-seen',
 };
 
 export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
@@ -128,12 +122,7 @@ export default function AppliedTable({ onChanged }: { onChanged: () => void }) {
             {job.applyNote && <Muted style={{ display: 'block' }}>{job.applyNote}</Muted>}
           </div>
           {/* What the recruiter did, read daily from Naukri's own history. */}
-          {job.naukriStage && job.naukriStage !== 'applied' && (
-            <span className={`badge ${STAGE_BADGE[job.naukriStage]}`}
-              title={(job.naukriTimeline || []).map(t => `${t.value}${t.at ? ` · ${fmtRunTime(t.at)}` : ''}`).join('\n')}>
-              {STAGE_TEXT[job.naukriStage]}{job.naukriStageAt ? ` · ${fmtRunTime(job.naukriStageAt)}` : ''}
-            </span>
-          )}
+          <StageBadge job={job} />
           {(() => {
             const o = outreach[job.id];
             if (o && o.searched) {

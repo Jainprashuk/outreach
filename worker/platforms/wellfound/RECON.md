@@ -27,3 +27,7 @@
 - Question kinds seen: LONG (textarea, optional). Other kinds (select / multi) are unseen: an unrecognised control stops
   with the markup in the reason rather than guessing.
 - Applied jobs: Ongoing/Archived lists show the new application (track verified).
+
+## Status audit 2026-11-02 (scripts/audit-platform-status.js, read-only)
+
+Read 26 applications. Seen: EXPIRED (8), now a known 'closed' word (id 99, moves no stage, no longer unrecognised), and REJECTED (1), which maps to not-shortlisted. No other states seen.

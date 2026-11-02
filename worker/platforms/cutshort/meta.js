@@ -79,11 +79,15 @@ module.exports = {
   // first, not your applications, and is skipped.
   applications: {
     url: `${ORIGIN}/profile/candidate-conversations?i=all&stage=awaiting`,
-    test: (url) => /\/conversations-v2\/candidate\?/.test(url) && /convo_status=/.test(url),
-    tabs: [/^\s*shortlisted\b/i, /^\s*closed\b/i],
+    // The Shortlisted tab asks WITHOUT convo_status (audit 2026-11-02: rows are your own
+    // applications — your message, resumeSeen, a recruiter reply — not recruiter-first),
+    // so any candidate-conversations call counts; /track only matches jobs you applied to.
+    test: (url) => /\/conversations-v2\/candidate\?/.test(url),
+    // The tab buttons read "Shortlisted1", "Closed1": the count is glued on, so a word boundary never matches (found by the 2026-11 audit; it had silently skipped both tabs).
+    tabs: [/^\s*shortlisted\s*\d*\s*$/i, /^\s*closed\s*\d*\s*$/i],
     rowsFrom: (body, url = '') => {
-      const tab = (/convo_status=([a-z_]+)/i.exec(url) || [])[1] || 'awaiting';
-      const word = { shortlisted: 'Shortlisted', nottakenforward: 'Not shortlisted' }[tab] || '';
+      const tab = (/convo_status=([a-z_]*)/i.exec(url) || [])[1] || '';
+      const word = { '': 'Shortlisted', awaiting: '', nottakenforward: 'Not shortlisted' }[tab] || '';
       return ((body && body.results) || []).map((r) => {
         const id = r && r.jobSignal && r.jobSignal._id;
         if (!id) return null;

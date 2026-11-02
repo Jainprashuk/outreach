@@ -94,8 +94,12 @@ ok('cutshort replies by tab', (() => {
   const u = (t) => `https://cutshort.io/conversations-v2/candidate?page=1&user_role=candidate&context=x&convo_status=${t}`;
   const r = (t) => cs.applications.rowsFrom({ results: [row, { jobSignal: null }] }, u(t));
   return r('awaiting').length === 1 && r('awaiting')[0].jobId === 'j1' && r('awaiting')[0].statuses.length === 0
-    && r('shortlisted')[0].statuses[0] === 'Shortlisted' && r('nottakenforward')[0].statuses[0] === 'Not shortlisted'
-    && cs.applications.test(u('awaiting')) && !cs.applications.test('https://cutshort.io/conversations-v2/candidate?page=1&user_role=candidate');
+    // The Shortlisted tab asks with NO convo_status (audit 2026-11-02); "Interested in
+    // you" is convo_status=unread and its recruiter-first rows carry no jobSignal.
+    && cs.applications.rowsFrom({ results: [row] }, 'https://cutshort.io/conversations-v2/candidate?page=1&user_role=candidate&context=x')[0].statuses[0] === 'Shortlisted'
+    && r('nottakenforward')[0].statuses[0] === 'Not shortlisted'
+    && cs.applications.rowsFrom({ results: [{ type: 'jobseekersignal', jobSignal: null }] }, u('unread')).length === 0
+    && cs.applications.test(u('awaiting')) && cs.applications.test('https://cutshort.io/conversations-v2/candidate?page=1&user_role=candidate');
 })());
 const post = (op, input) => ({ operationName: op, variables: { input } });
 ok('wellfound counts only the CreateJobApplication mutation', wa.applyRequest('https://wellfound.com/graphql', 'POST', post('CreateJobApplication', { jobListingId: '9' }))

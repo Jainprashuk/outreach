@@ -6,7 +6,9 @@ import { FitBadge } from '../components/naukri/ReviewQueue';
 import SelectionBar from '../components/naukri/SelectionBar';
 import { Empty, Muted } from '../components/naukri/ui';
 import ActivityFeed from '../components/naukri/ActivityFeed';
-import { DupBadge, PlatformTag } from '../components/naukri/platform';
+import { DupBadge, PlatformTag, PLATFORM_LABEL } from '../components/naukri/platform';
+import Overview, { type OverviewTarget } from '../components/naukri/Overview';
+import StageBadge from '../components/naukri/StageBadge';
 import { useFindPeople } from '../components/naukri/useFindPeople';
 import { Skeleton } from '../components/Skeleton';
 import { RefreshBar, Refreshing } from '../components/RefreshBar';
@@ -14,7 +16,7 @@ import { useToast } from '../context/ToastContext';
 import { useSession } from '../context/SessionContext';
 import {
   addSharedJobsApi, bulkNaukriJobsApi, companyStatusApi, sharedJobKeysApi, sharedJobsApi, type SharedJob, decideNaukriJobsApi, listNaukriJobsApi, lookupCompanyApi, recruitersToDiscoverApi, updateNaukriJobApi,
-  type CompanyOutreach, type NaukriApplyStatus, type NaukriJob, type NaukriJobQuery,
+  type CompanyOutreach, type NaukriApplyStatus, type NaukriJob, type NaukriJobQuery, type PlatformScope,
 } from '../lib/api';
 import { autoPick } from '../lib/prospects';
 
@@ -90,7 +92,7 @@ function OutreachChip({ company, st, finding, onFind }: {
 
 // "Others": the jobs other sharing accounts' platforms found. Read-only; the only
 // action is adding a job to your own list (pending, scored on your profile).
-function OthersJobs({ onChanged }: { onChanged: () => void }) {
+function OthersJobs({ onChanged, onReview }: { onChanged: () => void; onReview: () => void }) {
   const toast = useToast();
   const [rows, setRows] = useState<SharedJob[]>([]);
   const [total, setTotal] = useState(0);
@@ -107,6 +109,7 @@ function OthersJobs({ onChanged }: { onChanged: () => void }) {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [matching, setMatching] = useState<{ total: number; capped: boolean } | null>(null);
   const [picking, setPicking] = useState(false);
+  const [justAdded, setJustAdded] = useState(0);
 
   useEffect(() => { const t = setTimeout(() => { setQuery(q.trim()); setPage(1); }, 300); return () => clearTimeout(t); }, [q]);
   const load = useCallback(async () => {
@@ -135,6 +138,7 @@ function OthersJobs({ onChanged }: { onChanged: () => void }) {
       let added = 0;
       for (let i = 0; i < keys.length; i += 100) added += (await addSharedJobsApi(keys.slice(i, i + 100))).added;
       toast(added ? `Added ${added} to your jobs (Review)` : 'Already in your jobs', 'success');
+      setJustAdded(added);
       setSel(new Set()); setMatching(null);
       await load(); onChanged();
     } catch (e) { toast(e instanceof Error ? e.message : 'Could not add', 'error'); } finally { setAdding(new Set()); }
@@ -155,6 +159,13 @@ function OthersJobs({ onChanged }: { onChanged: () => void }) {
         </label>
         <Muted>{total} job{total === 1 ? '' : 's'} seen in the last 30 days · you can add them to your own list, nothing is applied for you</Muted>
       </div>
+      {justAdded > 0 && (
+        <div style={{ fontSize: 13, padding: '6px 0', display: 'flex', gap: 8, alignItems: 'center' }}>
+          <i className="ti ti-circle-check" style={{ color: '#1a7f4b' }} />
+          {justAdded} added to your Review list, scored on your profile. Nothing is applied until you approve.
+          <button className="btn btn-xs btn-primary" type="button" onClick={onReview}>Review them</button>
+        </div>
+      )}
       {error && <div className="badge badge-failed" style={{ marginBottom: 10 }}>{error}</div>}
       {loading && rows.length === 0 ? <JobRowsSkeleton /> : rows.length === 0 ? (
         <Empty icon="ti-world-search">{query ? 'Nothing matches that search.' : 'No jobs from other accounts yet.'}</Empty>
@@ -219,7 +230,7 @@ function OthersJobs({ onChanged }: { onChanged: () => void }) {
 export default function Jobs() {
   const toast = useToast();
   const { canSeeLibrary } = useSession();
-  const [scope, setScope] = useState<'mine' | 'others' | 'activity'>('mine');
+  const [scope, setScope] = useState<'overview' | 'mine' | 'others' | 'activity'>('overview');
   const { findPeople, finding } = useFindPeople();
   const navigate = useNavigate();
   const [addingRec, setAddingRec] = useState<string | null>(null);
@@ -248,6 +259,10 @@ export default function Jobs() {
   };
 
   const [stage, setStage] = useState<Stage>('review');
+  const [platform, setPlatform] = useState<PlatformScope>('all');
+  const [skipSub, setSkipSub] = useState<'' | 'needs-answer' | 'company-site' | 'other-skipped'>('');
+  const [recStage, setRecStage] = useState<'' | 'none' | 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted'>('');
+  const [stageCounts, setStageCounts] = useState<Record<string, number> | null>(null);
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState<Partial<Record<Stage, number>>>({});
@@ -265,20 +280,33 @@ export default function Jobs() {
   // Debounce the search box.
   useEffect(() => { const t = setTimeout(() => { setQuery(q.trim()); setPage(1); }, 300); return () => clearTimeout(t); }, [q]);
 
-  const def = STAGES.find(s => s.key === stage)!;
+  const baseDef = STAGES.find(s => s.key === stage)!;
+  // Sub-filters: Skipped splits by why; Applied splits by what the recruiter did.
+  const def = useMemo(() => {
+    const query: NaukriJobQuery = { ...baseDef.query };
+    if (stage === 'skipped' && skipSub) query.bucket = skipSub;
+    if (stage === 'applied' && recStage) query.stage = recStage;
+    return { ...baseDef, query };
+  }, [baseDef, stage, skipSub, recStage]);
+
+  const openFromOverview = (t: OverviewTarget) => {
+    if (t.scope === 'activity') { setScope('activity'); return; }
+    if (t.stage) { setStage(t.stage); setSkipSub((t.sub as typeof skipSub) || ''); setRecStage(''); setPlatform((t.platform as PlatformScope) || 'all'); setScope('mine'); }
+  };
 
   const loadCounts = useCallback(async () => {
     try {
       const rows = await Promise.all(STAGES.map(s =>
-        listNaukriJobsApi({ ...s.query, limit: 1 }, 'all').then(r => [s.key, r.total] as const)));
+        listNaukriJobsApi({ ...s.query, limit: 1 }, platform).then(r => [s.key, r.total] as const)));
       setCounts(Object.fromEntries(rows));
     } catch { /* counts are decoration; the list reports real errors */ }
-  }, []);
+  }, [platform]);
 
   const load = useCallback(async () => {
     setError('');
     try {
-      const r = await listNaukriJobsApi({ ...def.query, q: query || undefined, page, limit: PAGE }, 'all');
+      const r = await listNaukriJobsApi({ ...def.query, q: query || undefined, page, limit: PAGE }, platform);
+      setStageCounts(r.stageCounts ? { ...r.stageCounts } : null);
       setJobs(r.jobs);
       setTotal(r.total);
       const names = [...new Set(r.jobs.map(j => j.company).filter(Boolean))];
@@ -288,11 +316,12 @@ export default function Jobs() {
     } finally {
       setLoading(false);
     }
-  }, [def, query, page]);
+  }, [def, query, page, platform]);
 
   useEffect(() => { setLoading(true); setSelected(new Set()); load(); }, [load]);
   useEffect(() => { loadCounts(); }, [loadCounts]);
-  useEffect(() => { setPage(1); }, [stage]);
+  useEffect(() => { setPage(1); }, [stage, platform, skipSub, recStage]);
+  useEffect(() => { if (stage !== 'skipped') setSkipSub(''); if (stage !== 'applied') setRecStage(''); }, [stage]);
 
   const refresh = async () => { await Promise.all([load(), loadCounts()]); };
 
@@ -373,6 +402,12 @@ export default function Jobs() {
           <a href={j.url} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{j.title}</a>
           <PlatformTag id={j.platform} />
           <DupBadge dup={j.dup} />
+          {(stage === 'applied' || stage === 'interviewing') && <StageBadge job={j} />}
+          {stage === 'queued' && j.applyStatus === 'failed' && (
+            <span className="badge badge-failed" title={j.applyNote || 'The last attempt failed; it will be retried'}>
+              Failed{j.applyNote ? `: ${j.applyNote.slice(0, 60)}` : ''}
+            </span>
+          )}
         </div>
         <Muted>
           {showCompany && j.company ? <>{j.company} · </> : null}
@@ -421,6 +456,10 @@ export default function Jobs() {
       actions={<Link className="btn btn-sm" to="/job-platforms"><i className="ti ti-briefcase-2" /> Job Platforms</Link>}
     >
       <div style={{ display: 'flex', gap: 6, marginBottom: 12 }} role="group" aria-label="Jobs view">
+        <button type="button" className={`btn btn-sm${scope === 'overview' ? ' btn-primary' : ''}`} onClick={() => setScope('overview')}
+          title="What needs you, where each platform stands, and what happened lately.">
+          <i className="ti ti-layout-dashboard" /> Overview
+        </button>
         <button type="button" className={`btn btn-sm${scope === 'mine' ? ' btn-primary' : ''}`} onClick={() => setScope('mine')}>
           <i className="ti ti-user" /> Mine
         </button>
@@ -435,7 +474,7 @@ export default function Jobs() {
           </button>
         )}
       </div>
-      {scope === 'activity' ? <ActivityFeed /> : scope === 'others' && canSeeLibrary ? <OthersJobs onChanged={loadCounts} /> : (
+      {scope === 'overview' ? <Overview onOpen={openFromOverview} /> : scope === 'activity' ? <ActivityFeed /> : scope === 'others' && canSeeLibrary ? <OthersJobs onChanged={loadCounts} onReview={() => openFromOverview({ stage: 'review' })} /> : (
         <>
       <div className="nav-tabs" style={{ marginBottom: 12 }}>
         {STAGES.map(s => (
@@ -454,8 +493,28 @@ export default function Jobs() {
           <input type="checkbox" checked={grouped} onChange={e => setGrouped(e.target.checked)} />
           Group by company
         </label>
+        <select value={platform} onChange={e => setPlatform(e.target.value as PlatformScope)} style={{ width: 'auto', fontSize: 13 }} aria-label="Platform">
+          <option value="all">All platforms</option>
+          {(Object.keys(PLATFORM_LABEL) as Array<keyof typeof PLATFORM_LABEL>).map(id => <option key={id} value={id}>{PLATFORM_LABEL[id]}</option>)}
+        </select>
         <Muted>{total} job{total === 1 ? '' : 's'}</Muted>
       </div>
+      {stage === 'skipped' && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+          {([['', 'All skipped'], ['needs-answer', 'Needs your answer'], ['company-site', 'Company site'], ['other-skipped', 'Other']] as const).map(([k, label]) => (
+            <button key={k} type="button" className={`btn btn-xs${skipSub === k ? ' btn-primary' : ''}`} onClick={() => setSkipSub(k)}>{label}</button>
+          ))}
+        </div>
+      )}
+      {stage === 'applied' && (
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+          {([['', 'All'], ['none', 'No reply yet'], ['viewed', 'Viewed'], ['shortlisted', 'Shortlisted'], ['contacted', 'Contacted'], ['not-shortlisted', 'Not shortlisted']] as const).map(([k, label]) => (
+            <button key={k} type="button" className={`btn btn-xs${recStage === k ? ' btn-primary' : ''}`} onClick={() => setRecStage(k)}>
+              {label}{k && stageCounts && stageCounts[k] != null ? ` · ${stageCounts[k]}` : ''}
+            </button>
+          ))}
+        </div>
+      )}
 
       {error && <div className="badge badge-failed" style={{ marginBottom: 10 }}>{error}</div>}
 

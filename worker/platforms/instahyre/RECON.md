@@ -86,3 +86,7 @@ Still to do (after setup is finished): the opportunities feed request + fields, 
 - After it, the page may open "Want to apply to other similar jobs at …?" (`apply_bulk/`) — blocked at the network by the driver, modal cancelled.
 - Applied listing: the button is replaced by "Application sent!\n on October 21, 2026" (whitespace folded before matching).
 - First real application: job 404930, Backend Developer @ CynLr.
+
+## Status audit 2026-11-02 (scripts/audit-platform-status.js, read-only)
+
+Read 3 applications. Words seen: Viewed (2), Not shortlisted (1), Contacted (1). All map to a stage. Rows still carry no date, so the stage time is when the track run first saw it.

@@ -101,3 +101,7 @@ Still to do (needs you logged in): session cookie name, "my jobs" / applications
 - Proof: `GET /job/applied/count/` went 0 → 1 with `lastAppliedJobId: 1679274`.
 - Applied row (`/job/applied-jobs`): `{ id: <application id>, applicationDate: ms (5h30m BEHIND real time), jobDetail: { id: <job id>, title, … }, recruiterAction: [], app_status: 0, … }` — job id is `jobDetail.id`.
 - First real application: job 1679274, Frontend Developer - React/Next.js (2-4 yrs) @ HiringBlaze.
+
+## Status audit 2026-11-02 (scripts/audit-platform-status.js, read-only)
+
+Read **313** applications: the 50-row first page plus pages 1-6 of /job/applied-jobs. Before this fix only 50 were read (too few scrolls). app_status values seen: 0 (278), 5 = Resume downloaded (30), 2 = Not suitable (5). The recruiterAction actionIds are the same 2 and 5. No other ids were seen.

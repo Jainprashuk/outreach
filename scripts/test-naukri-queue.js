@@ -51,6 +51,22 @@ eq('contacted is the furthest', readStatus({ status: [st(6, 'Shortlisted'), st(9
 eq('not shortlisted after viewed', readStatus({ status: [st(4, 'Application Viewed'), st(7, 'Not Shortlisted', '2026-10-17 10:00:00')] }),
   { stage: 'not-shortlisted', at: '2026-10-17 10:00:00', timeline: [{ id: 4, value: 'Application Viewed', at: '2026-10-16 09:20:22' }, { id: 7, value: 'Not Shortlisted', at: '2026-10-17 10:00:00' }] });
 eq('an unknown status is kept but does not move the stage', readStatus({ status: [st(1, 'Applied'), st(42, 'Something New')] }).stage, 'applied');
+eq('shortlisted then rejected → rejected', readStatus({ status: [st(6, 'Shortlisted', '2026-10-16 09:00:00'), st(7, 'Not Shortlisted', '2026-10-17 10:00:00')] }).stage, 'not-shortlisted');
+eq('rejected then contacted later → contacted', readStatus({ status: [st(7, 'Not Shortlisted', '2026-10-16 09:00:00'), st(9, 'Contacted By Email', '2026-10-18 10:00:00')] }).stage, 'contacted');
+eq('undated rejection after contact is final', readStatus({ status: [{ statusId: 9, statusValue: 'Contacted' }, { statusId: 7, statusValue: 'Not Shortlisted' }] }).stage, 'not-shortlisted');
+
+console.log('\nshared status words: classifyStatus');
+const { classifyStatus } = require('../lib/jobStatus');
+const kind = (t) => (classifyStatus(t) || { stage: 'other' }).stage;
+eq('offer → contacted (was unrecognised at ingest)', kind('Offer extended'), 'contacted');
+eq('interview → contacted', kind('Interview scheduled'), 'contacted');
+eq('assessment → contacted', kind('Assessment invited'), 'contacted');
+eq('not selected beats selected', kind('Not selected'), 'not-shortlisted');
+eq('Hirist: Resume downloaded → viewed', kind('Resume downloaded'), 'viewed');
+eq('Wellfound PENDING → applied', kind('PENDING'), 'applied');
+eq('EXPIRED is known but moves no stage', [kind('EXPIRED'), classifyStatus('EXPIRED').id], ['closed', 99]);
+eq('Contact Viewed is a view, not a contact', kind('Contact Viewed'), 'viewed');
+eq('Naukri id 14 (Contact Viewed) → viewed', readStatus({ status: [st(1, 'Applied'), st(14, 'Contact Viewed')] }).stage, 'viewed');
 
 console.log('\nprofile from resume: parseProfile');
 const resume = 'Asha Verma, Bengaluru. Senior Backend Engineer, Acme Payments (Jan 2021 – Present). Node.js, MongoDB, AWS. B.Tech Computer Science, NIT Trichy';
