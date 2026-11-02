@@ -227,6 +227,8 @@ const STATUS_WORDS = [
   [/shortlist|accept|interested|selected|in[\s_-]?process/i, 6, 'Shortlisted'],
   [/view|seen|read|open|download/i, 4, 'Application Viewed'],
   [/appl|sent|submit/i, 1, 'Applied'],
+  // "No reply yet" words (Wellfound PENDING) are the applied state, not news.
+  [/^\s*(pending|awaiting|waiting)\b/i, 1, 'Applied'],
 ];
 // A status the site shows that none of the rules above recognise is kept, not
 // dropped: id 99 ("other") sits in the timeline and the Activity feed under its
