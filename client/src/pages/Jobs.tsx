@@ -6,6 +6,7 @@ import { FitBadge } from '../components/naukri/ReviewQueue';
 import SelectionBar from '../components/naukri/SelectionBar';
 import { Empty, Muted } from '../components/naukri/ui';
 import ActivityFeed from '../components/naukri/ActivityFeed';
+import NeedsAnswer from '../components/naukri/NeedsAnswer';
 import { DupBadge, PlatformTag, PLATFORM_LABEL } from '../components/naukri/platform';
 import Overview, { type OverviewTarget } from '../components/naukri/Overview';
 import StageBadge from '../components/naukri/StageBadge';
@@ -27,7 +28,7 @@ import { autoPick } from '../lib/prospects';
 // Reads /api/p/all/jobs (explicit platform, so it does not depend on the
 // URL-scoped default the Job Platforms page uses).
 
-type Stage = 'review' | 'queued' | 'applied' | 'interviewing' | 'skipped';
+type Stage = 'review' | 'queued' | 'applied' | 'answer' | 'skipped';
 
 const STAGES: { key: Stage; label: string; icon: string; tip: string; query: NaukriJobQuery }[] = [
   { key: 'review', label: 'Review', icon: 'ti-inbox', tip: 'New jobs waiting for your yes or no',
@@ -36,8 +37,10 @@ const STAGES: { key: Stage; label: string; icon: string; tip: string; query: Nau
     query: { bucket: 'waiting', sort: 'queue' } },
   { key: 'applied', label: 'Applied', icon: 'ti-send', tip: 'Applications that went out, and how they are going',
     query: { applyStatus: 'sent', sort: 'newest' } },
-  { key: 'interviewing', label: 'Interviewing', icon: 'ti-calendar-event', tip: 'Jobs you marked as interviewing',
-    query: { applyStatus: 'interviewing', sort: 'newest' } },
+  // Not a job list: the questions blocking applies, answered once for every job
+  // (and every platform) that asked. Its count is the jobs waiting on them.
+  { key: 'answer', label: 'Needs answer', icon: 'ti-message-question', tip: 'Screening questions with no answer yet. Answer once and every job that asked goes back in the queue.',
+    query: { bucket: 'needs-answer', sort: 'newest' } },
   { key: 'skipped', label: 'Skipped', icon: 'ti-player-skip-forward', tip: 'Set aside or could not be applied to',
     query: { bucket: 'skipped', sort: 'newest' } },
 ];
@@ -291,7 +294,7 @@ export default function Jobs() {
 
   const openFromOverview = (t: OverviewTarget) => {
     if (t.scope === 'activity') { setScope('activity'); return; }
-    if (t.stage) { setStage(t.stage); setSkipSub((t.sub as typeof skipSub) || ''); setRecStage(''); setPlatform((t.platform as PlatformScope) || 'all'); setScope('mine'); }
+    if (t.stage) { setStage(t.stage as Stage); setSkipSub((t.sub as typeof skipSub) || ''); setRecStage(''); setPlatform((t.platform as PlatformScope) || 'all'); setScope('mine'); }
   };
 
   const loadCounts = useCallback(async () => {
@@ -318,7 +321,8 @@ export default function Jobs() {
     }
   }, [def, query, page, platform]);
 
-  useEffect(() => { setLoading(true); setSelected(new Set()); load(); }, [load]);
+  // Needs answer shows questions, not a job list, so there is no list to fetch.
+  useEffect(() => { if (stage === 'answer') return; setLoading(true); setSelected(new Set()); load(); }, [load, stage]);
   useEffect(() => { loadCounts(); }, [loadCounts]);
   useEffect(() => { setPage(1); }, [stage, platform, skipSub, recStage]);
   useEffect(() => { if (stage !== 'skipped') setSkipSub(''); if (stage !== 'applied') setRecStage(''); }, [stage]);
@@ -374,7 +378,7 @@ export default function Jobs() {
       <button className="btn btn-xs" type="button" disabled={busy}
         onClick={() => act(() => bulkNaukriJobsApi([j.id], 'requeue'), 'Put back in the queue')}>Requeue</button>
     );
-    // applied / interviewing: move through the funnel, or hand over to Interviews
+    // applied: move through the funnel, or hand over to Interviews
     return (
       <>
         <select value={j.applyStatus} disabled={busy} style={{ width: 'auto', fontSize: 12 }} aria-label="Application status"
@@ -402,7 +406,7 @@ export default function Jobs() {
           <a href={j.url} target="_blank" rel="noreferrer" style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{j.title}</a>
           <PlatformTag id={j.platform} />
           <DupBadge dup={j.dup} />
-          {(stage === 'applied' || stage === 'interviewing') && <StageBadge job={j} />}
+          {stage === 'applied' && <StageBadge job={j} />}
           {stage === 'queued' && j.applyStatus === 'failed' && (
             <span className="badge badge-failed" title={j.applyNote || 'The last attempt failed; it will be retried'}>
               Failed{j.applyNote ? `: ${j.applyNote.slice(0, 60)}` : ''}
@@ -486,6 +490,7 @@ export default function Jobs() {
         ))}
       </div>
 
+      {stage === 'answer' ? <NeedsAnswer platform="all" onChanged={loadCounts} /> : (<>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
         <input type="text" placeholder="Search title, company, skill…" value={q}
           onChange={e => setQ(e.target.value)} style={{ maxWidth: 320 }} />
@@ -501,7 +506,7 @@ export default function Jobs() {
       </div>
       {stage === 'skipped' && (
         <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
-          {([['', 'All skipped'], ['needs-answer', 'Needs your answer'], ['company-site', 'Company site'], ['other-skipped', 'Other']] as const).map(([k, label]) => (
+          {([['', 'All skipped'], ['company-site', 'Company site'], ['other-skipped', 'Other']] as const).map(([k, label]) => (
             <button key={k} type="button" className={`btn btn-xs${skipSub === k ? ' btn-primary' : ''}`} onClick={() => setSkipSub(k)}>{label}</button>
           ))}
         </div>
@@ -549,6 +554,7 @@ export default function Jobs() {
           )}
         </>
       )}
+      </>)}
 
         </>
       )}

@@ -7,6 +7,7 @@
  *
  *   node scripts/parity/track-stage.js            # dev
  *   node scripts/parity/track-stage.js --prod     # prod, still read-only
+ *   add --detail to print each differing job's timeline with dates
  */
 require('dotenv').config();
 const mongoose = require('mongoose');
@@ -34,7 +35,10 @@ function oldStage(tl) {
     const a = oldStage(j.naukriTimeline), b = readStatus(row).stage;
     if (a !== b) {
       const k = `${a} → ${b}`;
-      (diffs[k] = diffs[k] || []).push(`${j.platform || 'naukri'} · ${j.title} · ${j.company} [stored ${j.naukriStage}, ${j.applyStatus}]`);
+      const tl = process.argv.includes('--detail')
+        ? '\n      ' + j.naukriTimeline.map(t => `${t.value} @ ${t.at ? new Date(t.at).toISOString().slice(0, 16) : 'no date'}`).join('\n      ')
+        : '';
+      (diffs[k] = diffs[k] || []).push(`${j.platform || 'naukri'} · ${j.title} · ${j.company} [stored ${j.naukriStage}, ${j.applyStatus}]${tl}`);
     }
   }
   console.log(`${prod ? 'PROD' : 'dev'}: ${n} tracked jobs`);

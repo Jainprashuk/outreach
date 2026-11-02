@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Empty, Muted } from './ui';
 import { PlatformTag } from './platform';
 import { fmtAgo } from '../dashboard/format';
+import { RefreshBar, Refreshing } from '../RefreshBar';
+import { Skeleton } from '../Skeleton';
 import { activityApi, type ActivityEvent, type ActivityType, type PlatformId } from '../../lib/api';
 
 // What recruiters are doing on your jobs, across every platform, newest first:
@@ -36,12 +38,17 @@ export default function ActivityFeed() {
   const [error, setError] = useState('');
   const [updated, setUpdated] = useState<number | null>(null);
 
+  // Only the newest request may land: quick chip clicks must not let an older
+  // answer overwrite the one you asked for last.
+  const seq = useRef(0);
   const load = useCallback(async () => {
+    const mine = ++seq.current;
     try {
       const r = await activityApi({ days, limit: 400, types: type });
+      if (mine !== seq.current) return;
       setEvents(r.events); setTotal(r.total); setCounts(r.counts); setError(''); setUpdated(Date.now());
-    } catch (e: any) { setError(e?.message || 'Could not load activity'); }
-    finally { setLoading(false); }
+    } catch (e: any) { if (mine === seq.current) setError(e?.message || 'Could not load activity'); }
+    finally { if (mine === seq.current) setLoading(false); }
   }, [days, type]);
 
   useEffect(() => { setLoading(true); setLimit(100); load(); }, [load]);
@@ -76,7 +83,7 @@ export default function ActivityFeed() {
         {KINDS.filter(k => k.key !== 'other' || chipCount('other') > 0).map(k => (
           <button key={k.key} type="button" className={`btn btn-sm${type === k.key ? ' btn-primary' : ''}`}
             onClick={() => setType(t => (t === k.key ? '' : k.key))}>
-            <i className={`ti ${k.icon}`} /> {k.label}
+            <i className={`ti ${loading && type === k.key ? 'ti-loader-2' : k.icon}`} /> {k.label}
             <span className="contact-count-badge" style={{ marginLeft: 6 }}>{chipCount(k.key)}</span>
           </button>
         ))}
@@ -88,7 +95,7 @@ export default function ActivityFeed() {
           <option value={1}>Last 24 hours</option><option value={3}>Last 3 days</option>
           <option value={7}>Last 7 days</option><option value={30}>Last 30 days</option><option value={90}>Last 90 days</option><option value={3650}>All time</option>
         </select>
-        <Muted>{updated ? `updated ${fmtAgo(updated)}` : ''}</Muted>
+        <Muted>{loading ? 'Loading…' : updated ? `updated ${fmtAgo(updated)}` : ''}</Muted>
       </div>
       <Muted style={{ display: 'block', marginBottom: 10 }}>
         {platform ? `${platform[0].toUpperCase()}${platform.slice(1)}` : 'All platforms'} · all time: {responded} job{responded === 1 ? '' : 's'} with a recruiter response, {shortlisted} shortlisted or contacted (same as Analytics).
@@ -97,7 +104,20 @@ export default function ActivityFeed() {
 
       {error && <div className="badge badge-failed" style={{ marginBottom: 10 }}>{error}</div>}
 
-      {loading && events.length === 0 ? <Muted>Loading recruiter activity…</Muted> : shown.length === 0 ? (
+      <RefreshBar active={loading && updated !== null} />
+      {loading && updated === null ? (
+        <div aria-busy="true" aria-label="Loading recruiter activity">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'center', padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+              <Skeleton w={16} h={16} r={8} />
+              <div style={{ flex: 1 }}><Skeleton w={`${40 + (i % 3) * 15}%`} h={12} style={{ marginBottom: 7 }} /><Skeleton w={`${30 + (i % 2) * 20}%`} h={9} /></div>
+              <Skeleton w={60} h={10} />
+            </div>
+          ))}
+        </div>
+      ) : (
+      <Refreshing active={loading}>
+      {shown.length === 0 ? (
         <Empty icon="ti-user-search">
           {responded > 0 ? (
             <>
@@ -139,6 +159,8 @@ export default function ActivityFeed() {
         <button className="btn btn-sm" type="button" onClick={() => setLimit(l => l + 100)}>Show more ({limit} of {shown.length})</button>
       )}
       {total > events.length && <Muted> Showing the newest {events.length} of {total}.</Muted>}
+      </Refreshing>
+      )}
     </div>
   );
 }

@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { jobsOverviewApi, type JobsOverview } from '../../lib/api';
+import { jobsOverviewApi, type JobsOverview, type JobsOverviewRange } from '../../lib/api';
+import { RefreshBar, Refreshing } from '../RefreshBar';
 import { PlatformTag } from './platform';
 import { Empty, Muted } from './ui';
 import { fmtRunTime } from './format';
+import { Skeleton } from '../Skeleton';
 
 // The Jobs tab's landing view: what needs you, where each platform stands, what
 // happened lately. Everything is read-only; each "needs you" card jumps to the
@@ -24,7 +26,16 @@ const KIND_ICON: Record<string, [string, string]> = {
   contacted: ['ti-message-circle', '#1a7f4b'], 'not-shortlisted': ['ti-circle-x', 'var(--text2)'],
 };
 
-export type OverviewTarget = { stage?: 'review' | 'queued' | 'applied' | 'skipped'; platform?: string; scope?: 'activity'; sub?: string };
+const RANGES: { key: JobsOverviewRange; label: string }[] = [
+  { key: 'today', label: 'Today' }, { key: 'yesterday', label: 'Yesterday' }, { key: '3d', label: 'Last 3 days' },
+  { key: '7d', label: 'Last 7 days' }, { key: '30d', label: 'Last 30 days' }, { key: 'all', label: 'All time' },
+];
+const RANGE_KEY = 'jobs.overview.range';
+const savedRange = (): JobsOverviewRange => {
+  try { const v = localStorage.getItem(RANGE_KEY) as JobsOverviewRange | null; return v && RANGES.some(r => r.key === v) ? v : '7d'; } catch { return '7d'; }
+};
+
+export type OverviewTarget = { stage?: 'review' | 'queued' | 'applied' | 'answer' | 'skipped'; platform?: string; scope?: 'activity'; sub?: string };
 
 function NeedCard({ n, label, hint, tone, onClick }: { n: number; label: string; hint: string; tone: 'bad' | 'warn' | 'good'; onClick: () => void }) {
   const color = tone === 'bad' ? '#c0392b' : tone === 'warn' ? '#b9770e' : '#1a7f4b';
@@ -41,26 +52,54 @@ function NeedCard({ n, label, hint, tone, onClick }: { n: number; label: string;
 export default function Overview({ onOpen }: { onOpen: (t: OverviewTarget) => void }) {
   const [data, setData] = useState<JobsOverview | null>(null);
   const [error, setError] = useState('');
+  const [range, setRange] = useState<JobsOverviewRange>(savedRange);
+  const [loading, setLoading] = useState(true);
+  const seq = useRef(0);
 
   const load = useCallback(async () => {
-    try { setData(await jobsOverviewApi(7)); setError(''); }
-    catch (e) { setError(e instanceof Error ? e.message : String(e)); }
-  }, []);
+    const mine = ++seq.current;
+    try {
+      const r = await jobsOverviewApi(range);
+      if (mine === seq.current) { setData(r); setError(''); }
+    } catch (e) { if (mine === seq.current) setError(e instanceof Error ? e.message : String(e)); }
+    finally { if (mine === seq.current) setLoading(false); }
+  }, [range]);
+  const pick = (r: JobsOverviewRange) => {
+    setRange(r); setLoading(true);
+    try { localStorage.setItem(RANGE_KEY, r); } catch { /* a remembered choice is a convenience */ }
+  };
   useEffect(() => { load(); const t = setInterval(load, 60000); return () => clearInterval(t); }, [load]);
 
   if (error && !data) return <div className="badge badge-failed">{error}</div>;
-  if (!data) return <Muted>Loading…</Muted>;
+  if (!data) return (
+    <div aria-busy="true" aria-label="Loading overview">
+      <Skeleton w={90} h={14} style={{ margin: '4px 0 10px' }} />
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 18 }}>
+        {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} w={180} h={62} r={10} />)}
+      </div>
+      {Array.from({ length: 5 }).map((_, i) => <Skeleton key={i} w="100%" h={30} r={6} style={{ marginBottom: 8 }} />)}
+    </div>
+  );
   const { needs, platforms, timeline } = data;
+  const rangeLabel = (RANGES.find(r => r.key === range) || RANGES[3]).label.toLowerCase();
   const nothing = needs.review + needs.needsAnswer + needs.failed + needs.problems.length === 0;
 
   return (
     <div>
-      <h3 style={{ fontSize: 14, margin: '4px 0 8px' }}>Needs you</h3>
+      <RefreshBar active={loading} />
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 8 }}>
+        <h3 style={{ fontSize: 14, margin: 0, flex: 1 }}>Needs you</h3>
+        <select value={range} onChange={e => pick(e.target.value as JobsOverviewRange)} style={{ width: 'auto', fontSize: 13 }} aria-label="Period"
+          title="Narrows what happened: sends, failures, recruiter updates and the timeline. Counts of what needs you now do not change.">
+          {RANGES.map(r => <option key={r.key} value={r.key}>{r.label}</option>)}
+        </select>
+      </div>
+      <Refreshing active={loading}>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
         <NeedCard n={needs.review} tone="warn" label="jobs to review" hint="New jobs waiting for your yes or no" onClick={() => onOpen({ stage: 'review' })} />
-        <NeedCard n={needs.needsAnswer} tone="warn" label="need an answer" hint="Skipped because a screening question had no answer" onClick={() => onOpen({ stage: 'skipped', sub: 'needs-answer' })} />
+        <NeedCard n={needs.needsAnswer} tone="warn" label="need an answer" hint="Skipped because a screening question had no answer" onClick={() => onOpen({ stage: 'answer' })} />
         <NeedCard n={needs.failed} tone="bad" label="failed to apply" hint="Approved jobs whose apply failed, in Queued" onClick={() => onOpen({ stage: 'queued' })} />
-        <NeedCard n={needs.recruiter} tone="good" label="recruiter interest" hint="Shortlisted or contacted by a recruiter" onClick={() => onOpen({ scope: 'activity' })} />
+        <NeedCard n={needs.recruiter} tone="good" label={`recruiter interest · ${rangeLabel}`} hint="Shortlisted or contacted by a recruiter in the period" onClick={() => onOpen({ scope: 'activity' })} />
       </div>
       {needs.problems.length > 0 && (
         <div style={{ margin: '8px 0 14px', display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -76,15 +115,21 @@ export default function Overview({ onOpen }: { onOpen: (t: OverviewTarget) => vo
       )}
       {nothing && <Muted style={{ display: 'block', marginBottom: 12 }}>Nothing needs you right now.</Muted>}
 
-      <h3 style={{ fontSize: 14, margin: '16px 0 8px' }}>Platforms</h3>
+      <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', margin: '16px 0 8px' }}>
+        <h3 style={{ fontSize: 14, margin: 0 }}>Platforms</h3>
+        <Muted>Review, Queued, Applied: right now · Sent to Rejected: {rangeLabel}</Muted>
+      </div>
       {platforms.length === 0 ? <Empty icon="ti-briefcase-2">No platform is switched on. Turn one on in Job Platforms.</Empty> : (
         <div style={{ overflowX: 'auto' }}>
           <table style={{ width: '100%', fontSize: 13, borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--text2)', fontSize: 12 }}>
-                <th style={{ padding: '4px 8px 4px 0' }}>Platform</th><th>Review</th><th>Queued</th><th>Applied</th>
-                <th title="Viewed by a recruiter">Viewed</th><th title="Shortlisted or contacted">Interest</th><th>Rejected</th>
-                <th>This week</th><th>Statuses checked</th><th>Worker</th>
+                <th style={{ padding: '4px 8px 4px 0' }}>Platform</th>
+                <th title="Now">Review</th><th title="Now">Queued</th><th title="Every application sent, all time">Applied</th>
+                <th title={`Applications sent · ${rangeLabel}`}>Sent</th><th title={`Apply attempts that failed · ${rangeLabel}`}>Failed</th>
+                <th title={`Viewed by a recruiter · ${rangeLabel}`}>Viewed</th><th title={`Shortlisted or contacted · ${rangeLabel}`}>Interest</th>
+                <th title={`Not shortlisted · ${rangeLabel}`}>Rejected</th>
+                <th>Statuses checked</th><th>Worker</th>
               </tr>
             </thead>
             <tbody>
@@ -94,10 +139,11 @@ export default function Overview({ onOpen }: { onOpen: (t: OverviewTarget) => vo
                   <td><button type="button" className="btn btn-xs" onClick={() => onOpen({ stage: 'review', platform: p.platform })}>{p.review}</button></td>
                   <td><button type="button" className="btn btn-xs" onClick={() => onOpen({ stage: 'queued', platform: p.platform })}>{p.queued}</button></td>
                   <td><button type="button" className="btn btn-xs" onClick={() => onOpen({ stage: 'applied', platform: p.platform })}>{p.applied}</button></td>
-                  <td>{p.viewed}</td>
-                  <td style={{ fontWeight: p.shortlisted + p.contacted ? 600 : 400 }}>{p.shortlisted + p.contacted}</td>
-                  <td>{p.notShortlisted}</td>
-                  <td title={`${p.foundThisWeek} new jobs found`}>{p.week.applied} sent{p.week.failed ? ` · ${p.week.failed} failed` : ''}</td>
+                  <td>{p.period.sent}</td>
+                  <td style={{ color: p.period.failed ? '#c0392b' : undefined }}>{p.period.failed}</td>
+                  <td>{p.period.viewed}</td>
+                  <td style={{ fontWeight: p.period.interest ? 600 : 400 }}>{p.period.interest}</td>
+                  <td>{p.period.rejected}</td>
                   <td style={{ color: p.trackStale ? '#b9770e' : undefined }}>{ago(p.lastTrackAt)}</td>
                   <td>
                     {p.activeRun ? <span className="badge badge-queued">running {p.activeRun.kind}</span>
@@ -112,7 +158,7 @@ export default function Overview({ onOpen }: { onOpen: (t: OverviewTarget) => vo
       )}
 
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, margin: '18px 0 6px' }}>
-        <h3 style={{ fontSize: 14, margin: 0 }}>What happened (last {data.days} days)</h3>
+        <h3 style={{ fontSize: 14, margin: 0 }}>What happened · {rangeLabel}</h3>
         <button type="button" className="btn btn-xs" onClick={() => onOpen({ scope: 'activity' })}>Recruiter activity</button>
       </div>
       {timeline.length === 0 ? <Empty icon="ti-activity">Nothing yet in this period.</Empty> : timeline.map((e, i) => {
@@ -130,6 +176,7 @@ export default function Overview({ onOpen }: { onOpen: (t: OverviewTarget) => vo
           </div>
         );
       })}
+      </Refreshing>
     </div>
   );
 }

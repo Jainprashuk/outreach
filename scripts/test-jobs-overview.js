@@ -32,7 +32,7 @@ async function main() {
   });
   try {
     const cookie = await loginViaOtp({ base: BASE, email });
-    const get = async () => (await fetch(`${BASE}/api/p/all/jobs-overview`, { headers: { Cookie: cookie } })).json();
+    const get = async (range = '') => (await fetch(`${BASE}/api/p/all/jobs-overview${range ? `?range=${range}` : ''}`, { headers: { Cookie: cookie } })).json();
     await get(); // creates the config row
     await db.collection('naukriconfigs').updateOne({ userId: uid }, { $set: { 'platforms.hirist.enabled': true, 'platforms.instahyre.enabled': false } });
 
@@ -50,6 +50,7 @@ async function main() {
       j('hirist', 1, { applyStatus: 'skipped', unknownQuestion: 'Notice period?' }),
       j('hirist', 2, { applyStatus: 'applied', naukriStage: 'not-shortlisted', naukriStageAt: new Date(now - HOUR), trackedAt: new Date(now - HOUR) }),
       j('instahyre', 1, { approval: 'pending' }), // platform off: not listed
+      j('hirist', 3, { applyStatus: 'applied', applyHistory: [{ at: new Date(now - 20 * DAY), from: 'none', to: 'applied', note: '' }] }),
     ]);
 
     const o = await get();
@@ -62,13 +63,22 @@ async function main() {
     console.log('Platforms:');
     check(!by.instahyre && !!by.naukri && !!by.hirist, 'only switched-on platforms are listed');
     check(by.naukri.applied === 2 && by.naukri.viewed === 1 && by.naukri.shortlisted === 1, `naukri applied 2, viewed 1, shortlisted 1 (${JSON.stringify([by.naukri.applied, by.naukri.viewed, by.naukri.shortlisted])})`);
-    check(by.hirist.applied === 1 && by.hirist.notShortlisted === 1, 'hirist applied 1, not shortlisted 1');
+    check(by.hirist.applied === 2 && by.hirist.notShortlisted === 1 && by.hirist.period.sent === 0, 'hirist applied 2 (all time), not shortlisted 1, nothing sent this week');
     check(by.naukri.trackStale === true && by.hirist.trackStale === false, 'a 5-day-old status check is stale, a fresh one is not');
     check(by.naukri.problems.some(p => p.kind === 'stale'), 'stale check is listed as a problem');
     console.log('Timeline:');
     check(o.timeline.some(e => e.kind === 'failed') && o.timeline.some(e => e.kind === 'applied'), 'own apply and failure appear');
     check(o.timeline.some(e => e.kind === 'shortlisted' && e.label === 'Shortlisted'), 'recruiter shortlist appears with the site\'s words');
     check(o.timeline.every((e, i, a) => !i || new Date(a[i - 1].at) >= new Date(e.at)), 'newest first');
+    console.log('Period:');
+    check(o.range === '7d' && by.naukri.period.sent === 1 && by.naukri.period.failed === 1 && by.naukri.period.interest === 1, `7d: naukri sent 1, failed 1, interest 1 (${JSON.stringify(by.naukri.period)})`);
+    const y = await get('yesterday');
+    const yb = Object.fromEntries(y.platforms.map(p => [p.platform, p]));
+    check(y.range === 'yesterday' && y.needs.review === 1 && y.needs.failed === 1, 'the period never changes what needs you now');
+    check(yb.naukri.applied === 2, 'total applied is all time in every period');
+    const old = await get('all');
+    check(old.range === 'all' && old.timeline.length >= o.timeline.length, 'all time has at least what 7 days has');
+    check((await get('banana')).range === '7d', 'an unknown period falls back to 7 days');
   } finally {
     for (const c of ['naukrijobs', 'naukriconfigs', 'naukriworkers', 'naukriruns', 'sessions', 'activitylogs']) await db.collection(c).deleteMany({ userId: uid });
     await db.collection('logincodes').deleteMany({ email });

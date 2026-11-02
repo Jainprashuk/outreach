@@ -53,6 +53,7 @@ eq('not shortlisted after viewed', readStatus({ status: [st(4, 'Application View
 eq('an unknown status is kept but does not move the stage', readStatus({ status: [st(1, 'Applied'), st(42, 'Something New')] }).stage, 'applied');
 eq('shortlisted then rejected → rejected', readStatus({ status: [st(6, 'Shortlisted', '2026-10-16 09:00:00'), st(7, 'Not Shortlisted', '2026-10-17 10:00:00')] }).stage, 'not-shortlisted');
 eq('rejected then contacted later → contacted', readStatus({ status: [st(7, 'Not Shortlisted', '2026-10-16 09:00:00'), st(9, 'Contacted By Email', '2026-10-18 10:00:00')] }).stage, 'contacted');
+eq('rejection and contact in the same minute → rejected (the email IS the rejection; 7 prod jobs, 2026-11-02)', readStatus({ status: [st(4, 'Application Viewed', '2026-10-18 07:38:00'), st(7, 'Not Shortlisted', '2026-10-18 07:38:00'), st(9, 'Contacted By Email', '2026-10-18 07:38:00')] }).stage, 'not-shortlisted');
 eq('undated rejection after contact is final', readStatus({ status: [{ statusId: 9, statusValue: 'Contacted' }, { statusId: 7, statusValue: 'Not Shortlisted' }] }).stage, 'not-shortlisted');
 
 console.log('\nshared status words: classifyStatus');

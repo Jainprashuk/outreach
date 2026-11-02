@@ -440,6 +440,15 @@ router.get('/platforms', async (req, res) => {
   }
 });
 
+const OVERVIEW_RANGES = ['today', 'yesterday', '3d', '7d', '30d', 'all'];
+function overviewWindow(range, timeZone) {
+  if (range === 'all') return { from: new Date(0), to: new Date(Date.now() + 60000) };
+  if (range === '3d') return { from: new Date(Date.now() - 3 * 86400000), to: new Date(Date.now() + 60000) };
+  // today / yesterday / 7d / 30d: the same windows as /counts.
+  const w = rangeWindow(range, timeZone);
+  return range === 'yesterday' ? w : { from: w.from, to: new Date(Date.now() + 60000) };
+}
+
 // GET /api/p/all/jobs-overview — the Jobs tab's landing view in ONE call, read-only:
 // what needs you, where each platform stands, and what happened lately. Built from
 // the same overviewFor() the Job Platforms page uses, so the numbers agree.
@@ -448,13 +457,19 @@ router.get('/jobs-overview', async (req, res) => {
     await failStaleRuns(req.userId);
     const userId = oidOf(req.userId);
     const config = await NaukriConfig.getForUser(req.userId);
-    const days = Math.min(30, Math.max(1, parseInt(req.query.days, 10) || 7));
-    const since = new Date(Date.now() - days * 86400000);
+    // The period narrows what HAPPENED (sends, failures, recruiter updates, the
+    // timeline). What is true NOW — to review, queued, needs an answer, failed,
+    // applied in total — never depends on it. Days start at midnight in the
+    // schedule's timezone, like the Job Platforms date filter.
+    const range = OVERVIEW_RANGES.includes(req.query.range) ? req.query.range : '7d';
+    const tz = (siteOf(config, 'naukri').schedule || {}).timezone;
+    const { from: since, to: until } = overviewWindow(range, tz);
+    const inWin = { $gte: since, $lt: until };
     const ids = PLATFORM_IDS.filter((id) => isEnabled(siteOf(config, id), id));
     const base = { userId, deleted: { $ne: true } };
     const pOf = (j) => j.platform || 'naukri';
 
-    const [overviews, failed, stageRows, trackRows, own, recruiterJobs] = await Promise.all([
+    const [overviews, failed, stageRows, trackRows, own, recruiterJobs, sentRows, winStageRows] = await Promise.all([
       Promise.all(ids.map((id) => overviewFor(req.userId, id, { config, light: true }))),
       NaukriJob.aggregate([{ $match: { ...base, approval: 'approved', applyStatus: 'failed' } },
         { $group: { _id: { $ifNull: ['$platform', 'naukri'] }, n: { $sum: 1 } } }]),
@@ -463,14 +478,27 @@ router.get('/jobs-overview', async (req, res) => {
       NaukriJob.aggregate([{ $match: { ...base, applyStatus: { $in: SENT_STATUSES } } },
         { $group: { _id: { $ifNull: ['$platform', 'naukri'] }, last: { $max: '$trackedAt' } } }]),
       NaukriJob.aggregate([
-        { $match: { ...base, 'applyHistory.at': { $gte: since } } }, { $unwind: '$applyHistory' },
-        { $match: { 'applyHistory.at': { $gte: since }, 'applyHistory.to': { $in: ['applied', 'failed'] } } },
-        { $sort: { 'applyHistory.at': -1 } }, { $limit: 60 },
+        { $match: { ...base, 'applyHistory.at': inWin } }, { $unwind: '$applyHistory' },
+        { $match: { 'applyHistory.at': inWin, 'applyHistory.to': { $in: ['applied', 'failed'] } } },
+        { $sort: { 'applyHistory.at': -1 } }, { $limit: 80 },
         { $project: { title: 1, company: 1, platform: 1, url: 1, at: '$applyHistory.at', to: '$applyHistory.to', note: '$applyHistory.note' } },
       ]),
-      NaukriJob.find({ ...base, applyStatus: { $in: SENT_STATUSES }, naukriStageAt: { $gte: since }, naukriStage: { $in: ['viewed', 'shortlisted', 'contacted', 'not-shortlisted'] } },
-        { title: 1, company: 1, platform: 1, url: 1, naukriStage: 1, naukriStageAt: 1, naukriTimeline: 1 }).sort({ naukriStageAt: -1 }).limit(60).lean(),
+      NaukriJob.find({ ...base, applyStatus: { $in: SENT_STATUSES }, naukriStageAt: inWin, naukriStage: { $in: ['viewed', 'shortlisted', 'contacted', 'not-shortlisted'] } },
+        { title: 1, company: 1, platform: 1, url: 1, naukriStage: 1, naukriStageAt: 1, naukriTimeline: 1 }).sort({ naukriStageAt: -1 }).limit(80).lean(),
+      // Sent / failed in the period, from the history the worker writes (a retry counts each time).
+      NaukriJob.aggregate([
+        { $match: { ...base, 'applyHistory.at': inWin } }, { $unwind: '$applyHistory' },
+        { $match: { 'applyHistory.at': inWin, 'applyHistory.to': { $in: ['applied', 'failed'] } } },
+        { $group: { _id: { p: { $ifNull: ['$platform', 'naukri'] }, t: '$applyHistory.to' }, n: { $sum: 1 } } },
+      ]),
+      // Recruiter stage reached in the period.
+      NaukriJob.aggregate([{ $match: { ...base, applyStatus: { $in: SENT_STATUSES }, naukriStageAt: inWin } },
+        { $group: { _id: { p: { $ifNull: ['$platform', 'naukri'] }, s: '$naukriStage' }, n: { $sum: 1 } } }]),
     ]);
+    const sent = {};
+    for (const r of sentRows) (sent[r._id.p] = sent[r._id.p] || {})[r._id.t] = r.n;
+    const win = {};
+    for (const r of winStageRows) (win[r._id.p] = win[r._id.p] || {})[r._id.s] = r.n;
 
     const failedBy = Object.fromEntries(failed.map((r) => [r._id, r.n]));
     const lastTrack = Object.fromEntries(trackRows.map((r) => [r._id, r.last]));
@@ -495,7 +523,15 @@ router.get('/jobs-overview', async (req, res) => {
         platform: o.platform, label: o.label, applyMode: o.applyMode,
         review: o.reviewCount, needsAnswer: o.needsAnswerCount, failed: failedBy[o.platform] || 0,
         queued: o.waitingCount, applied, appliedToday: o.appliedToday, perDay: o.perDay,
+        // All time: where every application stands now.
         viewed: st.viewed || 0, shortlisted: (st.shortlisted || 0), contacted: (st.contacted || 0), notShortlisted: st['not-shortlisted'] || 0,
+        // In the chosen period.
+        period: {
+          sent: (sent[o.platform] || {}).applied || 0, failed: (sent[o.platform] || {}).failed || 0,
+          viewed: (win[o.platform] || {}).viewed || 0,
+          interest: ((win[o.platform] || {}).shortlisted || 0) + ((win[o.platform] || {}).contacted || 0),
+          rejected: (win[o.platform] || {})['not-shortlisted'] || 0,
+        },
         week: o.week, foundThisWeek: o.foundThisWeek,
         lastTrackAt: last, trackStale, worker: { online: !!(o.worker && o.worker.online), lastSeenAt: o.worker && o.worker.lastSeenAt },
         activeRun: o.activeRun ? { kind: o.activeRun.kind, startedAt: o.activeRun.startedAt || o.activeRun.createdAt } : null,
@@ -507,7 +543,7 @@ router.get('/jobs-overview', async (req, res) => {
     const sum = (k) => platforms.reduce((a, p) => a + (p[k] || 0), 0);
     const needs = {
       review: sum('review'), needsAnswer: sum('needsAnswer'), failed: sum('failed'),
-      recruiter: platforms.reduce((a, p) => a + p.shortlisted + p.contacted, 0),
+      recruiter: platforms.reduce((a, p) => a + p.period.interest, 0),
       problems: platforms.filter((p) => p.problems.length).map((p) => ({ platform: p.platform, label: p.label, problems: p.problems })),
     };
 
@@ -519,7 +555,7 @@ router.get('/jobs-overview', async (req, res) => {
       }),
     ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 80);
 
-    res.json({ days, needs, platforms, timeline, generatedAt: new Date() });
+    res.json({ range, since, until, needs, platforms, timeline, generatedAt: new Date() });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

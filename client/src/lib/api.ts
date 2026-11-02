@@ -1859,7 +1859,9 @@ export interface NaukriQuestionGroup {
   similar?: NaukriSimilarAnswer[];
 }
 
-export const naukriNeedsAnswerApi = () =>
+// `platform` is explicit for pages outside /job-platforms (the Jobs tab reads 'all').
+const NBor = (p?: PlatformScope) => (p ? PB(p) : NB());
+export const naukriNeedsAnswerApi = (platform?: PlatformScope) =>
   apiFetch<{
     aiDrafts: boolean; hasResumeText: boolean; questions: NaukriQuestionGroup[];
     autoAnswer: { enabled: boolean; minConfidence: number };
@@ -1867,23 +1869,23 @@ export const naukriNeedsAnswerApi = () =>
     autoAnswered: NaukriAutoAnswer[];
     /** Jobs sent back to Waiting just now because a draft was confident enough. */
     autoRequeued?: number;
-  }>(`${NB()}/needs-answer`);
+  }>(`${NBor(platform)}/needs-answer`);
 
-export const reviewNaukriAutoAnswerApi = (pattern: string, action: 'keep' | 'edit' | 'remove', answer?: string) =>
-  apiFetch<{ ok: true }>(`${NB()}/needs-answer/auto`, { method: 'POST', body: JSON.stringify({ pattern, action, answer }) });
+export const reviewNaukriAutoAnswerApi = (pattern: string, action: 'keep' | 'edit' | 'remove', answer?: string, platform?: PlatformScope) =>
+  apiFetch<{ ok: true }>(`${NBor(platform)}/needs-answer/auto`, { method: 'POST', body: JSON.stringify({ pattern, action, answer }) });
 
-export const draftNaukriAnswerApi = (question: string) =>
+export const draftNaukriAnswerApi = (question: string, platform?: PlatformScope) =>
   apiFetch<{ draft: NaukriDraft; note?: string | null; autoUsed?: boolean; requeued?: number; attempt?: NaukriAiAttempt }>(
-    `${NB()}/needs-answer/draft`, { method: 'POST', body: JSON.stringify({ question }) });
+    `${NBor(platform)}/needs-answer/draft`, { method: 'POST', body: JSON.stringify({ question }) });
 
 /** Make it a rule; every job blocked on it goes back to Waiting. */
-export const useNaukriAnswerApi = (question: string, answer: string, pattern?: string) =>
+export const useNaukriAnswerApi = (question: string, answer: string, pattern?: string, platform?: PlatformScope) =>
   apiFetch<{ requeued: number; platforms?: Array<{ id: PlatformId; label: string }> }>(
-    `${NB()}/needs-answer/use`, { method: 'POST', body: JSON.stringify({ question, answer, pattern }) });
+    `${NBor(platform)}/needs-answer/use`, { method: 'POST', body: JSON.stringify({ question, answer, pattern }) });
 
-export const ignoreNaukriQuestionApi = (question: string) =>
+export const ignoreNaukriQuestionApi = (question: string, platform?: PlatformScope) =>
   apiFetch<{ dismissed: number }>(
-    `${NB()}/needs-answer/ignore`, { method: 'POST', body: JSON.stringify({ question }) });
+    `${NBor(platform)}/needs-answer/ignore`, { method: 'POST', body: JSON.stringify({ question }) });
 
 /** 409 when a run is already active; 423 while paused or inside a captcha block. */
 export const queueNaukriRunApi = (kind: NaukriRunKind, opts: { sources?: NaukriSources } = {}) =>
@@ -1968,6 +1970,8 @@ export interface JobsOverviewPlatform {
   review: number; needsAnswer: number; failed: number; queued: number;
   applied: number; appliedToday: number; perDay: number;
   viewed: number; shortlisted: number; contacted: number; notShortlisted: number;
+  /** In the chosen period. */
+  period: { sent: number; failed: number; viewed: number; interest: number; rejected: number };
   week: { applied: number; skipped: number; failed: number }; foundThisWeek: number;
   lastTrackAt: string | null; trackStale: boolean;
   worker: { online: boolean; lastSeenAt: string | null };
@@ -1980,13 +1984,14 @@ export interface JobsOverviewEvent {
 }
 /** The Jobs tab's landing view: what needs you, each platform's state, what happened lately. Read-only. */
 export interface JobsOverview {
-  days: number; generatedAt: string;
+  range: JobsOverviewRange; since: string; until: string; generatedAt: string;
   needs: { review: number; needsAnswer: number; failed: number; recruiter: number;
     problems: Array<{ platform: PlatformId; label: string; problems: JobsOverviewPlatform['problems'] }> };
   platforms: JobsOverviewPlatform[];
   timeline: JobsOverviewEvent[];
 }
-export const jobsOverviewApi = (days = 7) => apiFetch<JobsOverview>(`${PB('all')}/jobs-overview?days=${days}`);
+export type JobsOverviewRange = 'today' | 'yesterday' | '3d' | '7d' | '30d' | 'all';
+export const jobsOverviewApi = (range: JobsOverviewRange = '7d') => apiFetch<JobsOverview>(`${PB('all')}/jobs-overview?range=${range}`);
 
 /** The authorisation point: approving is what permits an application, and it queues the run. */
 export const decideNaukriJobsApi = (ids: string[], decision: NaukriApproval, reason?: string) =>

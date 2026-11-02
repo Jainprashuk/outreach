@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { NaukriQuestionGroup, NaukriAutoAnswer, NaukriAiAttempt } from '../../lib/api';
+import type { NaukriQuestionGroup, NaukriAutoAnswer, NaukriAiAttempt, PlatformScope } from '../../lib/api';
 import { naukriNeedsAnswerApi, draftNaukriAnswerApi, useNaukriAnswerApi, ignoreNaukriQuestionApi, isAiKeyRequired, reviewNaukriAutoAnswerApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty, Notice } from './ui';
 import { PLATFORM_LABEL } from './platform';
@@ -214,7 +214,7 @@ function QuestionCard({ group, busy, auto, onUse, onIgnore, onRetry, aiOn }: {
   );
 }
 
-export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
+export default function NeedsAnswer({ onChanged, platform }: { onChanged: () => void; platform?: PlatformScope }) {
   const [groups, setGroups] = useState<Array<NaukriQuestionGroup & { drafting?: boolean }>>([]);
   const [meta, setMeta] = useState<{ aiDrafts: boolean; hasResumeText: boolean; autoAnswer: AutoMeta } | null>(null);
   const [autoAnswered, setAutoAnswered] = useState<NaukriAutoAnswer[]>([]);
@@ -224,7 +224,7 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
 
   const load = useCallback(async () => {
     try {
-      const r = await naukriNeedsAnswerApi();
+      const r = await naukriNeedsAnswerApi(platform);
       setGroups(r.questions);
       setMeta({ aiDrafts: r.aiDrafts, hasResumeText: r.hasResumeText, autoAnswer: r.autoAnswer || { enabled: false, minConfidence: 85 } });
       setAutoAnswered(r.autoAnswered || []);
@@ -233,7 +233,7 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
         onChanged();
       }
     } catch (e: any) { toast(e?.message || 'Could not load', 'error'); }
-  }, [toast]);
+  }, [toast, platform]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -257,7 +257,7 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
           const question = q;
           try {
             if (noKey) throw new Error('no key');
-            const r = await draftNaukriAnswerApi(question);
+            const r = await draftNaukriAnswerApi(question, platform);
             if (r.autoUsed) {
               // Sure enough with auto-answer on: already saved as an auto rule.
               toast(`AI was ${r.draft.confidence}% sure — answered automatically`
@@ -288,7 +288,7 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
   const use = async (question: string, answer: string, pattern?: string) => {
     setBusy(true);
     try {
-      const r = await useNaukriAnswerApi(question, answer, pattern);
+      const r = await useNaukriAnswerApi(question, answer, pattern, platform);
       // The answer bank is shared: say which platforms it just freed jobs on.
       const on = (r.platforms || []).map(p => p.label).join(', ');
       toast(r.requeued
@@ -304,7 +304,7 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
   const retry = async (question: string) => {
     setGroups(gs => gs.map(g => (g.question === question ? { ...g, drafting: true } : g)));
     try {
-      const r = await draftNaukriAnswerApi(question);
+      const r = await draftNaukriAnswerApi(question, platform);
       if (r.autoUsed) {
         toast(`AI was ${r.draft.confidence}% sure — answered automatically`
           + (r.requeued ? `, ${r.requeued} job${r.requeued === 1 ? '' : 's'} back in Waiting.` : '.'), 'success');
@@ -324,7 +324,7 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
   const ignore = async (question: string) => {
     setBusy(true);
     try {
-      const r = await ignoreNaukriQuestionApi(question);
+      const r = await ignoreNaukriQuestionApi(question, platform);
       toast(`Ignored — ${r.dismissed} job${r.dismissed === 1 ? '' : 's'} dismissed.`, 'info');
       setGroups(gs => gs.filter(g => g.question !== question));
       onChanged();
@@ -335,7 +335,7 @@ export default function NeedsAnswer({ onChanged }: { onChanged: () => void }) {
   const review = async (pattern: string, action: 'keep' | 'edit' | 'remove', answer?: string) => {
     setBusy(true);
     try {
-      await reviewNaukriAutoAnswerApi(pattern, action, answer);
+      await reviewNaukriAutoAnswerApi(pattern, action, answer, platform);
       toast(action === 'remove' ? 'Removed — that question will need an answer again.' : 'Saved as your answer.', 'success');
       await load();
     } catch (e: any) { toast(e?.message || 'Could not save', 'error'); }
