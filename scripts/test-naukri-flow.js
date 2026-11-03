@@ -321,11 +321,23 @@ async function main() {
       ok('70% sure (bar 85): the job is skipped', lowJobs.filter(j => j.applyStatus === 'skipped').length === 1);
       ok('…no rule saved, and the draft shows 70%', cfgLow.answers.length === 0 && cfgLow.drafts.some(d => d.question === QUESTION && d.confidence === 70));
 
+      // The same question again — the next job, the next run — with nothing
+      // changed: the stored 70% is the verdict. No AI call, no slot of the cap.
+      const againRun = await NaukriRun.create({ userId, kind: 'apply', status: 'running', claimedAt: new Date() });
+      aiCalls = 0;
+      const again = await call('POST', '/ai-answer', { runId: String(againRun._id), question: QUESTION, options: ['No', 'Yes'] });
+      const againStats = ((await NaukriRun.findById(againRun._id).lean()).stats) || {};
+      ok('asked again unchanged: the stored 70% is reused — no AI call, no slot taken',
+        again.answer === null && again.cached === true && again.final === true && aiCalls === 0 && !againStats.aiAsked,
+        JSON.stringify({ again, aiCalls, aiAsked: againStats.aiAsked }));
+      await NaukriRun.updateOne({ _id: againRun._id }, { $set: { status: 'done' } });
+
       // A job already parked (the 70% case above). With auto-answer OFF a new
       // 95% draft just waits; switching auto-answer ON uses it on the next look.
       await call('PATCH', '/config', { autoAnswer: { enabled: false }, aiDrafts: true });
       aiReply = { status: 'ready', answer: 'No', quote: 'Skills: Node.js, MongoDB', source: 'resume', confidence: 95 };
-      const waitDraft = await call('POST', '/needs-answer/draft', { question: QUESTION });
+      // force: the 70% draft above is still good, so only "Ask AI again" asks anew.
+      const waitDraft = await call('POST', '/needs-answer/draft', { question: QUESTION, force: true });
       ok('auto-answer off: a 95% draft just waits for you', !waitDraft.autoUsed
         && (await NaukriJob.countDocuments({ _id: { $in: lowIds }, applyStatus: 'skipped' })) === 1);
       await call('PATCH', '/config', { autoAnswer: { enabled: true, minConfidence: 85 } });
@@ -351,6 +363,45 @@ async function main() {
       ok('AI failing: the job is skipped and the run finishes', er.run.status === 'done'
         && (await NaukriJob.countDocuments({ _id: { $in: errIds }, applyStatus: 'skipped' })) === 1,
         `${er.run.status} ${er.run.error || ''} · ${(await NaukriJob.find({ _id: { $in: errIds } }).lean()).map(j => j.applyStatus).join()} · claimed ${(er.claimed.jobs || []).length}`);
+
+      // Only a change that could change the answer asks the AI again.
+      {
+        await NaukriConfig.updateOne({ userId }, { $set: { answers: [], drafts: [] } });
+        await call('PATCH', '/config', { autoAnswer: { enabled: true, minConfidence: 85 } });
+        aiReply = { status: 'ready', answer: 'No', quote: 'Skills: Node.js, MongoDB', source: 'resume', confidence: 70 };
+        const run = await NaukriRun.create({ userId, kind: 'apply', status: 'running', claimedAt: new Date() });
+        const ask = (options = ['Yes', 'No']) => call('POST', '/ai-answer', { runId: String(run._id), question: QUESTION, options });
+        aiCalls = 0;
+        await ask();
+        await ask();
+        ok('one question asked twice in a run: one AI call', aiCalls === 1, `AI calls ${aiCalls}`);
+        await ask(['Yes', 'No', 'Maybe']);
+        ok('…different options: asked anew', aiCalls === 2, `AI calls ${aiCalls}`);
+        await NaukriConfig.updateOne({ userId }, { $set: { 'profile.currentLocation': `Pune ${Date.now()}` } });
+        await ask(['Yes', 'No', 'Maybe']);
+        ok('…profile changed: asked anew', aiCalls === 3, `AI calls ${aiCalls}`);
+        await call('PATCH', '/config', { autoAnswer: { enabled: true, minConfidence: 60 } });
+        const lowered = await ask(['Yes', 'No', 'Maybe']);
+        ok('…bar lowered to 60: the stored 70% is used, no AI call',
+          lowered.answer === 'No' && lowered.cached === true && aiCalls === 3
+          && (await NaukriConfig.findOne({ userId }).lean()).answers.some(a => a.origin === 'auto' && a.confidence === 70),
+          JSON.stringify({ lowered, aiCalls }));
+        await NaukriRun.updateOne({ _id: run._id }, { $set: { status: 'done' } });
+
+        // The Needs answer page: a draft already there is handed back; only
+        // "Ask AI again" (force) pays for another.
+        await NaukriConfig.updateOne({ userId }, { $set: { answers: [], drafts: [] } });
+        await call('PATCH', '/config', { autoAnswer: { enabled: false, minConfidence: 85 }, aiDrafts: true });
+        aiCalls = 0;
+        await call('POST', '/needs-answer/draft', { question: QUESTION });
+        const second = await call('POST', '/needs-answer/draft', { question: QUESTION });
+        ok('page drafts the same question twice: one AI call', aiCalls === 1 && second.cached === true && second.draft.confidence === 70,
+          JSON.stringify({ aiCalls, second }));
+        await call('POST', '/needs-answer/draft', { question: QUESTION, force: true });
+        ok('…Ask AI again (force) asks anew', aiCalls === 2, `AI calls ${aiCalls}`);
+        await NaukriConfig.updateOne({ userId }, { $set: { answers: [], drafts: [] } });
+        await call('PATCH', '/config', { autoAnswer: { enabled: true, minConfidence: 85 } });
+      }
 
       // The per-run cap.
       const capped = await NaukriRun.create({ userId, kind: 'apply', status: 'running', claimedAt: new Date(), 'stats.aiAsked': 15 });

@@ -1186,6 +1186,33 @@ const draftStillGood = (d, basis, rules = [], legacy = null) => {
   return true;
 };
 
+// What every draft decision needs, worked out the same way everywhere: the
+// resume text, profile and rules a draft is judged against, and the stored
+// draft for one question if it is still good — i.e. asking the AI again would
+// only get the same answer back (temperature 0, same inputs).
+async function draftContext(userId, config) {
+  const text = await resumeTextFor(userId, config);
+  const profile = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
+  const rules = plainAnswers(config);
+  const basis = draftBasis(text, profile);
+  const legacy = legacyBasis(text, profile, rules);
+  const good = (d) => draftStillGood(d, basis, rules, legacy);
+  return {
+    text, profile, rules, basis, legacy, good,
+    /** The still-good stored draft for `question`, or null. `options`, when
+        given, must be the same set the draft was made with. */
+    stored(question, options) {
+      const d = (config.drafts || []).find(x => sameQuestion(x.question, question));
+      if (!d || !good(d)) return null;
+      if (options) {
+        const key = (list) => (list || []).map(matchable).sort().join('|');
+        if (key(d.options) !== key(options)) return null;
+      }
+      return d;
+    },
+  };
+}
+
 // One AI attempt, for a question's history on Needs answer (drafts[].attempts).
 const ATTEMPTS_KEPT = 3;
 function attemptOf(out, where, min) {
@@ -1237,14 +1264,10 @@ async function promoteConfidentDrafts(userId, config) {
   const auto = config.autoAnswer || {};
   if (!auto.enabled) return 0;
   const min = auto.minConfidence || 85;
-  const text = await resumeTextFor(userId, config);
-  const prof = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
-  const rules = plainAnswers(config);
-  const basis = draftBasis(text, prof);
-  const legacy = legacyBasis(text, prof, rules);
+  const ctx = await draftContext(userId, config);
   let requeued = 0;
   for (const d of config.drafts || []) {
-    if (d.status !== 'ready' || (d.confidence || 0) < min || !draftStillGood(d, basis, rules, legacy)) continue;
+    if (d.status !== 'ready' || (d.confidence || 0) < min || !ctx.good(d)) continue;
     requeued += (await saveAutoRule(userId, { question: d.question, answer: d.answer, options: d.options || [], confidence: d.confidence, quote: d.quote })).requeued;
   }
   return requeued;
@@ -1275,11 +1298,8 @@ router.get('/needs-answer', async (req, res) => {
       NaukriConfig.getForUser(req.userId),
     ]);
     const drafts = config.drafts || [];
-    const text = await resumeTextFor(req.userId, config);
-    const prof = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
-    const rulesNow = plainAnswers(config);
-    const basis = draftBasis(text, prof);
-    const legacy = legacyBasis(text, prof, rulesNow);
+    const ctx = await draftContext(req.userId, config);
+    const { text, profile: prof, rules: rulesNow } = ctx;
     res.json({
       aiDrafts: !!config.aiDrafts,
       hasResumeText: !!text.trim(),
@@ -1287,7 +1307,7 @@ router.get('/needs-answer', async (req, res) => {
         // A stale draft (different resume or profile, or the AI was busy) is
         // reported as missing, so the tab asks for a fresh one.
         const stored = drafts.find(x => sameQuestion(x.question, r._id));
-        const d = stored && draftStillGood(stored, basis, rulesNow, legacy) ? stored : null;
+        const d = stored && ctx.good(stored) ? stored : null;
         return {
           question: r._id,
           count: r.count,
@@ -1320,9 +1340,20 @@ router.get('/needs-answer', async (req, res) => {
 router.post('/needs-answer/draft', async (req, res) => {
   try {
     const question = str((req.body || {}).question, 1000);
+    const force = (req.body || {}).force === true;
     if (!question) return res.status(400).json({ error: 'question is required' });
     const config = await NaukriConfig.getForUser(req.userId);
     if (!config.aiDrafts) return res.status(409).json({ error: 'AI drafts are off — turn them on under Configuration → Answers' });
+
+    // Already drafted from this same resume, profile and answers (another tab,
+    // a remount, the live apply path, or the same question with other
+    // punctuation): hand that back rather than pay for the same answer again.
+    // "Ask AI again" sends force.
+    const ctx = await draftContext(req.userId, config);
+    const have = force ? null : ctx.stored(question);
+    if (have && have.status !== 'ignored') {
+      return res.json({ draft: { answer: have.answer, quote: have.quote, source: have.source, status: have.status, confidence: have.confidence || 0 }, cached: true });
+    }
 
     const job = await NaukriJob.findOne(
       { userId: req.userId, unknownQuestion: question, ...BASE_FILTER },
@@ -1330,9 +1361,7 @@ router.post('/needs-answer/draft', async (req, res) => {
     ).sort({ updatedAt: -1 }).lean();
     const options = (job && job.questionOptions) || [];
 
-    const resumeTextNow = await resumeTextFor(req.userId, config);
-    const profile = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
-    const rules = plainAnswers(config);
+    const { text: resumeTextNow, profile, rules } = ctx;
     const out = await naukriDraft.draftAnswer(question, { resumeText: resumeTextNow, profile, options, rules, userId: req.userId });
     // Not saved as an 'error' draft: nothing is wrong with the question, and the
     // tab retries missing drafts on its next load once a key is added.
@@ -1428,6 +1457,8 @@ router.post('/needs-answer/auto', async (req, res) => {
 // already parked on it goes back to Waiting. Anything else is kept as a Needs
 // answer draft and the worker skips the job, as before.
 const MAX_AI_PER_RUN = 15;
+const notSureReason = (d, min) => (d.status === 'ready' ? `AI was ${d.confidence || 0}% sure — below your ${min}%`
+  : d.status === 'error' ? (d.note || 'AI busy') : 'Your resume and answers do not say');
 
 router.post('/ai-answer', async (req, res) => {
   try {
@@ -1441,6 +1472,22 @@ router.post('/ai-answer', async (req, res) => {
     if (!auto.enabled) return res.json({ answer: null, reason: 'off' });
     const min = auto.minConfidence || 85;
 
+    // Asked before with the same resume, profile, answers and options: the AI
+    // would say the same again (temperature 0), so its stored verdict is used —
+    // no call, and no slot of the per-run cap. Without this, one question the
+    // AI is unsure of was re-asked for every job that carries it, every run.
+    const ctx = await draftContext(req.userId, config);
+    const have = ctx.stored(question, options);
+    if (have) {
+      const confidence = have.confidence || 0;
+      if (have.status === 'ready' && confidence >= min) {
+        const { rule } = await saveAutoRule(req.userId, { question, answer: have.answer, options, confidence, quote: have.quote });
+        await NaukriRun.updateOne({ _id: runId, userId: req.userId }, { $inc: { 'stats.aiAnswered': 1 } });
+        return res.json({ answer: have.answer, confidence, rule, cached: true, final: true });
+      }
+      return res.json({ answer: null, confidence, cached: true, final: true, reason: have.status === 'ignored' ? 'You chose to ignore this question' : notSureReason(have, min) });
+    }
+
     // Per-run cap, taken atomically so parallel calls cannot overshoot it.
     const slot = await NaukriRun.findOneAndUpdate(
       { _id: runId, userId: req.userId, status: 'running', 'stats.aiAsked': { $lt: MAX_AI_PER_RUN }, ...PQ(req), ...BASE_FILTER },
@@ -1449,16 +1496,14 @@ router.post('/ai-answer', async (req, res) => {
     );
     if (!slot) return res.json({ answer: null, reason: `AI answer limit for this run (${MAX_AI_PER_RUN}) reached, or the run is not running` });
 
-    const text = await resumeTextFor(req.userId, config);
-    const profile = config.profile && config.profile.toObject ? config.profile.toObject() : config.profile;
-    const rules = plainAnswers(config);
+    const { text, profile, rules } = ctx;
     const out = await naukriDraft.draftAnswer(question, { resumeText: text, profile, options, rules, userId: req.userId });
     const confidence = out.confidence || 0;
 
     if (out.status === 'ready' && confidence >= min) {
       const { rule } = await saveAutoRule(req.userId, { question, answer: out.answer, options, confidence, quote: out.quote });
       await NaukriRun.updateOne({ _id: runId, userId: req.userId }, { $inc: { 'stats.aiAnswered': 1 } });
-      return res.json({ answer: out.answer, confidence, rule });
+      return res.json({ answer: out.answer, confidence, rule, final: true });
     }
 
     // Not sure enough: keep the draft (with its %) for Needs answer.
@@ -1471,9 +1516,10 @@ router.post('/ai-answer', async (req, res) => {
     }
     res.json({
       answer: null, confidence,
-      reason: out.code === 'AI_KEY_REQUIRED' ? out.note
-        : out.status === 'ready' ? `AI was ${confidence}% sure — below your ${min}%`
-        : out.status === 'error' ? (out.note || 'AI busy') : 'Your resume and answers do not say',
+      // A real verdict (not sure / does not say), as opposed to "AI busy": the
+      // worker may reuse it for this question for the rest of the run.
+      final: out.status === 'ready' || out.status === 'unknown',
+      reason: out.code === 'AI_KEY_REQUIRED' ? out.note : notSureReason({ ...out, confidence }, min),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

@@ -304,7 +304,7 @@ export default function NeedsAnswer({ onChanged, platform }: { onChanged: () => 
   const retry = async (question: string) => {
     setGroups(gs => gs.map(g => (g.question === question ? { ...g, drafting: true } : g)));
     try {
-      const r = await draftNaukriAnswerApi(question, platform);
+      const r = await draftNaukriAnswerApi(question, platform, true);
       if (r.autoUsed) {
         toast(`AI was ${r.draft.confidence}% sure — answered automatically`
           + (r.requeued ? `, ${r.requeued} job${r.requeued === 1 ? '' : 's'} back in Waiting.` : '.'), 'success');

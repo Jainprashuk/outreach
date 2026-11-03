@@ -1874,9 +1874,10 @@ export const naukriNeedsAnswerApi = (platform?: PlatformScope) =>
 export const reviewNaukriAutoAnswerApi = (pattern: string, action: 'keep' | 'edit' | 'remove', answer?: string, platform?: PlatformScope) =>
   apiFetch<{ ok: true }>(`${NBor(platform)}/needs-answer/auto`, { method: 'POST', body: JSON.stringify({ pattern, action, answer }) });
 
-export const draftNaukriAnswerApi = (question: string, platform?: PlatformScope) =>
-  apiFetch<{ draft: NaukriDraft; note?: string | null; autoUsed?: boolean; requeued?: number; attempt?: NaukriAiAttempt }>(
-    `${NBor(platform)}/needs-answer/draft`, { method: 'POST', body: JSON.stringify({ question }) });
+/** `force`: ask again even when a draft from the same resume, profile and answers is stored. */
+export const draftNaukriAnswerApi = (question: string, platform?: PlatformScope, force = false) =>
+  apiFetch<{ draft: NaukriDraft; note?: string | null; autoUsed?: boolean; requeued?: number; attempt?: NaukriAiAttempt; cached?: boolean }>(
+    `${NBor(platform)}/needs-answer/draft`, { method: 'POST', body: JSON.stringify(force ? { question, force } : { question }) });
 
 /** Make it a rule; every job blocked on it goes back to Waiting. */
 export const useNaukriAnswerApi = (question: string, answer: string, pattern?: string, platform?: PlatformScope) =>

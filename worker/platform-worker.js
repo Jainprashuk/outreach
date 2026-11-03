@@ -398,9 +398,19 @@ async function executeRun(runDoc, config, openSession = null) {
         // Live AI answers: one try, a short deadline, and any failure is "no
         // answer" (the job is skipped as before). Never the long retry the
         // result reports get — a Naukri form is open and waiting.
+        // Remembered for the rest of the run: the same question on the next job
+        // gets the same verdict without another request. Failures are not
+        // remembered (only verdicts the server marks final), so a timeout or a
+        // busy provider can still be retried on a later job.
+        const { matchable } = require('../lib/naukriAnswers');
+        const asked = new Map();
         const askAI = async (question, options) => {
+          const key = `${matchable(question)}|${(options || []).map(matchable).sort().join('|')}`;
+          if (asked.has(key)) return asked.get(key);
           try {
-            return await api(`${API}/ai-answer`, { runId: runDoc.id, question, options }, 30 * 1000);
+            const out = await api(`${API}/ai-answer`, { runId: runDoc.id, question, options }, 30 * 1000);
+            if (out && out.final) asked.set(key, out);
+            return out;
           } catch (err) {
             log('AI answer unavailable:', err.message.split('\n')[0]);
             return null;

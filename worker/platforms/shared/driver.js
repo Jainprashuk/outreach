@@ -457,6 +457,10 @@ function makeDriver(meta) {
     const sc = meta.applyFlow.screening;
     const asked = [];
     const written = [];
+    // Questions already put to the AI on this job. A later round sees an
+    // optional one it declined still blank; asking again would only pay for
+    // the same "no" (up to maxSteps times).
+    const triedAI = new Set();
     for (let round = 0; round < (sc.maxSteps || 3); round++) {
       const boxes = page.locator(sc.questionBox);
       try { await boxes.first().waitFor({ state: 'visible', timeout: round ? 8000 : 15000 }); }
@@ -522,7 +526,11 @@ function makeDriver(meta) {
 
         const resolved = resolveAnswer(question, config);
         let value = null, ai = null;
+        const qKey = question.toLowerCase();
+        const askedBefore = triedAI.has(qKey);
+        if (!resolved.matched && !askedBefore) triedAI.add(qKey);
         if (resolved.matched) value = String(resolved.answer);
+        else if (askedBefore) { /* declined earlier on this job: left as it was */ }
         else if (sc.aiNote && askNote && hasField && (await field.getAttribute('type').catch(() => '')) !== 'number') {
           // An open question: written for THIS job from your resume and its own
           // text, never saved as a reusable rule. Declined (the resume does not
