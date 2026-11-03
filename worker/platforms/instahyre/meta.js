@@ -56,6 +56,17 @@ module.exports = {
     { url: `${ORIGIN}/candidate/opportunities/?matching=true`, label: 'Matched opportunities', origin: 'recommended' },
   ],
   recruiterFeed: true,
+  // Who posted a job (verified live 2026-11-03): GET /api/v1/employer_public_jobs/<id>
+  // → { recruiter_name, recruiter_designation, recruiter_company_name }. The
+  // company is the recruiter's own (an agency like Recro), not always the hirer.
+  recruiterDetail: {
+    url: (id) => `${ORIGIN}/api/v1/employer_public_jobs/${encodeURIComponent(id)}`,
+    parse: (body) => {
+      const name = body && typeof body.recruiter_name === 'string' ? body.recruiter_name.trim() : '';
+      if (!name) return null;
+      return { name, title: String(body.recruiter_designation || '').trim(), company: String(body.recruiter_company_name || '').trim() };
+    },
+  },
   // Search results (verified 2026-10-27: /search-jobs?skills=react&years=2 → "199 react jobs").
   searchUrl: (s) => {
     const u = new URL(`${ORIGIN}/search-jobs/`);

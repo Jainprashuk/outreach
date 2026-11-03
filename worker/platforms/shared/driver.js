@@ -36,6 +36,25 @@ const JOB_TIMEOUT_AI_MS = 150 * 1000;
 // How long past the first 3.5s a listing page may take to deliver its feed.
 const FEED_WAIT_MS = 20 * 1000;
 
+// Who posted each job (meta.recruiterDetail): one detail call per NEW job, from
+// inside a page on the site so your own login applies. Capped per run and never
+// repeated for a job (a small file of ids already asked), so a re-harvest of the
+// same feed adds no requests.
+const RECRUITER_MAX = 30;
+const RECRUITER_DELAY = [700, 1800];
+const SEEN_MAX = 5000;
+const seenFile = (id) => require('path').join(require('os').homedir(), '.job-leads', `${id}-recruiters-seen.json`);
+function loadSeen(id) {
+  try { return new Set(JSON.parse(require('fs').readFileSync(seenFile(id), 'utf8'))); } catch (_) { return new Set(); }
+}
+function saveSeen(id, set) {
+  try {
+    const fs = require('fs');
+    fs.mkdirSync(require('path').dirname(seenFile(id)), { recursive: true });
+    fs.writeFileSync(seenFile(id), JSON.stringify([...set].slice(-SEEN_MAX)));
+  } catch (_) {}
+}
+
 const capped = (v, max) => Math.max(1, Math.min(max, Number(v) || max));
 
 function makeDriver(meta) {
@@ -204,7 +223,57 @@ function makeDriver(meta) {
     const { applyFilters } = require('../../../lib/naukriFilters');
     const all = [...byId.values()];
     const { kept, counts } = applyFilters(all, config.filters || {});
-    return { jobs: kept, searches: searches.length, recommended, seen: counts.total, dropped: counts.dropped, answeredEmpty: feedAnswered && counts.total === 0 };
+    // Only jobs that are kept: no detail call for a job you'd never see.
+    const recruitersAdded = await addRecruiters(session, kept, onProgress);
+    return { jobs: kept, recruitersAdded, searches: searches.length, recommended, seen: counts.total, dropped: counts.dropped, answeredEmpty: feedAnswered && counts.total === 0 };
+  }
+
+  async function addRecruiters(session, jobs, onProgress) {
+    const rd = meta.recruiterDetail;
+    if (!rd) return 0;
+    const seen = loadSeen(meta.id);
+    const todo = jobs.filter(j => !(j.recruiters || []).some(r => r.name) && !seen.has(String(j.sourceId))).slice(0, RECRUITER_MAX);
+    if (!todo.length) return 0;
+    let added = 0;
+    let page = null;
+    try {
+      page = await newPage(session);
+      await page.goto(meta.origin, { waitUntil: 'domcontentloaded' });
+      await check(page, 'recruiters');
+      for (let i = 0; i < todo.length; i++) {
+        const j = todo[i];
+        onProgress({ phase: 'recruiters', label: 'Who posted each job', page: i + 1, pagesTotal: todo.length, found: jobs.length });
+        // JSON detail calls (Instahyre, Hirist), or a job page's HTML read with
+        // the platform's own fromDocument (Wellfound), both inside the page.
+        const got = await page.evaluate(async ([u, fromDoc]) => {
+          try {
+            const r = await fetch(u, { credentials: 'include', headers: { accept: fromDoc ? 'text/html' : 'application/json' } });
+            if (!r.ok) return { status: r.status };
+            if (!fromDoc) return { body: await r.json() };
+            const doc = new DOMParser().parseFromString(await r.text(), 'text/html');
+            // eslint-disable-next-line no-new-func
+            return { body: new Function(`return (${fromDoc})`)()(doc) };
+          } catch (e) { return { error: String(e && e.message || e) }; }
+        }, [rd.url(j.sourceId, j), rd.fromDocument ? rd.fromDocument.toString() : null]);
+        // Refused or rate-limited: stop asking this run, and remember nothing,
+        // so these jobs are tried again next time.
+        if (got.status === 401 || got.status === 403 || got.status === 429) break;
+        if (got.body !== undefined) {
+          seen.add(String(j.sourceId));
+          const r = rd.parse(got.body);
+          if (r) { j.recruiters = [r]; added++; }
+        }
+        if (i + 1 < todo.length) await jitter(...RECRUITER_DELAY);
+      }
+    } catch (e) {
+      // A challenge page is a real stop for the whole run; anything else only
+      // costs the recruiter names, never the harvest.
+      if (e instanceof Checkpoint) throw e;
+    } finally {
+      saveSeen(meta.id, seen);
+      if (page) await page.close().catch(() => {});
+    }
+    return added;
   }
 
   async function track(session, { onProgress = () => {} } = {}) {
@@ -773,7 +842,7 @@ function makeDriver(meta) {
     + `Network, and update RECON.md. Do not retry blindly.${config && config.sources && config.sources.searches !== false && !(config.searches || []).length ? ' (You also have no searches set.)' : ''}`;
 
   return {
-    meta, connect, disconnect, loggedIn, refresh, harvest, apply, track, Checkpoint, NotSupported,
+    meta, connect, disconnect, loggedIn, refresh, harvest, addRecruiters, apply, track, Checkpoint, NotSupported,
     emptyHarvestHint, JOB_TIMEOUT_MS, JOB_TIMEOUT_AI_MS,
   };
 }

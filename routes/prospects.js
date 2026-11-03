@@ -8,6 +8,7 @@ const Prospect = require('../models/Prospect');
 const ProspectSearch = require('../models/ProspectSearch');
 const CompanyPattern = require('../models/CompanyPattern');
 const DiscoveryConfig = require('../models/DiscoveryConfig');
+const recruiterLinkedin = require('../lib/recruiterLinkedin');
 const Contact = require('../models/Contact');
 const { inngest } = require('../inngest');
 const credentials = require('../lib/credentials');
@@ -77,6 +78,7 @@ async function configView(userId) {
     canStoreKeys: credentials.isConfigured(),
     defaultRoles: (doc && doc.defaultRoles) || [],
     enrichOff: (doc && doc.enrichOff) || [],
+    recruiterLinkedin: keys.recruiterLinkedin || { modes: ['manual'], dailyCap: 20 },
   };
 }
 
@@ -94,6 +96,15 @@ router.put('/config', async (req, res) => {
     const set = {};
     if (req.body && req.body.defaultRoles !== undefined) set.defaultRoles = cleanRoles(req.body.defaultRoles);
     if (req.body && Array.isArray(req.body.enrichOff)) set.enrichOff = [...new Set(req.body.enrichOff.map(String))].filter(x => ENRICH_SOURCES.includes(x));
+    const rl = req.body && req.body.recruiterLinkedin;
+    if (rl && typeof rl === 'object') {
+      if (rl.modes !== undefined) set['recruiterLinkedin.modes'] = recruiterLinkedin.cleanModes(rl.modes);
+      if (rl.dailyCap !== undefined) {
+        const n = Math.floor(Number(rl.dailyCap));
+        if (!Number.isFinite(n) || n < 1) return res.status(400).json({ error: 'dailyCap must be a whole number, at least 1' });
+        set['recruiterLinkedin.dailyCap'] = Math.min(n, recruiterLinkedin.MAX_CAP);
+      }
+    }
     const givesKey = DiscoveryConfig.PROVIDERS.some(p => typeof (req.body || {})[p] === 'string' && req.body[p].trim());
     if (givesKey && !credentials.isConfigured()) {
       return res.status(503).json({ error: 'CREDENTIAL_KEY is not set, so a key cannot be stored safely.' });

@@ -16,7 +16,7 @@ import { RefreshBar, Refreshing } from '../components/RefreshBar';
 import { useToast } from '../context/ToastContext';
 import { useSession } from '../context/SessionContext';
 import {
-  addSharedJobsApi, bulkNaukriJobsApi, companyStatusApi, sharedJobKeysApi, sharedJobsApi, type SharedJob, decideNaukriJobsApi, listNaukriJobsApi, lookupCompanyApi, recruitersToDiscoverApi, updateNaukriJobApi,
+  addSharedJobsApi, bulkNaukriJobsApi, companyStatusApi, sharedJobKeysApi, sharedJobsApi, type SharedJob, decideNaukriJobsApi, listNaukriJobsApi, lookupCompanyApi, recruitersToDiscoverApi, updateNaukriJobApi, findRecruiterLinkedinApi, fetchJobRecruitersApi,
   type CompanyOutreach, type NaukriApplyStatus, type NaukriJob, type NaukriJobQuery, type PlatformScope,
 } from '../lib/api';
 import { autoPick } from '../lib/prospects';
@@ -237,6 +237,32 @@ export default function Jobs() {
   const { findPeople, finding } = useFindPeople();
   const navigate = useNavigate();
   const [addingRec, setAddingRec] = useState<string | null>(null);
+  const [findingLi, setFindingLi] = useState<string | null>(null);
+
+  // One recruiter's LinkedIn profile, from search results. Saved on the recruiter,
+  // so the link stays after a refresh and rides along into Discover.
+  // Instahyre only shows who posted a job on the job's own page; ask for it.
+  const findRecruiter = async (j: NaukriJob) => {
+    setFindingLi(`${j.id}:*`);
+    try {
+      const r = await fetchJobRecruitersApi(j.id);
+      toast(r.recruiters.some(x => x.name) ? 'Recruiter found' : 'This job doesn’t name a recruiter', r.recruiters.some(x => x.name) ? 'success' : 'info');
+      await refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not look up the recruiter', 'error');
+    } finally { setFindingLi(null); }
+  };
+
+  const findLinkedin = async (j: NaukriJob, key: string) => {
+    setFindingLi(`${j.id}:${key}`);
+    try {
+      const r = await findRecruiterLinkedinApi(j.id, key);
+      toast(r.linkedin ? 'LinkedIn profile found' : 'No matching LinkedIn profile found', r.linkedin ? 'success' : 'info');
+      await refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not search LinkedIn', 'error');
+    } finally { setFindingLi(null); }
+  };
 
   // The recruiters the platform showed for a job → Discover people. The company's
   // domain comes from a recruiter's work address when there is one, else from the
@@ -421,12 +447,33 @@ export default function Jobs() {
       </div>
       {showCompany && <OutreachChip company={j.company} st={status(j.company)} finding={finding === j.id} onFind={() => find(j)} />}
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>{stageActions(j)}</div>
+      {(j.recruiters || []).length === 0 && j.platform === 'instahyre' && (
+        <div style={{ flexBasis: '100%', paddingLeft: 44 }}>
+          <button className="btn btn-xs" type="button" disabled={findingLi === `${j.id}:*`} onClick={() => findRecruiter(j)}
+            title="Ask Instahyre who posted this job">
+            <i className="ti ti-user-search" /> {findingLi === `${j.id}:*` ? 'Looking…' : 'Find recruiter'}
+          </button>
+        </div>
+      )}
       {(j.recruiters || []).length > 0 && (
         <div style={{ flexBasis: '100%', paddingLeft: 44, display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
           <i className="ti ti-user-star" style={{ color: 'var(--text2)' }} />
-          <Muted>
-            {j.recruiters!.slice(0, 3).map(r => [r.name, r.title, r.email].filter(Boolean).join(' · ')).join('  |  ')}
-          </Muted>
+          {j.recruiters!.slice(0, 3).map(r => (
+            <span key={r.key} style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
+              <Muted>{[r.name, r.title, r.email].filter(Boolean).join(' · ')}</Muted>
+              {r.profileUrl ? (
+                <a href={r.profileUrl} target="_blank" rel="noreferrer" title="Open their LinkedIn profile" aria-label={`${r.name} on LinkedIn`}>
+                  <i className="ti ti-brand-linkedin" />
+                </a>
+              ) : r.name ? (
+                <button className="btn btn-xs" type="button" disabled={findingLi === `${j.id}:${r.key}`}
+                  title={r.linkedinTriedAt ? 'Searched before and not found — try again' : 'Search for their LinkedIn profile (uses one search credit)'}
+                  onClick={() => findLinkedin(j, r.key)}>
+                  <i className="ti ti-brand-linkedin" /> {findingLi === `${j.id}:${r.key}` ? 'Searching…' : r.linkedinTriedAt ? 'Retry' : 'Find LinkedIn'}
+                </button>
+              ) : null}
+            </span>
+          ))}
           <button className="btn btn-xs" type="button" disabled={addingRec === j.id} onClick={() => addRecruiters(j)}
             title="Add them to Discover as people to review. Nothing is emailed until you move them to outreach.">
             <i className="ti ti-user-plus" /> {addingRec === j.id ? 'Adding…' : 'Add to Discover'}

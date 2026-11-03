@@ -1487,7 +1487,7 @@ export interface NaukriRun {
   updatedAt: string;
 }
 
-export interface JobRecruiter { key: string; name: string; title: string; email: string; profileUrl: string; via: 'feed' | 'text' }
+export interface JobRecruiter { key: string; name: string; title: string; email: string; profileUrl: string; via: 'feed' | 'text'; company?: string; linkedinTriedAt?: string }
 export interface NaukriJob {
   id: string;
   sourceId: string;
@@ -1967,7 +1967,8 @@ export const activityApi = (params: { days?: number; types?: string; limit?: num
 
 export interface JobsOverviewPlatform {
   platform: PlatformId; label: string; applyMode: string;
-  review: number; needsAnswer: number; failed: number; queued: number;
+  /** Found / review / needsAnswer / failed / queued follow the chosen period; `applied` is the all-time total. */
+  found: number; review: number; needsAnswer: number; failed: number; queued: number;
   applied: number; appliedToday: number; perDay: number;
   viewed: number; shortlisted: number; contacted: number; notShortlisted: number;
   /** In the chosen period. */
@@ -2009,6 +2010,15 @@ export const bulkNaukriJobsApi = (
   reason?: string,
 ) => apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
   `${NB()}/jobs/bulk`, { method: 'POST', body: JSON.stringify({ ids, action, reason }) });
+
+/** Asks the platform who posted a job (Instahyre) and saves them on it. */
+export const fetchJobRecruitersApi = (jobId: string) =>
+  apiFetch<{ recruiters: JobRecruiter[] }>(`${NB()}/jobs/${jobId}/recruiters/fetch`, { method: 'POST' });
+
+/** Finds a job recruiter's LinkedIn profile from search results (one credit of your own key). */
+export const findRecruiterLinkedinApi = (jobId: string, key: string) =>
+  apiFetch<{ status: 'found' | 'none' | 'exists'; linkedin?: string }>(
+    `${NB()}/jobs/${jobId}/recruiters/${encodeURIComponent(key)}/linkedin`, { method: 'POST' });
 
 export const updateNaukriJobApi = (id: string, patch: { applyStatus?: NaukriApplyStatus; applyNote?: string }) =>
   apiFetch<{ job: NaukriJob }>(`${NB()}/jobs/${id}`, { method: 'PATCH', body: JSON.stringify(patch) });
@@ -2284,7 +2294,10 @@ export interface DiscoveryConfigView {
   defaultRoles: string[];
   /** Outside-signal sources switched off for "Worth searching". */
   enrichOff: EnrichSource[];
+  /** When a job's recruiter gets looked up on LinkedIn. `manual` (the button) is always on. */
+  recruiterLinkedin: { modes: RecruiterLinkedinMode[]; dailyCap: number };
 }
+export type RecruiterLinkedinMode = 'manual' | 'approved' | 'recruiter_action' | 'all';
 
 export interface MoveProspectsResult {
   ok: boolean;
@@ -2304,6 +2317,8 @@ export const saveDiscoveryKeysApi = (keys: Partial<Record<DiscoveryProvider, str
   apiFetch<DiscoveryConfigView>('/api/prospects/config', { method: 'PUT', ...json(keys) });
 export const saveDefaultRolesApi = (defaultRoles: string[]) =>
   apiFetch<DiscoveryConfigView>('/api/prospects/config', { method: 'PUT', ...json({ defaultRoles }) });
+export const saveRecruiterLinkedinApi = (recruiterLinkedin: { modes?: RecruiterLinkedinMode[]; dailyCap?: number }) =>
+  apiFetch<DiscoveryConfigView>('/api/prospects/config', { method: 'PUT', ...json({ recruiterLinkedin }) });
 export const removeDiscoveryKeyApi = (provider: DiscoveryProvider) =>
   apiFetch<DiscoveryConfigView>(`/api/prospects/config/${provider}`, { method: 'DELETE' });
 

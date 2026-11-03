@@ -379,6 +379,13 @@ export default function Contacts() {
                           <i className="ti ti-target-arrow" title="Promoted from a lead"
                             style={{ marginLeft: 6, fontSize: 13, color: 'var(--text3)' }} />
                         )}
+                        {c.linkedin && /^https?:\/\//i.test(c.linkedin) && (
+                          <a href={c.linkedin} target="_blank" rel="noopener noreferrer" title="Open their LinkedIn profile"
+                            aria-label={`${c.name} on LinkedIn`} onClick={e => e.stopPropagation()}
+                            style={{ marginLeft: 6, fontSize: 13, color: 'var(--text3)' }}>
+                            <i className="ti ti-brand-linkedin" />
+                          </a>
+                        )}
                         {c.prospectId && (
                           <i className="ti ti-compass" title="Found with Discover — address guessed"
                             style={{ marginLeft: 6, fontSize: 13, color: 'var(--text3)' }} />

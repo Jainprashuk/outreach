@@ -45,6 +45,18 @@ module.exports = {
     { url: `${ORIGIN}/jobfeed`, label: 'My job feed', origin: 'recommended', loginOnly: true },
   ],
   recruiterFeed: false,
+  // Who posted a job (verified live 2026-11-03): GET /job/detail?jobcode=<id> →
+  // { data: { recruiter: { recruiterName, designation } } }. The name is "*****"
+  // to anyone logged out, so it is read from inside your own logged-in page.
+  recruiterDetail: {
+    url: (id) => `https://gladiator.hirist.tech/job/detail?jobcode=${encodeURIComponent(id)}`,
+    parse: (body) => {
+      const r = body && body.data && body.data.recruiter;
+      const name = r && typeof r.recruiterName === 'string' ? r.recruiterName.trim() : '';
+      if (!name || /^\*+$/.test(name)) return null;
+      return { name, title: String(r.designation || '').trim(), company: '' };
+    },
+  },
   // Free-text search (verified): /search/backend-developer-jobs?minexp=3.
   // `loc` takes Hirist's own location ids, so location is left to your
   // Filters → Locations, which run on every harvest anyway.

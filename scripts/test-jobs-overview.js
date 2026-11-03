@@ -47,7 +47,9 @@ async function main() {
       j('naukri', 3, { applyStatus: 'in-review', naukriStage: 'shortlisted', naukriStageAt: new Date(now - 2 * HOUR), trackedAt: new Date(now - 5 * DAY),
         naukriTimeline: [{ id: 6, value: 'Shortlisted', at: new Date(now - 2 * HOUR) }], applyHistory: [{ at: new Date(now - 3 * HOUR), from: 'none', to: 'applied', note: '' }] }),
       j('naukri', 4, { applyStatus: 'applied', naukriStage: 'viewed', naukriStageAt: new Date(now - HOUR), trackedAt: new Date(now - 5 * DAY) }),
-      j('hirist', 1, { applyStatus: 'skipped', unknownQuestion: 'Notice period?' }),
+      j('hirist', 1, { applyStatus: 'skipped', unknownQuestion: 'Notice period?', applyHistory: [{ at: new Date(now - HOUR), from: 'none', to: 'skipped', note: 'question' }] }),
+      // Found 20 days ago, still pending: counts on All time / 30 days, not on 7 days.
+      j('naukri', 9, { approval: 'pending', firstSeenAt: new Date(now - 20 * DAY) }),
       j('hirist', 2, { applyStatus: 'applied', naukriStage: 'not-shortlisted', naukriStageAt: new Date(now - HOUR), trackedAt: new Date(now - HOUR) }),
       j('instahyre', 1, { approval: 'pending' }), // platform off: not listed
       j('hirist', 3, { applyStatus: 'applied', applyHistory: [{ at: new Date(now - 20 * DAY), from: 'none', to: 'applied', note: '' }] }),
@@ -74,10 +76,13 @@ async function main() {
     check(o.range === '7d' && by.naukri.period.sent === 1 && by.naukri.period.failed === 1 && by.naukri.period.interest === 1, `7d: naukri sent 1, failed 1, interest 1 (${JSON.stringify(by.naukri.period)})`);
     const y = await get('yesterday');
     const yb = Object.fromEntries(y.platforms.map(p => [p.platform, p]));
-    check(y.range === 'yesterday' && y.needs.review === 1 && y.needs.failed === 1, 'the period never changes what needs you now');
-    check(yb.naukri.applied === 2, 'total applied is all time in every period');
+    check(y.range === 'yesterday' && y.needs.review === 0 && y.needs.failed === 0 && y.needs.needsAnswer === 0, 'yesterday: nothing found, failed or stuck yesterday');
+    check(yb.naukri.found === 0 && yb.naukri.queued === 0, 'yesterday: nothing found or approved yesterday');
+    check(yb.naukri.applied === 2, 'the all-time applied total stays on the row (used for the stale check)');
     const old = await get('all');
     check(old.range === 'all' && old.timeline.length >= o.timeline.length, 'all time has at least what 7 days has');
+    check(old.needs.review === 2 && o.needs.review === 1, `review: 2 all time, 1 found in 7 days (${old.needs.review}, ${o.needs.review})`);
+    check((await get('30d')).needs.review === 2, '30 days includes the job found 20 days ago');
     check((await get('banana')).range === '7d', 'an unknown period falls back to 7 days');
   } finally {
     for (const c of ['naukrijobs', 'naukriconfigs', 'naukriworkers', 'naukriruns', 'sessions', 'activitylogs']) await db.collection(c).deleteMany({ userId: uid });

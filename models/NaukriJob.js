@@ -150,7 +150,9 @@ const naukriJobSchema = new mongoose.Schema({
   // harvest, never removed by one (lib/recruiterContacts.js). `key` is the
   // identity (address, else name) that makes a re-harvest idempotent.
   recruiters: {
-    type: [{ _id: false, key: String, name: String, title: String, email: String, profileUrl: String, via: String }],
+    // company: the recruiter's OWN employer when it differs from the hiring company (an agency).
+    // linkedinTriedAt: a LinkedIn lookup ran (found or not) — auto modes never retry.
+    type: [{ _id: false, key: String, name: String, title: String, email: String, profileUrl: String, via: String, company: String, linkedinTriedAt: Date }],
     default: [],
   },
   trackedAt:      { type: Date, default: null },

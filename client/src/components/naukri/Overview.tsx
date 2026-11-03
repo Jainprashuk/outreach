@@ -96,9 +96,9 @@ export default function Overview({ onOpen }: { onOpen: (t: OverviewTarget) => vo
       </div>
       <Refreshing active={loading}>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-        <NeedCard n={needs.review} tone="warn" label="jobs to review" hint="New jobs waiting for your yes or no" onClick={() => onOpen({ stage: 'review' })} />
-        <NeedCard n={needs.needsAnswer} tone="warn" label="need an answer" hint="Skipped because a screening question had no answer" onClick={() => onOpen({ stage: 'answer' })} />
-        <NeedCard n={needs.failed} tone="bad" label="failed to apply" hint="Approved jobs whose apply failed, in Queued" onClick={() => onOpen({ stage: 'queued' })} />
+        <NeedCard n={needs.review} tone="warn" label={`to review · found ${rangeLabel}`} hint="Jobs found in the period, still waiting for your yes or no" onClick={() => onOpen({ stage: 'review' })} />
+        <NeedCard n={needs.needsAnswer} tone="warn" label={`need an answer · ${rangeLabel}`} hint="Stopped on a screening question in the period, still unanswered" onClick={() => onOpen({ stage: 'answer' })} />
+        <NeedCard n={needs.failed} tone="bad" label={`failed to apply · ${rangeLabel}`} hint="Failed in the period and still not sent" onClick={() => onOpen({ stage: 'queued' })} />
         <NeedCard n={needs.recruiter} tone="good" label={`recruiter interest · ${rangeLabel}`} hint="Shortlisted or contacted by a recruiter in the period" onClick={() => onOpen({ scope: 'activity' })} />
       </div>
       {needs.problems.length > 0 && (
@@ -117,7 +117,7 @@ export default function Overview({ onOpen }: { onOpen: (t: OverviewTarget) => vo
 
       <div style={{ display: 'flex', gap: 10, alignItems: 'baseline', flexWrap: 'wrap', margin: '16px 0 8px' }}>
         <h3 style={{ fontSize: 14, margin: 0 }}>Platforms</h3>
-        <Muted>Review, Queued, Applied: right now · Sent to Rejected: {rangeLabel}</Muted>
+        <Muted>Every column: {rangeLabel}</Muted>
       </div>
       {platforms.length === 0 ? <Empty icon="ti-briefcase-2">No platform is switched on. Turn one on in Job Platforms.</Empty> : (
         <div style={{ overflowX: 'auto' }}>
@@ -125,8 +125,11 @@ export default function Overview({ onOpen }: { onOpen: (t: OverviewTarget) => vo
             <thead>
               <tr style={{ textAlign: 'left', color: 'var(--text2)', fontSize: 12 }}>
                 <th style={{ padding: '4px 8px 4px 0' }}>Platform</th>
-                <th title="Now">Review</th><th title="Now">Queued</th><th title="Every application sent, all time">Applied</th>
-                <th title={`Applications sent · ${rangeLabel}`}>Sent</th><th title={`Apply attempts that failed · ${rangeLabel}`}>Failed</th>
+                <th title={`New jobs harvested · ${rangeLabel}`}>Found</th>
+                <th title={`Found in the period, still waiting for your decision`}>Review</th>
+                <th title={`Approved in the period, not sent yet`}>Queued</th>
+                <th title={`Applications sent · ${rangeLabel}`}>Applied</th>
+                <th title={`Failed in the period, still not sent`}>Failed</th>
                 <th title={`Viewed by a recruiter · ${rangeLabel}`}>Viewed</th><th title={`Shortlisted or contacted · ${rangeLabel}`}>Interest</th>
                 <th title={`Not shortlisted · ${rangeLabel}`}>Rejected</th>
                 <th>Statuses checked</th><th>Worker</th>
@@ -136,11 +139,11 @@ export default function Overview({ onOpen }: { onOpen: (t: OverviewTarget) => vo
               {platforms.map(p => (
                 <tr key={p.platform} style={{ borderTop: '0.5px solid var(--border)' }}>
                   <td style={{ padding: '7px 8px 7px 0' }}><PlatformTag id={p.platform} /></td>
+                  <td>{p.found}</td>
                   <td><button type="button" className="btn btn-xs" onClick={() => onOpen({ stage: 'review', platform: p.platform })}>{p.review}</button></td>
                   <td><button type="button" className="btn btn-xs" onClick={() => onOpen({ stage: 'queued', platform: p.platform })}>{p.queued}</button></td>
-                  <td><button type="button" className="btn btn-xs" onClick={() => onOpen({ stage: 'applied', platform: p.platform })}>{p.applied}</button></td>
-                  <td>{p.period.sent}</td>
-                  <td style={{ color: p.period.failed ? '#c0392b' : undefined }}>{p.period.failed}</td>
+                  <td><button type="button" className="btn btn-xs" onClick={() => onOpen({ stage: 'applied', platform: p.platform })}>{range === 'all' ? p.applied : p.period.sent}</button></td>
+                  <td style={{ color: p.failed ? '#c0392b' : undefined }}>{p.failed}</td>
                   <td>{p.period.viewed}</td>
                   <td style={{ fontWeight: p.period.interest ? 600 : 400 }}>{p.period.interest}</td>
                   <td>{p.period.rejected}</td>

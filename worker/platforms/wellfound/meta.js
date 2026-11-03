@@ -46,6 +46,31 @@ module.exports = {
     { url: `${ORIGIN}/jobs`, label: 'Your Wellfound search', origin: 'recommended' },
   ],
   recruiterFeed: false,
+  // Who posted a job (verified live 2026-11-03): no JSON carries it — the job
+  // page's own HTML has a "Hiring contact" block: a /u/<slug> link with the
+  // name, and a title beside it ("Founder"). Read from a fetch of that page
+  // inside your logged-in tab (the job's url, built by jobsFromBody).
+  recruiterDetail: {
+    url: (id, job) => (job && job.url) || `${ORIGIN}/jobs/${encodeURIComponent(id)}`,
+    // Runs IN the page on the fetched document: self-contained, no closures.
+    fromDocument: (doc) => {
+      const head = [...doc.querySelectorAll('body *')].find(e => e.children.length === 0 && /^hiring contact$/i.test((e.textContent || '').trim()));
+      let box = head;
+      for (let i = 0; i < 5 && box && !box.querySelector('a[href^="/u/"]'); i++) box = box.parentElement;
+      const a = box && box.querySelector('a[href^="/u/"]');
+      if (!a) return null;
+      const name = (a.textContent || '').trim();
+      // <div><a>Name</a></div><span>Founder</span>: the title is the element
+      // after the name's wrapper (a parsed document has no layout, so no innerText).
+      const next = a.parentElement && a.parentElement.nextElementSibling;
+      const title = next ? (next.textContent || '').trim() : '';
+      return { name, title: title.length < 80 ? title : '' };
+    },
+    parse: (body) => {
+      const name = body && typeof body.name === 'string' ? body.name.trim() : '';
+      return name ? { name, title: String(body.title || '').trim(), company: '' } : null;
+    },
+  },
 
   // data.talent.jobSearchResults.startups.edges[].node (a PromotedResult
   // wraps it in promotedStartup): the startup carries the company, and

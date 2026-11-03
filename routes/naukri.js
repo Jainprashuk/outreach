@@ -28,6 +28,7 @@ const {
 } = require('../lib/platforms');
 const { dupKeyOf, dupesFor, dupText, blocksAuto, blocksApply } = require('../lib/jobDupes');
 const { recruitersFor, MAX_RECRUITERS } = require('../lib/recruiterContacts');
+const recruiterLinkedin = require('../lib/recruiterLinkedin');
 
 // mergeParams: the same router is mounted at /api/naukri (Naukri) and at
 // /api/p/:platform (every platform), and reads the platform from req.platform.
@@ -469,10 +470,18 @@ router.get('/jobs-overview', async (req, res) => {
     const base = { userId, deleted: { $ne: true } };
     const pOf = (j) => j.platform || 'naukri';
 
-    const [overviews, failed, stageRows, trackRows, own, recruiterJobs, sentRows, winStageRows] = await Promise.all([
+    // Every number follows the period. A dated condition per state; All time has
+    // none, so it is the plain current total (and old rows with no date still count).
+    const all = range === 'all';
+    const dated = (field) => (all ? {} : { [field]: inWin });
+    const happened = (to) => (all ? {} : { applyHistory: { $elemMatch: { to, at: inWin } } });
+    const byPlatform = (match) => NaukriJob.aggregate([{ $match: { ...base, ...match } },
+      { $group: { _id: { $ifNull: ['$platform', 'naukri'] }, n: { $sum: 1 } } }]).then((rows) => Object.fromEntries(rows.map((r) => [r._id, r.n])));
+
+    const [overviews, failed, stageRows, trackRows, own, recruiterJobs, sentRows, winStageRows, foundBy, reviewBy, queuedBy, answerBy] = await Promise.all([
       Promise.all(ids.map((id) => overviewFor(req.userId, id, { config, light: true }))),
-      NaukriJob.aggregate([{ $match: { ...base, approval: 'approved', applyStatus: 'failed' } },
-        { $group: { _id: { $ifNull: ['$platform', 'naukri'] }, n: { $sum: 1 } } }]),
+      // Still failed, and failed in the period.
+      byPlatform({ approval: 'approved', applyStatus: 'failed', ...happened('failed') }),
       NaukriJob.aggregate([{ $match: { ...base, applyStatus: { $in: SENT_STATUSES } } },
         { $group: { _id: { p: { $ifNull: ['$platform', 'naukri'] }, s: { $ifNull: ['$naukriStage', 'applied'] } }, n: { $sum: 1 } } }]),
       NaukriJob.aggregate([{ $match: { ...base, applyStatus: { $in: SENT_STATUSES } } },
@@ -494,13 +503,20 @@ router.get('/jobs-overview', async (req, res) => {
       // Recruiter stage reached in the period.
       NaukriJob.aggregate([{ $match: { ...base, applyStatus: { $in: SENT_STATUSES }, naukriStageAt: inWin } },
         { $group: { _id: { p: { $ifNull: ['$platform', 'naukri'] }, s: '$naukriStage' }, n: { $sum: 1 } } }]),
+      // Found in the period; of those, still waiting for your decision.
+      byPlatform({ ...dated('firstSeenAt') }),
+      byPlatform({ approval: 'pending', ...dated('firstSeenAt') }),
+      // Approved in the period and not sent yet.
+      byPlatform({ ...WAITING_FILTER, ...dated('approvedAt') }),
+      // Stopped on a question in the period, still waiting for an answer.
+      byPlatform({ ...SKIP_BUCKETS['needs-answer'], ...happened('skipped') }),
     ]);
     const sent = {};
     for (const r of sentRows) (sent[r._id.p] = sent[r._id.p] || {})[r._id.t] = r.n;
     const win = {};
     for (const r of winStageRows) (win[r._id.p] = win[r._id.p] || {})[r._id.s] = r.n;
 
-    const failedBy = Object.fromEntries(failed.map((r) => [r._id, r.n]));
+    const failedBy = failed;
     const lastTrack = Object.fromEntries(trackRows.map((r) => [r._id, r.last]));
     const stages = {};
     for (const r of stageRows) (stages[r._id.p] = stages[r._id.p] || {})[r._id.s] = r.n;
@@ -521,8 +537,8 @@ router.get('/jobs-overview', async (req, res) => {
       if (trackStale) problems.push({ kind: 'stale', text: last ? 'Statuses not checked for 2+ days' : 'Statuses never checked' });
       return {
         platform: o.platform, label: o.label, applyMode: o.applyMode,
-        review: o.reviewCount, needsAnswer: o.needsAnswerCount, failed: failedBy[o.platform] || 0,
-        queued: o.waitingCount, applied, appliedToday: o.appliedToday, perDay: o.perDay,
+        found: foundBy[o.platform] || 0, review: reviewBy[o.platform] || 0, needsAnswer: answerBy[o.platform] || 0,
+        failed: failedBy[o.platform] || 0, queued: queuedBy[o.platform] || 0, applied, appliedToday: o.appliedToday, perDay: o.perDay,
         // All time: where every application stands now.
         viewed: st.viewed || 0, shortlisted: (st.shortlisted || 0), contacted: (st.contacted || 0), notShortlisted: st['not-shortlisted'] || 0,
         // In the chosen period.
@@ -2097,6 +2113,30 @@ async function queueApplyFor(userId, ids) {
   return out;
 }
 
+// POST /api/naukri/jobs/:id/recruiters/fetch — ask the platform who posted this
+// job (Instahyre's public job data) and save them on the job. Other platforms
+// return what is already stored.
+router.post('/jobs/:id/recruiters/fetch', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Not found' });
+    const recruiters = await recruiterLinkedin.ensureRecruiters(req.userId, req.params.id);
+    if (!recruiters) return res.status(404).json({ error: 'That job wasn’t found' });
+    res.json({ recruiters });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/naukri/jobs/:id/recruiters/:key/linkedin — find this recruiter's
+// LinkedIn profile from search-engine results (your own Tavily/SerpApi key; one
+// credit). Saves the link on the recruiter when the name and company both match.
+router.post('/jobs/:id/recruiters/:key/linkedin', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Not found' });
+    const out = await recruiterLinkedin.lookupRecruiter({ userId: req.userId, jobId: req.params.id, key: req.params.key });
+    if (out.status === 'error') return res.status(/wasn’t found/.test(out.error) ? 404 : 400).json({ error: out.error });
+    res.json(out);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // POST /api/naukri/jobs/decide — THE authorisation point. Approving is the only
 // thing in this system that permits an application to be sent, which is why it
 // also queues the apply run rather than leaving that to a schedule.
@@ -2121,6 +2161,8 @@ router.post('/jobs/decide', async (req, res) => {
 
     let queuedRun = null;
     if (decision === 'approved' && result.modifiedCount > 0) {
+      // Recruiter LinkedIn lookups, when the user ticked "approved" (never throws).
+      await recruiterLinkedin.queueIfWanted(req.userId, 'approved', ids.slice(0, 100));
       // One apply run per platform the approved jobs are on (the All view can
       // approve across platforms in one go). A platform with apply off just
       // keeps them in Waiting — that is not an error worth showing.
@@ -2487,6 +2529,7 @@ router.post('/ingest', async (req, res) => {
     const platform = req.platform;
     const pq = platformQuery(platform);
     let created = 0, updated = 0, skipped = 0, autoApproved = 0, dupHeld = 0;
+    const withRecruiter = [], approvedKeys = []; // sourceKeys, for recruiter LinkedIn lookups
     const now = new Date();
     const fullConfig = await NaukriConfig.getForUser(req.userId);
     const site = siteOf(fullConfig, platform);
@@ -2580,7 +2623,10 @@ router.post('/ingest', async (req, res) => {
       // Recruiters this platform showed for the job: addresses in its text plus
       // any the feed named. Pushed one by one by identity, so a re-harvest adds
       // what is new and never duplicates or drops what an earlier one found.
-      for (const r of recruitersFor({ description: raw.description, feed: raw.recruiters })) {
+      const found = recruitersFor({ description: raw.description, feed: raw.recruiters });
+      // Instahyre names the recruiter only on the job's own page data, fetched when the lookup runs.
+      if (found.some(r => r.name) || platform === 'instahyre') withRecruiter.push(sourceKey);
+      for (const r of found) {
         await NaukriJob.updateOne(
           { userId: req.userId, sourceKey, 'recruiters.key': { $ne: r.key } },
           { $push: { recruiters: { $each: [r], $slice: -MAX_RECRUITERS } } },
@@ -2604,13 +2650,21 @@ router.post('/ingest', async (req, res) => {
           { userId: req.userId, sourceKey, approval: 'pending', applyStatus: 'none' },
           { $set: { approval: 'approved', approvedAt: now, approvedBy: 'auto' } },
         );
-        if (ok.modifiedCount) autoApproved++;
+        if (ok.modifiedCount) { autoApproved++; approvedKeys.push(sourceKey); }
       }
     }
 
     await NaukriRun.updateOne({ _id: runId, userId: req.userId }, {
       $inc: { 'stats.found': created + updated, 'stats.new': created, 'stats.updated': updated, 'stats.autoApproved': autoApproved },
     });
+
+    // Recruiter LinkedIn lookups the user switched on: jobs that came in with a
+    // named recruiter ('all'), and jobs just auto-approved ('approved').
+    for (const [trigger, keys] of [['all', withRecruiter], ['approved', approvedKeys]]) {
+      if (!keys.length) continue;
+      const rows = await NaukriJob.find({ userId: req.userId, sourceKey: { $in: keys.slice(0, 100) } }, { _id: 1 }).lean();
+      await recruiterLinkedin.queueIfWanted(req.userId, trigger, rows.map(r => r._id));
+    }
 
     const tidied = await tidyInbox(req.userId, fullConfig, platform);
     res.json({ created, updated, skipped, autoApproved, tidied, dupHeld });
@@ -2747,7 +2801,7 @@ router.post('/track', async (req, res) => {
       return isNaN(d.getTime()) ? null : d;
     };
     let matched = 0, moved = 0;
-    const news = [];
+    const news = [], acted = [];
     for (const row of rows.slice(0, 2000)) {
       const jobId = str(row && row.jobId, 100);
       if (!jobId) continue;
@@ -2781,10 +2835,12 @@ router.post('/track', async (req, res) => {
         update.$push = { applyHistory: { at: now, from, to, note: `${LABEL(req)}: ${stage.replace('-', ' ')}` } };
         moved++;
       }
+      if (changed && ['viewed', 'shortlisted', 'contacted'].includes(stage)) acted.push(job._id);
       if (changed && (stage === 'shortlisted' || stage === 'contacted')) news.push(`${job.title} · ${job.company}`);
       await NaukriJob.updateOne({ _id: job._id }, update);
     }
     await NaukriRun.updateOne({ _id: runId, userId: req.userId }, { $inc: { 'stats.tracked': matched, 'stats.moved': moved } });
+    await recruiterLinkedin.queueIfWanted(req.userId, 'recruiter_action', acted);
     if (news.length) {
       // Same notification types as always (no history to migrate); the
       // platform rides in the title and in meta.platform.

@@ -25,6 +25,16 @@ const discoveryConfigSchema = new mongoose.Schema({
   // Outside-signal sources you switched off for "Worth searching" (news, hn,
   // careers, github, fit). Empty = all on.
   enrichOff: { type: [String], default: [] },
+  // When a recruiter on a job platform gets looked up on LinkedIn (via the search
+  // keys above). Any mix of: manual (the button, always on), approved (jobs you or
+  // auto-approve send), recruiter_action (jobs a recruiter viewed/shortlisted/
+  // contacted), all (every job with a named recruiter). One shared daily cap.
+  recruiterLinkedin: {
+    modes:    { type: [String], default: ['manual'] },
+    dailyCap: { type: Number, default: 20 },
+    day:      { type: String, default: '' },   // YYYY-MM-DD (Asia/Kolkata)
+    used:     { type: Number, default: 0 },
+  },
   usage: {
     month:   { type: String, default: '' }, // YYYY-MM (Asia/Kolkata)
     tavily:  { type: Number, default: 0 },
@@ -37,7 +47,11 @@ discoveryConfigSchema.index({ userId: 1 }, { unique: true });
 
 discoveryConfigSchema.set('toJSON', {
   transform: (doc, ret) => {
-    const out = { usage: ret.usage || {}, defaultRoles: ret.defaultRoles || [], enrichOff: ret.enrichOff || [] };
+    const rl = ret.recruiterLinkedin || {};
+    const out = {
+      usage: ret.usage || {}, defaultRoles: ret.defaultRoles || [], enrichOff: ret.enrichOff || [],
+      recruiterLinkedin: { modes: rl.modes && rl.modes.length ? rl.modes : ['manual'], dailyCap: rl.dailyCap ?? 20 },
+    };
     for (const p of PROVIDERS) out[p] = !!ret[`${p}Enc`];
     return out;
   },
