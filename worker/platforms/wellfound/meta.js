@@ -47,24 +47,30 @@ module.exports = {
   ],
   recruiterFeed: false,
   // Who posted a job (verified live 2026-11-03): no JSON carries it — the job
-  // page's own HTML has a "Hiring contact" block: a /u/<slug> link with the
-  // name, and a title beside it ("Founder"). Read from a fetch of that page
-  // inside your logged-in tab (the job's url, built by jobsFromBody).
+  // page's own HTML has a "Hiring contact" heading followed by the name and the
+  // title ("Founder"): a /u/<slug> link logged in, a plain span logged out. The
+  // first two pieces of text after the heading are read, whatever wraps them.
+  // Fetched inside your tab (the job's url, built by jobsFromBody). The server
+  // reads the same page logged out (lib/recruiterLinkedin.js).
   recruiterDetail: {
     url: (id, job) => (job && job.url) || `${ORIGIN}/jobs/${encodeURIComponent(id)}`,
     // Runs IN the page on the fetched document: self-contained, no closures.
     fromDocument: (doc) => {
       const head = [...doc.querySelectorAll('body *')].find(e => e.children.length === 0 && /^hiring contact$/i.test((e.textContent || '').trim()));
-      let box = head;
-      for (let i = 0; i < 5 && box && !box.querySelector('a[href^="/u/"]'); i++) box = box.parentElement;
-      const a = box && box.querySelector('a[href^="/u/"]');
-      if (!a) return null;
-      const name = (a.textContent || '').trim();
-      // <div><a>Name</a></div><span>Founder</span>: the title is the element
-      // after the name's wrapper (a parsed document has no layout, so no innerText).
-      const next = a.parentElement && a.parentElement.nextElementSibling;
-      const title = next ? (next.textContent || '').trim() : '';
-      return { name, title: title.length < 80 ? title : '' };
+      if (!head) return null;
+      // Text nodes in document order after the heading (a parsed document has
+      // no layout, so no innerText): the first is the name, the next the title.
+      const walker = doc.createTreeWalker(doc.body, 4 /* NodeFilter.SHOW_TEXT */);
+      const texts = [];
+      let past = false;
+      for (let n = walker.nextNode(); n && texts.length < 2; n = walker.nextNode()) {
+        if (!past) { if (head.contains(n)) past = true; continue; }
+        if (head.contains(n)) continue;
+        const t = (n.nodeValue || '').replace(/\s+/g, ' ').trim();
+        if (t) texts.push(t);
+      }
+      const name = texts[0] || '';
+      return name && name.length <= 100 ? { name, title: texts[1] && texts[1].length < 80 ? texts[1] : '' } : null;
     },
     parse: (body) => {
       const name = body && typeof body.name === 'string' ? body.name.trim() : '';

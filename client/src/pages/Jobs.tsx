@@ -16,7 +16,7 @@ import { RefreshBar, Refreshing } from '../components/RefreshBar';
 import { useToast } from '../context/ToastContext';
 import { useSession } from '../context/SessionContext';
 import {
-  addSharedJobsApi, bulkNaukriJobsApi, companyStatusApi, sharedJobKeysApi, sharedJobsApi, type SharedJob, decideNaukriJobsApi, listNaukriJobsApi, lookupCompanyApi, recruitersToDiscoverApi, updateNaukriJobApi, findRecruiterLinkedinApi, fetchJobRecruitersApi,
+  addSharedJobsApi, bulkNaukriJobsApi, companyStatusApi, sharedJobKeysApi, sharedJobsApi, type SharedJob, decideNaukriJobsApi, listNaukriJobsApi, lookupCompanyApi, recruitersToDiscoverApi, updateNaukriJobApi, findRecruiterLinkedinApi, fetchJobRecruitersApi, backfillRecruitersApi,
   type CompanyOutreach, type NaukriApplyStatus, type NaukriJob, type NaukriJobQuery, type PlatformScope,
 } from '../lib/api';
 import { autoPick } from '../lib/prospects';
@@ -29,6 +29,9 @@ import { autoPick } from '../lib/prospects';
 // URL-scoped default the Job Platforms page uses).
 
 type Stage = 'review' | 'queued' | 'applied' | 'answer' | 'skipped';
+
+// Platforms that name who posted a job (read by the server or the worker).
+const RECRUITER_PLATFORMS: string[] = ['instahyre', 'hirist', 'wellfound'];
 
 const STAGES: { key: Stage; label: string; icon: string; tip: string; query: NaukriJobQuery }[] = [
   { key: 'review', label: 'Review', icon: 'ti-inbox', tip: 'New jobs waiting for your yes or no',
@@ -241,12 +244,28 @@ export default function Jobs() {
 
   // One recruiter's LinkedIn profile, from search results. Saved on the recruiter,
   // so the link stays after a refresh and rides along into Discover.
-  // Instahyre only shows who posted a job on the job's own page; ask for it.
+  // Every older job on the recruiter platforms with no one yet → the worker.
+  const [backfilling, setBackfilling] = useState(false);
+  const backfill = async () => {
+    setBackfilling(true);
+    try {
+      const r = await backfillRecruitersApi(platform);
+      toast(r.queued ? `Asked the worker about ${r.queued} older job${r.queued === 1 ? '' : 's'} — it reads 30 per check-in` : 'No older jobs need a recruiter', r.queued ? 'success' : 'info');
+      await refresh();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Could not queue them', 'error');
+    } finally { setBackfilling(false); }
+  };
+
+  // Who posted a job, when the harvest didn't say; ask for it.
   const findRecruiter = async (j: NaukriJob) => {
     setFindingLi(`${j.id}:*`);
     try {
       const r = await fetchJobRecruitersApi(j.id);
-      toast(r.recruiters.some(x => x.name) ? 'Recruiter found' : 'This job doesn’t name a recruiter', r.recruiters.some(x => x.name) ? 'success' : 'info');
+      const named = r.recruiters.some(x => x.name);
+      toast(named ? 'Recruiter found'
+        : r.queued ? `Asked the ${PLATFORM_LABEL[j.platform as keyof typeof PLATFORM_LABEL] || ''} worker — it reads it with your login within a minute; refresh to see it`
+        : 'This job doesn’t name a recruiter', named ? 'success' : 'info');
       await refresh();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Could not look up the recruiter', 'error');
@@ -447,12 +466,19 @@ export default function Jobs() {
       </div>
       {showCompany && <OutreachChip company={j.company} st={status(j.company)} finding={finding === j.id} onFind={() => find(j)} />}
       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>{stageActions(j)}</div>
-      {(j.recruiters || []).length === 0 && j.platform === 'instahyre' && (
-        <div style={{ flexBasis: '100%', paddingLeft: 44 }}>
-          <button className="btn btn-xs" type="button" disabled={findingLi === `${j.id}:*`} onClick={() => findRecruiter(j)}
-            title="Ask Instahyre who posted this job">
-            <i className="ti ti-user-search" /> {findingLi === `${j.id}:*` ? 'Looking…' : 'Find recruiter'}
-          </button>
+      {!(j.recruiters || []).some(r => r.name) && RECRUITER_PLATFORMS.includes(j.platform || '') && (
+        <div style={{ flexBasis: '100%', paddingLeft: 44, display: 'flex', gap: 8, alignItems: 'center' }}>
+          {j.recruiterWantedAt ? (
+            <Muted><i className="ti ti-loader" /> Waiting for the worker to read who posted it…</Muted>
+          ) : (
+            <>
+              <button className="btn btn-xs" type="button" disabled={findingLi === `${j.id}:*`} onClick={() => findRecruiter(j)}
+                title={`Ask ${PLATFORM_LABEL[j.platform as keyof typeof PLATFORM_LABEL] || 'the platform'} who posted this job`}>
+                <i className="ti ti-user-search" /> {findingLi === `${j.id}:*` ? 'Looking…' : j.recruiterFetchedAt ? 'Ask again' : 'Find recruiter'}
+              </button>
+              {j.recruiterFetchedAt && (j.recruiters || []).length === 0 && <Muted>The job didn’t name anyone</Muted>}
+            </>
+          )}
         </div>
       )}
       {(j.recruiters || []).length > 0 && (
@@ -550,6 +576,12 @@ export default function Jobs() {
           {(Object.keys(PLATFORM_LABEL) as Array<keyof typeof PLATFORM_LABEL>).map(id => <option key={id} value={id}>{PLATFORM_LABEL[id]}</option>)}
         </select>
         <Muted>{total} job{total === 1 ? '' : 's'}</Muted>
+        {(platform === 'all' || RECRUITER_PLATFORMS.includes(platform)) && (
+          <button className="btn btn-xs" type="button" disabled={backfilling} onClick={backfill}
+            title="Ask the worker who posted every Instahyre, Hirist and Wellfound job from the last 60 days that has no recruiter yet (30 per check-in, with your login)">
+            <i className="ti ti-users-group" /> {backfilling ? 'Queuing…' : 'Find recruiters for older jobs'}
+          </button>
+        )}
       </div>
       {stage === 'skipped' && (
         <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>

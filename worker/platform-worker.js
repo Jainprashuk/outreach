@@ -591,6 +591,26 @@ async function main() {
             log(`${LABEL} showed a captcha. Stopping the worker — do not restart it for a week.`);
             process.exit(0);
           }
+        } else if (Array.isArray(claimed.recruiterJobs) && claimed.recruiterJobs.length && session && driver.addRecruiters) {
+          // Idle, and you pressed "Find recruiter" (or the backfill): read who
+          // posted those jobs with this browser's login, then report back.
+          const jobs = claimed.recruiterJobs.map(j => ({ sourceId: String(j.sourceId), url: j.url || '' }));
+          try {
+            const found = await driver.addRecruiters(session, jobs, () => {}, { force: true });
+            const read = jobs.filter(j => j._read);
+            if (read.length) {
+              await api(`${API}/recruiters`, { results: read.map(j => ({ sourceId: j.sourceId, recruiters: j.recruiters || [] })) });
+            }
+            log(`recruiters: read ${read.length} of ${jobs.length} job(s) you asked about, ${found} named someone`);
+          } catch (err) {
+            if (isCheckpoint(err)) {
+              // Recorded on the server so a restart can't retry into the challenge.
+              await api(`${API}/recruiters`, { blocked: err.message }).catch(() => {});
+              log(`${LABEL} showed a captcha. Stopping the worker — do not restart it for a week.`);
+              process.exit(0);
+            }
+            log('recruiter read failed:', err.message);
+          }
         }
       } finally {
         if (session) await driver.disconnect(session).catch(() => {});

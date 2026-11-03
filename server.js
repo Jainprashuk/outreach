@@ -117,11 +117,13 @@ const WORKER_PATHS = new Set([
   '/api/naukri/ai-answer',
   // Recruiter actions read from Naukri's application history (read-only).
   '/api/naukri/track',
+  // Who posted a job, read by the worker for "Find recruiter" (job platforms).
+  '/api/naukri/recruiters',
   // The same worker endpoints for every job platform (Instahyre, Hirist, and
   // Naukri again under its platform path), each listed EXACTLY — never a
   // /api/p/ prefix, which would expose the owner routes under it too.
   ...require('./lib/platforms').PLATFORM_IDS.flatMap(id => [
-    'claim', 'ingest', 'finish', 'progress', 'result', 'worker-resume', 'ai-answer', 'ai-note', 'track',
+    'claim', 'ingest', 'finish', 'progress', 'result', 'worker-resume', 'ai-answer', 'ai-note', 'track', 'recruiters',
   ].map(r => `/api/p/${id}/${r}`)),
 ]);
 

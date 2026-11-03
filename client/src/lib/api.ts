@@ -1524,6 +1524,10 @@ export interface NaukriJob {
   listingOpen?: boolean | null;
   /** Recruiters the job platform itself showed for this role (name from its feed, or an address in the job text). */
   recruiters?: JobRecruiter[];
+  /** "Find recruiter" handed to the worker, not read yet. */
+  recruiterWantedAt?: string | null;
+  /** When the worker or server last read who posted it (found or not). */
+  recruiterFetchedAt?: string | null;
   /** Cleared out of the inbox by the tidy rules; Restore brings it back. */
   tidiedAt?: string | null;
   tidyReason?: string;
@@ -2012,9 +2016,13 @@ export const bulkNaukriJobsApi = (
 ) => apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
   `${NB()}/jobs/bulk`, { method: 'POST', body: JSON.stringify({ ids, action, reason }) });
 
-/** Asks the platform who posted a job (Instahyre) and saves them on it. */
+/** Who posted a job: read now when public (Instahyre, Wellfound), else handed to the worker (`queued`). */
 export const fetchJobRecruitersApi = (jobId: string) =>
-  apiFetch<{ recruiters: JobRecruiter[] }>(`${NB()}/jobs/${jobId}/recruiters/fetch`, { method: 'POST' });
+  apiFetch<{ recruiters: JobRecruiter[]; queued: boolean }>(`${NB()}/jobs/${jobId}/recruiters/fetch`, { method: 'POST' });
+
+/** Hands every older job with no recruiter yet (last `days`) to the worker. */
+export const backfillRecruitersApi = (platform: string, days = 60) =>
+  apiFetch<{ queued: number; days: number }>(`${platform === 'naukri' ? '/api/naukri' : `/api/p/${platform}`}/jobs/recruiters/backfill`, { method: 'POST', body: JSON.stringify({ days }) });
 
 /** Finds a job recruiter's LinkedIn profile from search results (one credit of your own key). */
 export const findRecruiterLinkedinApi = (jobId: string, key: string) =>

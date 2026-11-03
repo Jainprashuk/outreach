@@ -155,6 +155,12 @@ const naukriJobSchema = new mongoose.Schema({
     type: [{ _id: false, key: String, name: String, title: String, email: String, profileUrl: String, via: String, company: String, linkedinTriedAt: Date }],
     default: [],
   },
+  // "Find recruiter" asked for this job and the server could not read it itself:
+  // the platform worker reads it with your login on its next idle check-in
+  // (/claim → recruiterJobs → POST /recruiters), then clears this.
+  recruiterWantedAt:  { type: Date, default: null },
+  // When that read ran, found or not — the UI says "none named" after it.
+  recruiterFetchedAt: { type: Date, default: null },
   trackedAt:      { type: Date, default: null },
   applyHistory: {
     type: [{
@@ -186,6 +192,8 @@ naukriJobSchema.index({ userId: 1, platform: 1, approval: 1, score: -1 });
 naukriJobSchema.index({ userId: 1, platform: 1, applyStatus: 1, appliedAt: -1 });
 // Duplicate lookups across platforms.
 naukriJobSchema.index({ userId: 1, dupKey: 1 });
+// Recruiter reads waiting for the worker (non-unique, so null is fine).
+naukriJobSchema.index({ userId: 1, platform: 1, recruiterWantedAt: 1 });
 
 naukriJobSchema.set('toJSON', {
   transform: (doc, ret) => {

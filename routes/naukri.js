@@ -244,6 +244,7 @@ async function nextPollFor(userId, platform, config, worker, fastSeconds, fast) 
   let secs = IDLE_POLL_SECONDS;
   if (fast
     || await NaukriRun.exists({ userId, status: { $in: ACTIVE }, ...platformQuery(platform), ...BASE_FILTER })
+    || await NaukriJob.exists({ userId, ...platformQuery(platform), recruiterWantedAt: { $ne: null } })
     || await inPortal(userId)) {
     secs = fastSeconds;
   } else {
@@ -2159,15 +2160,27 @@ async function queueApplyFor(userId, ids) {
   return out;
 }
 
-// POST /api/naukri/jobs/:id/recruiters/fetch — ask the platform who posted this
-// job (Instahyre's public job data) and save them on the job. Other platforms
-// return what is already stored.
+// POST /api/naukri/jobs/recruiters/backfill { days? } — hand every older job on
+// this platform (or all of them, from the All view) with no recruiter yet to the
+// worker, which reads 30 per idle check-in with your login.
+router.post('/jobs/recruiters/backfill', async (req, res) => {
+  try {
+    const days = Math.min(365, Math.max(1, parseInt((req.body || {}).days, 10) || 60));
+    const platforms = req.platform === 'all' ? recruiterLinkedin.WORKER_PLATFORMS : [req.platform];
+    const queued = await recruiterLinkedin.queueBackfill(req.userId, platforms, { days });
+    res.json({ queued, days });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/naukri/jobs/:id/recruiters/fetch — who posted this job. The server
+// reads public data itself (Instahyre, Wellfound); otherwise (Hirist, or a page
+// behind a challenge) the job goes to the worker: { recruiters, queued: true }.
 router.post('/jobs/:id/recruiters/fetch', async (req, res) => {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ error: 'Not found' });
-    const recruiters = await recruiterLinkedin.ensureRecruiters(req.userId, req.params.id);
-    if (!recruiters) return res.status(404).json({ error: 'That job wasn’t found' });
-    res.json({ recruiters });
+    const out = await recruiterLinkedin.ensureRecruiters(req.userId, req.params.id, { queue: true });
+    if (!out) return res.status(404).json({ error: 'That job wasn’t found' });
+    res.json(out);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -2455,7 +2468,11 @@ router.post('/claim', async (req, res) => {
       { $set: { status: 'running', claimedAt: new Date(), workerHost: str(host, 200) } },
       { sort: { createdAt: 1 }, new: true }
     );
-    if (!run) return send({ run: null });
+    // Idle: any "Find recruiter" asks this worker can read with your login.
+    if (!run) {
+      const recruiterJobs = await recruiterLinkedin.wantedFor(req.userId, platform);
+      return send(recruiterJobs.length ? { run: null, recruiterJobs } : { run: null });
+    }
 
     // Everything the worker needs to execute, in the same response — it must not
     // need a second round trip mid-run.
@@ -2834,6 +2851,56 @@ router.post('/result', async (req, res) => {
 // still at "applied" in your pipeline moves on (shortlisted/contacted → in
 // review, not shortlisted → rejected). Your own pipeline edits are never
 // overwritten. Applications made outside this app are counted, not stored.
+// POST /api/naukri/recruiters — the worker's answer to recruiterJobs:
+// { results: [{ sourceId, recruiters: [{ name, title, company }] }] }. Every job
+// listed was read (found or not), so its ask is cleared. Then any LinkedIn
+// lookup the user switched on for that job is queued.
+router.post('/recruiters', async (req, res) => {
+  try {
+    const platform = req.platform;
+    // A challenge while reading: block this platform's worker for a week, same
+    // as a captcha during a run — a restarted worker must not shrug it off.
+    if (req.body && req.body.blocked) {
+      const worker = await NaukriWorker.getForUser(req.userId, platform);
+      worker.blockedUntil = new Date(Date.now() + BLOCK_MS);
+      worker.blockedReason = str(req.body.blocked, 300) || `${labelOf(platform)} showed a captcha while reading recruiters`;
+      await worker.save();
+      return res.json({ blocked: true });
+    }
+    const results = Array.isArray((req.body || {}).results) ? req.body.results.slice(0, 50) : [];
+    const now = new Date();
+    let found = 0;
+    const byTrigger = { all: [], approved: [], recruiter_action: [] };
+    for (const r of results) {
+      const sourceId = str(r && r.sourceId, 100);
+      if (!sourceId) continue;
+      const job = await NaukriJob.findOne({ userId: req.userId, sourceKey: `${platform}:${sourceId}`, ...BASE_FILTER },
+        { _id: 1, approval: 1, naukriStage: 1 }).lean();
+      if (!job) continue;
+      const recs = recruitersFor({ description: '', feed: Array.isArray(r.recruiters) ? r.recruiters.slice(0, 5) : [] });
+      for (const rec of recs) {
+        await NaukriJob.updateOne({ _id: job._id, userId: req.userId, 'recruiters.key': { $ne: rec.key } },
+          { $push: { recruiters: { $each: [rec], $slice: -MAX_RECRUITERS } } });
+      }
+      await NaukriJob.updateOne({ _id: job._id, userId: req.userId }, { $set: { recruiterWantedAt: null, recruiterFetchedAt: now } });
+      if (recs.some(x => x.name)) {
+        found++;
+        byTrigger.all.push(job._id);
+        if (job.approval === 'approved') byTrigger.approved.push(job._id);
+        if (['viewed', 'shortlisted', 'contacted'].includes(job.naukriStage)) byTrigger.recruiter_action.push(job._id);
+      }
+    }
+    // One lookup per job even when several triggers match (the lookup itself
+    // skips anyone already tried, so a repeat costs nothing).
+    const queued = new Set();
+    for (const [trigger, ids] of Object.entries(byTrigger)) {
+      const fresh = ids.filter(id => !queued.has(String(id)));
+      if (await recruiterLinkedin.queueIfWanted(req.userId, trigger, fresh)) fresh.forEach(id => queued.add(String(id)));
+    }
+    res.json({ read: results.length, found });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 router.post('/track', async (req, res) => {
   try {
     const { runId, rows } = req.body || {};

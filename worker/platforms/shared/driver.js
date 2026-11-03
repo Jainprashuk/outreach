@@ -228,11 +228,13 @@ function makeDriver(meta) {
     return { jobs: kept, recruitersAdded, searches: searches.length, recommended, seen: counts.total, dropped: counts.dropped, answeredEmpty: feedAnswered && counts.total === 0 };
   }
 
-  async function addRecruiters(session, jobs, onProgress) {
+  // `force`: the app asked for these jobs ("Find recruiter"), so read them even
+  // if a harvest already asked once. Every job read gets `_read = true`.
+  async function addRecruiters(session, jobs, onProgress = () => {}, { force = false } = {}) {
     const rd = meta.recruiterDetail;
     if (!rd) return 0;
     const seen = loadSeen(meta.id);
-    const todo = jobs.filter(j => !(j.recruiters || []).some(r => r.name) && !seen.has(String(j.sourceId))).slice(0, RECRUITER_MAX);
+    const todo = jobs.filter(j => !(j.recruiters || []).some(r => r.name) && (force || !seen.has(String(j.sourceId)))).slice(0, RECRUITER_MAX);
     if (!todo.length) return 0;
     let added = 0;
     let page = null;
@@ -260,6 +262,7 @@ function makeDriver(meta) {
         if (got.status === 401 || got.status === 403 || got.status === 429) break;
         if (got.body !== undefined) {
           seen.add(String(j.sourceId));
+          j._read = true;
           const r = rd.parse(got.body);
           if (r) { j.recruiters = [r]; added++; }
         }
