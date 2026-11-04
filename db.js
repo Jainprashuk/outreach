@@ -3,7 +3,11 @@ const Contact = require('./models/Contact');
 const User = require('./models/User');
 const Settings = require('./models/Settings');
 const Lead = require('./models/Lead');
+const Session = require('./models/Session');
+const LoginCode = require('./models/LoginCode');
+const AccessRequest = require('./models/AccessRequest');
 const { ONBOARDING_VERSION } = require('./lib/onboarding');
+const { inApp } = require('./lib/apps');
 
 async function backfillStatusHistory() {
   const contacts = await Contact.find({
@@ -148,6 +152,23 @@ async function backfillFollowUpReplied() {
 // blocked from sending. Matched on the field being ABSENT, so it goes inert
 // after one pass and never touches a user again: every account created since
 // gets the subdocument from schema defaults and can never match.
+// The account store became shared with Clientline. Everything written before
+// that belongs to Outreach, and must say so: every sweep filters on apps, and
+// sessions and codes only work in the app named on them, so a missing field
+// would sign everybody out. Cheap and idempotent — once done it matches nothing.
+// Runs first, ahead of anything that sweeps users.
+async function backfillApps() {
+  const missing = { $exists: false };
+  const [users, sessions, codes, requests] = await Promise.all([
+    User.updateMany({ apps: missing }, { $set: { apps: ['outreach'] } }),
+    Session.updateMany({ app: missing }, { $set: { app: 'outreach' } }),
+    LoginCode.updateMany({ app: missing }, { $set: { app: 'outreach' } }),
+    AccessRequest.updateMany({ app: missing }, { $set: { app: 'outreach' } }),
+  ]);
+  const n = [users, sessions, codes, requests].reduce((t, r) => t + (r.modifiedCount || 0), 0);
+  if (n) console.log(`✅  Backfilled app on ${users.modifiedCount} users, ${sessions.modifiedCount} sessions, ${codes.modifiedCount} codes, ${requests.modifiedCount} access requests`);
+}
+
 async function backfillOnboarding() {
   const users = await User.find({ onboarding: { $exists: false } }, { createdAt: 1 }).lean();
   if (users.length === 0) return;
@@ -163,7 +184,7 @@ async function backfillOnboarding() {
   ).lean();
   const done = new Set(configured.map(s => String(s.userId)));
 
-  const totalUsers = await User.countDocuments();
+  const totalUsers = await User.countDocuments(inApp());
   const envFallbackLive = !!(process.env.GMAIL_EMAIL && process.env.GMAIL_APP_PASSWORD) && totalUsers === 1;
 
   const ops = users.map((u) => {
@@ -246,6 +267,7 @@ async function connect() {
     socketTimeoutMS: 45000,
   });
   console.log(`✅  Connected to MongoDB (${env} database)`);
+  await backfillApps();
   await backfillStatusHistory();
   await backfillSendTimestamps();
   await backfillFollowUpReplied();

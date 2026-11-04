@@ -67,6 +67,7 @@ const CronBeat = require('../models/CronBeat');
 const { notifyStalledCrons } = require('../lib/cronBeat');
 const { buildTimeline, istDateKey, DAILY_SEND_CAP } = require('../lib/campaignRunner');
 const { destroyAllForUser } = require('../lib/session');
+const { APP, hasApp, inApp } = require('../lib/apps');
 const { issueWorkerToken, revokeWorkerToken } = require('../lib/workerAuth');
 const { logEvent } = require('../lib/activityLog');
 const { sendAccessApproved } = require('../lib/emailOtp');
@@ -151,7 +152,8 @@ router.get('/users', async (req, res) => {
       // leaves it. .lean() BYPASSES the toJSON transform in models/User.js, so
       // the token hashes are NOT stripped for us — they are projected in here
       // purely to become booleans, and must never reach the response.
-      User.find({}, {
+      // Outreach's accounts only — Clientline-only ones belong to the admin app.
+      User.find(inApp(), {
         email: 1, name: 1, createdAt: 1, lastLoginAt: 1, isAdmin: 1, status: 1,
         onboarding: 1, workerTokenHash: 1, shareTokenHash: 1, libraryAccess: 1, libraryOptOut: 1,
         lastActiveAt: 1, emailOptOut: 1, emailBlockedByAdmin: 1, aiOwnerFallback: 1, cloudScreenUrl: 1, cloudConsentAt: 1,
@@ -209,7 +211,7 @@ router.get('/users', async (req, res) => {
       ]),
 
       Session.aggregate([
-        { $match: { expiresAt: { $gt: new Date() } } },
+        { $match: { app: APP, expiresAt: { $gt: new Date() } } },
         { $group: { _id: '$userId', active: { $sum: 1 }, newest: { $max: '$createdAt' } } },
       ]),
 
@@ -247,6 +249,7 @@ router.get('/users', async (req, res) => {
       ]),
 
       User.aggregate([
+        { $match: inApp() },
         { $group: { _id: { $dateToString: { format: '%Y-%m', date: '$createdAt', timezone: 'Asia/Kolkata' } }, n: { $sum: 1 } } },
         { $sort: { _id: 1 } },
       ]),
@@ -254,7 +257,7 @@ router.get('/users', async (req, res) => {
 
     // Folded into this response rather than left to a second request, so the
     // dashboard cannot render without showing that somebody is waiting.
-    const pendingRequests = await AccessRequest.countDocuments({ status: 'pending' });
+    const pendingRequests = await AccessRequest.countDocuments({ status: 'pending', app: APP });
 
     const cMap = byUser(contacts), kMap = byUser(campaigns), lMap = byUser(leads);
     const rMap = byUser(scrapes), jMap = byUser(sendJobs), iMap = byUser(interviews);
@@ -421,19 +424,27 @@ router.post('/users', async (req, res) => {
     const name = String((req.body && req.body.name) || '').trim();
     if (!email || !email.includes('@')) return res.status(400).json({ error: 'A valid email address is required' });
 
-    const existing = await User.findOne({ email }, { _id: 1 }).lean();
+    const existing = await User.findOne({ email }, { _id: 1, apps: 1, status: 1 }).lean();
     // Enumeration is moot here — the caller is already an admin and can list
     // every account anyway.
-    if (existing) return res.status(409).json({ error: `${email} already has an account` });
+    if (existing && hasApp(existing)) return res.status(409).json({ error: `${email} already has an account` });
 
-    const user = await User.create({
-      email, name,
-      isAdmin: req.body.isAdmin === true,
-      status: 'invited',
-      invitedAt: new Date(),
-      invitedBy: req.userId,
-      onboarding: { startedAt: null, completedAt: null, step: 0, skipped: [], version: 0 },
-    });
+    let user;
+    if (existing) {
+      // A Clientline account: inviting it here adds Outreach to that same
+      // account rather than making a second one (email is unique across both).
+      await User.updateOne({ _id: existing._id }, { $addToSet: { apps: APP } });
+      user = { _id: existing._id, email, status: existing.status };
+    } else {
+      user = await User.create({
+        email, name,
+        isAdmin: req.body.isAdmin === true,
+        status: 'invited',
+        invitedAt: new Date(),
+        invitedBy: req.userId,
+        onboarding: { startedAt: null, completedAt: null, step: 0, skipped: [], version: 0 },
+      });
+    }
 
     // Tell them, unless explicitly asked not to. Whitelisting somebody who
     // never asked is otherwise silent — they have no way to know the account
@@ -635,10 +646,11 @@ router.get('/access-requests', async (req, res) => {
   try {
     const status = ['pending', 'approved', 'rejected', 'all'].includes(req.query.status)
       ? req.query.status : 'pending';
-    const filter = status === 'all' ? {} : { status };
+    // Requests to join Outreach; Clientline's queue is the admin app's.
+    const filter = status === 'all' ? { app: APP } : { status, app: APP };
     const [requests, pendingCount] = await Promise.all([
       AccessRequest.find(filter).sort({ createdAt: -1 }).limit(200).lean(),
-      AccessRequest.countDocuments({ status: 'pending' }),
+      AccessRequest.countDocuments({ status: 'pending', app: APP }),
     ]);
     res.json({
       pendingCount,
@@ -676,12 +688,15 @@ router.post('/access-requests/:id/approve', async (req, res) => {
     const existing = await User.findOne({ email: reqDoc.email }, { _id: 1 }).lean();
     let userId;
     if (existing) {
-      // Someone whitelisted them by hand while the request was sitting in the
-      // queue. Close it out rather than failing on the unique index.
+      // Either someone whitelisted them by hand while the request was sitting
+      // in the queue, or they already use the other app. Add this app to that
+      // account rather than failing on the unique index.
+      await User.updateOne({ _id: existing._id }, { $addToSet: { apps: reqDoc.app || APP } });
       userId = existing._id;
     } else {
       const user = await User.create({
         email: reqDoc.email,
+        apps: [reqDoc.app || APP],
         name: reqDoc.name || '',
         isAdmin: false,
         status: 'invited',
@@ -1800,7 +1815,7 @@ function pacificMidnight(now) {
 async function aiRolloutView() {
   const cfg = await aiKeys.getAiKeysConfig({ fresh: true });
   const [users, keyed] = await Promise.all([
-    User.find({ status: 'active' }, { aiOwnerFallback: 1 }).lean(),
+    User.find(inApp({ status: 'active' }), { aiOwnerFallback: 1 }).lean(),
     Settings.find({ $or: aiKeys.PROVIDERS.map(p => ({ [`aiKeys.${p}Enc`]: { $nin: ['', null] } })) }, { userId: 1, aiKeys: 1 }).lean(),
   ]);
   const keysOf = new Map(keyed.map(s => [id(s.userId), s.aiKeys || {}]));

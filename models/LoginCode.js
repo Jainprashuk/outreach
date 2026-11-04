@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { APPS } = require('../lib/apps');
 
 /**
  * One issued (or deliberately faked) sign-in code.
@@ -19,6 +20,9 @@ const loginCodeSchema = new mongoose.Schema({
   // one" is itself a way to discover which addresses have accounts.
   userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
   email: { type: String, required: true, lowercase: true, trim: true },
+  // The app the code was requested from; it only verifies there. The rate-limit
+  // counters deliberately ignore it, so the two apps share one budget per address.
+  app: { type: String, enum: APPS, required: true },
 
   // HMAC-SHA256(code, codeSalt). Null on a decoy row, which is what makes such a
   // row structurally unable to verify.

@@ -14,6 +14,7 @@ const { logEvent } = require('../lib/activityLog');
 const { isOnboarded } = require('../lib/onboarding');
 const { notifyAdmins } = require('../lib/notify');
 const { canSeeLibrary } = require('../lib/requireLibraryAccess');
+const { hasApp } = require('../lib/apps');
 
 const router = express.Router();
 
@@ -169,10 +170,10 @@ router.get('/session', async (req, res) => {
   try {
     const session = await resolveSession(req);
     if (!session) return res.json({ authenticated: false });
-    const user = await User.findById(session.userId, { email: 1, name: 1, isAdmin: 1, libraryAccess: 1, status: 1, onboarding: 1 }).lean();
-    // A session whose user was deleted, or whose access was revoked while they
-    // were signed in.
-    if (!user || user.status === 'disabled') return res.json({ authenticated: false });
+    const user = await User.findById(session.userId, { email: 1, name: 1, isAdmin: 1, libraryAccess: 1, status: 1, onboarding: 1, apps: 1 }).lean();
+    // A session whose user was deleted, or whose access (to the account, or to
+    // this app) was revoked while they were signed in.
+    if (!user || user.status === 'disabled' || !hasApp(user)) return res.json({ authenticated: false });
     res.json({ authenticated: true, user: publicUser(user) });
   } catch (err) {
     res.status(500).json({ error: err.message });

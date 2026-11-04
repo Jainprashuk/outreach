@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { APPS } = require('../lib/apps');
 
 // Sessions live in the DB rather than in a signed JWT so they can be revoked
 // server-side — "log out everywhere" and "someone else has my cookie" both need
@@ -9,6 +10,9 @@ const sessionSchema = new mongoose.Schema({
   // collection cannot be replayed as a login.
   tokenHash: { type: String, required: true },
   expiresAt: { type: Date, required: true },
+  // The app that issued it. The collection is shared with Clientline, and a
+  // session only works in its own app (lib/session.js resolveSession).
+  app: { type: String, enum: APPS, required: true },
 }, { timestamps: { createdAt: true, updatedAt: false } });
 
 sessionSchema.index({ tokenHash: 1 }, { unique: true });

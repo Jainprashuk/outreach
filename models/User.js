@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { APP, APPS } = require('../lib/apps');
 
 const userSchema = new mongoose.Schema({
   email: { type: String, required: true, lowercase: true, trim: true },
@@ -47,6 +48,12 @@ const userSchema = new mongoose.Schema({
   // An admin let this account use the owner's AI keys when it has none of its
   // own (lib/ai/keys.js). Off unless turned on; check `=== true`.
   aiOwnerFallback: { type: Boolean, default: false },
+
+  // Which products this account may sign in to — see lib/apps.js. The account
+  // store is shared with Clientline, so "an account exists" no longer means
+  // "an Outreach user": check hasApp(), and sweep with inApp(). Backfilled to
+  // ['outreach'] for every account that predates it (db.js).
+  apps: { type: [{ type: String, enum: APPS }], default: () => [APP], index: true },
 
   // invited  — an admin whitelisted the address; has never signed in
   // active   — has completed at least one sign-in
