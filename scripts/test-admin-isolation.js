@@ -113,7 +113,7 @@ async function main() {
   SECRETS = [SECRET_NAME, SECRET_COMPANY, SECRET_QUERY];
   const outsider = await users.insertOne({
     email: `admin-isolation-${Date.now()}@example.invalid`,
-    name: '', isAdmin: false, status: 'active',
+    name: '', isAdmin: false, status: 'active', apps: ['outreach'],
     createdAt: new Date(), updatedAt: new Date(),
     onboarding: { startedAt: null, completedAt: new Date(), step: 99, skipped: [], version: 1 },
   });

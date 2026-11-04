@@ -29,7 +29,7 @@ async function main() {
   const db = mongoose.connection.db;
   const email = `needs-answer-${Date.now()}@example.invalid`;
   const { insertedId: uid } = await db.collection('users').insertOne({
-    email, name: '', isAdmin: false, status: 'active', createdAt: new Date(), updatedAt: new Date(),
+    email, name: '', isAdmin: false, status: 'active', apps: ['outreach'], createdAt: new Date(), updatedAt: new Date(),
     onboarding: { startedAt: null, completedAt: new Date(), step: 99, skipped: [], version: 1 },
   });
   const Q_HISTORY = 'Do you have experience with Kubernetes in production?';

@@ -60,7 +60,7 @@ async function main() {
   // A scratch account with a pre-existing worker token, as if it ran on a Mac.
   const OLD_TOKEN = `wk_old_${Date.now()}`;
   const target = await users.insertOne({
-    email: `cloud-worker-${Date.now()}@example.invalid`, name: '', isAdmin: false, status: 'active',
+    email: `cloud-worker-${Date.now()}@example.invalid`, name: '', isAdmin: false, status: 'active', apps: ['outreach'],
     workerTokenHash: sha(OLD_TOKEN), createdAt: new Date(), updatedAt: new Date(),
     onboarding: { startedAt: null, completedAt: new Date(), step: 99, skipped: [], version: 1 },
   });

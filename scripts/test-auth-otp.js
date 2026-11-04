@@ -74,7 +74,8 @@ async function main() {
 
   const UNKNOWN = `nobody-${Date.now()}@example.invalid`;
   const DISABLED = `disabled-${Date.now()}@example.invalid`;
-  let disabledId = null;
+  const OTHER_APP = `clientline-only-${Date.now()}@example.invalid`;
+  let disabledId = null, otherAppId = null;
 
   console.log(`\nDatabase: ${db.databaseName}`);
   console.log(`Account:  ${EMAIL}\n`);
@@ -212,7 +213,7 @@ async function main() {
     // ── Disabled accounts ─────────────────────────────────────────────────
     console.log('\nA disabled account cannot sign in:');
     const ins = await users.insertOne({
-      email: DISABLED, name: '', isAdmin: false, status: 'disabled',
+      email: DISABLED, name: '', isAdmin: false, status: 'disabled', apps: ['outreach'],
       createdAt: new Date(), updatedAt: new Date(),
       onboarding: { startedAt: null, completedAt: null, step: 0, skipped: [], version: 0 },
     });
@@ -227,6 +228,36 @@ async function main() {
     const dRow = await codes.countDocuments({ email: DISABLED });
     dRow === 0 ? ok('no code row was written') : bad('a code was issued to a disabled account');
 
+    // ── Accounts are shared with Clientline ───────────────────────────────
+    console.log('\nAn account for the other app only is not registered here:');
+    otherAppId = (await users.insertOne({
+      email: OTHER_APP, name: '', isAdmin: false, status: 'active', apps: ['clientline'],
+      createdAt: new Date(), updatedAt: new Date(),
+      onboarding: { startedAt: null, completedAt: null, step: 0, skipped: [], version: 0 },
+    })).insertedId;
+    const oReq = await post('/api/auth/request-code', { email: OTHER_APP });
+    oReq.status === 404 && oReq.data.canRequestAccess === true
+      ? ok('request-code -> 404, offered the access request') : bad(`-> ${oReq.status} ${oReq.text}`);
+    (await codes.countDocuments({ email: OTHER_APP })) === 0 ? ok('no code row was written') : bad('a code was issued');
+    const oAsk = await post('/api/auth/request-access', { email: OTHER_APP });
+    oAsk.status === 200 ? ok('it can ask to join this app -> 200') : bad(`-> ${oAsk.status} ${oAsk.text}`);
+    const oRow = await requests.findOne({ email: OTHER_APP });
+    oRow && oRow.app === 'outreach' ? ok("the request is for 'outreach'") : bad(`request app: ${oRow && oRow.app}`);
+
+    console.log('\nA session only works in the app that issued it:');
+    const asSession = async (app) => {
+      const raw = crypto.randomBytes(32).toString('base64url');
+      await sessions.insertOne({
+        userId: account._id, app, createdAt: new Date(),
+        tokenHash: crypto.createHash('sha256').update(raw).digest('hex'),
+        expiresAt: new Date(Date.now() + 600000),
+      });
+      const res = await fetch(BASE + '/api/auth/session', { headers: { Cookie: `outreach_session=${raw}` } });
+      return (await res.json()).authenticated === true;
+    };
+    (await asSession('outreach')) ? ok('an outreach session -> signed in') : bad('an outreach session was refused');
+    !(await asSession('clientline')) ? ok('a clientline token in the outreach cookie -> refused') : bad('a clientline session signed in here');
+
     // ── Machine callers still work ────────────────────────────────────────
     console.log('\nMachine callers are unaffected:');
     const noCookie = await fetch(BASE + '/api/contacts');
@@ -236,9 +267,10 @@ async function main() {
     const sess = await fetch(BASE + '/api/auth/session');
     sess.status === 200 ? ok('/api/auth/session is still public') : bad(`-> ${sess.status}`);
   } finally {
-    await codes.deleteMany({ email: { $in: [UNKNOWN, DISABLED] } });
-    await requests.deleteMany({ email: { $in: [UNKNOWN, DISABLED] } });
+    await codes.deleteMany({ email: { $in: [UNKNOWN, DISABLED, OTHER_APP] } });
+    await requests.deleteMany({ email: { $in: [UNKNOWN, DISABLED, OTHER_APP] } });
     if (disabledId) await users.deleteOne({ _id: disabledId });
+    if (otherAppId) await users.deleteOne({ _id: otherAppId });
     await clearCodes(EMAIL);
     // The suite signs in several times; tidy up after itself.
     await sessions.deleteMany({ userId: account._id, createdAt: { $gt: new Date(Date.now() - 600000) } });

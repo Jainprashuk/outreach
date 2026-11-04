@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { APPS } = require('../lib/apps');
 
 /**
  * Somebody asking to be let in.
@@ -13,6 +14,9 @@ const mongoose = require('mongoose');
  */
 const accessRequestSchema = new mongoose.Schema({
   email: { type: String, required: true, lowercase: true, trim: true },
+  // The app they are asking to join. One row per address PER APP, so an
+  // Outreach user can still ask for Clientline.
+  app: { type: String, enum: APPS, required: true },
   name: { type: String, default: '' },
   // Free text from the requester: who they are, why they want in. Shown to the
   // admin, never rendered as HTML anywhere.
@@ -32,7 +36,9 @@ const accessRequestSchema = new mongoose.Schema({
   lastRequestedAt: { type: Date, default: Date.now },
 }, { timestamps: true });
 
-accessRequestSchema.index({ email: 1 }, { unique: true });
+// Was { email: 1 } before apps; scripts/migrate-apps.js drops that index —
+// mongoose builds this one but never removes the superseded one.
+accessRequestSchema.index({ email: 1, app: 1 }, { unique: true });
 accessRequestSchema.index({ status: 1, createdAt: -1 });
 accessRequestSchema.index({ requestIp: 1, createdAt: -1 });
 

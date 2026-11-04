@@ -77,7 +77,7 @@ async function main() {
   const SECRETS = [`ZZReplyText-${ts}`, `ZZThreadBody-${ts}`, `ZZNote-${ts}`, `ZZApplyNote-${ts}`];
   const now = new Date();
   const mkUser = (tag, extra = {}) => ({
-    email: `library-${tag}-${ts}@example.invalid`, name: `ZZ ${tag} ${ts}`, isAdmin: false, status: 'active',
+    email: `library-${tag}-${ts}@example.invalid`, name: `ZZ ${tag} ${ts}`, isAdmin: false, status: 'active', apps: ['outreach'],
     createdAt: now, updatedAt: now,
     onboarding: { startedAt: null, completedAt: now, step: 99, skipped: [], version: 1 },
     ...extra,

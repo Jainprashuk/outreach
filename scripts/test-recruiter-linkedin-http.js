@@ -21,7 +21,7 @@ const ok = (l, c, d = '') => { c ? pass++ : fail++; console.log((c ? '  ok   ' :
   const db = mongoose.connection.db;
   const email = `reclink-${Date.now()}@example.invalid`;
   const { insertedId: uid } = await db.collection('users').insertOne({
-    email, name: '', isAdmin: false, status: 'active', createdAt: new Date(), updatedAt: new Date(),
+    email, name: '', isAdmin: false, status: 'active', apps: ['outreach'], createdAt: new Date(), updatedAt: new Date(),
     onboarding: { startedAt: null, completedAt: new Date(), step: 99, skipped: [], version: 1 },
   });
   const jobIds = [];
