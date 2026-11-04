@@ -6,7 +6,7 @@
 #   node worker/platform-worker.js × $PLATFORMS
 #
 # Build from the repo root (the .dockerignore next to this file keeps the
-# context to the worker and the three lib files it requires):
+# context to the worker and the four lib files it requires):
 #   docker build -f deploy/cloud-worker/Dockerfile -t outreach-cw .
 #
 # Debian rather than Ubuntu on purpose: Ubuntu's chromium is a snap, which does
@@ -52,14 +52,14 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*; \
     cw-browser --version
 
-# Only what the workers load: the worker tree, the three lib files it requires,
+# Only what the workers load: the worker tree, the four lib files it requires,
 # and its two npm dependencies (versions pinned to the repo's lockfile).
 WORKDIR /app
 RUN printf '{"name":"outreach-cloud-worker","private":true}\n' > package.json \
  && npm install --omit=dev --no-audit --no-fund dotenv@16.6.1 playwright-core@1.63.0 \
  && npm cache clean --force
 COPY worker/ /app/worker/
-COPY lib/platforms.js lib/naukriFilters.js lib/naukriAnswers.js /app/lib/
+COPY lib/platforms.js lib/naukriFilters.js lib/naukriAnswers.js lib/jobStatus.js /app/lib/
 
 # noVNC: the screen link lands straight in the viewer, connected and scaled.
 RUN cp -r /usr/share/novnc /opt/novnc

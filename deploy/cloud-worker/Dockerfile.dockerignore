@@ -4,6 +4,7 @@
 !lib/platforms.js
 !lib/naukriFilters.js
 !lib/naukriAnswers.js
+!lib/jobStatus.js
 !deploy/cloud-worker/novnc-index.html
 !deploy/cloud-worker/chrome.sh
 !deploy/cloud-worker/chrome-debug.sh
