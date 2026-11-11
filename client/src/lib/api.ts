@@ -1999,9 +1999,9 @@ export interface JobsOverview {
 export type JobsOverviewRange = 'today' | 'yesterday' | '3d' | '7d' | '30d' | 'all';
 export const jobsOverviewApi = (range: JobsOverviewRange = '7d') => apiFetch<JobsOverview>(`${PB('all')}/jobs-overview?range=${range}`);
 
-/** The authorisation point: approving is what permits an application, and it queues the run. */
+/** The authorisation point: approving is what permits an application. The next scheduled run sends it. */
 export const decideNaukriJobsApi = (ids: string[], decision: NaukriApproval, reason?: string) =>
-  apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
+  apiFetch<{ updated: number }>(
     `${NB()}/jobs/decide`, { method: 'POST', body: JSON.stringify({ ids, decision, reason }) });
 
 /**

@@ -54,8 +54,7 @@ function trigger(o: NaukriOverview): { tone: 'ok' | 'warn'; text: string } {
   }
   return {
     tone: 'warn',
-    text: 'No schedule is set, so these will not run on their own. They run when you press Apply above, '
-        + 'or when you approve more jobs — approving queues a run.',
+    text: 'No schedule is set, so these will not run on their own. They run when you press Apply above.',
   };
 }
 

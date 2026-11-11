@@ -406,7 +406,7 @@ export default function Jobs() {
     if (stage === 'review') return (
       <>
         <button className="btn btn-xs btn-primary" type="button" disabled={busy}
-          onClick={() => act(() => decideNaukriJobsApi([j.id], 'approved'), 'Approved — queued to apply')}>Approve</button>
+          onClick={() => act(() => decideNaukriJobsApi([j.id], 'approved'), 'Approved — goes out on the next run')}>Approve</button>
         <button className="btn btn-xs" type="button" disabled={busy}
           onClick={() => act(() => decideNaukriJobsApi([j.id], 'rejected'), 'Rejected')}>Reject</button>
       </>

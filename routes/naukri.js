@@ -1777,7 +1777,7 @@ async function queueRun(userId, kind, trigger = 'manual', { sources = null, plat
   // apply. The shared Chrome is serialised on the Mac (worker/chrome-lock.js).
   const active = await NaukriRun.findOne({ userId, status: { $in: ACTIVE }, ...pq, ...BASE_FILTER }).lean();
   if (active) {
-    // An apply run queued by an approval while one is already pending is a
+    // An apply run queued while one is already pending is a
     // no-op, not an error: the pending run will pick up the new approvals when
     // it claims, because it reads them at claim time.
     if (kind === 'apply' && active.kind === 'apply') return { run: active, deduped: true };
@@ -2197,8 +2197,10 @@ router.post('/jobs/:id/recruiters/:key/linkedin', async (req, res) => {
 });
 
 // POST /api/naukri/jobs/decide — THE authorisation point. Approving is the only
-// thing in this system that permits an application to be sent, which is why it
-// also queues the apply run rather than leaving that to a schedule.
+// thing in this system that permits an application to be sent. It does not start
+// a run: approved jobs wait for the next scheduled apply run, so a day of
+// approvals goes out together. Waiting → "Send now" (bulk apply-next) is the
+// way to apply at once.
 router.post('/jobs/decide', async (req, res) => {
   try {
     const { ids, decision, reason } = req.body || {};
@@ -2218,22 +2220,12 @@ router.post('/jobs/decide', async (req, res) => {
       { $set: update }
     );
 
-    let queuedRun = null;
     if (decision === 'approved' && result.modifiedCount > 0) {
       // Recruiter LinkedIn lookups, when the user ticked "approved" (never throws).
       await recruiterLinkedin.queueIfWanted(req.userId, 'approved', ids.slice(0, 100));
-      // One apply run per platform the approved jobs are on (the All view can
-      // approve across platforms in one go). A platform with apply off just
-      // keeps them in Waiting — that is not an error worth showing.
-      const runs = await queueApplyFor(req.userId, ids.slice(0, 500));
-      // A queue failure here must not lose the approvals — they are saved, and
-      // the reason is reported so the UI can explain why nothing started.
-      const first = runs[0] || null;
-      queuedRun = first ? (first.error ? { error: first.error } : first.run) : null;
-      return res.json({ updated: result.modifiedCount, run: queuedRun, runs });
     }
 
-    res.json({ updated: result.modifiedCount, run: queuedRun });
+    res.json({ updated: result.modifiedCount });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

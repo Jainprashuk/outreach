@@ -201,17 +201,11 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
       // "Approve anyway": the apply-time duplicate skip must leave it alone too.
       if (anyway) await bulkNaukriJobsApi(ids, 'allow-duplicate');
       const r = await decideNaukriJobsApi(ids, decision);
-      // Approving queues the apply run server-side, and that can be refused
-      // (paused, blocked, one already active). Say so — the approvals are saved
-      // either way, and silence would read as "nothing sent".
-      const runErr = r.run && 'error' in r.run ? r.run.error : null;
       const text = decision === 'approved'
-        ? runErr
-          ? `Approved ${r.updated}, but the apply run did not start: ${runErr}`
-          : `Approved ${r.updated} — apply run queued.`
+        ? `Approved ${r.updated}. They go out on the next scheduled run.`
         : `Rejected ${r.updated}.`;
       const full = kept ? `${text} Kept ${kept} in the inbox: already applied or approved on another platform.` : text;
-      if (ids.length > 1 || runErr || kept) toast(full, decision === 'approved' && runErr ? 'error' : 'success');
+      if (ids.length > 1 || kept) toast(full, 'success');
       setMsg(full);
       // Out of the list at once, so the keyboard flow never waits on a reload.
       const gone = new Set(ids);
