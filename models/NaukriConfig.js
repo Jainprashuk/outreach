@@ -168,7 +168,9 @@ const siteSchemaFor = (id) => new mongoose.Schema({
 });
 
 const naukriConfigSchema = new mongoose.Schema({
-  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', index: true, default: null },
+  // Unique: one config per user. A racing getForUser once created two, and
+  // findOne({ userId }) then read whichever came back first.
+  userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User', unique: true, default: null },
 
   // ── job platforms ──────────────────────────────────────────────────────────
   // Naukri's own on/off and apply mode. `enabled` defaults on and `applyMode`
@@ -254,6 +256,17 @@ const naukriConfigSchema = new mongoose.Schema({
     // Which Recommended-jobs tabs to read: apply (similar to your applies),
     // profile, preference, similar_jobs ("You might like"). Empty = all.
     recommendedTabs: { type: [String], default: ['apply', 'profile', 'preference', 'similar_jobs'] },
+  },
+
+  // Company keys (lib/jobFloods.js) you said are not flooding the inbox, so the
+  // review screen stops grouping them. Shared across platforms.
+  floodIgnore: { type: [String], default: [] },
+  // When a company counts as flooding the inbox: this many waiting listings,
+  // or one role posted as this many separate listings in as many cities.
+  floodRules: {
+    enabled:   { type: Boolean, default: true },
+    minJobs:   { type: Number, default: 8, min: 3, max: 100 },
+    minCities: { type: Number, default: 3, min: 2, max: 50 },
   },
 
   // ── filters, applied before anything reaches the review queue ──────────────
@@ -356,9 +369,15 @@ const naukriConfigSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 naukriConfigSchema.statics.getForUser = async function (userId) {
-  let doc = await this.findOne({ userId });
-  if (!doc) doc = await this.create({ userId });
-  return doc;
+  const doc = await this.findOne({ userId });
+  if (doc) return doc;
+  try {
+    return await this.create({ userId });
+  } catch (err) {
+    // Lost the race to a concurrent first call; the unique index kept it to one.
+    if (err.code === 11000) return this.findOne({ userId });
+    throw err;
+  }
 };
 
 // Never ship the resume bytes to the client — the config endpoint is polled.

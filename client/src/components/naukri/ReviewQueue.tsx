@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshBar, Refreshing } from '../RefreshBar';
-import type { NaukriJob } from '../../lib/api';
-import { listNaukriJobsApi, decideNaukriJobsApi, bulkNaukriJobsApi } from '../../lib/api';
+import type { NaukriJob, JobFlood } from '../../lib/api';
+import { listNaukriJobsApi, decideNaukriJobsApi, bulkNaukriJobsApi, listJobFloodsApi, blockJobFloodApi, ignoreJobFloodApi } from '../../lib/api';
 import { Card, Muted, Hint, Empty } from './ui';
 import JobFilters, { EMPTY, toQuery, activeCount, type Draft } from './JobFilters';
 import HoverCard from '../HoverCard';
@@ -129,6 +129,45 @@ function Row({ job, selected, focused, busy, onToggle, onDecide, onFocus, onRest
   );
 }
 
+// A company flooding the inbox (lib/jobFloods.js), shown once instead of as
+// dozens of rows: its jobs are left out of the list below until you decide.
+function FloodCard({ flood, busy, onBlock, onReview, onIgnore }: {
+  flood: JobFlood; busy: boolean; onBlock: () => void; onReview: () => void; onIgnore: () => void;
+}) {
+  const r = flood.repeatedRole;
+  return (
+    <div style={{
+      display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap',
+      padding: '9px 10px', marginBottom: 8, border: '1px solid var(--border)', borderRadius: 'var(--radius)', background: 'var(--bg2)',
+    }}>
+      <i className="ti ti-copy" style={{ color: 'var(--text2)' }} />
+      <div style={{ flex: 1, minWidth: 220 }}>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>
+          {flood.company} posted {flood.count} jobs
+        </div>
+        <div style={{ color: 'var(--text2)', fontSize: 12, marginTop: 2 }}>
+          {flood.roles} different {flood.roles === 1 ? 'role' : 'roles'} across {flood.cities} {flood.cities === 1 ? 'city' : 'cities'}
+          {r && <> · “{r.title}” alone in {r.cities} cities</>}
+          {flood.names.length > 1 && <> · under {flood.names.length} spellings of the name</>}
+        </div>
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+        <button className="btn btn-xs" type="button" disabled={busy} onClick={onIgnore}
+          title="Stop grouping this company — its jobs go back into the list">
+          Not spam
+        </button>
+        <button className="btn btn-xs" type="button" disabled={busy} onClick={onReview}>
+          <i className="ti ti-list" /> Review them
+        </button>
+        <button className="btn btn-xs btn-primary" type="button" disabled={busy} onClick={onBlock}
+          title="Add to your company blocklist so future harvests drop it, and clear these jobs (Show tidied can restore them)">
+          <i className="ti ti-ban" /> Block company
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
   const [jobs, setJobs] = useState<NaukriJob[]>([]);
   const [total, setTotal] = useState(0);
@@ -151,13 +190,20 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
   // A single approve of a duplicate waits on "Approve anyway".
   const [confirmDup, setConfirmDup] = useState<NaukriJob | null>(null);
   const { label: here } = usePlatform();
+  const [floods, setFloods] = useState<JobFlood[]>([]);
 
   const load = useCallback(async (d: Draft, p: number) => {
     setLoading(true);
     try {
-      const r = await listNaukriJobsApi(tidiedView
-        ? { tidied: '1', limit: PAGE, page: p, ...toQuery(d) }
-        : { approval: 'pending', limit: PAGE, page: p, ...toQuery(d) });
+      // A search shows everything it matches, flooding companies included —
+      // that is how "Review them" lists one company's jobs.
+      const [r, f] = await Promise.all([
+        listNaukriJobsApi(tidiedView
+          ? { tidied: '1', limit: PAGE, page: p, ...toQuery(d) }
+          : { approval: 'pending', limit: PAGE, page: p, ...(d.q ? {} : { hideFloods: '1' as const }), ...toQuery(d) }),
+        tidiedView || d.q ? Promise.resolve({ floods: [] }) : listJobFloodsApi(),
+      ]);
+      setFloods(f.floods);
       // Past the last page (everything after it was decided): go back to page 1.
       if (!r.jobs.length && p > 1) { setPage(1); return; }
       setJobs(r.jobs); setTotal(r.total); setPages(Math.max(1, r.pages)); setTruncated(!!r.truncated); setTypeCounts(r.typeCounts); setOriginCounts(r.originCounts);
@@ -252,6 +298,25 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
     finally { setBusy(false); }
   };
 
+  const block = async (f: JobFlood) => {
+    setBusy(true);
+    try {
+      const r = await blockJobFloodApi(f.key);
+      toast(`Blocked ${f.company}: cleared ${r.rejected} from the inbox, and future harvests will drop it.`, 'success');
+      load(draft, page); onChanged();
+    } catch (e: any) { toast(e?.message || 'Could not block the company', 'error'); }
+    finally { setBusy(false); }
+  };
+
+  const ignore = async (f: JobFlood) => {
+    setBusy(true);
+    try {
+      await ignoreJobFloodApi(f.key);
+      load(draft, page);
+    } catch (e: any) { toast(e?.message || 'Could not save that', 'error'); }
+    finally { setBusy(false); }
+  };
+
   const allSelected = jobs.length > 0 && sel.size === jobs.length;
   const filtered = activeCount(draft) > 0;
   const atOrAbove = jobs.filter(j => (j.score ?? -1) >= minScore && !j.likelyExternal && !blocksApprove(j));
@@ -271,9 +336,15 @@ export default function ReviewQueue({ onChanged }: { onChanged: () => void }) {
         {tidiedView && <Muted>Jobs the inbox tidy cleared away (Configuration → Filters). Restore puts one back for good.</Muted>}
       </div>
 
+      {floods.map(f => (
+        <FloodCard key={f.key} flood={f} busy={busy}
+          onBlock={() => block(f)} onIgnore={() => ignore(f)}
+          onReview={() => changeDraft({ ...draft, q: f.names.reduce((a, b) => (b.length < a.length ? b : a)) })} />
+      ))}
+
       {loading && !jobs.length ? <Empty icon="ti-loader">Loading…</Empty> : <RefreshBar active={loading} />}
 
-      {!loading && !jobs.length && (
+      {!loading && !jobs.length && !floods.length && (
         filtered
           ? <Empty icon="ti-search-off">No jobs match these filters. Clear them to see the rest of the inbox.</Empty>
           : <Empty icon="ti-checklist">Inbox empty. New listings land here after each harvest.</Empty>

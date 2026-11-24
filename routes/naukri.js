@@ -27,6 +27,7 @@ const {
   kindBlocked, isEnabled, publicRegistry, PLATFORM_IDS, SITE_FIELDS,
 } = require('../lib/platforms');
 const { dupKeyOf, dupesFor, dupText, blocksAuto, blocksApply } = require('../lib/jobDupes');
+const { findFloods, blockTermsFor } = require('../lib/jobFloods');
 const { recruitersFor, MAX_RECRUITERS } = require('../lib/recruiterContacts');
 const recruiterLinkedin = require('../lib/recruiterLinkedin');
 
@@ -58,7 +59,7 @@ const ALL_OK = new Set([
   'GET /config', 'PATCH /config', 'POST /resume', 'DELETE /resume',
 ]);
 // What the All view's PATCH /config may change: settings every platform shares.
-const SHARED_KEYS = new Set(['profile', 'answers', 'autoAnswer', 'aiDrafts', 'onUnknownQuestion', 'resumeText', 'duplicates', 'crossPlatformOrder']);
+const SHARED_KEYS = new Set(['profile', 'answers', 'autoAnswer', 'aiDrafts', 'onUnknownQuestion', 'resumeText', 'duplicates', 'crossPlatformOrder', 'floodRules']);
 // A row with its platform, for rows from before the field existed.
 const PQ = (req) => platformQuery(req.platform);
 const LABEL = (req) => labelOf(req.platform === 'all' ? 'naukri' : req.platform);
@@ -298,6 +299,26 @@ const scheduleView = (schedule) => {
     upcoming: upcomingSlots(schedule, now, 5).map(o => ({ at: o.at, kinds: o.kinds })),
   };
 };
+
+// ── Inbox floods ───────────────────────────────────────────────────────────
+// Companies flooding the review queue (lib/jobFloods.js), worked out from the
+// pending inbox in this platform's scope.
+async function inboxFloods(req) {
+  const [rows, cfg] = await Promise.all([
+    NaukriJob.find(
+      { userId: req.userId, approval: 'pending', applyStatus: 'none', ...PQ(req), ...BASE_FILTER },
+      { company: 1, title: 1, location: 1, platform: 1 },
+    ).lean(),
+    NaukriConfig.findOne({ userId: req.userId }, { floodIgnore: 1, floodRules: 1 }).lean(),
+  ]);
+  const rules = (cfg && cfg.floodRules) || {};
+  if (rules.enabled === false) return [];
+  return findFloods(rows, {
+    ignore: (cfg && cfg.floodIgnore) || [],
+    ...(rules.minJobs ? { minJobs: rules.minJobs } : {}),
+    ...(rules.minCities ? { minCities: rules.minCities } : {}),
+  });
+}
 
 // ── Inbox tidy ─────────────────────────────────────────────────────────────
 // Clears jobs nobody will apply to out of the review queue, by the rules in
@@ -926,6 +947,13 @@ router.patch('/config', async (req, res) => {
       if (t.minScore !== undefined) site.inboxTidy.minScore = num(t.minScore, { min: 0, max: 100, integer: true }) ?? site.inboxTidy.minScore;
       if (t.companySite !== undefined) site.inboxTidy.companySite = !!t.companySite;
       tidyChanged = true;
+    }
+    if (body.floodRules) {
+      const r = body.floodRules;
+      if (!config.floodRules) config.floodRules = {};
+      if (r.enabled !== undefined) config.floodRules.enabled = !!r.enabled;
+      if (r.minJobs !== undefined) config.floodRules.minJobs = num(r.minJobs, { min: 3, max: 100, integer: true }) ?? 8;
+      if (r.minCities !== undefined) config.floodRules.minCities = num(r.minCities, { min: 2, max: 50, integer: true }) ?? 3;
     }
     if (body.resumeText !== undefined) {
       config.resume.text = str(body.resumeText, 20000);
@@ -1969,6 +1997,12 @@ router.get('/jobs', async (req, res) => {
       const r = rx(req.query.q);
       filter.$or = [{ title: r }, { company: r }, { tags: r }];
     }
+    // The review list leaves out companies flooding the inbox: they are shown
+    // once, as a card above it (GET /jobs/floods), instead of row after row.
+    if (req.query.hideFloods === '1') {
+      const ids = (await inboxFloods(req)).flatMap(f => f.ids);
+      if (ids.length) filter._id = { $nin: ids.map(id => new mongoose.Types.ObjectId(id)) };
+    }
     // Which kind of apply. `external` means the employer has been seen handing
     // off to their own site before; `native` means they have not — a prediction,
     // not a guarantee, which is why the UI never calls it "will apply".
@@ -2377,6 +2411,61 @@ router.post('/jobs/clear-unapplied', async (req, res) => {
       $or: [{ approval: 'pending', applyStatus: { $in: ['none', 'failed'] } }, WAITING_FILTER],
     });
     res.json({ deleted: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/naukri/jobs/floods — companies flooding the review queue, one entry
+// each, for the card above the inbox.
+router.get('/jobs/floods', async (req, res) => {
+  try {
+    const floods = await inboxFloods(req);
+    res.json({ floods: floods.map(({ ids, ...f }) => f) });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/naukri/jobs/floods/:key/block — "Block this company": adds it to
+// the blocklist of every platform it flooded, so the next harvest drops it
+// before it reaches the inbox, and clears what is already waiting. Cleared the
+// way the inbox tidy clears, so Show tidied → Restore can bring one back.
+router.post('/jobs/floods/:key/block', async (req, res) => {
+  try {
+    const flood = (await inboxFloods(req)).find(f => f.key === req.params.key);
+    if (!flood) return res.status(404).json({ error: 'That company is no longer flooding the inbox' });
+
+    const config = await NaukriConfig.getForUser(req.userId);
+    const terms = blockTermsFor(flood.names);
+    for (const p of flood.platforms) {
+      const f = siteOf(config, p).filters;
+      const have = new Set((f.companyExclude || []).map(t => String(t).toLowerCase()));
+      f.companyExclude = [...(f.companyExclude || []), ...terms.filter(t => !have.has(t))];
+    }
+    config.markModified('platforms');
+    await config.save();
+
+    const now = new Date();
+    const why = 'company is on your blocklist';
+    const result = await NaukriJob.updateMany(
+      { _id: { $in: flood.ids }, userId: req.userId, approval: 'pending', applyStatus: 'none', ...BASE_FILTER },
+      { $set: { approval: 'rejected', rejectedReason: `Tidied: ${why}`, tidiedAt: now, tidyReason: why } },
+    );
+    res.json({ blocked: terms, rejected: result.modifiedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/naukri/jobs/floods/:key/ignore — "Not spam": stop grouping this
+// company; its jobs go back to being ordinary rows in the inbox.
+router.post('/jobs/floods/:key/ignore', async (req, res) => {
+  try {
+    const key = str(req.params.key, 200);
+    if (!key) return res.status(400).json({ error: 'key is required' });
+    await NaukriConfig.updateOne({ userId: req.userId }, { $addToSet: { floodIgnore: key } });
+    res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

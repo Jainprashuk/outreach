@@ -22,6 +22,8 @@ export default function FiltersCard({ config, onSaved }: {
   const [f, setF] = useState<NaukriFilters>(config.filters);
   // Inbox tidy: clears jobs waiting for review that nobody will apply to.
   const [tidy, setTidy] = useState(config.inboxTidy || { enabled: false, maxAgeDays: 21, minScore: 40, companySite: false });
+  // Flood grouping: one card in Review for a company posting the same roles city by city.
+  const [flood, setFlood] = useState({ enabled: true, minJobs: 8, minCities: 3, ...config.floodRules });
   const toast = useToast();
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
@@ -46,7 +48,7 @@ export default function FiltersCard({ config, onSaved }: {
   const save = async () => {
     setSaving(true); setMsg('');
     try {
-      const r = await updateNaukriConfigApi({ filters: f, inboxTidy: tidy });
+      const r = await updateNaukriConfigApi({ filters: f, inboxTidy: tidy, floodRules: flood });
       const text = r.tidied ? `Saved — ${r.tidied} job${r.tidied === 1 ? '' : 's'} tidied out of the inbox.` : 'Saved.';
       toast(text, 'success'); setMsg(text); onSaved();
     }
@@ -147,6 +149,29 @@ export default function FiltersCard({ config, onSaved }: {
               <input type="checkbox" checked={tidy.companySite} onChange={e => setTidy(t => ({ ...t, companySite: e.target.checked }))} />
               Applies on the company site
             </label>
+          </div>
+        )}
+      </div>
+
+      <div style={{ borderTop: '1px solid var(--border)', margin: '12px 0', paddingTop: 12 }}>
+        <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 13 }}>
+          <input type="checkbox" checked={flood.enabled} style={{ marginTop: 3 }}
+            onChange={e => setFlood(x => ({ ...x, enabled: e.target.checked }))} />
+          <span>
+            Group companies flooding the inbox
+            <div style={{ color: 'var(--text2)', fontSize: 11 }}>
+              A company posting the same roles city by city shows up in the Inbox as one card, with Block company,
+              Review them and Not spam, instead of dozens of rows. Nothing is rejected until you choose. Applies to
+              every platform.
+            </div>
+          </span>
+        </label>
+        {flood.enabled && (
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', alignItems: 'center', fontSize: 13, margin: '8px 0 0 23px' }}>
+            <span><input type="number" min={3} max={100} value={flood.minJobs} style={{ width: 64 }}
+              onChange={e => setFlood(x => ({ ...x, minJobs: Number(e.target.value) }))} /> or more jobs waiting</span>
+            <span>or one role in <input type="number" min={2} max={50} value={flood.minCities} style={{ width: 64 }}
+              onChange={e => setFlood(x => ({ ...x, minCities: Number(e.target.value) }))} /> or more cities</span>
           </div>
         )}
       </div>

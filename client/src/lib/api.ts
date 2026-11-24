@@ -1584,6 +1584,9 @@ export interface NaukriSlot { time: string; runRefresh: boolean; runHarvest: boo
 
 export interface NaukriInboxTidy { enabled: boolean; maxAgeDays: number; minScore: number; companySite: boolean }
 
+/** When a company counts as flooding the inbox (lib/jobFloods.js). Shared across platforms. */
+export interface NaukriFloodRules { enabled: boolean; minJobs: number; minCities: number }
+
 export interface NaukriStageTally { sent: number; viewed: number; shortlisted: number; contacted: number; notShortlisted: number }
 
 export interface NaukriResults extends NaukriStageTally {
@@ -1661,6 +1664,8 @@ export interface NaukriConfig {
   autoAnswer: { enabled: boolean; minConfidence: number };
   /** Clear old / poor-fit / company-site jobs out of the inbox automatically. */
   inboxTidy: NaukriInboxTidy;
+  /** Group a company flooding the inbox into one card in Review. Missing on configs saved before it existed. */
+  floodRules?: NaukriFloodRules;
   filters: NaukriFilters;
   profile: NaukriProfileFields;
   answers: NaukriAnswer[];
@@ -1716,13 +1721,13 @@ export interface NaukriOverview {
   reviewCount: number;
   /** Skipped on a screening question that has no rule yet, plus applied jobs' open questionnaires. */
   needsAnswerCount: number;
+  /** Applied jobs whose post-apply questionnaire waits on a question (Cutshort) — part of needsAnswerCount. */
+  questionnaireOpenCount?: number;
   /** Outcomes of the last 7 days. */
   week: { applied: number; skipped: number; failed: number };
   perRun: number;
   perDay: number;
   /** The default harvest sources, for the Harvest menu's tick. */
-  /** Applied jobs whose post-apply questionnaire waits on a question (Cutshort) — part of needsAnswerCount. */
-  questionnaireOpenCount?: number;
   sources: NaukriSources;
   /** What still needs setting up — each item names the card that fixes it. */
   setup: { items: NaukriSetupItem[]; done: number; total: number } | null;
@@ -1929,6 +1934,8 @@ export interface NaukriJobQuery {
   origin?: 'search' | 'recommended';
   /** '1' = only jobs the inbox tidy cleared away. */
   tidied?: '1';
+  /** '1' = leave out companies flooding the inbox (shown as cards instead). */
+  hideFloods?: '1';
   /** Applied only: by what the recruiter did. 'none' = no action seen yet. */
   stage?: 'none' | 'viewed' | 'shortlisted' | 'contacted' | 'not-shortlisted';
   page?: number;
@@ -2017,6 +2024,28 @@ export const bulkNaukriJobsApi = (
   reason?: string,
 ) => apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
   `${NB()}/jobs/bulk`, { method: 'POST', body: JSON.stringify({ ids, action, reason }) });
+
+/** One company flooding the review queue: many listings, or one role in many cities (lib/jobFloods.js). */
+export interface JobFlood {
+  key: string;
+  company: string;
+  names: string[];
+  platforms: string[];
+  count: number;
+  roles: number;
+  cities: number;
+  repeatedRole: { title: string; cities: number } | null;
+}
+
+export const listJobFloodsApi = () => apiFetch<{ floods: JobFlood[] }>(`${NB()}/jobs/floods`);
+
+/** Blocklist the company on every platform it flooded, and clear its waiting jobs (restorable from Show tidied). */
+export const blockJobFloodApi = (key: string) =>
+  apiFetch<{ blocked: string[]; rejected: number }>(`${NB()}/jobs/floods/${encodeURIComponent(key)}/block`, { method: 'POST' });
+
+/** "Not spam": stop grouping this company. */
+export const ignoreJobFloodApi = (key: string) =>
+  apiFetch<{ ok: true }>(`${NB()}/jobs/floods/${encodeURIComponent(key)}/ignore`, { method: 'POST' });
 
 /** Delete every job on this platform not yet tried (inbox + Waiting); the next harvest brings back what is still listed. */
 export const clearUnappliedNaukriJobsApi = () =>
