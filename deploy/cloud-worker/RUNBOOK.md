@@ -16,7 +16,7 @@ How it is built is in `README.md` next to this file.
 | Domain / DNS | `jainprashuk.in` on Cloudflare (nameservers `alfred` / `ariadne`), registered at Hostinger |
 | Zero Trust team | `divine-wildflower-0fea` — login methods: One-time PIN, Cloudflare |
 | Tunnel | `outreach-cw` (id `899b0efa-eebb-4c0e-b60b-3d6f14d9ef5b`) |
-| Portal | `https://outreach.jainprashuk.in` — container `outreach-web` on this VM (see **Portal**) |
+| Portal | `https://outreach-new.jainprashuk.in` — container `outreach-web` on this VM (see **Portal**). `outreach.jainprashuk.in` is retired (no DNS record) |
 | Code on the VM | `/opt/outreach`, tracks `main`, read-only deploy key `oracle-cw` |
 | Per-user data | `/srv/cw/<user>/` (Chrome profile, logs), `/srv/cw/<user>.env` (token) |
 | Admin tool | `cw` (`/usr/local/bin/cw` → `/opt/outreach/deploy/cloud-worker/cw`) |
@@ -191,23 +191,19 @@ or `cw rm` rewrites the tunnel config and would drop it.
 then fix forward on `main` (the next deploy pulls `main` again — `git checkout main` first).
 
 **What needs to be in `web.env`:** the local `.env` minus `INNGEST_DEV`, with
-`NODE_ENV=prod`, `OUTREACH_URL=https://outreach.jainprashuk.in`,
+`NODE_ENV=prod`, `OUTREACH_URL=https://outreach-new.jainprashuk.in`,
 `INNGEST_SIGNING_KEY` / `INNGEST_EVENT_KEY` from the Inngest dashboard, and
 `CRON_SECRET` equal to the GitHub repo secret. `CREDENTIAL_KEY` must never change:
 `node scripts/check-credential-key.js` confirms it still decrypts stored Gmail logins.
 
-**Switching the domain from Vercel to here** (Vercel stays primary until it blocks the project):
-1. `ssh cw 'sudo cw web deploy && sudo cw web host-add outreach.jainprashuk.in --replace'` —
-   repoints the record in place (never delete it first: resolvers cache the gap for ~30 min).
-2. Inngest dashboard → app → **Resync** `https://outreach.jainprashuk.in/api/inngest`; one app listed.
-3. GitHub → repo secrets: `CRON_SECRET` = the value in `/srv/cw/web.env`; `VERCEL_APP_URL` =
-   `https://outreach.jainprashuk.in`; `VM_HOST` = the VM IP; `VM_SSH_KEY` = `~/.ssh/outreach_gh_deploy`
-   on the Mac (deploy-only: its authorized_keys entry forces `cw web deploy`).
-4. Actions → run "Release campaign batches" and "Auto check mailbox" → both HTTP 200.
-5. Check `curl -sI https://outreach.jainprashuk.in/login` has no `x-vercel-id`; `cw web logs` shows traffic.
+**Changing the portal's address** (as on 2026-11-24, outreach → outreach-new):
+`sudo cw web host-add <new>`, set `OUTREACH_URL` in `/srv/cw/web.env` + `sudo cw web start`,
+`sudo cw web url https://<new>` (cloud workers), Mac `.env` `OUTREACH_URL` (LinkedIn worker),
+Inngest **Resync** to `https://<new>/api/inngest`, GitHub secret `VERCEL_APP_URL` = `https://<new>`.
+Sessions are per hostname, so everyone signs in once on the new address.
 
 **Inngest:** one app (`INNGEST_APP_ID`, default `outreach-app`), synced to
-`https://outreach.jainprashuk.in/api/inngest`. After changing that URL, click
+`https://outreach-new.jainprashuk.in/api/inngest`. After changing that URL, click
 **Resync** in the Inngest dashboard and confirm exactly one app is listed.
 
 ---
