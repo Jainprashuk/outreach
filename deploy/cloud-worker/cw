@@ -13,6 +13,8 @@
 #                                      (both wait for a running job to finish unless --now)
 #   sudo cw web start|deploy|logs|host-add <name> [--replace]|host-rm <name>|url <url>
 #                                      the portal itself (server.js) — see `cw web`
+#   sudo cw site add <host> <port> [--replace] | rm <host> | list
+#                                      route any other hostname to a local port
 #   sudo cw logs-ui on|off             live logs of every container in the browser at
 #                                      https://logs.<zone>, behind Cloudflare Access
 #
@@ -36,6 +38,7 @@ WEB="$STATE/web.json"
 WEB_ENV="$STATE/web.env"
 WEB_PORT=3000
 LOGS="$STATE/logs.json"
+SITES="$STATE/sites.json"
 LOGS_PORT=6090
 LOGS_IMAGE=amir20/dozzle:v11.4.2
 IMAGE=outreach-cw:latest
@@ -80,12 +83,13 @@ host_of() { echo "screen-$1.$CF_ZONE"; }
 # whole list, so a route added by hand in the dashboard is wiped — add hosts
 # with cw web host-add / cw logs-ui on.
 push_ingress() {
-  local rules web='{"hosts":[]}' logs='{}'
+  local rules web='{"hosts":[]}' logs='{}' sites='{"sites":[]}'
   [ -f "$WEB" ] && web="$(cat "$WEB")"
   [ -f "$LOGS" ] && logs="$(cat "$LOGS")"
+  [ -f "$SITES" ] && sites="$(cat "$SITES")"
   rules="$(jq -c --arg zone "$CF_ZONE" --argjson web "$web" --arg wsvc "http://localhost:$WEB_PORT" \
-    --argjson logs "$logs" --arg lsvc "http://localhost:$LOGS_PORT" \
-    '[$web.hosts[] | {hostname: ., service: $wsvc}] + [$logs.host // empty | {hostname: ., service: $lsvc}] + [.users[] | {hostname: ("screen-" + .user + "." + $zone), service: ("http://localhost:" + (.port|tostring))}] + [{service: "http_status:404"}]' "$USERS")"
+    --argjson logs "$logs" --arg lsvc "http://localhost:$LOGS_PORT" --argjson sites "$sites" \
+    '[$web.hosts[] | {hostname: ., service: $wsvc}] + [$logs.host // empty | {hostname: ., service: $lsvc}] + [$sites.sites[] | {hostname: .host, service: ("http://localhost:" + (.port|tostring))}] + [.users[] | {hostname: ("screen-" + .user + "." + $zone), service: ("http://localhost:" + (.port|tostring))}] + [{service: "http_status:404"}]' "$USERS")"
   cf PUT "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/configurations" "{\"config\":{\"ingress\":$rules}}" >/dev/null
 }
 
@@ -508,6 +512,50 @@ cmd_web() {
   esac
 }
 
+# ── other sites on this box ─────────────────────────────────────────────────
+# Any hostname → a local port, through the same tunnel (the portfolio and its
+# API moved here when Vercel paused the account, 2026-11-24). The containers
+# themselves are run by hand; see RUNBOOK → Other sites.
+cmd_site() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    add)
+      need_root site; need_setup; load_cf
+      local host="${1:-}" port="${2:-}" replace="${3:-}" existing id type content rec tmp
+      [[ "$host" == "$CF_ZONE" || "$host" == *".$CF_ZONE" ]] && [[ "$port" =~ ^[0-9]+$ ]] \
+        || die "Usage: sudo cw site add <host>.$CF_ZONE <port> [--replace]"
+      existing="$(cf GET "/zones/$CF_ZONE_ID/dns_records?name=$host")"
+      id="$(jq -r '[.[] | select(.type=="A" or .type=="AAAA" or .type=="CNAME")][0].id // empty' <<<"$existing")"
+      type="$(jq -r '[.[] | select(.type=="A" or .type=="AAAA" or .type=="CNAME")][0].type // empty' <<<"$existing")"
+      content="$(jq -r '[.[] | select(.type=="A" or .type=="AAAA" or .type=="CNAME")][0].content // empty' <<<"$existing")"
+      if [ -n "$type" ] && [ "$content" != "$CF_TUNNEL_ID.cfargotunnel.com" ] && [ "$replace" != "--replace" ]; then
+        die "$host already has a $type record → $content. Rerun with --replace to point it here in place."
+      fi
+      [ -f "$SITES" ] || echo '{"sites":[]}' > "$SITES"
+      tmp="$(mktemp)"; jq --arg h "$host" --argjson p "$port" '.sites |= (map(select(.host != $h)) + [{host:$h, port:$p}])' "$SITES" > "$tmp" && mv "$tmp" "$SITES"
+      push_ingress   # route first, so the record never points at a tunnel that 404s it
+      rec="{\"type\":\"CNAME\",\"name\":\"$host\",\"content\":\"$CF_TUNNEL_ID.cfargotunnel.com\",\"proxied\":true,\"comment\":\"cw site → :$port\"}"
+      if [ -z "$type" ]; then cf POST "/zones/$CF_ZONE_ID/dns_records" "$rec" >/dev/null
+      elif [ "$content" != "$CF_TUNNEL_ID.cfargotunnel.com" ]; then
+        cf PUT "/zones/$CF_ZONE_ID/dns_records/$id" "$rec" >/dev/null
+        say "Replaced $type → $content (to go back: point it there again)"
+      fi
+      say "https://$host → 127.0.0.1:$port" ;;
+    rm)
+      need_root site; need_setup; load_cf
+      local host="${1:-}" id tmp
+      [ -n "$host" ] || die "Usage: sudo cw site rm <host>"
+      [ -f "$SITES" ] && { tmp="$(mktemp)"; jq --arg h "$host" '.sites |= map(select(.host != $h))' "$SITES" > "$tmp" && mv "$tmp" "$SITES"; }
+      push_ingress
+      id="$(cf GET "/zones/$CF_ZONE_ID/dns_records?type=CNAME&name=$host&content=$CF_TUNNEL_ID.cfargotunnel.com" | jq -r '.[0].id // empty')"
+      [ -n "$id" ] && cf DELETE "/zones/$CF_ZONE_ID/dns_records/$id" >/dev/null
+      say "Removed $host." ;;
+    list)
+      [ -f "$SITES" ] && jq -r '.sites[] | "\(.host)\t127.0.0.1:\(.port)"' "$SITES" || echo "No sites." ;;
+    *) die "Usage: sudo cw site add <host> <port> [--replace] | rm <host> | list" ;;
+  esac
+}
+
 # ── the logs page ───────────────────────────────────────────────────────────
 # Dozzle: a read-only web view of `docker logs` for every container here (no
 # shell, no start/stop — both are off by default and stay off). Order matters
@@ -572,7 +620,7 @@ set -- $(for a in "$@"; do [ "$a" = "--now" ] || printf '%s ' "$a"; done)
 # Everything here reads root-only state (/srv/cw, the Docker socket), so the
 # read-only commands re-run themselves under sudo instead of failing.
 case "${1:-}" in
-  list|stats|logs|web) [ "$(id -u)" -eq 0 ] || exec sudo "$SELF" "$@" ;;
+  list|stats|logs|web|site) [ "$(id -u)" -eq 0 ] || exec sudo "$SELF" "$@" ;;
 esac
 
 case "${1:-}" in
@@ -587,5 +635,6 @@ case "${1:-}" in
   update)     shift; cmd_update "$@" ;;
   web)        shift; cmd_web "$@" ;;
   logs-ui)    shift; cmd_logs_ui "$@" ;;
-  *) sed -n '2,16p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  site)       shift; cmd_site "$@" ;;
+  *) sed -n '2,18p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac
