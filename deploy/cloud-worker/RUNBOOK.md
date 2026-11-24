@@ -16,7 +16,7 @@ How it is built is in `README.md` next to this file.
 | Domain / DNS | `jainprashuk.in` on Cloudflare (nameservers `alfred` / `ariadne`), registered at Hostinger |
 | Zero Trust team | `divine-wildflower-0fea` — login methods: One-time PIN, Cloudflare |
 | Tunnel | `outreach-cw` (id `899b0efa-eebb-4c0e-b60b-3d6f14d9ef5b`) |
-| Portal | `https://outreach.jainprashuk.in` |
+| Portal | `https://outreach.jainprashuk.in` — container `outreach-web` on this VM (see **Portal**) |
 | Code on the VM | `/opt/outreach`, tracks `main`, read-only deploy key `oracle-cw` |
 | Per-user data | `/srv/cw/<user>/` (Chrome profile, logs), `/srv/cw/<user>.env` (token) |
 | Admin tool | `cw` (`/usr/local/bin/cw` → `/opt/outreach/deploy/cloud-worker/cw`) |
@@ -155,7 +155,8 @@ ssh -t cw 'sudo cw update'
 It pulls, rebuilds the image and restarts each user one at a time (about 20 s
 offline each). Logins are kept. It never runs by itself.
 
-Server-only changes (routes, models) need nothing on the VM — Vercel deploys them.
+Server-only changes (routes, models) deploy themselves: a push to `main` runs
+`.github/workflows/deploy.yml`, which does `sudo cw web deploy` here.
 Client changes still need `cd client && npm run build` and a committed `client/dist`.
 
 Test the image on the Mac first if the change is risky: start Colima
@@ -163,6 +164,41 @@ Test the image on the Mac first if the change is risky: start Colima
 `docker build -f deploy/cloud-worker/Dockerfile -t outreach-cw .` and run it against
 the dev server (`NODE_ENV=dev PORT=4099 node server.js`) with a dev account's token
 and `--security-opt seccomp=deploy/cloud-worker/chrome-seccomp.json`.
+
+---
+
+## Portal (the web app)
+
+The portal (`server.js`) runs here as container `outreach-web`: the `/opt/outreach`
+checkout in a stock `node:22-slim`, on `127.0.0.1:3000`, reached only through the
+tunnel. It moved off Vercel in Nov 2026. Env is `/srv/cw/web.env` (mode 600);
+`DEPLOYED=1` and `PORT=3000` are added by `cw`.
+
+```bash
+cw web logs                    # follow the server log
+sudo cw web deploy             # pull main, npm ci if the lockfile changed, restart (drains requests)
+sudo cw web start              # first start, or after editing /srv/cw/web.env
+sudo cw web host-add <host>    # route a hostname to the portal (proxied CNAME + tunnel route)
+sudo cw web host-rm <host>     # undo it
+sudo cw web url <url>          # point every cloud worker at the portal URL (restarts them, waits for runs)
+```
+
+Hostnames live in `/srv/cw/web.json`; `push_ingress` writes them ahead of the
+screens. Never add a portal route in the Cloudflare dashboard: the next `cw add`
+or `cw rm` rewrites the tunnel config and would drop it.
+
+**Rollback a bad deploy:** `ssh cw 'cd /opt/outreach && git checkout <good-sha> && sudo docker restart outreach-web'`,
+then fix forward on `main` (the next deploy pulls `main` again — `git checkout main` first).
+
+**What needs to be in `web.env`:** the local `.env` minus `INNGEST_DEV`, with
+`NODE_ENV=prod`, `OUTREACH_URL=https://outreach.jainprashuk.in`,
+`INNGEST_SIGNING_KEY` / `INNGEST_EVENT_KEY` from the Inngest dashboard, and
+`CRON_SECRET` equal to the GitHub repo secret. `CREDENTIAL_KEY` must never change:
+`node scripts/check-credential-key.js` confirms it still decrypts stored Gmail logins.
+
+**Inngest:** one app (`INNGEST_APP_ID`, default `outreach-app`), synced to
+`https://outreach.jainprashuk.in/api/inngest`. After changing that URL, click
+**Resync** in the Inngest dashboard and confirm exactly one app is listed.
 
 ---
 
@@ -212,8 +248,9 @@ stay on — it is how invited users sign in.
 "Cloud browser — <user>" → Policies (their email; yours only if `--allow-admin` was used).
 Sessions last 30 days.
 
-**DNS:** each user has one proxied CNAME `screen-<user>` → the tunnel. Everything
-else on the domain is DNS-only (grey). Don't proxy the Vercel / Clerk / Resend records.
+**DNS:** each user has one proxied CNAME `screen-<user>` → the tunnel, and so does
+the portal (`outreach`, via `cw web host-add`). Everything else on the domain is
+DNS-only (grey). Don't proxy the Clerk / Resend records.
 
 **Tunnel health:** Zero Trust → Networks → Tunnels → `outreach-cw` should be **Healthy**.
 
@@ -308,11 +345,11 @@ Everything else (runs, jobs, settings) is in the portal's database, not on the V
 |---|---|---|
 | Oracle A1 | 4 OCPU / 24 GB shown (kept at 2 / 12) | ~3 GB per user → about 3 users now, ~8 at 4 / 24 |
 | Oracle disk | 200 GB total | 45 GB used of it; ~1 GB per user |
-| Vercel Hobby | 1M requests, 4 h CPU / month | workers check in fast only while needed (≈50–60k requests per cloud user per month); the Mac LinkedIn worker still polls every 20 s (~130k) |
+| Portal (`outreach-web`) | capped at 1 GB RAM | no request or CPU quota (off Vercel since Nov 2026) |
 | MongoDB Atlas free | 512 MB | worker check-ins are no longer logged |
 | Cloudflare Zero Trust | 50 users | 1 seat per person who opens a screen |
 
-Watch: Vercel → Usage, Atlas → Metrics, `cw stats`, Oracle Cost Analysis.
+Watch: Atlas → Metrics, `cw stats`, Oracle Cost Analysis.
 
 ## Safety rules (do not change casually)
 

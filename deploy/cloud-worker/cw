@@ -11,6 +11,8 @@
 #   sudo cw restart <user> [--now]     restart a user's browser + workers (logins kept)
 #   sudo cw update [--now]             pull, rebuild, restart every user one at a time
 #                                      (both wait for a running job to finish unless --now)
+#   sudo cw web start|deploy|logs|host-add <name>|host-rm <name>|url <url>
+#                                      the portal itself (server.js) — see `cw web`
 #
 # Each user gets:
 #   container cw-<user>   Xvfb + real Chrome + noVNC + one worker per platform
@@ -28,6 +30,9 @@ REPO="$(cd "$(dirname "$SELF")/../.." && pwd)"
 STATE=/srv/cw
 USERS="$STATE/users.json"
 CFENV="$STATE/cloudflare.env"
+WEB="$STATE/web.json"
+WEB_ENV="$STATE/web.env"
+WEB_PORT=3000
 IMAGE=outreach-cw:latest
 TUNNEL_NAME=outreach-cw
 FIRST_PORT=6001
@@ -64,11 +69,15 @@ cf_try() {
 
 host_of() { echo "screen-$1.$CF_ZONE"; }
 
-# Rewrites the tunnel's routes from users.json: every user's hostname to their
-# local screen port, everything else 404.
+# Rewrites the tunnel's routes from users.json and web.json: every user's
+# hostname to their local screen port, each portal hostname to the web
+# container, everything else 404. This PUT replaces the whole list, so a route
+# added by hand in the dashboard is wiped — add portal hosts with cw web host-add.
 push_ingress() {
-  local rules
-  rules="$(jq -c --arg zone "$CF_ZONE" '[.users[] | {hostname: ("screen-" + .user + "." + $zone), service: ("http://localhost:" + (.port|tostring))}] + [{service: "http_status:404"}]' "$USERS")"
+  local rules web='{"hosts":[]}'
+  [ -f "$WEB" ] && web="$(cat "$WEB")"
+  rules="$(jq -c --arg zone "$CF_ZONE" --argjson web "$web" --arg wsvc "http://localhost:$WEB_PORT" \
+    '[$web.hosts[] | {hostname: ., service: $wsvc}] + [.users[] | {hostname: ("screen-" + .user + "." + $zone), service: ("http://localhost:" + (.port|tostring))}] + [{service: "http_status:404"}]' "$USERS")"
   cf PUT "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/configurations" "{\"config\":{\"ingress\":$rules}}" >/dev/null
 }
 
@@ -375,6 +384,103 @@ cmd_update() {
   say "Updated."
 }
 
+# ── the portal (server.js) ──────────────────────────────────────────────────
+# Runs the repo checkout itself in a stock Node image: no build step, since
+# client/dist is committed. Env comes from $WEB_ENV (mode 600, written by hand
+# from the Vercel settings). Listens on the host's 127.0.0.1 only; the tunnel
+# is the way in, exactly as for the screens.
+repo_owner() { stat -c %u:%g "$REPO"; }
+# git as the checkout's owner: root trips git's dubious-ownership check, and
+# the deploy key lives in the owner's ~/.ssh.
+repo_git() { sudo -u "$(stat -c %U "$REPO")" git -C "$REPO" "$@"; }
+web_npm() {
+  docker run --rm --user "$(repo_owner)" -e HOME=/tmp -v "$REPO:/app" -w /app node:22-slim \
+    npm ci --omit=dev --no-audit --no-fund
+}
+web_run() {
+  [ -f "$WEB_ENV" ] || die "Write $WEB_ENV first (see RUNBOOK → Portal)."
+  docker rm -f outreach-web >/dev/null 2>&1 || true
+  # --init: node as pid 1 would ignore SIGTERM and every restart would wait for
+  # the SIGKILL. --stop-timeout covers server.js draining in-flight requests.
+  docker run -d --name outreach-web --init --restart unless-stopped --stop-timeout 30 \
+    --user "$(repo_owner)" --memory 1g --memory-swap 1g \
+    -p "127.0.0.1:$WEB_PORT:3000" -v "$REPO:/app" -w /app \
+    --env-file "$WEB_ENV" -e DEPLOYED=1 -e PORT=3000 \
+    --log-opt max-size=20m --log-opt max-file=3 \
+    node:22-slim node server.js >/dev/null
+}
+web_wait_up() {
+  local i
+  for i in $(seq 1 30); do
+    curl -fsS -o /dev/null "http://127.0.0.1:$WEB_PORT/login" && { say "Portal is up on 127.0.0.1:$WEB_PORT"; return 0; }
+    sleep 1
+  done
+  docker logs --tail 40 outreach-web >&2
+  die "Portal did not answer within 30 s (logs above)."
+}
+
+cmd_web() {
+  local sub="${1:-}"; shift || true
+  case "$sub" in
+    start)
+      need_root web; need_setup
+      say "Installing dependencies"; web_npm
+      say "Starting outreach-web"; web_run; web_wait_up ;;
+    deploy)
+      need_root web; need_setup
+      local before; before="$(repo_git rev-parse HEAD)"
+      repo_git pull --ff-only
+      if ! repo_git diff --quiet "$before" HEAD -- package-lock.json; then
+        say "package-lock.json changed: installing"; web_npm
+      fi
+      say "Restarting outreach-web ($(repo_git log -1 --format='%h %s'))"
+      docker restart -t 30 outreach-web >/dev/null; web_wait_up ;;
+    logs)
+      docker logs --tail 100 -f outreach-web ;;
+    host-add)
+      need_root web; need_setup; load_cf
+      local host="${1:-}" existing type content rec tmp
+      [[ "$host" == *".$CF_ZONE" ]] || die "Usage: sudo cw web host-add <name>.$CF_ZONE"
+      # The cutover step: refuse to silently replace a record that points
+      # elsewhere (the Vercel one). Delete it in the dashboard, then rerun.
+      existing="$(cf GET "/zones/$CF_ZONE_ID/dns_records?name=$host")"
+      type="$(jq -r '.[0].type // empty' <<<"$existing")"; content="$(jq -r '.[0].content // empty' <<<"$existing")"
+      if [ -n "$type" ] && [ "$content" != "$CF_TUNNEL_ID.cfargotunnel.com" ]; then
+        die "$host already has a $type record → $content. Delete it in Cloudflare → DNS first (that is the switch away from it), then rerun."
+      fi
+      [ -f "$WEB" ] || echo '{"hosts":[]}' > "$WEB"
+      tmp="$(mktemp)"; jq --arg h "$host" '.hosts |= (. + [$h] | unique)' "$WEB" > "$tmp" && mv "$tmp" "$WEB"
+      push_ingress
+      if [ -z "$type" ]; then
+        rec="{\"type\":\"CNAME\",\"name\":\"$host\",\"content\":\"$CF_TUNNEL_ID.cfargotunnel.com\",\"proxied\":true,\"comment\":\"outreach portal\"}"
+        cf POST "/zones/$CF_ZONE_ID/dns_records" "$rec" >/dev/null
+      fi
+      say "https://$host → outreach-web" ;;
+    host-rm)
+      need_root web; need_setup; load_cf
+      local host="${1:-}" id tmp
+      [ -n "$host" ] || die "Usage: sudo cw web host-rm <hostname>"
+      [ -f "$WEB" ] && { tmp="$(mktemp)"; jq --arg h "$host" '.hosts |= map(select(. != $h))' "$WEB" > "$tmp" && mv "$tmp" "$WEB"; }
+      push_ingress
+      id="$(cf GET "/zones/$CF_ZONE_ID/dns_records?type=CNAME&name=$host&content=$CF_TUNNEL_ID.cfargotunnel.com" | jq -r '.[0].id // empty')"
+      [ -n "$id" ] && cf DELETE "/zones/$CF_ZONE_ID/dns_records/$id" >/dev/null
+      say "Removed $host from the tunnel." ;;
+    url)
+      # Where the cloud workers find the portal. Rewrites every user's env
+      # (token kept) and restarts them one at a time, waiting for runs.
+      need_root web; need_setup; load_cf
+      local url="${1:-}" u p pl tok; url="${url%/}"
+      [[ "$url" =~ ^https:// ]] || die "Usage: sudo cw web url https://outreach.$CF_ZONE"
+      sed -i "s|^OUTREACH_URL=.*|OUTREACH_URL=$url|" "$CFENV"; OUTREACH_URL="$url"
+      jq -r '.users[] | [.user, (.port|tostring), .platforms] | @tsv' "$USERS" | while IFS=$'\t' read -r u p pl; do
+        tok="$(sed -n 's/^WORKER_SECRET=//p' "$STATE/$u.env")"
+        write_env "$u" "$tok" "$pl"
+        hold_idle "$u"; run_container "$u" "$p"; say "cw-$u now uses $url"
+      done ;;
+    *) die "Usage: sudo cw web start|deploy|logs|host-add <host>|host-rm <host>|url <url>" ;;
+  esac
+}
+
 # --now anywhere on the line: restart without waiting for a run to finish.
 for a in "$@"; do [ "$a" = "--now" ] && NOW=1; done
 set -- $(for a in "$@"; do [ "$a" = "--now" ] || printf '%s ' "$a"; done)
@@ -382,7 +488,7 @@ set -- $(for a in "$@"; do [ "$a" = "--now" ] || printf '%s ' "$a"; done)
 # Everything here reads root-only state (/srv/cw, the Docker socket), so the
 # read-only commands re-run themselves under sudo instead of failing.
 case "${1:-}" in
-  list|stats|logs) [ "$(id -u)" -eq 0 ] || exec sudo "$SELF" "$@" ;;
+  list|stats|logs|web) [ "$(id -u)" -eq 0 ] || exec sudo "$SELF" "$@" ;;
 esac
 
 case "${1:-}" in
@@ -395,5 +501,6 @@ case "${1:-}" in
   logs)       shift; cmd_logs "$@" ;;
   restart)    shift; cmd_restart "$@" ;;
   update)     shift; cmd_update "$@" ;;
-  *) sed -n '2,12p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  web)        shift; cmd_web "$@" ;;
+  *) sed -n '2,14p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

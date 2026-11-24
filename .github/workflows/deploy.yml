@@ -1,0 +1,32 @@
+name: Deploy portal
+
+# Replaces Vercel's deploy-on-push: pulls main on the Oracle VM and restarts the
+# outreach-web container (deploy/cloud-worker/cw web deploy). The restart drains
+# in-flight requests first, so a deploy mid-send does not cut an email off.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-portal
+  cancel-in-progress: false   # never kill a deploy half way; queue the next one
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pull and restart on the VM
+        env:
+          VM_HOST: ${{ secrets.VM_HOST }}
+          VM_SSH_KEY: ${{ secrets.VM_SSH_KEY }}
+        run: |
+          # Until the VM secrets exist (before the move off Vercel) this is a no-op.
+          if [ -z "$VM_HOST" ] || [ -z "$VM_SSH_KEY" ]; then
+            echo "VM_HOST / VM_SSH_KEY not set; skipping."; exit 0
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$VM_SSH_KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VM_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          ssh -o BatchMode=yes "ubuntu@$VM_HOST" 'sudo cw web deploy'

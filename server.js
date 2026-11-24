@@ -1288,7 +1288,7 @@ app.use((err, req, res, next) => {
 });
 
 // Export for Vercel (serverless). On Vercel, ensureDb() is called lazily per-request via the
-// middleware above; the listen block below only runs in local dev.
+// middleware above; the listen block below runs locally and on the VM (cw web).
 module.exports = app;
 module.exports.checkMailboxForUser = checkMailboxForUser;
 
@@ -1297,9 +1297,18 @@ if (require.main === module) {
   ensureDb()
     .catch(err => console.error('❌  MongoDB connection error:', err.message))
     .finally(() => {
-      app.listen(PORT, () => {
+      const server = app.listen(PORT, () => {
         console.log(`\n✅  Outreach server running at http://localhost:${PORT}`);
         console.log(`   Open http://localhost:${PORT} in your browser\n`);
+      });
+      // A deploy restarts the container (SIGTERM). Let in-flight requests finish
+      // first: an Inngest step cut off after its email went out but before it
+      // answered would be retried, and that email sent twice. Docker's stop
+      // timeout (30 s, set by cw web) is the hard ceiling.
+      process.once('SIGTERM', () => {
+        console.log('SIGTERM: finishing in-flight requests');
+        server.close(() => process.exit(0));
+        setTimeout(() => process.exit(0), 25000).unref();
       });
     });
 }
