@@ -13,6 +13,8 @@
 #                                      (both wait for a running job to finish unless --now)
 #   sudo cw web start|deploy|logs|host-add <name> [--replace]|host-rm <name>|url <url>
 #                                      the portal itself (server.js) — see `cw web`
+#   sudo cw logs-ui on|off             live logs of every container in the browser at
+#                                      https://logs.<zone>, behind Cloudflare Access
 #
 # Each user gets:
 #   container cw-<user>   Xvfb + real Chrome + noVNC + one worker per platform
@@ -33,6 +35,9 @@ CFENV="$STATE/cloudflare.env"
 WEB="$STATE/web.json"
 WEB_ENV="$STATE/web.env"
 WEB_PORT=3000
+LOGS="$STATE/logs.json"
+LOGS_PORT=6090
+LOGS_IMAGE=amir20/dozzle:v11.4.2
 IMAGE=outreach-cw:latest
 TUNNEL_NAME=outreach-cw
 FIRST_PORT=6001
@@ -69,15 +74,18 @@ cf_try() {
 
 host_of() { echo "screen-$1.$CF_ZONE"; }
 
-# Rewrites the tunnel's routes from users.json and web.json: every user's
-# hostname to their local screen port, each portal hostname to the web
-# container, everything else 404. This PUT replaces the whole list, so a route
-# added by hand in the dashboard is wiped — add portal hosts with cw web host-add.
+# Rewrites the tunnel's routes from users.json, web.json and logs.json: every
+# user's hostname to their local screen port, each portal hostname to the web
+# container, the logs page to Dozzle, everything else 404. This PUT replaces the
+# whole list, so a route added by hand in the dashboard is wiped — add hosts
+# with cw web host-add / cw logs-ui on.
 push_ingress() {
-  local rules web='{"hosts":[]}'
+  local rules web='{"hosts":[]}' logs='{}'
   [ -f "$WEB" ] && web="$(cat "$WEB")"
+  [ -f "$LOGS" ] && logs="$(cat "$LOGS")"
   rules="$(jq -c --arg zone "$CF_ZONE" --argjson web "$web" --arg wsvc "http://localhost:$WEB_PORT" \
-    '[$web.hosts[] | {hostname: ., service: $wsvc}] + [.users[] | {hostname: ("screen-" + .user + "." + $zone), service: ("http://localhost:" + (.port|tostring))}] + [{service: "http_status:404"}]' "$USERS")"
+    --argjson logs "$logs" --arg lsvc "http://localhost:$LOGS_PORT" \
+    '[$web.hosts[] | {hostname: ., service: $wsvc}] + [$logs.host // empty | {hostname: ., service: $lsvc}] + [.users[] | {hostname: ("screen-" + .user + "." + $zone), service: ("http://localhost:" + (.port|tostring))}] + [{service: "http_status:404"}]' "$USERS")"
   cf PUT "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/configurations" "{\"config\":{\"ingress\":$rules}}" >/dev/null
 }
 
@@ -486,6 +494,50 @@ cmd_web() {
   esac
 }
 
+# ── the logs page ───────────────────────────────────────────────────────────
+# Dozzle: a read-only web view of `docker logs` for every container here (no
+# shell, no start/stop — both are off by default and stay off). Order matters
+# on the way up: the Access rule exists before the hostname resolves, so the
+# page is never reachable without the email code.
+cmd_logs_ui() {
+  need_root logs-ui; need_setup; load_cf
+  local host="logs.$CF_ZONE" app_id dns_id j
+  case "${1:-}" in
+    on)
+      [ -f "$LOGS" ] && die "Already on: https://$(jq -r .host "$LOGS") (sudo cw logs-ui off first)."
+      say "Access rule: only $ADMIN_EMAIL"
+      app_id="$(cf POST "/accounts/$CF_ACCOUNT_ID/access/apps" \
+        "{\"name\":\"Outreach logs\",\"domain\":\"$host\",\"type\":\"self_hosted\",\"session_duration\":\"720h\",\"app_launcher_visible\":false}" | jq -r '.id')"
+      cf POST "/accounts/$CF_ACCOUNT_ID/access/apps/$app_id/policies" \
+        "{\"name\":\"owner only\",\"decision\":\"allow\",\"include\":[{\"email\":{\"email\":\"$ADMIN_EMAIL\"}}],\"precedence\":1}" >/dev/null
+      say "Dozzle on 127.0.0.1:$LOGS_PORT (capped at 64 MB)"
+      docker rm -f cw-logs >/dev/null 2>&1 || true
+      docker run -d --name cw-logs --restart unless-stopped \
+        --memory 64m --memory-swap 64m --cpus 0.25 \
+        -v /var/run/docker.sock:/var/run/docker.sock:ro \
+        -p "127.0.0.1:$LOGS_PORT:8080" \
+        -e DOZZLE_NO_ANALYTICS=true -e DOZZLE_HOSTNAME=outreach-cw \
+        --log-opt max-size=5m --log-opt max-file=2 \
+        "$LOGS_IMAGE" >/dev/null
+      jq -n --arg h "$host" --arg a "$app_id" '{host:$h, appId:$a}' > "$LOGS"
+      push_ingress
+      dns_id="$(cf POST "/zones/$CF_ZONE_ID/dns_records" \
+        "{\"type\":\"CNAME\",\"name\":\"$host\",\"content\":\"$CF_TUNNEL_ID.cfargotunnel.com\",\"proxied\":true,\"comment\":\"outreach logs (Dozzle)\"}" | jq -r '.id')"
+      j="$(jq --arg d "$dns_id" '. + {dnsId:$d}' "$LOGS")"; printf '%s\n' "$j" > "$LOGS"
+      say "Logs: https://$host  (sign in with $ADMIN_EMAIL)" ;;
+    off)
+      [ -f "$LOGS" ] || die "Not on."
+      docker rm -f cw-logs >/dev/null 2>&1 || true
+      app_id="$(jq -r '.appId // empty' "$LOGS")"; dns_id="$(jq -r '.dnsId // empty' "$LOGS")"
+      rm -f "$LOGS"
+      push_ingress
+      [ -n "$dns_id" ] && { cf_try DELETE "/zones/$CF_ZONE_ID/dns_records/$dns_id" >/dev/null || warn "Could not delete DNS record $dns_id"; }
+      [ -n "$app_id" ] && { cf_try DELETE "/accounts/$CF_ACCOUNT_ID/access/apps/$app_id" >/dev/null || warn "Could not delete Access app $app_id"; }
+      say "Logs page removed." ;;
+    *) die "Usage: sudo cw logs-ui on|off" ;;
+  esac
+}
+
 # --now anywhere on the line: restart without waiting for a run to finish.
 for a in "$@"; do [ "$a" = "--now" ] && NOW=1; done
 set -- $(for a in "$@"; do [ "$a" = "--now" ] || printf '%s ' "$a"; done)
@@ -507,5 +559,6 @@ case "${1:-}" in
   restart)    shift; cmd_restart "$@" ;;
   update)     shift; cmd_update "$@" ;;
   web)        shift; cmd_web "$@" ;;
-  *) sed -n '2,14p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  logs-ui)    shift; cmd_logs_ui "$@" ;;
+  *) sed -n '2,16p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

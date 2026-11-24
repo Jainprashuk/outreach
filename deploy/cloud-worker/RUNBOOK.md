@@ -175,13 +175,17 @@ tunnel. It moved off Vercel in Nov 2026. Env is `/srv/cw/web.env` (mode 600);
 `DEPLOYED=1` and `PORT=3000` are added by `cw`.
 
 ```bash
-cw web logs                    # follow the server log
+cw web logs                    # follow the server log (or the browser: https://logs.jainprashuk.in)
 sudo cw web deploy             # pull main, npm ci if the lockfile changed, restart (drains requests)
 sudo cw web start              # first start, or after editing /srv/cw/web.env
 sudo cw web host-add <host> [--replace]  # route a hostname here; --replace repoints an existing record in place
 sudo cw web host-rm <host>     # undo it
 sudo cw web url <url>          # point every cloud worker at the portal URL (restarts them, waits for runs)
 ```
+
+**Logs in the browser:** https://logs.jainprashuk.in — Dozzle (read-only, every container:
+`outreach-web`, `cw-<user>`), behind Cloudflare Access for the admin email only, capped at 64 MB.
+`sudo cw logs-ui on|off` adds or removes it (container `cw-logs`, Access app, DNS, route).
 
 Hostnames live in `/srv/cw/web.json`; `push_ingress` writes them ahead of the
 screens. Never add a portal route in the Cloudflare dashboard: the next `cw add`
