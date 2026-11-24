@@ -2337,7 +2337,7 @@ router.post('/jobs/bulk', async (req, res) => {
 });
 
 // POST /api/naukri/jobs/clear-unapplied — wipe this platform's inbox and
-// Waiting: every job not yet tried (pending or approved, applyStatus 'none').
+// Waiting: every job not yet applied to.
 //
 // A hard delete, not a reject: /ingest upserts by sourceKey and only sets
 // approval on insert, so a rejected row would never come back. Deleting it lets
@@ -2349,8 +2349,11 @@ router.post('/jobs/clear-unapplied', async (req, res) => {
     if (await NaukriRun.exists({ userId: req.userId, kind: 'apply', status: { $in: ACTIVE }, ...PQ(req), ...BASE_FILTER })) {
       return res.status(409).json({ error: 'An apply run is queued or running — cancel it or wait, then clear.' });
     }
+    // Exactly what the Inbox and Waiting counts show — Waiting includes
+    // retryable failures, so 'none' alone left those behind.
     const result = await NaukriJob.deleteMany({
-      userId: req.userId, ...PQ(req), approval: { $in: ['pending', 'approved'] }, applyStatus: 'none',
+      userId: req.userId, ...PQ(req),
+      $or: [{ approval: 'pending', applyStatus: { $in: ['none', 'failed'] } }, WAITING_FILTER],
     });
     res.json({ deleted: result.deletedCount });
   } catch (err) {
