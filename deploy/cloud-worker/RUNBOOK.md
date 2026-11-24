@@ -214,6 +214,36 @@ Sessions are per hostname, so everyone signs in once on the new address.
 
 ---
 
+## Other sites (portfolio)
+
+Moved here when Vercel paused the account (2026-11-24). Routed with `cw site` (`/srv/cw/sites.json`).
+
+| Host | Container | Checkout | Port |
+|---|---|---|---|
+| `jainprashuk.in`, `www.jainprashuk.in` | `portfolio-web` (Next.js 13, `next start`, 512 MB cap) | `/opt/portfolio` (PersonalPortfolio) | 3100 |
+| `portfolio-api.jainprashuk.in` | `portfolio-api` (Express, 256 MB cap) | `/opt/portfolio-backend` (Portfolio_Backend) | 3101 |
+
+`bugtrace.jainprashuk.in` is on Cloudflare Pages (repo Error_tracker, root `bug-tracker`), not here.
+
+Env for the API: `/srv/cw/portfolio-backend.env` (`EMAIL`, `PASSWORD` for the contact form;
+`ADMIN_EMAILS`, `ADMIN_PASSWORD`, `ADMIN_SECRET` for blog admin) → `sudo docker restart portfolio-api`
+does not reread it; recreate the container (same `docker run` as below).
+
+**Update after a push** (no auto-deploy yet):
+```bash
+# site
+git -C /opt/portfolio pull --ff-only
+sudo docker run --rm --user $(id -u):$(id -g) -e HOME=/tmp -e NEXT_TELEMETRY_DISABLED=1 \
+  -e NEXT_PUBLIC_BACKEND_URL=https://portfolio-api.jainprashuk.in -v /opt/portfolio:/app -w /app \
+  node:22-slim sh -c "npm ci && npm run build" && sudo docker restart portfolio-web
+# API
+git -C /opt/portfolio-backend pull --ff-only && sudo docker restart portfolio-api
+```
+Containers were started with `--restart unless-stopped --init --user ubuntu`, mounting the
+checkout at `/app`: `node_modules/.bin/next start -p 3100` and `node index.js` (PORT=3101).
+
+---
+
 ## Oracle console tasks
 
 **Resize CPU/RAM:** Compute → Instances → `outreach-cw` → **Edit** → Shape →
