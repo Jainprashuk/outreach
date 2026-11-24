@@ -241,6 +241,8 @@ git -C /opt/portfolio-backend pull --ff-only && sudo docker restart portfolio-ap
 ```
 Containers were started with `--restart unless-stopped --init --user ubuntu`, mounting the
 checkout at `/app`: `node_modules/.bin/next start -p 3100` and `node index.js` (PORT=3101).
+`portfolio-web` also needs `-e NODE_OPTIONS=--dns-result-order=ipv4first`: Next 13.4 talks to its own
+workers on `localhost`, Node 22 resolves that to `::1`, and `/_next/image` 500s (ECONNREFUSED ::1).
 
 ---
 
