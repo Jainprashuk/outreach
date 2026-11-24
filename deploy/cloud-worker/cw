@@ -511,10 +511,12 @@ cmd_logs_ui() {
       cf POST "/accounts/$CF_ACCOUNT_ID/access/apps/$app_id/policies" \
         "{\"name\":\"owner only\",\"decision\":\"allow\",\"include\":[{\"email\":{\"email\":\"$ADMIN_EMAIL\"}}],\"precedence\":1}" >/dev/null
       say "Dozzle on 127.0.0.1:$LOGS_PORT (capped at 64 MB)"
+      mkdir -p "$STATE/logs-data"; chmod 700 "$STATE/logs-data"   # its settings (setup wizard)
       docker rm -f cw-logs >/dev/null 2>&1 || true
       docker run -d --name cw-logs --restart unless-stopped \
         --memory 64m --memory-swap 64m --cpus 0.25 \
         -v /var/run/docker.sock:/var/run/docker.sock:ro \
+        -v "$STATE/logs-data:/data" \
         -p "127.0.0.1:$LOGS_PORT:8080" \
         -e DOZZLE_NO_ANALYTICS=true -e DOZZLE_HOSTNAME=outreach-cw \
         --log-opt max-size=5m --log-opt max-file=2 \
