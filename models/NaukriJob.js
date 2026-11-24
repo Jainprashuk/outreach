@@ -121,6 +121,11 @@ const naukriJobSchema = new mongoose.Schema({
   // The choices offered for that question, when it was a radio or checkbox.
   // An AI draft must pick one of these, never invent its own.
   questionOptions: { type: [String], default: [] },
+  // A recruiter's questionnaire that arrived AFTER the application (Cutshort
+  // posts one into Messages). 'open' = a question no rule answers, held in
+  // unknownQuestion so it shows under Needs answer while the job stays applied;
+  // 'done' = submitted. Null when the job never had one.
+  questionnaire: { type: String, enum: [null, 'open', 'done'], default: null },
 
   // ── fit ────────────────────────────────────────────────────────────────────
   // 0–100 from lib/naukriScore.js, recomputed on every harvest it appears in.

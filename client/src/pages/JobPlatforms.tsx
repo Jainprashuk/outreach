@@ -551,7 +551,7 @@ function sumOverview(on: PlatformInfo[]): NaukriOverview | null {
   const sum = (k: keyof NaukriOverview) => os.reduce((n, o) => n + (Number(o[k]) || 0), 0);
   return {
     ...os[0], platform: undefined, label: 'All platforms', applyMode: 'on',
-    reviewCount: sum('reviewCount'), needsAnswerCount: sum('needsAnswerCount'), waitingCount: sum('waitingCount'),
+    reviewCount: sum('reviewCount'), needsAnswerCount: sum('needsAnswerCount'), questionnaireOpenCount: sum('questionnaireOpenCount'), waitingCount: sum('waitingCount'),
     skippedCount: sum('skippedCount'), appliedCount: sum('appliedCount'), appliedToday: sum('appliedToday'),
     perRun: 10_000, paused: false, blockedUntil: null, upcoming: [],
     schedule: { ...os[0].schedule, enabled: false },

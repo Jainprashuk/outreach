@@ -33,3 +33,25 @@
 ## Status audit 2026-11-02 (scripts/audit-platform-status.js, read-only)
 
 Read 10 applications. The tab buttons read 'Shortlisted1' / 'Closed1' (the count is glued on), so the old word-boundary regexes never clicked them. The Shortlisted tab asks for conversations-v2/candidate WITHOUT convo_status. 'Interested in you' is convo_status=unread, with jobseekersignal rows that have no jobSignal. Seen: Shortlisted 1, Not shortlisted 1.
+
+## Post-apply questionnaire — mapped 2026-11-24 (read-only, scripts/recon-cutshort-questionnaire.js)
+
+- Seconds after `POST /sendreply/jobsignal`, the recruiter's bot ("Voila") posts a **[Questionnaire]** into the thread.
+  It does not block the application: the application already stands.
+- List: Messages → Pending reads `conversations-v2/candidate?…&convo_status=awaiting`; a row whose `lastMsgText` is
+  `"[Questionnaire]"` has one. Row `_id` = the `?thread=` id; `jobSignal._id` = our `sourceId`. Later pages are the
+  same URL with `page=N` (8 rows a page).
+- Thread: `GET /loadthread-v2/<thread>` → `thread.messages[]`; the questionnaire is the message with
+  `responseType: 'screening'`: `questions[{ question: { title, options[{_id,label}], responseType 'mcq'|'text',
+  isMandatory }, responseStringArray }]`, `screeningSubmitted` (+ `screeningSubmittedOn`). Opening a thread also
+  `POST /markthreadasread`.
+- Cutshort PRE-SELECTS your last answer to the same question (in `responseStringArray`) even on an unsubmitted form —
+  e.g. "I am not okay with this location" on a remote job. Nothing is sent until Submit.
+- Page: `form > ol > li` per question. Choice: `fieldset > legend` + options as `[tabindex=0]` divs holding the label
+  text (no native radios; a "Clear" link per question). Text: `label` + `textarea`. One `button[type=submit]` "Submit";
+  afterwards the thread reads "Questionnaire submitted!". Class names are generated hashes.
+- Seen on 2026-11-24: 20 questionnaire threads, 12 unsubmitted; questions repeat — location OK (remote / city),
+  notice period, "This job offers ₹xL - ₹yL / yr. Does this work for you?", years of <skill>, how soon can you join,
+  one free-text "Current CTC (in LPA) and in-hand salary per month?".
+- NOT yet observed: the submit request itself (filled through the driver on its first real sweep; success is read
+  from the page saying "submitted").

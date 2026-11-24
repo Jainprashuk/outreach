@@ -118,4 +118,52 @@ module.exports = {
     detailTest: (url) => /\/api\/auth\/ats\/my-applications-for-job\//.test(url),
     preCheck: (body) => (Array.isArray(body) && body.length ? 'Cutshort says you have already applied to this job' : null),
   },
+
+  // The recruiter's questionnaire, posted into the Messages thread a few seconds
+  // AFTER an application is sent (mapped 2026-11-24, RECON.md). The application
+  // already stands, so this can only add answers, never undo an apply.
+  //   List: conversations-v2 rows whose lastMsgText is "[Questionnaire]"
+  //   (row _id = ?thread=, jobSignal._id = our sourceId).
+  //   Thread: GET /loadthread-v2/<thread> → thread.messages[] with
+  //   responseType 'screening', questions[{ question: { title, options[{_id,
+  //   label}], responseType 'mcq', isMandatory }, responseStringArray }],
+  //   screeningSubmitted. Cutshort pre-selects your last answers to the same
+  //   question; they are not submitted until Submit is pressed.
+  //   Page: form > ol > li per question; each option a [tabindex=0] div holding
+  //   its label text, one button[type=submit] "Submit". Class names are
+  //   generated hashes, so only structure and text are used.
+  questionnaire: {
+    listUrl: `${ORIGIN}/profile/candidate-conversations?i=all&stage=awaiting`,
+    listTest: (url) => /\/conversations-v2\/candidate\?/.test(url) && /convo_status=awaiting/.test(url),
+    pageUrl: (first, n) => first.replace(/([?&])page=\d+/, `$1page=${n}`),
+    threadsFrom: (body) => ((body && body.results) || [])
+      .filter(r => r && r.lastMsgText === '[Questionnaire]' && r.jobSignal && r.jobSignal._id)
+      .map(r => ({ thread: String(r._id), jobId: String(r.jobSignal._id) })),
+    threadUrl: (thread) => `${ORIGIN}/profile/candidate-conversations?i=all&thread=${thread}`,
+    threadTest: (url) => /\/loadthread-v2\//.test(url),
+    formFrom: (body) => {
+      const msgs = ((body && body.thread && body.thread.messages) || [])
+        .filter(m => m && m.responseType === 'screening' && Array.isArray(m.questions) && m.questions.length);
+      const m = msgs[msgs.length - 1];
+      if (!m) return null;
+      return {
+        submitted: !!m.screeningSubmitted,
+        questions: m.questions.map(q => ({
+          title: String((q.question && q.question.title) || '').replace(/\s+/g, ' ').trim(),
+          type: (q.question && q.question.responseType) || '',
+          mandatory: !!(q.question && q.question.isMandatory),
+          options: ((q.question && q.question.options) || []).map(o => ({ id: String(o._id), label: String(o.label || '').trim() })),
+          selected: (q.responseStringArray || []).map(String),
+        })),
+      };
+    },
+    // One li per question: a fieldset+legend for a choice, a label+textarea for
+    // free text (responseType 'text', e.g. "Current CTC and in-hand salary?").
+    field: 'form li',
+    fieldText: 'legend, label',
+    option: '[tabindex="0"]',
+    submit: 'form button[type=submit]',
+    done: /questionnaire submitted/i,
+    maxThreads: 15,
+  },
 };

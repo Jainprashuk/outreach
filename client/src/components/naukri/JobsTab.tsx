@@ -17,7 +17,8 @@ export default function JobsTab({ overview, view, onView, onChanged }: {
   onView: (v: JobsView) => void;
   onChanged: () => void;
 }) {
-  const otherSkipped = Math.max(0, overview.skippedCount - overview.needsAnswerCount);
+  // Open questionnaires are applied jobs, not skips: only the skips come off Skipped.
+  const otherSkipped = Math.max(0, overview.skippedCount - (overview.needsAnswerCount - (overview.questionnaireOpenCount || 0)));
   const VIEWS: Array<[JobsView, string, string, number, boolean?]> = [
     ['waiting', 'Waiting', 'ti-hourglass', overview.waitingCount],
     // Highlighted: the one view here that is waiting on YOU.

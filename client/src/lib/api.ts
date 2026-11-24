@@ -1714,13 +1714,15 @@ export interface NaukriOverview {
   nextOccurrence: string | null;
   upcoming: NaukriOccurrence[];
   reviewCount: number;
-  /** Skipped on a screening question that has no rule yet. */
+  /** Skipped on a screening question that has no rule yet, plus applied jobs' open questionnaires. */
   needsAnswerCount: number;
   /** Outcomes of the last 7 days. */
   week: { applied: number; skipped: number; failed: number };
   perRun: number;
   perDay: number;
   /** The default harvest sources, for the Harvest menu's tick. */
+  /** Applied jobs whose post-apply questionnaire waits on a question (Cutshort) — part of needsAnswerCount. */
+  questionnaireOpenCount?: number;
   sources: NaukriSources;
   /** What still needs setting up — each item names the card that fixes it. */
   setup: { items: NaukriSetupItem[]; done: number; total: number } | null;

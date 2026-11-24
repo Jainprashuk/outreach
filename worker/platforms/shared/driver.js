@@ -843,6 +843,147 @@ function makeDriver(meta) {
     return stats;
   }
 
+  // A recruiter's questionnaire that arrives in Messages AFTER the application
+  // (Cutshort, meta.questionnaire). The application already stands, so nothing
+  // here can turn it into a skip: a question with no answer leaves the form
+  // unsubmitted and is reported as 'open' for Needs answer, and the next sweep
+  // submits it once a rule exists.
+  //
+  // Answer order per question: your saved rule, then what the site pre-selected
+  // (your last answer to the same question there), then the AI when
+  // auto-answer is on. The rule wins over the pre-selection because the
+  // pre-selection is the site's memory, not a decision made for this job.
+  async function fillQuestionnaire(page, item, { config = {}, askAI = null } = {}) {
+    const qn = meta.questionnaire;
+    let form = null;
+    const onResponse = async (res) => {
+      try { if (qn.threadTest(res.url())) form = qn.formFrom(await res.json()) || form; } catch (_) { /* unreadable */ }
+    };
+    page.on('response', onResponse);
+    try {
+      await page.goto(qn.threadUrl(item.thread), { waitUntil: 'domcontentloaded' });
+      for (let i = 0; i < 30 && !form; i++) await page.waitForTimeout(500);
+      await check(page, `the ${meta.label} message thread`);
+      if (!form) return { state: 'none' };
+      if (form.submitted) return { state: 'done', already: true };
+
+      const plan = [];
+      for (const q of form.questions) {
+        const labels = q.options.map(o => o.label);
+        const pre = q.options.find(o => q.selected.includes(o.id));
+        let chosen = null, by = null;
+        const rule = resolveAnswer(q.title, config);
+        if (rule.matched) { chosen = labels.length ? pickOption(String(rule.answer), labels) : String(rule.answer); by = 'rule'; }
+        if (!chosen && pre) { chosen = pre.label; by = 'pre-selected'; }
+        if (!chosen && askAI && config.autoAnswer && config.autoAnswer.enabled) {
+          const live = await askAI(q.title, labels).catch(() => null);
+          if (live && live.answer) {
+            chosen = labels.length ? pickOption(String(live.answer), labels) : String(live.answer);
+            by = `AI ${live.confidence || ''}%`.trim();
+            if (live.rule) config.answers = [live.rule, ...(config.answers || [])];
+          }
+        }
+        if (!chosen) {
+          if (q.mandatory) return { state: 'open', question: q.title, options: labels };
+          continue;
+        }
+        plan.push({ q, chosen, by, isPre: !!pre && pre.label === chosen });
+      }
+
+      for (const p of plan) {
+        const field = page.locator(qn.field).filter({ has: page.locator(qn.fieldText, { hasText: p.q.title.slice(0, 60) }) }).first();
+        if (!(await field.count().catch(() => 0))) {
+          return { state: 'failed', reason: `${meta.label} questionnaire: could not find "${p.q.title.slice(0, 60)}" on the page — nothing was submitted` };
+        }
+        if (p.q.options.length) {
+          if (p.isPre) continue;   // already selected on the page
+          const opt = field.locator(qn.option).filter({ has: page.getByText(p.chosen, { exact: true }) }).first();
+          if (!(await opt.count().catch(() => 0))) {
+            return { state: 'failed', reason: `${meta.label} questionnaire: no option "${p.chosen}" for "${p.q.title.slice(0, 60)}" — nothing was submitted` };
+          }
+          await opt.click({ timeout: 5000 });
+        } else {
+          // Not seen yet: a free-text question. Typed only when the page has a box for it.
+          const box = field.locator('textarea, input[type=text], input[type=number]').first();
+          if (!(await box.count().catch(() => 0))) {
+            if (p.q.mandatory) return { state: 'open', question: p.q.title, options: [] };
+            continue;
+          }
+          await box.fill(p.chosen);
+        }
+        await jitter(300, 700);
+      }
+
+      const submit = page.locator(qn.submit).first();
+      if (!(await submit.count().catch(() => 0))) return { state: 'failed', reason: `${meta.label} questionnaire has no Submit button — nothing was submitted` };
+      await submit.click({ timeout: 5000 });
+      let ok = false;
+      for (let i = 0; i < 20 && !ok; i++) {
+        await page.waitForTimeout(500);
+        ok = qn.done.test((await page.innerText('body').catch(() => '')) || '');
+      }
+      if (!ok) return { state: 'failed', reason: `Pressed Submit on the ${meta.label} questionnaire but it never said "submitted" — check the thread` };
+      return { state: 'done', answers: plan.map(p => ({ q: p.q.title, a: p.chosen, by: p.by })) };
+    } finally {
+      page.off('response', onResponse);
+    }
+  }
+
+  // Every thread in Messages → Pending whose last message is an unanswered
+  // questionnaire, filled one by one. `onItem` gets { sourceId, ...result }.
+  async function questionnaires(session, { config = {}, askAI = null, onItem = async () => {}, onProgress = () => {} } = {}) {
+    const qn = meta.questionnaire;
+    if (!qn) throw new NotSupported(`${meta.label} has no questionnaire step`);
+    const page = await newPage(session);
+    let first = null;
+    const found = new Map();
+    const onResponse = async (res) => {
+      try {
+        const u = res.url();
+        if (!qn.listTest(u)) return;
+        if (!first) first = u;
+        for (const t of qn.threadsFrom(await res.json())) found.set(t.thread, t);
+      } catch (_) { /* unreadable */ }
+    };
+    page.on('response', onResponse);
+    const stats = { done: 0, open: 0, failed: 0, seen: 0 };
+    try {
+      await page.goto(qn.listUrl, { waitUntil: 'domcontentloaded' });
+      for (let i = 0; i < 30 && !first; i++) await page.waitForTimeout(500);
+      await check(page, `${meta.label} Messages`);
+      // The rest of the list, from the same endpoint the page reads (with your
+      // session), rather than scrolling a panel until it loads.
+      if (first) {
+        for (let n = 2; n <= 10; n++) {
+          const body = await page.evaluate((u) => fetch(u, { credentials: 'include' }).then(r => r.json()).catch(() => null), qn.pageUrl(first, n));
+          const rows = qn.threadsFrom(body);
+          if (!body || !(body.results || []).length) break;
+          for (const t of rows) found.set(t.thread, t);
+        }
+      }
+      page.off('response', onResponse);
+      const items = [...found.values()].slice(0, qn.maxThreads || 15);
+      for (let i = 0; i < items.length; i++) {
+        onProgress({ phase: 'questionnaires', label: `questionnaire ${i + 1} of ${items.length}`, page: i + 1, pagesTotal: items.length });
+        let out;
+        try { out = await fillQuestionnaire(page, items[i], { config, askAI }); }
+        catch (err) {
+          if (err && (err.name === 'Checkpoint' || err.fatal)) throw err;
+          out = { state: 'failed', reason: String(err && err.message || err).slice(0, 200) };
+        }
+        if (out.state === 'none' || out.already) continue;
+        stats.seen++;
+        stats[out.state] = (stats[out.state] || 0) + 1;
+        await onItem({ sourceId: items[i].jobId, ...out });
+        await jitter(1500, 3500);
+      }
+    } finally {
+      page.off('response', onResponse);
+      await page.close().catch(() => {});
+    }
+    return stats;
+  }
+
   async function refresh() {
     throw new NotSupported(`${meta.label} has no refresh profile step`);
   }
@@ -854,6 +995,7 @@ function makeDriver(meta) {
 
   return {
     meta, connect, disconnect, loggedIn, refresh, harvest, addRecruiters, apply, track, Checkpoint, NotSupported,
+    ...(meta.questionnaire ? { questionnaires } : {}),
     emptyHarvestHint, JOB_TIMEOUT_MS, JOB_TIMEOUT_AI_MS,
   };
 }

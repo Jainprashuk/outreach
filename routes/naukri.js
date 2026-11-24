@@ -135,6 +135,12 @@ const SKIP_BUCKETS = {
   },
 };
 const ALL_SKIPPED = { applyStatus: 'skipped', approval: { $ne: 'rejected' } };
+// Applied jobs whose post-apply questionnaire is waiting on a question (Cutshort).
+// Shown under Needs answer beside the skips, but kept OUT of SKIP_BUCKETS: the
+// actions on that bucket (requeue, ignore → dismissed) are for jobs that never
+// went out, and must never touch one that did.
+const QUESTIONNAIRE_OPEN = { questionnaire: 'open', unknownQuestion: { $nin: [null, ''] } };
+const NEEDS_ANSWER_ANY = { $or: [SKIP_BUCKETS['needs-answer'], QUESTIONNAIRE_OPEN] };
 
 // Jobs blocked on a screening question go back to Waiting the moment a rule
 // answers it — and not before. Called whenever the answer bank changes, so
@@ -149,6 +155,13 @@ async function requeueAnswered(userId, config, platforms = null) {
     { unknownQuestion: 1, applyNote: 1, platform: 1 },
   ).lean();
   const bank = { answers: config.answers, profile: config.profile };
+  // Open questionnaires a rule now answers leave the Needs answer list; the
+  // next sweep submits them (they stay 'open' until it does).
+  const waiting = await NaukriJob.find({ userId, ...QUESTIONNAIRE_OPEN, ...BASE_FILTER }, { unknownQuestion: 1 }).lean();
+  const answeredQs = waiting.filter(j => resolveAnswer(j.unknownQuestion, bank).matched).map(j => j._id);
+  if (answeredQs.length) {
+    await NaukriJob.updateMany({ _id: { $in: answeredQs }, userId, questionnaire: 'open' }, { $set: { unknownQuestion: '', questionOptions: [] } });
+  }
   const ready = blocked.filter(j => resolveAnswer(j.unknownQuestion, bank).matched);
   if (!ready.length) return 0;
   if (platforms) for (const j of ready) platforms.add(platformOfDoc(j));
@@ -649,7 +662,7 @@ async function overviewFor(userId, platform, { config: given = null, light = fal
     // once reported the waiting count as "applied today".
     NaukriJob.countDocuments({ userId, ...WAITING_FILTER, ...pq, ...BASE_FILTER }),
     NaukriJob.countDocuments({ userId, ...ALL_SKIPPED, ...pq, ...BASE_FILTER }),
-    NaukriJob.countDocuments({ userId, ...SKIP_BUCKETS['needs-answer'], ...pq, ...BASE_FILTER }),
+    NaukriJob.countDocuments({ userId, ...NEEDS_ANSWER_ANY, ...pq, ...BASE_FILTER }),
     // This week's outcomes, from the history entries the worker writes as it
     // goes — so a job retried twice counts as what it ended up as each time,
     // not as whatever it is now.
@@ -693,6 +706,9 @@ async function overviewFor(userId, platform, { config: given = null, light = fal
     ...scheduleView(site.schedule),
     reviewCount,
     needsAnswerCount,
+    // The part of needsAnswerCount that is applied jobs' questionnaires, not
+    // skips — so Skipped can subtract only the skips.
+    questionnaireOpenCount: await NaukriJob.countDocuments({ userId, ...QUESTIONNAIRE_OPEN, ...pq, ...BASE_FILTER }),
     week: { applied: weekOf('applied'), skipped: weekOf('skipped'), failed: weekOf('failed') },
     perRun: site.apply.maxPerRun,
     perDay: site.apply.maxPerDay,
@@ -1283,7 +1299,7 @@ router.get('/needs-answer', async (req, res) => {
         // This platform's questions (all of them in the All view). The answer
         // bank they go into is shared, so answering one here also frees jobs
         // on every other platform that asked it.
-        { $match: { userId: req.userId, ...SKIP_BUCKETS['needs-answer'], ...PQ(req), deleted: { $ne: true } } },
+        { $match: { userId: req.userId, ...NEEDS_ANSWER_ANY, ...PQ(req), deleted: { $ne: true } } },
         { $sort: { updatedAt: -1 } },
         { $group: {
             _id: '$unknownQuestion',
@@ -1582,6 +1598,11 @@ router.post('/needs-answer/ignore', async (req, res) => {
       { userId: req.userId, ...SKIP_BUCKETS['needs-answer'], unknownQuestion: question, ...BASE_FILTER },
       { $set: { applyStatus: 'dismissed', retryable: false, priority: 0 },
         $push: { applyHistory: { at: now, from: 'skipped', to: 'dismissed', note: 'question ignored by you' } } },
+    );
+    // An applied job's questionnaire only leaves the list: the application stands.
+    await NaukriJob.updateMany(
+      { userId: req.userId, ...QUESTIONNAIRE_OPEN, unknownQuestion: question, ...BASE_FILTER },
+      { $set: { unknownQuestion: '', questionOptions: [] } },
     );
     await NaukriConfig.updateOne({ userId: req.userId }, { $pull: { drafts: { question } } });
     await NaukriConfig.updateOne({ userId: req.userId }, {
@@ -2916,6 +2937,48 @@ router.post('/recruiters', async (req, res) => {
     }
     res.json({ read: results.length, found });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /api/naukri/questionnaire — one post-apply questionnaire the worker
+// filled or could not (Cutshort Messages). The job stays applied either way:
+// 'open' puts its question under Needs answer, 'done' clears it and keeps what
+// was sent. A thread for a job applied outside this app has no row and is ignored.
+router.post('/questionnaire', async (req, res) => {
+  try {
+    const { runId, sourceId, state, question, options, answers, reason } = req.body || {};
+    if (!runId || !sourceId) return res.status(400).json({ error: 'runId and sourceId are required' });
+    if (!['done', 'open', 'failed'].includes(state)) return res.status(400).json({ error: 'state must be done, open or failed' });
+    const job = await NaukriJob.findOne({ userId: req.userId, sourceKey: `${req.platform}:${str(sourceId, 100)}`, ...BASE_FILTER });
+    if (!job) return res.json({ ok: false, reason: 'not a job from here' });
+
+    const now = new Date();
+    if (state === 'open') {
+      const q = str(question, 500);
+      if (job.questionnaire === 'open' && job.unknownQuestion === q) return res.json({ ok: true, unchanged: true });
+      // A question you chose to ignore stays off Needs answer, sweep after sweep.
+      const config = await NaukriConfig.getForUser(req.userId);
+      const ignored = (config.drafts || []).some(d => d.status === 'ignored' && sameQuestion(d.question, q));
+      job.questionnaire = 'open';
+      job.unknownQuestion = ignored ? '' : q;
+      job.questionOptions = cleanList(options, 20, 200);
+      job.applyHistory.push({ at: now, from: job.applyStatus, to: job.applyStatus, note: `questionnaire waiting on an answer: ${q.slice(0, 300)}` });
+    } else if (state === 'done') {
+      const sent = (Array.isArray(answers) ? answers : []).slice(0, 10)
+        .map(a => ({ q: str(a && a.q, 300), a: str(a && a.a, 300) })).filter(a => a.q);
+      const by = (Array.isArray(answers) ? answers : []).map(a => a && a.by).filter(Boolean);
+      job.questionnaire = 'done';
+      if (job.applyStatus !== 'skipped') { job.unknownQuestion = ''; job.questionOptions = []; }
+      if (sent.length) job.sentAnswers = sent;
+      job.applyHistory.push({ at: now, from: job.applyStatus, to: job.applyStatus,
+        note: `questionnaire submitted (${sent.length} answer(s)${by.length ? `: ${[...new Set(by)].join(', ')}` : ''})` });
+    } else {
+      job.applyHistory.push({ at: now, from: job.applyStatus, to: job.applyStatus, note: `questionnaire not submitted: ${str(reason, 300)}` });
+    }
+    await job.save();
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 router.post('/track', async (req, res) => {
