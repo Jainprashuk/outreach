@@ -11,7 +11,7 @@
 #   sudo cw restart <user> [--now]     restart a user's browser + workers (logins kept)
 #   sudo cw update [--now]             pull, rebuild, restart every user one at a time
 #                                      (both wait for a running job to finish unless --now)
-#   sudo cw web start|deploy|logs|host-add <name>|host-rm <name>|url <url>
+#   sudo cw web start|deploy|logs|host-add <name> [--replace]|host-rm <name>|url <url>
 #                                      the portal itself (server.js) — see `cw web`
 #
 # Each user gets:
@@ -439,21 +439,26 @@ cmd_web() {
       docker logs --tail 100 -f outreach-web ;;
     host-add)
       need_root web; need_setup; load_cf
-      local host="${1:-}" existing type content rec tmp
-      [[ "$host" == *".$CF_ZONE" ]] || die "Usage: sudo cw web host-add <name>.$CF_ZONE"
-      # The cutover step: refuse to silently replace a record that points
-      # elsewhere (the Vercel one). Delete it in the dashboard, then rerun.
+      local host="${1:-}" replace="${2:-}" existing id type content rec tmp
+      [[ "$host" == *".$CF_ZONE" ]] || die "Usage: sudo cw web host-add <name>.$CF_ZONE [--replace]"
+      # Refuse to silently replace a record that points elsewhere (Vercel).
+      # --replace rewrites it in place: deleting it first leaves a moment where
+      # the name does not exist, and resolvers cache that for up to 30 min
+      # (2026-11-24: the owner's router kept serving NXDOMAIN after the switch).
       existing="$(cf GET "/zones/$CF_ZONE_ID/dns_records?name=$host")"
+      id="$(jq -r '.[0].id // empty' <<<"$existing")"
       type="$(jq -r '.[0].type // empty' <<<"$existing")"; content="$(jq -r '.[0].content // empty' <<<"$existing")"
-      if [ -n "$type" ] && [ "$content" != "$CF_TUNNEL_ID.cfargotunnel.com" ]; then
-        die "$host already has a $type record → $content. Delete it in Cloudflare → DNS first (that is the switch away from it), then rerun."
+      if [ -n "$type" ] && [ "$content" != "$CF_TUNNEL_ID.cfargotunnel.com" ] && [ "$replace" != "--replace" ]; then
+        die "$host already has a $type record → $content. Rerun with --replace to point it here in place."
       fi
       [ -f "$WEB" ] || echo '{"hosts":[]}' > "$WEB"
       tmp="$(mktemp)"; jq --arg h "$host" '.hosts |= (. + [$h] | unique)' "$WEB" > "$tmp" && mv "$tmp" "$WEB"
-      push_ingress
-      if [ -z "$type" ]; then
-        rec="{\"type\":\"CNAME\",\"name\":\"$host\",\"content\":\"$CF_TUNNEL_ID.cfargotunnel.com\",\"proxied\":true,\"comment\":\"outreach portal\"}"
-        cf POST "/zones/$CF_ZONE_ID/dns_records" "$rec" >/dev/null
+      push_ingress   # route first, so the record never points at a tunnel that 404s it
+      rec="{\"type\":\"CNAME\",\"name\":\"$host\",\"content\":\"$CF_TUNNEL_ID.cfargotunnel.com\",\"proxied\":true,\"comment\":\"outreach portal\"}"
+      if [ -z "$type" ]; then cf POST "/zones/$CF_ZONE_ID/dns_records" "$rec" >/dev/null
+      elif [ "$content" != "$CF_TUNNEL_ID.cfargotunnel.com" ]; then
+        cf PUT "/zones/$CF_ZONE_ID/dns_records/$id" "$rec" >/dev/null
+        say "Replaced $type → $content (to go back: point it there again, DNS only)"
       fi
       say "https://$host → outreach-web" ;;
     host-rm)

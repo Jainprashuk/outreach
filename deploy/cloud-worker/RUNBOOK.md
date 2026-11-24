@@ -178,7 +178,7 @@ tunnel. It moved off Vercel in Nov 2026. Env is `/srv/cw/web.env` (mode 600);
 cw web logs                    # follow the server log
 sudo cw web deploy             # pull main, npm ci if the lockfile changed, restart (drains requests)
 sudo cw web start              # first start, or after editing /srv/cw/web.env
-sudo cw web host-add <host>    # route a hostname to the portal (proxied CNAME + tunnel route)
+sudo cw web host-add <host> [--replace]  # route a hostname here; --replace repoints an existing record in place
 sudo cw web host-rm <host>     # undo it
 sudo cw web url <url>          # point every cloud worker at the portal URL (restarts them, waits for runs)
 ```
@@ -195,6 +195,16 @@ then fix forward on `main` (the next deploy pulls `main` again — `git checkout
 `INNGEST_SIGNING_KEY` / `INNGEST_EVENT_KEY` from the Inngest dashboard, and
 `CRON_SECRET` equal to the GitHub repo secret. `CREDENTIAL_KEY` must never change:
 `node scripts/check-credential-key.js` confirms it still decrypts stored Gmail logins.
+
+**Switching the domain from Vercel to here** (Vercel stays primary until it blocks the project):
+1. `ssh cw 'sudo cw web deploy && sudo cw web host-add outreach.jainprashuk.in --replace'` —
+   repoints the record in place (never delete it first: resolvers cache the gap for ~30 min).
+2. Inngest dashboard → app → **Resync** `https://outreach.jainprashuk.in/api/inngest`; one app listed.
+3. GitHub → repo secrets: `CRON_SECRET` = the value in `/srv/cw/web.env`; `VERCEL_APP_URL` =
+   `https://outreach.jainprashuk.in`; `VM_HOST` = the VM IP; `VM_SSH_KEY` = `~/.ssh/outreach_gh_deploy`
+   on the Mac (deploy-only: its authorized_keys entry forces `cw web deploy`).
+4. Actions → run "Release campaign batches" and "Auto check mailbox" → both HTTP 200.
+5. Check `curl -sI https://outreach.jainprashuk.in/login` has no `x-vercel-id`; `cw web logs` shows traffic.
 
 **Inngest:** one app (`INNGEST_APP_ID`, default `outreach-app`), synced to
 `https://outreach.jainprashuk.in/api/inngest`. After changing that URL, click
