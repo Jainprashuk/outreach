@@ -2016,6 +2016,10 @@ export const bulkNaukriJobsApi = (
 ) => apiFetch<{ updated: number; run: NaukriRun | { error: string } | null }>(
   `${NB()}/jobs/bulk`, { method: 'POST', body: JSON.stringify({ ids, action, reason }) });
 
+/** Delete every job on this platform not yet tried (inbox + Waiting); the next harvest brings back what is still listed. */
+export const clearUnappliedNaukriJobsApi = () =>
+  apiFetch<{ deleted: number }>(`${NB()}/jobs/clear-unapplied`, { method: 'POST' });
+
 /** Who posted a job: read now when public (Instahyre, Wellfound), else handed to the worker (`queued`). */
 export const fetchJobRecruitersApi = (jobId: string) =>
   apiFetch<{ recruiters: JobRecruiter[]; queued: boolean }>(`${NB()}/jobs/${jobId}/recruiters/fetch`, { method: 'POST' });

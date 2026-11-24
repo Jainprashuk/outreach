@@ -2336,6 +2336,28 @@ router.post('/jobs/bulk', async (req, res) => {
   }
 });
 
+// POST /api/naukri/jobs/clear-unapplied — wipe this platform's inbox and
+// Waiting: every job not yet tried (pending or approved, applyStatus 'none').
+//
+// A hard delete, not a reject: /ingest upserts by sourceKey and only sets
+// approval on insert, so a rejected row would never come back. Deleting it lets
+// the next harvest bring back whatever is still listed, fresh and rescored.
+// Refused while an apply run is live, so a job the worker just claimed is not
+// pulled out from under it.
+router.post('/jobs/clear-unapplied', async (req, res) => {
+  try {
+    if (await NaukriRun.exists({ userId: req.userId, kind: 'apply', status: { $in: ACTIVE }, ...PQ(req), ...BASE_FILTER })) {
+      return res.status(409).json({ error: 'An apply run is queued or running — cancel it or wait, then clear.' });
+    }
+    const result = await NaukriJob.deleteMany({
+      userId: req.userId, ...PQ(req), approval: { $in: ['pending', 'approved'] }, applyStatus: 'none',
+    });
+    res.json({ deleted: result.deletedCount });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // PATCH /api/naukri/jobs/:id — manual applyStatus moves as recruiters reply.
 router.patch('/jobs/:id', async (req, res) => {
   try {

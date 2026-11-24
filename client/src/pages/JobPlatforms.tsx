@@ -7,7 +7,7 @@ import type {
 import {
   naukriOverviewApi, naukriConfigApi, queueNaukriRunApi, cancelNaukriRunApi, platformsApi,
   queuePlatformRunApi, updatePlatformConfigApi, updateNaukriConfigApi, setNaukriPlatform, workerTokenStatusApi,
-  platformCountsApi, type CountRange, type PlatformCounts,
+  platformCountsApi, type CountRange, type PlatformCounts, clearUnappliedNaukriJobsApi,
 } from '../lib/api';
 import { useVisibleInterval } from '../hooks/useVisibleInterval';
 import Layout from '../components/Layout';
@@ -661,6 +661,19 @@ export default function JobPlatforms() {
     } finally { setBusy(false); }
   };
 
+  // Wipe the inbox and Waiting on this platform so the next harvest starts fresh.
+  const clearUnapplied = async () => {
+    const n = (overview?.reviewCount || 0) + (overview?.waitingCount || 0);
+    if (!window.confirm(`Delete ${n} unapplied ${platformView.label} job${n === 1 ? '' : 's'} (inbox + waiting)? The next scrape brings back any that are still listed.`)) return;
+    setBusy(true);
+    try {
+      const r = await clearUnappliedNaukriJobsApi();
+      toast(`${r.deleted} job${r.deleted === 1 ? '' : 's'} cleared from ${platformView.label}.`, 'success');
+      await load();
+    } catch (e: any) { toast(e?.message || 'Could not clear jobs', 'error'); }
+    finally { setBusy(false); }
+  };
+
   // All view: start one kind on every ready platform that can do it.
   const startAll = async (kind: NaukriRunKind, only?: PlatformId[]) => {
     const on = (registry?.platforms || []).filter(p => p.enabled && p.overview && (!only || only.includes(p.id as PlatformId)));
@@ -917,6 +930,13 @@ export default function JobPlatforms() {
                       : ' — nothing will send these automatically'}
                 </span>
                 <button className="btn btn-xs" type="button" onClick={() => openJobs('waiting')}>See them</button>
+              </div>
+            )}
+            {overview.reviewCount + overview.waitingCount > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <button className="btn btn-xs" type="button" onClick={clearUnapplied} disabled={busy}>
+                  <i className="ti ti-trash" /> Clear all unapplied ({overview.reviewCount + overview.waitingCount})
+                </button>
               </div>
             )}
             {!readiness(overview).canRun && <div style={{ marginTop: 10 }}><Muted>Nothing can start until the problem above is fixed.</Muted></div>}
