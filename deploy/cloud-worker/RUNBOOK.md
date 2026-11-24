@@ -220,7 +220,7 @@ Moved here when Vercel paused the account (2026-11-24). Routed with `cw site` (`
 
 | Host | Container | Checkout | Port |
 |---|---|---|---|
-| `jainprashuk.in`, `www.jainprashuk.in` | `portfolio-web` (Next.js 13, `next start`, 512 MB cap) | `/opt/portfolio` (PersonalPortfolio) | 3100 |
+| `jainprashuk.in`, `www.jainprashuk.in` | `portfolio-web` (Next.js 13, `next start`, 1 GB cap, needs `sharp`) | `/opt/portfolio` (PersonalPortfolio) | 3100 |
 | `portfolio-api.jainprashuk.in` | `portfolio-api` (Express, 256 MB cap) | `/opt/portfolio-backend` (Portfolio_Backend) | 3101 |
 
 `bugtrace.jainprashuk.in` is on Cloudflare Pages (repo Error_tracker, root `bug-tracker`), not here.
@@ -242,7 +242,7 @@ git -C /opt/portfolio-backend pull --ff-only && sudo docker restart portfolio-ap
 Containers were started with `--restart unless-stopped --init --user ubuntu`, mounting the
 checkout at `/app`: `node_modules/.bin/next start -p 3100` and `node index.js` (PORT=3101).
 `portfolio-web` also needs `-e NODE_OPTIONS=--dns-result-order=ipv4first`: Next 13.4 talks to its own
-workers on `localhost`, Node 22 resolves that to `::1`, and `/_next/image` 500s (ECONNREFUSED ::1).
+workers on `localhost`, Node 22 resolves that to `::1`, and `/_next/image` 500s (ECONNREFUSED ::1). Without `sharp` in package.json, image resizing falls back to WASM and gets the render worker OOM-killed.
 
 ---
 
