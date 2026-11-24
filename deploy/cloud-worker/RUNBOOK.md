@@ -185,7 +185,9 @@ sudo cw web url <url>          # point every cloud worker at the portal URL (res
 
 **Logs in the browser:** https://logs.jainprashuk.in — Dozzle (read-only, every container:
 `outreach-web`, `cw-<user>`), behind Cloudflare Access for the admin email only, capped at 64 MB.
-`sudo cw logs-ui on|off` adds or removes it (container `cw-logs`, Access app, DNS, route).
+`sudo cw logs-ui on|off` adds or removes it (container `cw-logs`, Access app, DNS, route, and
+`LOGS_UI_URL` in `web.env`). **Admin → Server logs** embeds it; sign in once in a normal tab first
+(Cloudflare's login page cannot be shown inside a frame).
 
 Hostnames live in `/srv/cw/web.json`; `push_ingress` writes them ahead of the
 screens. Never add a portal route in the Cloudflare dashboard: the next `cw add`

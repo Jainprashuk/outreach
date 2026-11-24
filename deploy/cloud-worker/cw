@@ -513,6 +513,15 @@ cmd_web() {
 # shell, no start/stop — both are off by default and stay off). Order matters
 # on the way up: the Access rule exists before the hostname resolves, so the
 # page is never reachable without the email code.
+# Admin → Server logs embeds the page from LOGS_UI_URL; env is read at
+# container start, so recreate the portal when it changes.
+web_logs_url() {  # web_logs_url <url|"">
+  [ -f "$WEB_ENV" ] || return 0
+  sed -i '/^LOGS_UI_URL=/d' "$WEB_ENV"
+  [ -n "$1" ] && echo "LOGS_UI_URL=$1" >> "$WEB_ENV"
+  if docker inspect outreach-web >/dev/null 2>&1; then say "Restarting outreach-web for the Server logs tab"; web_run; web_wait_up; fi
+}
+
 cmd_logs_ui() {
   need_root logs-ui; need_setup; load_cf
   local host="logs.$CF_ZONE" app_id dns_id j
@@ -540,6 +549,7 @@ cmd_logs_ui() {
       dns_id="$(cf POST "/zones/$CF_ZONE_ID/dns_records" \
         "{\"type\":\"CNAME\",\"name\":\"$host\",\"content\":\"$CF_TUNNEL_ID.cfargotunnel.com\",\"proxied\":true,\"comment\":\"outreach logs (Dozzle)\"}" | jq -r '.id')"
       j="$(jq --arg d "$dns_id" '. + {dnsId:$d}' "$LOGS")"; printf '%s\n' "$j" > "$LOGS"
+      web_logs_url "https://$host"
       say "Logs: https://$host  (sign in with $ADMIN_EMAIL)" ;;
     off)
       [ -f "$LOGS" ] || die "Not on."
@@ -549,6 +559,7 @@ cmd_logs_ui() {
       push_ingress
       [ -n "$dns_id" ] && { cf_try DELETE "/zones/$CF_ZONE_ID/dns_records/$dns_id" >/dev/null || warn "Could not delete DNS record $dns_id"; }
       [ -n "$app_id" ] && { cf_try DELETE "/accounts/$CF_ACCOUNT_ID/access/apps/$app_id" >/dev/null || warn "Could not delete Access app $app_id"; }
+      web_logs_url ""
       say "Logs page removed." ;;
     *) die "Usage: sudo cw logs-ui on|off" ;;
   esac

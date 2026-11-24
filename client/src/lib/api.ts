@@ -2805,6 +2805,7 @@ export interface AiCallDetail extends Omit<AiCallRow, 'promptPreview' | 'outputP
 export const adminAiCallsApi = (params: Record<string, string>) =>
   apiFetch<AiCallsView>(`/api/admin/ai-calls?${new URLSearchParams(params)}`);
 export const adminAiCallApi = (id: string) => apiFetch<AiCallDetail>(`/api/admin/ai-calls/${encodeURIComponent(id)}`);
+export const adminServerLogsApi = () => apiFetch<{ url: string }>('/api/admin/server-logs');
 
 // ── Shared Library ───────────────────────────────────────────────────────────
 // Every account's contact data, pooled — never anyone's progress. Behind

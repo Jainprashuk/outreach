@@ -400,6 +400,13 @@ router.get('/users', async (req, res) => {
   }
 });
 
+/** Where the live container-log page lives (Dozzle on the VM, `cw logs-ui on`).
+ *  Env-driven so the public bundle carries no host and other deployments can
+ *  leave it unset. The page has its own Cloudflare Access login. */
+router.get('/server-logs', (_req, res) => {
+  res.json({ url: String(process.env.LOGS_UI_URL || '').trim() });
+});
+
 /** Sign-in codes that could not be delivered — the only view of a mail outage. */
 router.get('/otp-health', async (_req, res) => {
   try {
