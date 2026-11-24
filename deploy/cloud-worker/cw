@@ -104,6 +104,20 @@ run_container() {  # run_container <user> <port>
     "$IMAGE" >/dev/null
 }
 
+# A user's platforms: the running env file wins over users.json, because it is
+# what the container actually runs and has been edited by hand before. Writes
+# the answer back into users.json so the two agree from then on. Rebuilding
+# from users.json alone dropped Cutshort/Wellfound from cw-prashuk (2026-11-24).
+platforms_of() {  # platforms_of <user>
+  local u="$1" pl tmp
+  pl="$(sed -n 's/^PLATFORMS=//p' "$STATE/$u.env" 2>/dev/null)"
+  [ -n "$pl" ] || pl="$(jq -r --arg u "$u" '.users[] | select(.user == $u) | .platforms' "$USERS")"
+  tmp="$(mktemp)"
+  jq --arg u "$u" --arg pl "$pl" '(.users[] | select(.user == $u) | .platforms) = $pl' "$USERS" > "$tmp" && cat "$tmp" > "$USERS"
+  rm -f "$tmp"
+  echo "$pl"
+}
+
 write_env() {  # write_env <user> <token> <platforms>
   umask 077
   printf 'WORKER_SECRET=%s\nOUTREACH_URL=%s\nPLATFORMS=%s\n' "$2" "$OUTREACH_URL" "$3" > "$STATE/$1.env"
@@ -335,7 +349,7 @@ cmd_token() {
   need_root token; need_setup; load_cf
   local u="${1:-}" j; [ -n "$u" ] || die "Usage: sudo cw token <user>"
   j="$(user_json "$u")"; [ -n "$j" ] || die "No user '$u'."
-  write_env "$u" "$(ask_token "$u")" "$(jq -r '.platforms' <<<"$j")"
+  write_env "$u" "$(ask_token "$u")" "$(platforms_of "$u")"
   hold_idle "$u"
   run_container "$u" "$(jq -r '.port' <<<"$j")"
   say "Token replaced; cw-$u restarted."
@@ -482,12 +496,12 @@ cmd_web() {
       # Where the cloud workers find the portal. Rewrites every user's env
       # (token kept) and restarts them one at a time, waiting for runs.
       need_root web; need_setup; load_cf
-      local url="${1:-}" u p pl tok; url="${url%/}"
+      local url="${1:-}" u p tok; url="${url%/}"
       [[ "$url" =~ ^https:// ]] || die "Usage: sudo cw web url https://outreach.$CF_ZONE"
       sed -i "s|^OUTREACH_URL=.*|OUTREACH_URL=$url|" "$CFENV"; OUTREACH_URL="$url"
-      jq -r '.users[] | [.user, (.port|tostring), .platforms] | @tsv' "$USERS" | while IFS=$'\t' read -r u p pl; do
+      jq -r '.users[] | [.user, (.port|tostring)] | @tsv' "$USERS" | while IFS=$'\t' read -r u p; do
         tok="$(sed -n 's/^WORKER_SECRET=//p' "$STATE/$u.env")"
-        write_env "$u" "$tok" "$pl"
+        write_env "$u" "$tok" "$(platforms_of "$u")"
         hold_idle "$u"; run_container "$u" "$p"; say "cw-$u now uses $url"
       done ;;
     *) die "Usage: sudo cw web start|deploy|logs|host-add <host>|host-rm <host>|url <url>" ;;
