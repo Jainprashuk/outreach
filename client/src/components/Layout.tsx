@@ -66,7 +66,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
 
   // The routes worth reaching in one click stay at the top level; the rest
   // live in a group that remembers whether it was open.
-  const OTHERS = ['/library', '/logs', '/add-contacts', '/templates', '/blocklist', '/export-contacts'];
+  const OTHERS = ['/companies', '/library', '/logs', '/add-contacts', '/templates', '/blocklist', '/export-contacts'];
   const inOthers = OTHERS.some(p => pathname === p || pathname.startsWith(p + '/'));
   const [othersOpen, setOthersOpen] = useState(() => {
     try { return localStorage.getItem('outreach-nav-others') === 'open'; } catch { return false; }
@@ -100,19 +100,19 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
       {!minimal && (<>
       {item('/', 'ti-layout-dashboard', 'Dashboard', 'Your outreach at a glance — replies waiting on you, sent, bounced and follow-ups due — with every contact below it.', { end: true })}
       {item('/analytics', 'ti-chart-histogram', 'Analytics', 'How your outreach is doing: the reply funnel, which templates and companies work, response speed — plus reports as a PDF or by email.')}
-      {/* Your order (2026-10-21): replies and interviews first, then the job
-          platforms and sending, then where contacts come from. */}
+      {/* Your order (2026-11-28): Dashboard, Analytics, Mailbox, Jobs, Job
+          Platforms, Discover, Leads, Contacts, Interviews; Campaigns after them,
+          Companies under Others. */}
       {item('/mailbox', 'ti-mail-opened', 'Mailbox', 'Replies to your emails. “Needs you” lists the ones waiting for your answer — reply right from here.',
         { badge: needsYou, badgeTitle: 'Replies waiting on you' })}
-      {item('/interviews', 'ti-user-check', 'Interviews', 'People who got back to you, and the interviews in progress — stages, dates and reminders.',
-        { badge: needsAttention, badgeTitle: 'Upcoming interviews or follow-ups due' })}
       {item('/jobs', 'ti-briefcase', 'Jobs', 'Every role from Naukri, Instahyre, Hirist, Cutshort and Wellfound in one pipeline — review, apply, follow up — with who you’ve emailed at each company and a one-click way to find people there.')}
       {item('/job-platforms', 'ti-briefcase-2', 'Job Platforms', 'Naukri, Instahyre, Hirist, Cutshort and Wellfound in one place: harvests jobs, applies to the ones you approve and tracks what recruiters do, using a worker on your computer for each platform.')}
-      {item('/campaigns', 'ti-calendar-repeat', 'Campaigns', 'Hands-off sending: give it a list and it emails a set number of people a day for you.')}
-      {item('/leads', 'ti-target-arrow', 'Leads', 'Hiring posts collected from LinkedIn, with recruiters’ emails and apply links. Move the good ones to outreach.')}
       {item('/discover', 'ti-compass', 'Discover', 'Type a company: find people who work there and guess their work email. You choose who moves to outreach.')}
-      {item('/companies', 'ti-building', 'Companies', 'One page per company: your contacts there from every source, LinkedIn posts, Naukri jobs, interviews, the email format and whether it’s worth searching.')}
+      {item('/leads', 'ti-target-arrow', 'Leads', 'Hiring posts collected from LinkedIn, with recruiters’ emails and apply links. Move the good ones to outreach.')}
       {item('/contacts', 'ti-users', 'Contacts', 'Everyone in your outreach. Search and filter by status, edit details, or pick people to email.')}
+      {item('/interviews', 'ti-user-check', 'Interviews', 'People who got back to you, and the interviews in progress — stages, dates and reminders.',
+        { badge: needsAttention, badgeTitle: 'Upcoming interviews or follow-ups due' })}
+      {item('/campaigns', 'ti-calendar-repeat', 'Campaigns', 'Hands-off sending: give it a list and it emails a set number of people a day for you.')}
 
       <button type="button" className={`nav-item nav-group${inOthers && !othersOpen ? ' has-active' : ''}`}
         aria-expanded={showOthers} aria-controls="nav-others" title={collapsed ? 'Others' : undefined}
@@ -124,6 +124,7 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
         {/* Display only — requireLibraryAccess re-checks on every request. Hidden
             unless an admin turned it on for this account. */}
         {canSeeLibrary && item('/library', 'ti-books', 'Library', 'Contacts, leads, Discover people and companies from every user, in one shared list. Only the details — never anyone’s sends or replies. Add the ones you want to your outreach.')}
+        {item('/companies', 'ti-building', 'Companies', 'One page per company: your contacts there from every source, LinkedIn posts, Naukri jobs, interviews, the email format and whether it’s worth searching.')}
         {item('/logs', 'ti-list-details', 'Logs', 'A record of everything the app did — sends, imports, scrapes, errors — for checking what happened and when.')}
         {item('/add-contacts', 'ti-user-plus', 'Add Contacts', 'Add people to your outreach — upload a CSV or type them in.')}
         {item('/templates', 'ti-file-text', 'Templates', 'The emails you send, written once with {{name}}-style blanks that fill in for each person.')}
