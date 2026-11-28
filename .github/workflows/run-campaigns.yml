@@ -16,10 +16,16 @@ jobs:
     steps:
       - name: Release due campaign batches
         run: |
-          code=$(curl -s -o /tmp/out.json -w '%{http_code}' -X POST \
-            -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
-            "${{ secrets.VERCEL_APP_URL }}/api/campaigns/run-due")
-          echo "HTTP $code"
+          # Retry only gateway errors: a push-triggered deploy restarts the
+          # container and leaves a ~20-45s window of 502s. Anything else
+          # (401, 500, ...) is a real failure and falls straight through.
+          for attempt in 1 2 3 4; do
+            code=$(curl -s -o /tmp/out.json -w '%{http_code}' -X POST \
+              -H "X-Cron-Secret: ${{ secrets.CRON_SECRET }}" \
+              "${{ secrets.VERCEL_APP_URL }}/api/campaigns/run-due")
+            echo "HTTP $code (attempt $attempt)"
+            case "$code" in 502|503|504) [ "$attempt" -lt 4 ] && sleep 15 ;; *) break ;; esac
+          done
           cat /tmp/out.json; echo
           # Fail loudly. A silently-swallowed 401 is exactly how the mailbox cron
           # went unnoticed, so this job must go red rather than print a shrug.
