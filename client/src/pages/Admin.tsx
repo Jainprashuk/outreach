@@ -15,6 +15,7 @@ import AdminUserDrawer from '../components/AdminUserDrawer';
 import AdminOverviewPanel from '../components/admin/AdminOverviewPanel';
 import AdminAccountsPanel, { type AccountFilter } from '../components/admin/AdminAccountsPanel';
 import AdminRequestsPanel from '../components/admin/AdminRequestsPanel';
+import AdminMailActivity from '../components/admin/AdminMailActivity';
 import {
   adminOverviewApi, adminInviteApi, adminEmailsApi, adminIssuesApi, adminSendingApi,
   accessRequestsApi,
@@ -23,8 +24,8 @@ import {
 import '../styles/admin-redesign.css';
 
 // One section per hash. The old tab keys are kept so existing links still land.
-type Sec = 'overview' | 'accounts' | 'requests' | 'sending' | 'platform-runs' | 'emails' | 'issues' | 'ai' | 'server-logs';
-const SECS: Sec[] = ['overview', 'accounts', 'requests', 'sending', 'platform-runs', 'emails', 'issues', 'ai', 'server-logs'];
+type Sec = 'overview' | 'accounts' | 'requests' | 'mail' | 'sending' | 'platform-runs' | 'emails' | 'issues' | 'ai' | 'server-logs';
+const SECS: Sec[] = ['overview', 'accounts', 'requests', 'mail', 'sending', 'platform-runs', 'emails', 'issues', 'ai', 'server-logs'];
 const secOf = (hash: string): Sec => {
   const h = hash.replace(/^#/, '') as Sec;
   return SECS.includes(h) ? h : 'overview';
@@ -37,6 +38,7 @@ const NAV: Array<{ group: string; items: Array<{ id: Sec; icon: string; label: s
     { id: 'requests', icon: 'ti-inbox', label: 'Access requests' },
   ] },
   { group: 'Operations', items: [
+    { id: 'mail', icon: 'ti-mail', label: 'Email activity' },
     { id: 'sending', icon: 'ti-send', label: 'Sending' },
     { id: 'platform-runs', icon: 'ti-briefcase', label: 'Job runs' },
     { id: 'emails', icon: 'ti-mail-cog', label: 'Lifecycle emails' },
@@ -52,6 +54,7 @@ const SUBTITLE: Record<Sec, string> = {
   overview: "What needs you, and how the app is doing. Every account in aggregate — no one else's contacts or emails are shown here.",
   accounts: "Every account, with counts only. Click a row for details and actions.",
   requests: "People who tried to sign in and weren't on the list.",
+  mail: "What each account has sent and how it went, batch by batch. Counts only — never a recipient or message.",
   sending: 'How email is moving across every account: live batches, what is scheduled, what ran, and whether the scheduler is firing.',
   'platform-runs': 'Recent job-platform runs across accounts. Status and numeric results only.',
   emails: 'Lifecycle email switches, what is due next, and what was sent.',
@@ -208,7 +211,7 @@ export default function Admin() {
     if (id === 'sending' && sendingCritical > 0) return <span className="adm-pill bad" aria-label={`${sendingCritical} critical`}>{sendingCritical}</span>;
     return null;
   };
-  const usesFleet = sec === 'overview' || sec === 'accounts' || sec === 'requests';
+  const usesFleet = sec === 'overview' || sec === 'accounts' || sec === 'requests' || sec === 'mail';
 
   const drawerRow = drawerId && data ? data.users.find(x => x.id === drawerId) : null;
   const emailsRow = emailsOpen && data ? data.users.find(x => x.id === emailsOpen) : null;
@@ -270,6 +273,7 @@ export default function Admin() {
               />
             )}
 
+            {sec === 'mail' && data && <AdminMailActivity users={data.users} openDrawer={openDrawer} />}
             {sec === 'sending' && <AdminSending onAlertCount={setSendingCritical} />}
             {sec === 'platform-runs' && <AdminPlatformRuns accounts={data?.users || []} />}
             {sec === 'issues' && <AdminIssues onOpenCount={setOpenIssues} />}

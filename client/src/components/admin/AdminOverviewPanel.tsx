@@ -8,7 +8,7 @@ import { fmtAgo } from '../../lib/analytics';
 import type { AdminOverview, SendingAlert } from '../../lib/api';
 import type { AccountFilter } from './AdminAccountsPanel';
 
-type Sec = 'overview' | 'accounts' | 'requests' | 'sending' | 'platform-runs' | 'emails' | 'issues' | 'ai' | 'server-logs';
+type Sec = 'overview' | 'accounts' | 'requests' | 'mail' | 'sending' | 'platform-runs' | 'emails' | 'issues' | 'ai' | 'server-logs';
 const RANGES = [7, 30, 90];
 const TOP = 8;
 
@@ -74,7 +74,7 @@ export default function AdminOverviewPanel({ data, days, setDays, loading, openI
     { icon: 'ti-users', label: 'Accounts', value: t.users, sub: `${t.active} active · ${t.invited} invited`, run: () => goAccounts('all') },
     { icon: 'ti-checklist', label: 'Set up', value: t.onboarded, sub: `${t.withGmail} with Gmail connected`, run: () => goAccounts('onboarded') },
     { icon: 'ti-address-book', label: 'Contacts', value: t.contacts.toLocaleString(), sub: `${t.leads.toLocaleString()} leads` },
-    { icon: 'ti-send', label: 'Emails sent', value: t.everSent.toLocaleString(), sub: `${t.campaigns} campaign(s)`, run: () => go('sending') },
+    { icon: 'ti-send', label: 'Emails sent', value: t.everSent.toLocaleString(), sub: `${t.campaigns} campaign(s)`, run: () => go('mail') },
     { icon: 'ti-message-reply', label: 'Replies', value: t.everReplied.toLocaleString(), sub: `${t.replyRate}% reply rate` },
     { icon: 'ti-device-laptop', label: 'Live sessions', value: t.activeSessions, sub: t.scrapeFailures ? `${t.scrapeFailures} failed scrape(s)` : undefined },
   ];
@@ -179,6 +179,7 @@ export default function AdminOverviewPanel({ data, days, setDays, loading, openI
         <div className="an-card-head">
           <div className="an-card-title"><i className="ti ti-trophy" /> Sending by account</div>
           <div className="an-card-sub">Emails ever sent. A trend, not an audit — a follow-up overwrites the send date it replaces. Click one to open it.</div>
+          <button type="button" className="btn btn-xs" style={{ marginTop: 8 }} onClick={() => go('mail')}>Email activity by account <i className="ti ti-arrow-right" /></button>
         </div>
         <div className="an-card-body">
           {!ranked.some(u => u.contacts.everSent > 0) ? <div className="an-empty">Nothing sent yet.</div> : (

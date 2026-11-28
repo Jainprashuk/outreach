@@ -162,3 +162,12 @@ button.adm-kpi:hover { border-color: var(--border-md); box-shadow: var(--shadow-
 .adm-vh { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 .adm-linkbtn { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; color: var(--accent); }
 .adm-linkbtn:hover { text-decoration: underline; }
+
+/* ── Email activity: expanded account row ── */
+.adm-table tr.adm-expand > td { background: var(--bg2); padding-top: 12px; padding-bottom: 14px; }
+.adm-expand-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; font-size: 13px; }
+.adm-subtable { width: 100%; margin-top: 10px; border-collapse: collapse; font-size: 12.5px; background: var(--bg); border-radius: var(--radius); overflow: hidden; }
+.adm-subtable th { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--text3); font-weight: 600; text-align: left; padding: 8px 10px; border-bottom: 0.5px solid var(--border); }
+.adm-subtable td { padding: 8px 10px; border-bottom: 0.5px solid var(--border); vertical-align: top; }
+.adm-subtable th.adm-num { text-align: right; }
+.adm-subtable td.adm-suberr { color: var(--red); font-size: 12px; padding-top: 0; }
