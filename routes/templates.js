@@ -55,7 +55,7 @@ router.patch('/:key', async (req, res) => {
     for (const field of allowed) {
       if (field in req.body) update[field] = req.body[field];
     }
-    const tpl = await Template.findOneAndUpdate({ userId: req.userId, key: req.params.key }, update, { new: true, lean: true });
+    const tpl = await Template.findOneAndUpdate({ userId: req.userId, key: req.params.key }, update, { returnDocument: 'after', lean: true });
     if (!tpl) return res.status(404).json({ error: 'Template not found' });
     res.json(serialize(tpl));
   } catch (err) {

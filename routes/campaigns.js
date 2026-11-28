@@ -443,7 +443,7 @@ router.post('/:id/rows', async (req, res) => {
       if (total === 0) return res.status(400).json({ error: 'No rows were uploaded.' });
       update.$set.status = campaign.status === 'draft' ? 'running' : campaign.status;
     }
-    let updated = await Campaign.findOneAndUpdate({ _id: campaign._id, userId: req.userId }, update, { new: true }).lean();
+    let updated = await Campaign.findOneAndUpdate({ _id: campaign._id, userId: req.userId }, update, { returnDocument: 'after' }).lean();
 
     // Retire rows that are already Contacts the moment the sheet is complete,
     // rather than rediscovering them on every release scan. Budgeted so a very
@@ -605,7 +605,7 @@ router.patch('/:id', async (req, res) => {
       $set.ratePerHour = ratePerHour;
     }
 
-    const updated = await Campaign.findOneAndUpdate({ _id: campaign._id, userId: req.userId }, { $set }, { new: true }).lean();
+    const updated = await Campaign.findOneAndUpdate({ _id: campaign._id, userId: req.userId }, { $set }, { returnDocument: 'after' }).lean();
     res.json(serialize(updated));
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -626,7 +626,7 @@ router.post('/:id/pause', async (req, res) => {
     }
 
     const updated = await Campaign.findOneAndUpdate({ _id: campaign._id, userId: req.userId },
-      { $set: { status: 'paused', pausedAt: new Date() } }, { new: true }).lean();
+      { $set: { status: 'paused', pausedAt: new Date() } }, { returnDocument: 'after' }).lean();
 
     // Reported so the UI can say honestly what is still going out.
     const jobIds = (updated.releases || []).slice(-3).map(r => r.jobId).filter(Boolean);
@@ -660,7 +660,7 @@ router.post('/:id/resume', requireOnboarded, async (req, res) => {
     const remaining = await CampaignRow.countDocuments({ userId: req.userId, campaignId: campaign._id, status: 'pending' });
     if (remaining === 0) {
       const done = await Campaign.findOneAndUpdate({ _id: campaign._id, userId: req.userId },
-        { $set: { status: 'completed', completedAt: new Date() } }, { new: true }).lean();
+        { $set: { status: 'completed', completedAt: new Date() } }, { returnDocument: 'after' }).lean();
       return res.json({ campaign: serialize(done), released: null });
     }
 
@@ -669,7 +669,7 @@ router.post('/:id/resume', requireOnboarded, async (req, res) => {
     // leaving it set re-trips on every resume. Resuming is the owner saying the
     // cause is fixed; the next batch becomes lastJobId and is judged afresh.
     const updated = await Campaign.findOneAndUpdate({ _id: campaign._id, userId: req.userId },
-      { $set: { status: 'running', pausedAt: null, pausedByAdmin: false, lastError: null, lastJobId: null } }, { new: true }).lean();
+      { $set: { status: 'running', pausedAt: null, pausedByAdmin: false, lastError: null, lastJobId: null } }, { returnDocument: 'after' }).lean();
 
     // Resuming at 11pm should not dump a day's batch, so this is opt-in.
     let released = null;

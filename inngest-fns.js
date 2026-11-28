@@ -121,7 +121,7 @@ const _atomicItemUpdate = async (jobId, contactId, fields, userId) => {
     const completed = await SendJob.findOneAndUpdate({ _id: jobId, userId, status: 'processing' }, {
       status: 'done',
       processedCount: latest.items.length,
-    }, { new: true }).lean();
+    }, { returnDocument: 'after' }).lean();
     if (completed) await notifySendJobFinished(jobId);
     if (completed?.campaignId) await notifyCampaignJobFinished(jobId);
   }

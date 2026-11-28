@@ -380,7 +380,7 @@ router.patch('/:id', async (req, res) => {
     const prev = await Lead.findOne({ _id: req.params.id, userId: req.userId }, { appliedAt: 1 }).lean();
     if (!prev) return res.status(404).json({ error: 'Lead not found' });
     const lead = await Lead.findOneAndUpdate(
-      { _id: req.params.id, userId: req.userId }, buildOp(patch, req.body.note, prev), { new: true }
+      { _id: req.params.id, userId: req.userId }, buildOp(patch, req.body.note, prev), { returnDocument: 'after' }
     );
     res.json(lead);
   } catch (err) {
@@ -394,7 +394,7 @@ router.delete('/:id', async (req, res) => {
     const lead = await Lead.findOneAndUpdate(
       { _id: req.params.id, userId: req.userId },
       { $set: { deleted: true, deletedAt: new Date() } },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!lead) return res.status(404).json({ error: 'Lead not found' });
     res.json({ ok: true });

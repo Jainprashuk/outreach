@@ -609,7 +609,7 @@ router.delete('/:id', async (req, res) => {
     const contact = await Contact.findOneAndUpdate(
       { _id: req.params.id, userId: req.userId },
       { deleted: true, deletedAt: new Date() },
-      { new: true, lean: true }
+      { returnDocument: 'after', lean: true }
     );
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     res.json({ ok: true });
@@ -689,7 +689,7 @@ router.patch('/:id', async (req, res) => {
     if (update.status) {
       op.$push = { statusHistory: { status: update.status, changedAt: new Date(), note: 'Manual status change' } };
     }
-    const contact = await Contact.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, op, { new: true, lean: true });
+    const contact = await Contact.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, op, { returnDocument: 'after', lean: true });
     if (!contact) return res.status(404).json({ error: 'Contact not found' });
     res.json(serialize(contact));
   } catch (err) {

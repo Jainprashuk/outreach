@@ -582,7 +582,7 @@ router.post('/format-tests', requireOnboarded, async (req, res) => {
     const contact = await Contact.findOneAndUpdate(
       { _id: contactId, userId: req.userId },
       { $set: { approvalStatus: 'approved' } },
-      { new: true },
+      { returnDocument: 'after' },
     ).lean();
     const { subject, body } = renderTemplate(ctx.template, contact, ctx.sender);
     if (!subject || !body) {

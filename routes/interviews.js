@@ -192,7 +192,7 @@ router.patch('/:id', async (req, res) => {
     }
 
     const updated = await Interview.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, op, {
-      new: true, projection: NO_BINARIES,
+      returnDocument: 'after', projection: NO_BINARIES,
     });
     res.json(updated);
   } catch (err) {
@@ -211,7 +211,7 @@ router.post('/:id/followed-up', async (req, res) => {
         $set: { lastActivityAt: now },
         $push: { statusHistory: { status: 'followed-up', changedAt: now, note: normText((req.body || {}).note) || 'Followed up' } },
       },
-      { new: true, projection: NO_BINARIES },
+      { returnDocument: 'after', projection: NO_BINARIES },
     );
     if (!updated) return res.status(404).json({ error: 'Interview not found' });
     res.json(updated);
@@ -246,7 +246,7 @@ router.post('/:id/file/:kind', (req, res) => {
             lastActivityAt: now,
           },
         },
-        { new: true, projection: NO_BINARIES },
+        { returnDocument: 'after', projection: NO_BINARIES },
       );
       if (!updated) return res.status(404).json({ error: 'Interview not found' });
       res.status(201).json(updated);
@@ -282,7 +282,7 @@ router.delete('/:id/file/:kind', async (req, res) => {
     const updated = await Interview.findOneAndUpdate(
       { _id: req.params.id, userId: req.userId, ...BASE_FILTER },
       { $set: { [kind]: null, lastActivityAt: new Date() } },
-      { new: true, projection: NO_BINARIES },
+      { returnDocument: 'after', projection: NO_BINARIES },
     );
     if (!updated) return res.status(404).json({ error: 'Interview not found' });
     res.json(updated);
@@ -297,7 +297,7 @@ router.delete('/:id', async (req, res) => {
     const doc = await Interview.findOneAndUpdate(
       { _id: req.params.id, userId: req.userId },
       { $set: { deleted: true, deletedAt: new Date() } },
-      { new: true, projection: NO_BINARIES },
+      { returnDocument: 'after', projection: NO_BINARIES },
     );
     if (!doc) return res.status(404).json({ error: 'Interview not found' });
     res.json({ ok: true });

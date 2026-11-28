@@ -231,7 +231,7 @@ router.post('/:id/cancel', async (req, res) => {
     const run = await ScrapeRun.findOneAndUpdate(
       { _id: req.params.id, userId: req.userId, status: 'queued', ...BASE_FILTER },
       { $set: { status: 'cancelled', finishedAt: new Date() } },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!run) return res.status(404).json({ error: 'No queued run with that id' });
     res.json({ run: run.toJSON() });
@@ -296,7 +296,7 @@ router.post('/claim', async (req, res) => {
     const run = await ScrapeRun.findOneAndUpdate(
       { userId: req.userId, status: 'queued', ...BASE_FILTER },
       { $set: { status: 'running', claimedAt: new Date(), workerHost: String(host || '').slice(0, 200) } },
-      { sort: { createdAt: 1 }, new: true }
+      { sort: { createdAt: 1 }, returnDocument: 'after' }
     );
 
     res.json({ run: run ? run.toJSON() : null });
@@ -377,7 +377,7 @@ router.post('/progress', async (req, res) => {
           perQuery,
           updatedAt:     new Date(),
         } } },
-      { new: true, projection: { progress: 1, status: 1 } }
+      { returnDocument: 'after', projection: { progress: 1, status: 1 } }
     );
     if (!run) return res.status(404).json({ error: 'No running run with that id' });
 
@@ -409,7 +409,7 @@ router.post('/finish', async (req, res) => {
       };
     }
 
-    const run = await ScrapeRun.findOneAndUpdate({ _id: runId, userId: req.userId, ...BASE_FILTER }, { $set: update }, { new: true });
+    const run = await ScrapeRun.findOneAndUpdate({ _id: runId, userId: req.userId, ...BASE_FILTER }, { $set: update }, { returnDocument: 'after' });
     if (!run) return res.status(404).json({ error: 'No such run' });
 
     if (status !== 'done') {

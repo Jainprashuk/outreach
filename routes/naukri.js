@@ -1537,7 +1537,7 @@ router.post('/ai-answer', async (req, res) => {
     const slot = await NaukriRun.findOneAndUpdate(
       { _id: runId, userId: req.userId, status: 'running', 'stats.aiAsked': { $lt: MAX_AI_PER_RUN }, ...PQ(req), ...BASE_FILTER },
       { $inc: { 'stats.aiAsked': 1 } },
-      { new: true, projection: { _id: 1 } },
+      { returnDocument: 'after', projection: { _id: 1 } },
     );
     if (!slot) return res.json({ answer: null, reason: `AI answer limit for this run (${MAX_AI_PER_RUN}) reached, or the run is not running` });
 
@@ -1592,7 +1592,7 @@ router.post('/ai-note', async (req, res) => {
     const slot = await NaukriRun.findOneAndUpdate(
       { _id: runId, userId: req.userId, status: 'running', 'stats.aiNotes': { $lt: MAX_NOTES_PER_RUN }, ...PQ(req), ...BASE_FILTER },
       { $inc: { 'stats.aiNotes': 1 } },
-      { new: true, projection: { _id: 1 } },
+      { returnDocument: 'after', projection: { _id: 1 } },
     );
     if (!slot) return res.json({ text: null, reason: `AI note limit for this run (${MAX_NOTES_PER_RUN}) reached, or the run is not running` });
 
@@ -1868,7 +1868,7 @@ router.post('/runs/:id/cancel', async (req, res) => {
     const run = await NaukriRun.findOneAndUpdate(
       { _id: req.params.id, userId: req.userId, status: 'queued', ...PQ(req), ...BASE_FILTER },
       { $set: { status: 'cancelled', finishedAt: new Date() } },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!run) return res.status(404).json({ error: 'No queued run with that id' });
     res.json({ run: run.toJSON() });
@@ -2593,7 +2593,7 @@ router.post('/claim', async (req, res) => {
     const run = await NaukriRun.findOneAndUpdate(
       { userId: req.userId, status: 'queued', ...pq, ...BASE_FILTER },
       { $set: { status: 'running', claimedAt: new Date(), workerHost: str(host, 200) } },
-      { sort: { createdAt: 1 }, new: true }
+      { sort: { createdAt: 1 }, returnDocument: 'after' }
     );
     // Idle: any "Find recruiter" asks this worker can read with your login.
     if (!run) {
@@ -2890,7 +2890,7 @@ router.post('/progress', async (req, res) => {
           failed:     Number(progress.failed) || 0,
           updatedAt:  new Date(),
         } } },
-      { new: true, projection: { progress: 1, status: 1 } }
+      { returnDocument: 'after', projection: { progress: 1, status: 1 } }
     );
     if (!run) return res.status(404).json({ error: 'No running run with that id' });
 
@@ -3165,7 +3165,7 @@ router.post('/finish', async (req, res) => {
     const run = await NaukriRun.findOneAndUpdate(
       { _id: runId, userId: req.userId, ...PQ(req), ...BASE_FILTER },
       { $set: update },
-      { new: true }
+      { returnDocument: 'after' }
     );
     if (!run) return res.status(404).json({ error: 'No such run' });
     const label = LABEL(req);

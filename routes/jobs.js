@@ -240,7 +240,7 @@ router.post('/:id/pause', async (req, res) => {
   try {
     const job = await SendJob.findOneAndUpdate({ _id: req.params.id, userId: req.userId },
       // A hand pause outranks a Gmail-limit pause: clearing pauseReason stops the scheduled auto-resume.
-      { status: 'paused', pauseReason: null, pausedUntil: null }, { new: true, lean: true });
+      { status: 'paused', pauseReason: null, pausedUntil: null }, { returnDocument: 'after', lean: true });
     if (!job) return res.status(404).json({ error: 'Job not found' });
     res.json(serialize(job));
   } catch (err) {
@@ -263,7 +263,7 @@ router.post('/:id/resume', async (req, res) => {
     const job = await SendJob.findOneAndUpdate(
       { _id: req.params.id, userId: req.userId },
       { status: 'processing', pauseReason: null, pausedUntil: null },
-      { new: true, lean: true }
+      { returnDocument: 'after', lean: true }
     );
     if (!job) return res.status(404).json({ error: 'Job not found' });
 
@@ -281,7 +281,7 @@ router.post('/:id/resume', async (req, res) => {
 
 router.post('/:id/cancel', async (req, res) => {
   try {
-    const job = await SendJob.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, { status: 'cancelled' }, { new: true, lean: true });
+    const job = await SendJob.findOneAndUpdate({ _id: req.params.id, userId: req.userId }, { status: 'cancelled' }, { returnDocument: 'after', lean: true });
     if (!job) return res.status(404).json({ error: 'Job not found' });
     res.json(serialize(job));
   } catch (err) {

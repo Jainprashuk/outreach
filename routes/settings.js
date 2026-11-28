@@ -81,7 +81,7 @@ router.put('/', async (req, res) => {
     const settings = await Settings.findOneAndUpdate(
       { userId: req.userId },
       { $set: { ...update, userId: req.userId } },
-      { new: true, upsert: true, setDefaultsOnInsert: true, projection: { 'resume.data': 0 } }
+      { returnDocument: 'after', upsert: true, setDefaultsOnInsert: true, projection: { 'resume.data': 0 } }
     );
     res.json(settings);
   } catch (err) {
