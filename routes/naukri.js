@@ -396,6 +396,16 @@ async function resultsSummary(userId, days = 30, platform = 'naukri') {
 // ── Setup progress ─────────────────────────────────────────────────────────
 // What a new (or half-set-up) account still needs, each with the card that
 // fixes it. Every item is something that changes results, not busywork.
+// For a slim config (overviewFor): counted in Atlas, so the answers never
+// cross the wire just to be counted.
+async function enabledAnswerCount(userId) {
+  const [row] = await NaukriConfig.aggregate([
+    { $match: { userId: oidOf(userId) } },
+    { $project: { n: { $size: { $filter: { input: { $ifNull: ['$answers', []] }, cond: { $ne: ['$$this.enabled', false] } } } } } },
+  ]);
+  return row ? row.n : 0;
+}
+
 async function setupChecklist(userId, config, worker, platform = 'naukri') {
   const eff = await effectiveResume(userId, config);
   const text = await resumeTextFor(userId, config);
@@ -403,7 +413,7 @@ async function setupChecklist(userId, config, worker, platform = 'naukri') {
   const site = siteOf(config, platform);
   const label = labelOf(platform);
   const slots = slotsOf(site.schedule);
-  const answers = (config.answers || []).filter(a => a.enabled !== false);
+  const answerCount = config.answers ? config.answers.filter(a => a.enabled !== false).length : await enabledAnswerCount(userId);
   const src = site.sources || {};
   // Resume and profile are set once and used by every platform.
   const shared = ' (shared by all platforms)';
@@ -421,7 +431,7 @@ async function setupChecklist(userId, config, worker, platform = 'naukri') {
       done: (site.searches || []).some(s => s.enabled !== false && (s.keywords || s.url)) || !!src.recommended,
       hint: `Add a search or two${capabilitiesOf(platform) && src ? `, or tick ${label}'s recommended jobs` : ''}.` },
     { key: 'answers', card: 'answers', label: 'Common screening answers',
-      done: answers.length >= 5,
+      done: answerCount >= 5,
       hint: 'Press "Add common rules" in Answers — notice period, CTC, experience, location in one go.' },
     { key: 'schedule', card: 'schedule', label: applyModeOf(site, platform) === 'off' ? 'Daily schedule that harvests' : 'Daily schedule that applies',
       done: !!site.schedule.enabled && slots.some(s => s.kinds.includes(applyModeOf(site, platform) === 'off' ? 'harvest' : 'apply')),
@@ -675,7 +685,7 @@ router.get('/counts', async (req, res) => {
 async function overviewFor(userId, platform, { config: given = null, light = false } = {}) {
   const pq = platformQuery(platform);
   if (!given) await failStaleRuns(userId);
-  const config = given || await NaukriConfig.getForUser(userId);
+  const config = given || await NaukriConfig.getForUser(userId, { slim: true });
   const site = siteOf(config, platform);
   const weekAgo = new Date(Date.now() - 7 * 86400000);
   const [worker, activeRun, queued, history, reviewCount, appliedCount, todayCount, waitingCount, skippedCount, needsAnswerCount, week, foundWeek, questionnaireOpenCount] = await Promise.all([
