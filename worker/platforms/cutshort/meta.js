@@ -163,6 +163,9 @@ module.exports = {
     fieldText: 'legend, label',
     option: '[tabindex="0"]',
     submit: 'form button[type=submit]',
+    // Submit only asks "Responses cannot be changed after submission. Are you
+    // sure?" — its "Yes" (another submit button in the form) is what sends it.
+    confirm: 'form button[type=submit]:has-text("Yes")',
     done: /questionnaire submitted/i,
     maxThreads: 15,
   },

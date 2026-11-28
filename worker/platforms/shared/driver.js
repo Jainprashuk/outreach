@@ -917,6 +917,12 @@ function makeDriver(meta) {
       const submit = page.locator(qn.submit).first();
       if (!(await submit.count().catch(() => 0))) return { state: 'failed', reason: `${meta.label} questionnaire has no Submit button — nothing was submitted` };
       await submit.click({ timeout: 5000 });
+      if (qn.confirm) {
+        const yes = page.locator(qn.confirm).first();
+        await yes.waitFor({ state: 'visible', timeout: 5000 }).catch(() => {});
+        if (!(await yes.count().catch(() => 0))) return { state: 'failed', reason: `${meta.label} questionnaire never asked to confirm after Submit — nothing was submitted` };
+        await yes.click({ timeout: 5000 });
+      }
       let ok = false;
       for (let i = 0; i < 20 && !ok; i++) {
         await page.waitForTimeout(500);

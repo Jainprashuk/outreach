@@ -53,5 +53,7 @@ Read 10 applications. The tab buttons read 'Shortlisted1' / 'Closed1' (the count
 - Seen on 2026-11-24: 20 questionnaire threads, 12 unsubmitted; questions repeat — location OK (remote / city),
   notice period, "This job offers ₹xL - ₹yL / yr. Does this work for you?", years of <skill>, how soon can you join,
   one free-text "Current CTC (in LPA) and in-hand salary per month?".
-- NOT yet observed: the submit request itself (filled through the driver on its first real sweep; success is read
-  from the page saying "submitted").
+- Submit (seen 2026-11-28): clicking an option already saves it as a draft (`POST /update-message/<messageId>`
+  `{ questions[{ question, responseStringArray:[optionId] }] }`). "Submit" only opens an in-form confirm
+  "Responses cannot be changed after submission. Are you sure?" with Yes (`button[type=submit]`) / No; Yes sends it
+  and the form shows "Questionnaire submitted!". The first sweep pressed Submit only, so nothing was sent.
