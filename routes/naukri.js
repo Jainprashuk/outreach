@@ -1299,7 +1299,7 @@ function attemptOf(out, where, min) {
 // Replace a question's draft, carrying its earlier attempts forward. Two
 // atomic writes rather than config.save(): several drafts are written at once.
 async function saveDraft(userId, draft, attempt) {
-  const cfg = await NaukriConfig.findOne({ userId }, { drafts: 1 }).lean();
+  const cfg = await NaukriConfig.leanForUser(userId);
   const prev = ((cfg && cfg.drafts) || []).find(d => sameQuestion(d.question, draft.question));
   const attempts = [attempt, ...((prev && prev.attempts) || [])].slice(0, ATTEMPTS_KEPT);
   await NaukriConfig.updateOne({ userId }, { $pull: { drafts: { question: draft.question } } });
@@ -2540,9 +2540,10 @@ router.patch('/jobs/:id', async (req, res) => {
 // at most one. All in one round trip because the worker polls every 20s and each
 // call is a serverless cold-start candidate.
 // /claim loads the config slim; only a run that is handed out needs the
-// answers. A full document, not lean, so schema defaults apply as before.
+// answers. A full document (served from memory when unchanged), so schema
+// defaults apply as before.
 async function enabledAnswers(userId) {
-  const doc = await NaukriConfig.findOne({ userId }, { answers: 1 });
+  const doc = await NaukriConfig.getForUser(userId);
   return ((doc && doc.answers) || []).filter(a => a.enabled);
 }
 

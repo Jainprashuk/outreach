@@ -379,10 +379,54 @@ const NO_FILE = { 'resume.data': 0 };
 // A slim doc must not touch answers or drafts: they read as undefined, and
 // save() only ever writes the paths that changed.
 const SLIM = { ...NO_FILE, answers: 0, drafts: 0 };
+// Full reads are served from memory while the document is unchanged: a tiny
+// read of updatedAt + size decides, and only a changed document is downloaded
+// again. Every app write goes through Mongoose, which stamps updatedAt (the
+// size catches a raw write that doesn't). Deployed only — the portal there is
+// one long-lived process; test scripts write raw against dev.
+const CACHE_ON = !!(process.env.DEPLOYED || process.env.VERCEL) && process.env.NAUKRI_CONFIG_CACHE !== '0';
+const CACHE_MAX = 50;
+const CACHE_TTL_MS = 10 * 60_000;
+const cache = new Map();   // userId -> { stamp, at, bytes } (BSON, so every read gets its own copy)
+const { BSON } = mongoose.mongo;
+
+// A plain copy of the full document (no resume bytes), or null if none exists.
+async function cachedRaw(model, userId) {
+  if (!CACHE_ON) return model.findOne({ userId }, NO_FILE).lean();
+  const key = String(userId);
+  const [head] = await model.aggregate([
+    { $match: { userId: new mongoose.Types.ObjectId(key) } },
+    { $project: { updatedAt: 1, size: { $bsonSize: '$$ROOT' } } },
+  ]);
+  if (!head) { cache.delete(key); return null; }
+  const stamp = `${head.updatedAt ? +head.updatedAt : 0}:${head.size}`;
+  const hit = cache.get(key);
+  if (hit && hit.stamp === stamp && Date.now() - hit.at < CACHE_TTL_MS) return BSON.deserialize(hit.bytes);
+  // Fetched after the stamp was read, so the copy is never older than its stamp.
+  const raw = await model.findOne({ _id: head._id }, NO_FILE).lean();
+  cache.delete(key);
+  if (!raw) return null;
+  if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value);
+  cache.set(key, { stamp, at: Date.now(), bytes: BSON.serialize(raw) });
+  return raw;
+}
+
+// For read-only callers that used findOne(...).lean().
+naukriConfigSchema.statics.leanForUser = function (userId) {
+  return cachedRaw(this, userId);
+};
+
 naukriConfigSchema.statics.getForUser = async function (userId, { slim = false } = {}) {
   const fields = slim ? SLIM : NO_FILE;
-  const doc = await this.findOne({ userId }, fields);
-  if (doc) return doc;
+  if (!slim) {
+    const raw = await cachedRaw(this, userId);
+    // hydrate: a normal document, nothing marked modified, so save() writes
+    // only what the caller changes — exactly as after findOne().
+    if (raw) return this.hydrate(raw, NO_FILE);
+  } else {
+    const doc = await this.findOne({ userId }, fields);
+    if (doc) return doc;
+  }
   try {
     return await this.create({ userId });
   } catch (err) {
