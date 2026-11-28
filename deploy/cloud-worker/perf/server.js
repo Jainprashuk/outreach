@@ -146,7 +146,7 @@ async function poll() {
 }
 
 // ── aggregation for the page ───────────────────────────────────────────────
-const RANGES = { '1h': [3600e3, 60e3], '6h': [6 * 3600e3, 5 * 60e3], '24h': [24 * 3600e3, 15 * 60e3], '7d': [7 * 24 * 3600e3, 3600e3] };
+const RANGES = { '5m': [5 * 60e3, 60e3], '1h': [3600e3, 60e3], '6h': [6 * 3600e3, 5 * 60e3], '24h': [24 * 3600e3, 15 * 60e3], '7d': [7 * 24 * 3600e3, 3600e3] };
 
 function pct(hist, q, maxMs) {
   const bounds = state.bounds || [];
