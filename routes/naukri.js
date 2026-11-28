@@ -473,7 +473,7 @@ router.get('/overview', async (req, res) => {
 router.get('/platforms', async (req, res) => {
   try {
     await failStaleRuns(req.userId);
-    const config = await NaukriConfig.getForUser(req.userId);
+    const config = await NaukriConfig.getForUser(req.userId, { slim: true });
     const out = await Promise.all(PLATFORM_IDS.map(async (id) => {
       const site = siteOf(config, id);
       const enabled = isEnabled(site, id);
@@ -506,7 +506,7 @@ router.get('/jobs-overview', async (req, res) => {
   try {
     await failStaleRuns(req.userId);
     const userId = oidOf(req.userId);
-    const config = await NaukriConfig.getForUser(req.userId);
+    const config = await NaukriConfig.getForUser(req.userId, { slim: true });
     // The period narrows what HAPPENED (sends, failures, recruiter updates, the
     // timeline). What is true NOW — to review, queued, needs an answer, failed,
     // applied in total — never depends on it. Days start at midnight in the
@@ -659,7 +659,7 @@ async function countsFor(userId, platform, config) {
 router.get('/counts', async (req, res) => {
   try {
     const range = COUNT_RANGES.includes(req.query.range) ? req.query.range : '7d';
-    const config = await NaukriConfig.getForUser(req.userId);
+    const config = await NaukriConfig.getForUser(req.userId, { slim: true });
     const ids = req.platform === 'all' ? PLATFORM_IDS.filter(id => isEnabled(siteOf(config, id), id)) : [req.platform];
     const tz = siteOf(config, ids[0] || 'naukri').schedule.timezone;
     const win = rangeWindow(range, tz);
@@ -2529,6 +2529,13 @@ router.patch('/jobs/:id', async (req, res) => {
 // POST /api/naukri/claim — heartbeat, materialise due scheduled runs, then claim
 // at most one. All in one round trip because the worker polls every 20s and each
 // call is a serverless cold-start candidate.
+// /claim loads the config slim; only a run that is handed out needs the
+// answers. A full document, not lean, so schema defaults apply as before.
+async function enabledAnswers(userId) {
+  const doc = await NaukriConfig.findOne({ userId }, { answers: 1 });
+  return ((doc && doc.answers) || []).filter(a => a.enabled);
+}
+
 router.post('/claim', async (req, res) => {
   try {
     const { host, chromeUp, naukriLoggedIn, loggedIn, nextWakeAt, probeOnly } = req.body || {};
@@ -2539,7 +2546,9 @@ router.post('/claim', async (req, res) => {
     // Independent reads, so one round trip instead of two.
     const [worker, fullConfig] = await Promise.all([
       NaukriWorker.getForUser(req.userId, platform),
-      NaukriConfig.getForUser(req.userId),
+      // Slim: most polls hand out nothing. A claimed run reads the answers
+      // below, once (enabledAnswers).
+      NaukriConfig.getForUser(req.userId, { slim: true }),
     ]);
     const prevSeenAt = worker.lastSeenAt;
     worker.lastSeenAt = new Date();
@@ -2646,7 +2655,7 @@ router.post('/claim', async (req, res) => {
         useRecommended: platform === 'naukri' ? fullConfig.useRecommended : !!(config.sources && config.sources.recommended),
         filters: config.filters,
         profile: fullConfig.profile,
-        answers: fullConfig.answers.filter(a => a.enabled),
+        answers: await enabledAnswers(req.userId),
         // Whether the worker may ask /ai-answer mid-questionnaire. The server
         // re-checks it (and the threshold) on every call regardless.
         autoAnswer: { enabled: !!(fullConfig.autoAnswer && fullConfig.autoAnswer.enabled) },

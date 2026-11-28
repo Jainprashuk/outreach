@@ -372,14 +372,22 @@ const naukriConfigSchema = new mongoose.Schema({
 // check-in, and only GET /resume needs the file (it reads it itself). Saving
 // the doc is still safe — Mongoose writes only the paths that changed.
 const NO_FILE = { 'resume.data': 0 };
-naukriConfigSchema.statics.getForUser = async function (userId) {
-  const doc = await this.findOne({ userId }, NO_FILE);
+// `slim` also leaves out answers and drafts — together most of the document
+// (350 KB for an active user), and Atlas free-tier download speed made every
+// full read take ~4 s (seen on logs.<zone>/perf, 2026-11-28). For the hot
+// paths (worker /claim polls, Job Platforms, counts) that never read either.
+// A slim doc must not touch answers or drafts: they read as undefined, and
+// save() only ever writes the paths that changed.
+const SLIM = { ...NO_FILE, answers: 0, drafts: 0 };
+naukriConfigSchema.statics.getForUser = async function (userId, { slim = false } = {}) {
+  const fields = slim ? SLIM : NO_FILE;
+  const doc = await this.findOne({ userId }, fields);
   if (doc) return doc;
   try {
     return await this.create({ userId });
   } catch (err) {
     // Lost the race to a concurrent first call; the unique index kept it to one.
-    if (err.code === 11000) return this.findOne({ userId }, NO_FILE);
+    if (err.code === 11000) return this.findOne({ userId }, fields);
     throw err;
   }
 };
