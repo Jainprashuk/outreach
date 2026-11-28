@@ -176,3 +176,20 @@ button.adm-kpi:hover { border-color: var(--border-md); box-shadow: var(--shadow-
    fixed five columns; inside the admin column it should line up and fill. */
 .adm-main .stat-grid { padding: 0; margin: 0; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
 @media (max-width: 560px) { .adm-main .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* One sidebar open at a time: while the app's main sidebar is open, this menu
+   is an icon rail; collapse the main sidebar and it shows in full. */
+.adm-nav { transition: flex-basis .2s var(--ease); }
+@media (min-width: 901px) {
+  .app-shell:not(.sidebar-collapsed) .adm-nav { flex-basis: 48px; }
+  .app-shell:not(.sidebar-collapsed) .adm-nav-group { font-size: 0; height: 1px; padding: 0; margin: 8px 6px; background: var(--border); }
+  .app-shell:not(.sidebar-collapsed) .adm-nav > div:first-child .adm-nav-group { display: none; }
+  .app-shell:not(.sidebar-collapsed) .adm-nav-item { position: relative; justify-content: center; padding: 0; gap: 0; width: 44px; }
+  .app-shell:not(.sidebar-collapsed) .adm-nav-item i { font-size: 18px; }
+  .app-shell:not(.sidebar-collapsed) .adm-nav-label,
+  .app-shell:not(.sidebar-collapsed) .adm-count { display: none; }
+  .app-shell:not(.sidebar-collapsed) .adm-pill {
+    position: absolute; top: 1px; right: -2px; min-width: 16px; height: 16px; padding: 0 4px; font-size: 9.5px;
+    box-shadow: 0 0 0 2px var(--canvas);
+  }
+}

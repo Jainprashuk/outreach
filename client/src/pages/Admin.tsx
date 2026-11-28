@@ -237,6 +237,8 @@ export default function Admin() {
                 <div className="adm-nav-group">{g.group}</div>
                 {g.items.map(n => (
                   <button key={n.id} type="button" className={'adm-nav-item' + (sec === n.id ? ' on' : '')}
+                    // Labels are hidden while this menu is a rail (main sidebar open).
+                    title={n.label} aria-label={n.label}
                     aria-current={sec === n.id ? 'page' : undefined} onClick={() => pickSec(n.id)}>
                     <i className={'ti ' + n.icon} aria-hidden="true" />
                     <span className="adm-nav-label">{n.label}</span>
