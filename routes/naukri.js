@@ -19,6 +19,19 @@ const applyNote = require('../lib/applyNote');
 const { applyFilters, parseSalaryLpa, parsePostedAgeDays, cityVariants } = require('../lib/naukriFilters');
 const { reportIssue } = require('../lib/issues');
 const { failStaleNaukriRuns: failStaleRuns } = require('../lib/staleNaukriRuns');
+
+// The sweep gives up on a run only after 30 minutes of silence, so running it on
+// every worker check-in (every 20s, per platform) bought nothing. /claim runs it
+// at most once a minute per account; the portal's reads still run it each time.
+const STALE_SWEEP_EVERY_MS = 60 * 1000;
+const _lastSweep = new Map();   // userId -> ms
+async function failStaleRunsThrottled(userId) {
+  const id = String(userId);
+  if (Date.now() - (_lastSweep.get(id) || 0) < STALE_SWEEP_EVERY_MS) return;
+  _lastSweep.set(id, Date.now());
+  if (_lastSweep.size > 5000) _lastSweep.clear();
+  await failStaleRuns(userId);
+}
 const { notify } = require('../lib/notify');
 const { WORKER_OFFLINE_MS, workerBack } = require('../lib/workerWatch');
 const { inPortal } = require('../lib/portalPresence');
@@ -256,10 +269,12 @@ const cleanSources = (input, fallback = {}) => {
 // "online" can allow for it (isOnline).
 async function nextPollFor(userId, platform, config, worker, fastSeconds, fast) {
   let secs = IDLE_POLL_SECONDS;
-  if (fast
-    || await NaukriRun.exists({ userId, status: { $in: ACTIVE }, ...platformQuery(platform), ...BASE_FILTER })
-    || await NaukriJob.exists({ userId, ...platformQuery(platform), recruiterWantedAt: { $ne: null } })
-    || await inPortal(userId)) {
+  // Concurrent rather than short-circuited: one round trip instead of up to three.
+  if (fast || (await Promise.all([
+    NaukriRun.exists({ userId, status: { $in: ACTIVE }, ...platformQuery(platform), ...BASE_FILTER }),
+    NaukriJob.exists({ userId, ...platformQuery(platform), recruiterWantedAt: { $ne: null } }),
+    inPortal(userId),
+  ])).some(Boolean)) {
     secs = fastSeconds;
   } else {
     const next = nextSlot(config.schedule, new Date());
@@ -2521,7 +2536,11 @@ router.post('/claim', async (req, res) => {
     const pq = platformQuery(platform);
     const label = labelOf(platform);
 
-    const worker = await NaukriWorker.getForUser(req.userId, platform);
+    // Independent reads, so one round trip instead of two.
+    const [worker, fullConfig] = await Promise.all([
+      NaukriWorker.getForUser(req.userId, platform),
+      NaukriConfig.getForUser(req.userId),
+    ]);
     const prevSeenAt = worker.lastSeenAt;
     worker.lastSeenAt = new Date();
     if (host !== undefined) worker.host = str(host, 200);
@@ -2538,7 +2557,6 @@ router.post('/claim', async (req, res) => {
     // Back after an outage long enough to have been reported: say so once.
     if (prevSeenAt && Date.now() - new Date(prevSeenAt).getTime() > WORKER_OFFLINE_MS) await workerBack(req.userId, platform, prevSeenAt);
 
-    const fullConfig = await NaukriConfig.getForUser(req.userId);
     const config = siteOf(fullConfig, platform);
     // Sent on EVERY response, idle ones included, so a changed check-in
     // interval reaches the worker without a restart.
@@ -2561,7 +2579,7 @@ router.post('/claim', async (req, res) => {
     // below on its behalf.
     if (probeOnly) return send({ run: null, busy: true }, { fast: true });
 
-    await failStaleRuns(req.userId);
+    await failStaleRunsThrottled(req.userId);
 
     // Materialise the scheduled runs if an occurrence is due and nothing is
     // already active. One occurrence fans out into the runs its slot asks for,
