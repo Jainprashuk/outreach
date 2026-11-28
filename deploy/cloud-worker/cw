@@ -17,6 +17,7 @@
 #                                      route any other hostname to a local port
 #   sudo cw logs-ui on|off             live logs of every container in the browser at
 #                                      https://logs.<zone>, behind Cloudflare Access
+#   sudo cw perf-ui on|off             latency dashboard at https://logs.<zone>/perf (needs logs-ui)
 #
 # Each user gets:
 #   container cw-<user>   Xvfb + real Chrome + noVNC + one worker per platform
@@ -41,6 +42,8 @@ LOGS="$STATE/logs.json"
 SITES="$STATE/sites.json"
 LOGS_PORT=6090
 LOGS_IMAGE=amir20/dozzle:v11.4.2
+PERF_PORT=6091
+PERF_ENV="$STATE/perf.env"
 IMAGE=outreach-cw:latest
 TUNNEL_NAME=outreach-cw
 FIRST_PORT=6001
@@ -79,7 +82,8 @@ host_of() { echo "screen-$1.$CF_ZONE"; }
 
 # Rewrites the tunnel's routes from users.json, web.json and logs.json: every
 # user's hostname to their local screen port, each portal hostname to the web
-# container, the logs page to Dozzle, everything else 404. This PUT replaces the
+# container, the logs page to Dozzle (its /perf path to the perf dashboard when
+# on), everything else 404. This PUT replaces the
 # whole list, so a route added by hand in the dashboard is wiped — add hosts
 # with cw web host-add / cw logs-ui on.
 push_ingress() {
@@ -88,8 +92,8 @@ push_ingress() {
   [ -f "$LOGS" ] && logs="$(cat "$LOGS")"
   [ -f "$SITES" ] && sites="$(cat "$SITES")"
   rules="$(jq -c --arg zone "$CF_ZONE" --argjson web "$web" --arg wsvc "http://localhost:$WEB_PORT" \
-    --argjson logs "$logs" --arg lsvc "http://localhost:$LOGS_PORT" --argjson sites "$sites" \
-    '[$web.hosts[] | {hostname: ., service: $wsvc}] + [$logs.host // empty | {hostname: ., service: $lsvc}] + [$sites.sites[] | {hostname: .host, service: ("http://localhost:" + (.port|tostring))}] + [.users[] | {hostname: ("screen-" + .user + "." + $zone), service: ("http://localhost:" + (.port|tostring))}] + [{service: "http_status:404"}]' "$USERS")"
+    --argjson logs "$logs" --arg lsvc "http://localhost:$LOGS_PORT" --arg psvc "http://localhost:$PERF_PORT" --argjson sites "$sites" \
+    '[$web.hosts[] | {hostname: ., service: $wsvc}] + [if $logs.perf then {hostname: $logs.host, path: "^/perf(/|$)", service: $psvc} else empty end] + [$logs.host // empty | {hostname: ., service: $lsvc}] + [$sites.sites[] | {hostname: .host, service: ("http://localhost:" + (.port|tostring))}] + [.users[] | {hostname: ("screen-" + .user + "." + $zone), service: ("http://localhost:" + (.port|tostring))}] + [{service: "http_status:404"}]' "$USERS")"
   cf PUT "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$CF_TUNNEL_ID/configurations" "{\"config\":{\"ingress\":$rules}}" >/dev/null
 }
 
@@ -460,7 +464,9 @@ cmd_web() {
         say "package-lock.json changed: installing"; web_npm
       fi
       say "Restarting outreach-web ($(repo_git log -1 --format='%h %s'))"
-      docker restart -t 30 outreach-web >/dev/null; web_wait_up ;;
+      docker restart -t 30 outreach-web >/dev/null; web_wait_up
+      # The dashboard runs from the same checkout; it saves its history on stop.
+      if docker inspect cw-perf >/dev/null 2>&1; then docker restart cw-perf >/dev/null; fi ;;
     logs)
       docker logs --tail 100 -f outreach-web ;;
     host-add)
@@ -601,7 +607,7 @@ cmd_logs_ui() {
       say "Logs: https://$host  (sign in with $ADMIN_EMAIL)" ;;
     off)
       [ -f "$LOGS" ] || die "Not on."
-      docker rm -f cw-logs >/dev/null 2>&1 || true
+      docker rm -f cw-logs cw-perf >/dev/null 2>&1 || true
       app_id="$(jq -r '.appId // empty' "$LOGS")"; dns_id="$(jq -r '.dnsId // empty' "$LOGS")"
       rm -f "$LOGS"
       push_ingress
@@ -610,6 +616,54 @@ cmd_logs_ui() {
       web_logs_url ""
       say "Logs page removed." ;;
     *) die "Usage: sudo cw logs-ui on|off" ;;
+  esac
+}
+
+# ── the perf dashboard ──────────────────────────────────────────────────────
+# deploy/cloud-worker/perf, run from the checkout in stock Node, on the host
+# network so it reaches the portal on 127.0.0.1:3000. It reads the portal's
+# counters with PERF_TOKEN (also in web.env), and Docker's stats through the
+# socket (read-only mount, as Dozzle). Served at logs.<zone>/perf, so the logs
+# page's Access rule covers it; history is kept in /srv/cw/perf-data.
+perf_run() {
+  docker rm -f cw-perf >/dev/null 2>&1 || true
+  mkdir -p "$STATE/perf-data"; chmod 700 "$STATE/perf-data"
+  docker run -d --name cw-perf --init --restart unless-stopped --network host \
+    --memory 128m --memory-swap 128m --cpus 0.25 \
+    -v /var/run/docker.sock:/var/run/docker.sock:ro \
+    -v "$REPO/deploy/cloud-worker/perf:/app:ro" -v "$STATE/perf-data:/data" \
+    --env-file "$PERF_ENV" -e PORT="$PERF_PORT" -e PORTAL="http://127.0.0.1:$WEB_PORT" \
+    --log-opt max-size=5m --log-opt max-file=2 \
+    node:22-slim node /app/server.js >/dev/null
+}
+
+web_perf_token() {  # web_perf_token <token|"">
+  sed -i '/^PERF_TOKEN=/d' "$WEB_ENV"
+  [ -n "$1" ] && echo "PERF_TOKEN=$1" >> "$WEB_ENV"
+  say "Restarting outreach-web for PERF_TOKEN"; web_run; web_wait_up
+}
+
+cmd_perf_ui() {
+  need_root perf-ui; need_setup; load_cf
+  local token j
+  [ -f "$LOGS" ] || die "The dashboard lives on the logs page: sudo cw logs-ui on first."
+  case "${1:-}" in
+    on)
+      if [ -f "$PERF_ENV" ]; then token="$(sed -n 's/^PERF_TOKEN=//p' "$PERF_ENV")"; else token="$(openssl rand -hex 24)"; fi
+      ( umask 077; echo "PERF_TOKEN=$token" > "$PERF_ENV" )
+      grep -qx "PERF_TOKEN=$token" "$WEB_ENV" || web_perf_token "$token"
+      say "Perf dashboard on 127.0.0.1:$PERF_PORT (capped at 128 MB)"
+      perf_run
+      j="$(jq '. + {perf:true}' "$LOGS")"; printf '%s\n' "$j" > "$LOGS"
+      push_ingress
+      say "Dashboard: https://$(jq -r .host "$LOGS")/perf" ;;
+    off)
+      docker rm -f cw-perf >/dev/null 2>&1 || true
+      j="$(jq 'del(.perf)' "$LOGS")"; printf '%s\n' "$j" > "$LOGS"
+      push_ingress
+      rm -f "$PERF_ENV"; web_perf_token ""
+      say "Perf dashboard removed (history kept in $STATE/perf-data)." ;;
+    *) die "Usage: sudo cw perf-ui on|off" ;;
   esac
 }
 
@@ -635,6 +689,7 @@ case "${1:-}" in
   update)     shift; cmd_update "$@" ;;
   web)        shift; cmd_web "$@" ;;
   logs-ui)    shift; cmd_logs_ui "$@" ;;
+  perf-ui)    shift; cmd_perf_ui "$@" ;;
   site)       shift; cmd_site "$@" ;;
-  *) sed -n '2,18p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
+  *) sed -n '2,19p' "$SELF" | sed 's/^# \{0,1\}//'; exit 1 ;;
 esac

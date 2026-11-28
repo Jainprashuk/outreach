@@ -8,6 +8,7 @@ const LoginCode = require('./models/LoginCode');
 const AccessRequest = require('./models/AccessRequest');
 const { ONBOARDING_VERSION } = require('./lib/onboarding');
 const { inApp } = require('./lib/apps');
+const { watchMongo } = require('./lib/perf');
 
 async function backfillStatusHistory() {
   const contacts = await Contact.find({
@@ -265,7 +266,9 @@ async function connect() {
     maxPoolSize: 5,              // keep pool small for serverless (each instance has its own)
     serverSelectionTimeoutMS: 5000,
     socketTimeoutMS: 45000,
+    monitorCommands: true,       // per-query timings for the perf dashboard
   });
+  watchMongo(mongoose.connection.getClient());
   console.log(`✅  Connected to MongoDB (${env} database)`);
   await backfillApps();
   await backfillStatusHistory();

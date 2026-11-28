@@ -19,6 +19,7 @@ const credentials = require('./lib/credentials');
 const { resolveSession, destroySession, clearCookieHeader } = require('./lib/session');
 const { auditHttpMutations } = require('./lib/activityLog');
 const { captureHttpIssues } = require('./lib/issues');
+const { trackRequests, perfEndpoint } = require('./lib/perf');
 const { recordCronBeats } = require('./lib/cronBeat');
 const { attachUser, resolveSoleUserId } = require('./lib/currentUser');
 const { isOnboarded } = require('./lib/onboarding');
@@ -40,6 +41,10 @@ const Lead = require('./models/Lead');
 const { serialize: serializeLead, leadOutcomes } = require('./routes/leads');
 
 const app = express();
+// Latency per route for the perf dashboard (lib/perf.js). First, so the time
+// includes every middleware below.
+app.use(trackRequests);
+app.get('/api/internal/perf', perfEndpoint(mongoose));
 app.use(cors());
 // gzip for clients that ask (Accept-Encoding) — the contact lists are JSON that
 // shrinks ~10x. Inngest's handler is left alone: that SDK owns its responses.

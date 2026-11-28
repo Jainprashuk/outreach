@@ -189,6 +189,14 @@ sudo cw web url <url>          # point every cloud worker at the portal URL (res
 `LOGS_UI_URL` in `web.env`). **Admin → Server logs** embeds it; sign in once in a normal tab first
 (Cloudflare's login page cannot be shown inside a frame).
 
+**Performance dashboard:** https://logs.jainprashuk.in/perf — container `cw-perf`
+(`deploy/cloud-worker/perf`, 128 MB cap), same Access login as the logs page. Once a minute it
+reads the portal's counters (`lib/perf.js`: latency per route, per Mongo query, slow requests ≥ 1 s,
+slow queries ≥ 300 ms, event-loop delay, memory, Atlas size), Docker's CPU/memory per container
+and the VM's load, and keeps 7 days in `/srv/cw/perf-data/history.json`, so deploys don't erase it.
+`sudo cw perf-ui on|off` (needs `logs-ui` on) creates `PERF_TOKEN` in `/srv/cw/perf.env` and
+`web.env`, starts the container, and routes `/perf` on the logs host. `cw web deploy` restarts it.
+
 Hostnames live in `/srv/cw/web.json`; `push_ingress` writes them ahead of the
 screens. Never add a portal route in the Cloudflare dashboard: the next `cw add`
 or `cw rm` rewrites the tunnel config and would drop it.
@@ -389,11 +397,11 @@ Everything else (runs, jobs, settings) is in the portal's database, not on the V
 |---|---|---|
 | Oracle A1 | 4 OCPU / 24 GB shown (kept at 2 / 12) | ~3 GB per user → about 3 users now, ~8 at 4 / 24 |
 | Oracle disk | 200 GB total | 45 GB used of it; ~1 GB per user |
-| Portal (`outreach-web`) | capped at 1 GB RAM | no request or CPU quota (off Vercel since Nov 2026) |
+| Portal (`outreach-web`) | capped at 1 GB RAM | no request or CPU quota (off Vercel since Nov 2026); latency at logs.jainprashuk.in/perf |
 | MongoDB Atlas free | 512 MB | worker check-ins are no longer logged |
 | Cloudflare Zero Trust | 50 users | 1 seat per person who opens a screen |
 
-Watch: Atlas → Metrics, `cw stats`, Oracle Cost Analysis.
+Watch: https://logs.jainprashuk.in/perf, Atlas → Metrics, `cw stats`, Oracle Cost Analysis.
 
 ## Safety rules (do not change casually)
 
