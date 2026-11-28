@@ -148,7 +148,7 @@ router.post('/verify-code', async (req, res) => {
     if (firstSignIn) {
       await notifyAdmins({
         type: 'admin.user_joined', title: `${user.name || user.email} joined`, body: user.name ? user.email : '',
-        link: '/admin', dedupeKey: `admin.user_joined:${user._id}`,
+        link: '/admin#accounts', dedupeKey: `admin.user_joined:${user._id}`,
       });
     }
 
