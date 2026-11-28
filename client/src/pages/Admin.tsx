@@ -1,9 +1,8 @@
-import { Fragment, useCallback, useEffect, useState } from 'react';
-import { RefreshBar, Refreshing } from '../components/RefreshBar';
+import { useCallback, useEffect, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { useToast } from '../context/ToastContext';
 import { useSession } from '../context/SessionContext';
-import { fmtAgo } from '../lib/analytics';
 import AdminEmailsCard from '../components/AdminEmailsCard';
 import AdminEmailSchedule from '../components/AdminEmailSchedule';
 import AdminIssues from '../components/AdminIssues';
@@ -13,52 +12,69 @@ import AdminPlatformRuns from '../components/AdminPlatformRuns';
 import AdminServerLogs from '../components/AdminServerLogs';
 import UserEmailsModal from '../components/UserEmailsModal';
 import AdminUserDrawer from '../components/AdminUserDrawer';
-import InfoTip from '../components/InfoTip';
-import { EMAIL_TYPES, effectiveState, TONE_COLOR } from '../lib/lifecycleTypes';
+import AdminOverviewPanel from '../components/admin/AdminOverviewPanel';
+import AdminAccountsPanel, { type AccountFilter } from '../components/admin/AdminAccountsPanel';
+import AdminRequestsPanel from '../components/admin/AdminRequestsPanel';
 import {
-  adminOverviewApi, adminInviteApi, adminUpdateUserApi, adminRevokeSessionsApi,
-  accessRequestsApi, approveAccessApi, rejectAccessApi, clearAccessRequestApi, adminEmailsApi, adminIssuesApi,
-  type AdminOverview, type AdminUserRow, type AccessRequestRow, type AdminEmailsView,
+  adminOverviewApi, adminInviteApi, adminEmailsApi, adminIssuesApi, adminSendingApi,
+  accessRequestsApi,
+  type AdminOverview, type AdminUserRow, type AccessRequestRow, type AdminEmailsView, type SendingAlert,
 } from '../lib/api';
+import '../styles/admin-redesign.css';
 
+// One section per hash. The old tab keys are kept so existing links still land.
+type Sec = 'overview' | 'accounts' | 'requests' | 'sending' | 'platform-runs' | 'emails' | 'issues' | 'ai' | 'server-logs';
+const SECS: Sec[] = ['overview', 'accounts', 'requests', 'sending', 'platform-runs', 'emails', 'issues', 'ai', 'server-logs'];
+const secOf = (hash: string): Sec => {
+  const h = hash.replace(/^#/, '') as Sec;
+  return SECS.includes(h) ? h : 'overview';
+};
 
-const RANGES = [7, 30, 90];
+const NAV: Array<{ group: string; items: Array<{ id: Sec; icon: string; label: string }> }> = [
+  { group: 'Home', items: [{ id: 'overview', icon: 'ti-layout-dashboard', label: 'Overview' }] },
+  { group: 'People', items: [
+    { id: 'accounts', icon: 'ti-users', label: 'Accounts' },
+    { id: 'requests', icon: 'ti-inbox', label: 'Access requests' },
+  ] },
+  { group: 'Operations', items: [
+    { id: 'sending', icon: 'ti-send', label: 'Sending' },
+    { id: 'platform-runs', icon: 'ti-briefcase', label: 'Job runs' },
+    { id: 'emails', icon: 'ti-mail-cog', label: 'Lifecycle emails' },
+  ] },
+  { group: 'Diagnostics', items: [
+    { id: 'issues', icon: 'ti-alert-triangle', label: 'Issues' },
+    { id: 'ai', icon: 'ti-sparkles', label: 'Gemini logs' },
+    { id: 'server-logs', icon: 'ti-terminal-2', label: 'Server logs' },
+  ] },
+];
 
-const ago = (v: string | null) => (v ? fmtAgo(new Date(v).getTime()) : '—');
-
-/** Health pills. Present/absent only — never what the thing actually contains. */
-function ConfigPills({ row }: { row: AdminUserRow }) {
-  const pills = [
-    { on: row.config.hasGmail, icon: 'ti-mail', label: 'Gmail connected' },
-    { on: row.config.templates > 0, icon: 'ti-file-text', label: `${row.config.templates} template(s)` },
-    { on: row.config.hasWorkerToken, icon: 'ti-robot', label: 'Scrape worker token' },
-    { on: row.config.hasShareToken, icon: 'ti-share', label: 'Share link' },
-  ];
-  return (
-    <span style={{ display: 'inline-flex', gap: 5 }}>
-      {pills.map(p => (
-        <i
-          key={p.icon} className={`ti ${p.icon}`} title={`${p.label}: ${p.on ? 'yes' : 'no'}`}
-          style={{ fontSize: 14, color: p.on ? 'var(--green)' : 'var(--border-md)' }}
-        />
-      ))}
-    </span>
-  );
-}
+const SUBTITLE: Record<Sec, string> = {
+  overview: "What needs you, and how the app is doing. Every account in aggregate — no one else's contacts or emails are shown here.",
+  accounts: "Every account, with counts only. Click a row for details and actions.",
+  requests: "People who tried to sign in and weren't on the list.",
+  sending: 'How email is moving across every account: live batches, what is scheduled, what ran, and whether the scheduler is firing.',
+  'platform-runs': 'Recent job-platform runs across accounts. Status and numeric results only.',
+  emails: 'Lifecycle email switches, what is due next, and what was sent.',
+  issues: 'Everything that failed for anyone, with the raw error — including recipient addresses.',
+  ai: 'Every AI request for anyone, in full — the prompt (reply text, conversations, profiles) and the raw answer.',
+  'server-logs': 'Live output of every container on the server: the portal and each cloud worker.',
+};
 
 export default function Admin() {
   const toast = useToast();
   const { user } = useSession();
+  const location = useLocation();
   const [data, setData] = useState<AdminOverview | null>(null);
   const [days, setDays] = useState(30);
   const [error, setError] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
-  const [inviting, setInviting] = useState(false);
-  const [notifyInvite, setNotifyInvite] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [requests, setRequests] = useState<AccessRequestRow[]>([]);
   const [reqFilter, setReqFilter] = useState<'pending' | 'all'>('pending');
   const [emailsOpen, setEmailsOpen] = useState<string | null>(null);
+  // Set from the Overview so "3 never signed in" lands on that filter.
+  const [accountFilter, setAccountFilter] = useState<AccountFilter>('all');
+  const [inviteOpen, setInviteOpen] = useState(false);
+
   // One account's drawer. ?user=<id> opens it (Analytics links here).
   const [drawerId, setDrawerId] = useState<string | null>(() => new URLSearchParams(window.location.search).get('user'));
   const openDrawer = (uid: string | null) => {
@@ -67,25 +83,39 @@ export default function Admin() {
     if (uid) url.searchParams.set('user', uid); else url.searchParams.delete('user');
     window.history.replaceState(null, '', url.pathname + url.search + url.hash);
   };
-  // The lifecycle email switches, schedule and history live on their own tab,
-  // and so do the Issues log, the Gemini logs and the server's container logs.
-  type Tab = 'overview' | 'sending' | 'emails' | 'issues' | 'ai' | 'platform-runs' | 'server-logs';
-  const [tab, setTab] = useState<Tab>(() => {
-    const h = window.location.hash.slice(1);
-    return h === 'sending' || h === 'emails' || h === 'issues' || h === 'ai' || h === 'platform-runs' || h === 'server-logs' ? h : 'overview';
-  });
-  const pickTab = (t: Tab) => {
-    setTab(t);
-    window.history.replaceState(null, '', t === 'overview' ? window.location.pathname + window.location.search : `#${t}`);
+
+  const [sec, setSec] = useState<Sec>(() => secOf(window.location.hash));
+  const pickSec = (s: Sec) => {
+    setSec(s);
+    window.history.replaceState(null, '', s === 'overview' ? window.location.pathname + window.location.search : `${window.location.search}#${s}`);
+    window.scrollTo({ top: 0 });
   };
-  // Shown on the tab itself, so a new failure is visible from the Overview too.
-  const [openIssues, setOpenIssues] = useState<number | null>(null);
-  const [sendingCritical, setSendingCritical] = useState(0);
+  // A notification clicked while already on /admin navigates without a remount.
   useEffect(() => {
+    setSec(secOf(location.hash));
+    const uid = new URLSearchParams(location.search).get('user');
+    if (uid) setDrawerId(uid);
+  }, [location.key, location.hash]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const goAccounts = (f: AccountFilter) => { setAccountFilter(f); pickSec('accounts'); };
+
+  // Shown in the nav, so a new failure is visible from every section.
+  const [openIssues, setOpenIssues] = useState<number | null>(null);
+  const [sendAlerts, setSendAlerts] = useState<SendingAlert[]>([]);
+  const [sendingCritical, setSendingCritical] = useState(0);
+  const loadSignals = useCallback(() => {
     adminIssuesApi({ status: 'open', limit: '1' })
       .then(d => setOpenIssues(Object.values(d.open).reduce((n, g) => n + (g?.issues || 0), 0)))
       .catch(() => {});
+    adminSendingApi(7)
+      .then(d => {
+        setSendAlerts(d.alerts.filter(a => a.level !== 'info'));
+        setSendingCritical(d.alerts.filter(a => a.level === 'critical').length);
+      })
+      .catch(() => {});
   }, []);
+  useEffect(() => { loadSignals(); }, [loadSignals]);
+
   // Shared by the Lifecycle emails card and the accounts table, so a switch
   // flipped in one is reflected in the other's "will it actually send" view.
   const [emails, setEmails] = useState<AdminEmailsView | null>(null);
@@ -121,14 +151,11 @@ export default function Admin() {
   useEffect(() => { load(days); }, [load, days]);
   useEffect(() => { loadRequests(reqFilter); }, [loadRequests, reqFilter]);
 
-  const invite = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const email = inviteEmail.trim();
-    if (!email) return;
-    setInviting(true);
+  const refreshAll = () => { load(days); loadRequests(reqFilter); loadSignals(); };
+
+  const invite = async (email: string, notify: boolean) => {
     try {
-      const r = await adminInviteApi(email, { notify: notifyInvite });
-      setInviteEmail('');
+      const r = await adminInviteApi(email, { notify });
       toast(
         r.warning ? `${email} was added, but the email did not send — tell them yourself.`
           : r.emailed ? `${email} was added and emailed.`
@@ -136,10 +163,10 @@ export default function Admin() {
         r.warning ? 'info' : 'success',
       );
       await load(days);
+      return true;
     } catch (err: any) {
       toast(err.message || 'Could not whitelist that address', 'error');
-    } finally {
-      setInviting(false);
+      return false;
     }
   };
 
@@ -173,405 +200,109 @@ export default function Admin() {
     }
   };
 
-  const tiles = data ? [
-    { label: 'Accounts', value: data.totals.users, sub: `${data.totals.active} active · ${data.totals.invited} invited` },
-    { label: 'Set up', value: data.totals.onboarded, sub: `${data.totals.withGmail} with Gmail connected`, cls: data.totals.onboarded < data.totals.users ? 'amber' : 'green' },
-    { label: 'Contacts', value: data.totals.contacts, sub: `${data.totals.leads} leads` },
-    { label: 'Emails sent', value: data.totals.everSent, sub: `${data.totals.campaigns} campaign(s)`, cls: 'green' },
-    { label: 'Replies', value: data.totals.everReplied, sub: `${data.totals.replyRate}% reply rate` },
-    { label: 'Live sessions', value: data.totals.activeSessions },
-    ...(data.totals.pendingRequests > 0
-      ? [{ label: 'Access requests', value: data.totals.pendingRequests, sub: 'waiting for you', cls: 'amber' }]
-      : []),
-  ] : [];
+  const pending = data?.totals.pendingRequests || 0;
+  const badge = (id: Sec) => {
+    if (id === 'accounts' && data) return <span className="adm-count">{data.totals.users}</span>;
+    if (id === 'requests' && pending > 0) return <span className="adm-pill warn" aria-label={`${pending} waiting`}>{pending}</span>;
+    if (id === 'issues' && openIssues) return <span className="adm-pill bad" aria-label={`${openIssues} open`}>{openIssues}</span>;
+    if (id === 'sending' && sendingCritical > 0) return <span className="adm-pill bad" aria-label={`${sendingCritical} critical`}>{sendingCritical}</span>;
+    return null;
+  };
+  const usesFleet = sec === 'overview' || sec === 'accounts' || sec === 'requests';
+
+  const drawerRow = drawerId && data ? data.users.find(x => x.id === drawerId) : null;
+  const emailsRow = emailsOpen && data ? data.users.find(x => x.id === emailsOpen) : null;
 
   return (
     <Layout
       title="Admin"
-      subtitle={tab === 'issues'
-        ? 'Everything that failed for anyone, with the raw error — including recipient addresses.'
-        : tab === 'ai'
-          ? 'Every AI request for anyone, in full — the prompt (reply text, conversations, profiles) and the raw answer.'
-          : tab === 'platform-runs'
-            ? 'Recent job-platform runs across accounts. Status and numeric results only.'
-          : tab === 'server-logs'
-            ? 'Live output of every container on the server: the portal and each cloud worker.'
-          : tab === 'sending'
-          ? 'How email is moving across every account: live batches, what is scheduled, what ran, and whether the scheduler is firing.'
-          : "Every account, in aggregate. No one else's contacts or emails are shown here."}
+      subtitle={SUBTITLE[sec]}
       wide
-      // The range only drives the Overview; Sending has its own window.
-      actions={tab !== 'overview' ? undefined :
-        <div className="seg-toggle">
-          {RANGES.map(d => (
-            <button
-              key={d} type="button" className={`btn btn-xs${days === d ? ' active' : ''}`}
-              onClick={() => setDays(d)}
-            >{days === d && overviewLoading && data && <i className="ti ti-loader" aria-hidden="true" />}{d}d</button>
-          ))}
-        </div>
-      }
+      actions={usesFleet ? (
+        <button type="button" className="btn btn-sm" onClick={refreshAll} disabled={overviewLoading}>
+          <i className={`ti ${overviewLoading ? 'ti-loader' : 'ti-refresh'}`} aria-hidden="true" /> Refresh
+        </button>
+      ) : undefined}
     >
       <div className="section" style={{ flex: 1 }}>
-        <div className="section-head" style={{ marginBottom: 14 }}>
-          <div className="nav-tabs" role="tablist">
-            {([['overview', 'Overview'], ['sending', 'Sending'], ['platform-runs', 'Job runs'], ['emails', 'Lifecycle emails'], ['issues', 'Issues'], ['ai', 'Gemini logs'], ['server-logs', 'Server logs']] as const).map(([key, label]) => (
-              <button type="button" role="tab" aria-selected={tab === key} key={key}
-                className={`nav-tab${tab === key ? ' active' : ''}`} onClick={() => pickTab(key)}>
-                {label}
-                {key === 'issues' && !!openIssues && <span className="tab-badge" style={{ marginLeft: 6 }}>{openIssues}</span>}
-                {key === 'sending' && sendingCritical > 0 && <span className="tab-badge" style={{ marginLeft: 6 }}>{sendingCritical}</span>}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        {tab === 'sending' && <AdminSending onAlertCount={setSendingCritical} />}
-        {tab === 'platform-runs' && <AdminPlatformRuns accounts={data?.users || []} />}
-        {tab === 'issues' && <AdminIssues onOpenCount={setOpenIssues} />}
-        {tab === 'ai' && <AdminAiLogs />}
-        {tab === 'server-logs' && <AdminServerLogs />}
-
-        {tab === 'emails' && (
-          <>
-            <AdminEmailsCard data={emails} reload={loadEmails} />
-            <AdminEmailSchedule />
-          </>
-        )}
-
-        <div hidden={tab !== 'overview'}>
-        {error && <div className="login-error" style={{ textAlign: 'left' }}>{error}</div>}
-        {!data && !error && <div className="skeleton" style={{ height: 120 }} />}
-
-        <RefreshBar active={overviewLoading && !!data} />
-        <Refreshing active={overviewLoading && !!data}>
-        {data && (
-          <>
-            {/* Only appears when it is actually true: the unique index on
-                Settings.userId is gone and someone has two rows. */}
-            {data.totals.duplicateSettings > 0 && (
-              <div className="info-box danger" style={{ marginBottom: 14 }}>
-                <strong>{data.totals.duplicateSettings} account(s) have duplicate settings documents.</strong>{' '}
-                The unique index on <code>settings.userId</code> is missing — run{' '}
-                <code>scripts/dedupe-settings.js</code>.
-              </div>
-            )}
-            {data.unassigned && (
-              <div className="info-box" style={{ borderColor: 'var(--amber)', marginBottom: 14 }}>
-                <strong>Some documents belong to no account.</strong>{' '}
-                {data.unassigned.contacts.total} contact(s), {data.unassigned.leads.total} lead(s).
-                They predate the multi-tenant migration and are invisible to every user.
-              </div>
-            )}
-
-            <div className="stat-grid">
-              {tiles.map(t => (
-                <div className="stat-card" key={t.label}>
-                  <div className="stat-label">{t.label}</div>
-                  <div className={`stat-value ${t.cls || ''}`}>{t.value}</div>
-                  {t.sub && <div style={{ fontSize: 11.5, color: 'var(--text3)', marginTop: 2 }}>{t.sub}</div>}
-                </div>
-              ))}
-            </div>
-
-            {/* Accounts ranked by volume. A bar list rather than a chart: at
-                fifty accounts a fifty-column chart is unreadable, and this
-                reuses a component class that already exists. */}
-            <div className="an-card" style={{ marginTop: 16 }}>
-              <div className="an-card-head">
-                <div className="an-card-title"><i className="ti ti-chart-bar" /> Sending by account</div>
-                <div className="an-card-sub">Emails ever sent. A trend, not an audit — a follow-up overwrites the send date it replaces.</div>
-              </div>
-              <div className="an-card-body">
-                {(() => {
-                  const max = Math.max(1, ...data.users.map(u => u.contacts.everSent));
-                  const ranked = [...data.users].sort((a, b) => b.contacts.everSent - a.contacts.everSent);
-                  if (!ranked.some(u => u.contacts.everSent > 0)) return <div className="an-empty">Nothing sent yet.</div>;
-                  return ranked.map(u => (
-                    <div key={u.id} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                      <div style={{ width: 200, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{u.email}</div>
-                      <div className="progress-bar" style={{ flex: 1 }}>
-                        <div className="progress-fill" style={{ width: `${(u.contacts.everSent / max) * 100}%` }} />
-                      </div>
-                      <div style={{ width: 90, textAlign: 'right', fontSize: 12, color: 'var(--text2)', fontVariantNumeric: 'tabular-nums' }}>
-                        {u.contacts.everSent} sent
-                      </div>
-                    </div>
-                  ));
-                })()}
-              </div>
-            </div>
-
-            <div className="an-card" style={{ marginTop: 16 }}>
-              <div className="an-card-head" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-                <div>
-                  <div className="an-card-title">
-                    <i className="ti ti-inbox" /> Access requests
-                    {data.totals.pendingRequests > 0 && (
-                      <span className="tab-badge" style={{ marginLeft: 6 }}>{data.totals.pendingRequests}</span>
-                    )}
-                  </div>
-                  <div className="an-card-sub">
-                    People who tried to sign in and weren't on the list. Approving one creates
-                    their account and emails them; declining is final, and they are not emailed.
-                  </div>
-                </div>
-                <div className="seg-toggle">
-                  {(['pending', 'all'] as const).map(f => (
-                    <button
-                      key={f} type="button" className={`btn btn-xs${reqFilter === f ? ' active' : ''}`}
-                      onClick={() => setReqFilter(f)}
-                    >{f}</button>
-                  ))}
-                </div>
-              </div>
-              <div className="an-card-body">
-                <Refreshing active={requestsLoading}>
-                {requests.length === 0 ? (
-                  <div className="an-empty">
-                    {reqFilter === 'pending' ? 'Nothing waiting.' : 'No requests yet.'}
-                  </div>
-                ) : requests.map(r => (
-                  <div
-                    key={r.id}
-                    style={{
-                      display: 'flex', gap: 12, alignItems: 'flex-start', padding: '10px 0',
-                      borderBottom: '1px solid var(--border)',
-                    }}
-                  >
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontWeight: 500, fontSize: 13 }}>
-                        {r.email}
-                        {r.name && <span style={{ color: 'var(--text2)', fontWeight: 400 }}> · {r.name}</span>}
-                        {r.status !== 'pending' && (
-                          <span className={`badge ${r.status === 'approved' ? 'badge-sent' : 'badge-rejected'}`} style={{ marginLeft: 6 }}>
-                            {r.status}
-                          </span>
-                        )}
-                        {r.requestCount > 1 && (
-                          <span className="badge badge-pending" style={{ marginLeft: 6 }}>asked {r.requestCount}×</span>
-                        )}
-                      </div>
-                      {/* Free text from a stranger. React escapes it; it is never
-                          inserted as HTML anywhere. */}
-                      {r.note && (
-                        <div style={{ fontSize: 12.5, color: 'var(--text2)', marginTop: 3, whiteSpace: 'pre-wrap' }}>{r.note}</div>
-                      )}
-                      <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 3 }}>{ago(r.createdAt)}</div>
-                    </div>
-                    <div style={{ whiteSpace: 'nowrap' }}>
-                      {r.status === 'pending' ? (
-                        <>
-                          <button
-                            className="btn btn-xs btn-success" type="button" disabled={busyId === r.id}
-                            onClick={() => decide(r, () => approveAccessApi(r.id), `${r.email} approved`)}
-                          >Approve</button>{' '}
-                          <button
-                            className="btn btn-xs btn-danger" type="button" disabled={busyId === r.id}
-                            onClick={() => {
-                              if (!window.confirm(`Decline ${r.email}? They are told plainly, and asking again will not reopen it.`)) return;
-                              decide(r, () => rejectAccessApi(r.id), `${r.email} declined`);
-                            }}
-                          >Decline</button>
-                        </>
-                      ) : (
-                        <button
-                          className="btn btn-xs" type="button" disabled={busyId === r.id}
-                          title={r.status === 'rejected'
-                            ? 'Remove this row. That address can then ask again.'
-                            : 'Remove this row from the list.'}
-                          onClick={() => decide(r, () => clearAccessRequestApi(r.id), 'Cleared')}
-                        >Clear</button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-                </Refreshing>
-              </div>
-            </div>
-
-            <div className="an-card" style={{ marginTop: 16 }}>
-              <div className="an-card-head">
-                <div className="an-card-title"><i className="ti ti-user-plus" /> Whitelist an address</div>
-                <div className="an-card-sub">That is the whole of account creation — they sign in with a code emailed to them. No password is ever issued.</div>
-              </div>
-              <div className="an-card-body">
-                <form onSubmit={invite} style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                  <input
-                    className="login-input" type="email" required placeholder="person@example.com"
-                    value={inviteEmail} onChange={e => setInviteEmail(e.target.value)}
-                    style={{ flex: 1, minWidth: 220 }}
-                  />
-                  <button className="btn btn-primary" type="submit" disabled={inviting}>
-                    {inviting ? <><i className="ti ti-loader" /> Adding…</> : <><i className="ti ti-plus" /> Whitelist</>}
+        <div className="adm-layout">
+          <nav className="adm-nav" aria-label="Admin sections">
+            {NAV.map(g => (
+              <div key={g.group} style={{ display: 'contents' }}>
+                <div className="adm-nav-group">{g.group}</div>
+                {g.items.map(n => (
+                  <button key={n.id} type="button" className={'adm-nav-item' + (sec === n.id ? ' on' : '')}
+                    aria-current={sec === n.id ? 'page' : undefined} onClick={() => pickSec(n.id)}>
+                    <i className={'ti ' + n.icon} aria-hidden="true" />
+                    <span className="adm-nav-label">{n.label}</span>
+                    {badge(n.id)}
                   </button>
-                </form>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 7, marginTop: 10, fontSize: 12.5, color: 'var(--text2)', cursor: 'pointer' }}>
-                  <input type="checkbox" checked={notifyInvite} onChange={e => setNotifyInvite(e.target.checked)} />
-                  Email them to say their access is ready
-                  <span style={{ color: 'var(--text3)' }}>
-                    — otherwise they have no way of knowing the account exists.
-                  </span>
-                </label>
+                ))}
               </div>
-            </div>
+            ))}
+          </nav>
 
-            <div className="table-card" style={{ marginTop: 16 }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Account</th><th>Setup</th><th>Config</th>
-                    <th style={{ textAlign: 'right' }}>Contacts</th>
-                    <th style={{ textAlign: 'right' }}>Leads</th>
-                    <th style={{ textAlign: 'right' }}>Campaigns</th>
-                    <th style={{ textAlign: 'right' }}>Scrapes</th>
-                    <th>Last seen</th>
-                    <th>
-                      <span style={{ display: 'inline-flex', gap: 5, alignItems: 'center' }}>
-                        Emails
-                        <InfoTip label="What do the email icons mean?">
-                          <strong>One icon per email</strong>
-                          {EMAIL_TYPES.map(t => t.label).join(' · ')}.<br /><br />
-                          <strong>Colour = what will actually happen</strong>
-                          Green: will send · Blue: test mode, recorded only · Red: you turned it off for this user ·
-                          Amber: they opted out · Grey: off app-wide, master off, or account disabled.
-                          Click to change.
-                        </InfoTip>
-                      </span>
-                    </th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.users.map(u => {
-                    const isSelf = u.id === user?.id;
-                    const busy = busyId === u.id;
-                    return (
-                      <Fragment key={u.id}>
-                      <tr className={u.id ? 'tr-clickable' : undefined}
-                        title={u.id ? 'Open this account — details and actions' : undefined}
-                        // Buttons inside the row keep their own job.
-                        onClick={e => { if (u.id && !(e.target as HTMLElement).closest('button, a, input, select')) openDrawer(u.id); }}>
-                        <td>
-                          <div style={{ fontWeight: 500 }}>{u.email}</div>
-                          <div style={{ display: 'flex', gap: 5, marginTop: 3 }}>
-                            {u.isAdmin && <span className="badge badge-approved">admin</span>}
-                            {!u.isAdmin && u.libraryAccess && <span className="badge" title="Can see the shared Library">library</span>}
-                            {(u.config.aiKeyCount ?? 0) > 0
-                              ? <span className="badge" title="How many of their own AI keys are saved (Groq is the required one)">keys {u.config.aiKeyCount}/3</span>
-                              : u.aiOwnerFallback
-                                ? <span className="badge badge-queued" title="AI runs on your keys">AI fallback</span>
-                                : <span className="badge" title="No AI keys of their own and no fallback" style={{ opacity: 0.7 }}>no AI keys</span>}
-                            {u.status === 'invited' && <span className="badge badge-pending">never signed in</span>}
-                            {u.status === 'disabled' && <span className="badge badge-rejected">disabled</span>}
-                            {isSelf && <span className="badge">you</span>}
-                          </div>
-                        </td>
-                        <td>
-                          {u.onboarding.completedAt
-                            ? <span className="badge badge-sent">done</span>
-                            : <span className="badge badge-pending">step {u.onboarding.step + 1} of 3</span>}
-                        </td>
-                        <td><ConfigPills row={u} /></td>
-                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                          {u.contacts.total}
-                          <div style={{ fontSize: 11, color: 'var(--text3)' }}>{u.contacts.everSent} sent · {u.contacts.everReplied} replied</div>
-                        </td>
-                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.leads.total}</td>
-                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{u.campaigns.total}</td>
-                        <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                          {u.scrapes.total}
-                          {(u.scrapes.by.failed || 0) > 0 && (
-                            <div style={{ fontSize: 11, color: 'var(--red)' }}>{u.scrapes.by.failed} failed</div>
-                          )}
-                        </td>
-                        <td style={{ fontSize: 12, color: 'var(--text2)' }}>
-                          {ago(u.lastActiveAt || u.lastLoginAt)}
-                          <div style={{ fontSize: 11, color: 'var(--text3)' }}>{u.activeSessions} session(s)</div>
-                        </td>
-                        <td>
-                          {u.id && (
-                            <button className="em-strip" type="button" onClick={() => setEmailsOpen(u.id)}
-                              aria-label={`Lifecycle emails for ${u.email}`} title="How many emails will actually be sent to this account. Click to change.">
-                              {EMAIL_TYPES.map(t => {
-                                const eff = effectiveState(t, u, emails?.config || null);
-                                return <i key={t.key} className={`ti ${t.icon}`} style={{ color: TONE_COLOR[eff.tone] }} title={`${t.label}: ${eff.label}`} />;
-                              })}
-                              <span style={{ fontSize: 11, color: 'var(--text2)', fontVariantNumeric: 'tabular-nums', marginLeft: 2 }}>
-                                {EMAIL_TYPES.filter(t => effectiveState(t, u, emails?.config || null).tone === 'on').length}/{EMAIL_TYPES.length}
-                              </span>
-                              <i className="ti ti-chevron-right" style={{ fontSize: 12, color: 'var(--text3)' }} />
-                            </button>
-                          )}
-                        </td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
-                          <button aria-label="Sign this account out on every device"
-                            className="btn btn-xs" type="button" disabled={busy || u.activeSessions === 0}
-                            title="Sign this account out on every device"
-                            onClick={() => act(u, () => adminRevokeSessionsApi(u.id!), 'Sessions ended')}
-                          ><i className="ti ti-logout" /></button>{' '}
-                          {u.status === 'disabled' ? (
-                            <button
-                              className="btn btn-xs" type="button" disabled={busy}
-                              onClick={() => act(u, () => adminUpdateUserApi(u.id!, { status: 'active' }), 'Account re-enabled')}
-                            >Enable</button>
-                          ) : (
-                            <button
-                              className="btn btn-xs btn-danger" type="button"
-                              // Self-disable is refused server-side too; hiding
-                              // the button just avoids offering a dead action.
-                              disabled={busy || isSelf}
-                              title={isSelf ? 'You cannot disable your own account' : 'Revoke access, keep their data'}
-                              onClick={() => {
-                                if (!window.confirm(`Disable ${u.email}? Their data is kept, but they are signed out everywhere and cannot sign back in.`)) return;
-                                act(u, () => adminUpdateUserApi(u.id!, { status: 'disabled' }), 'Account disabled');
-                              }}
-                            >Disable</button>
-                          )}
-                        </td>
-                      </tr>
-                      </Fragment>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+          <main className="adm-main">
+            {usesFleet && error && <div className="login-error" style={{ textAlign: 'left' }}>{error}</div>}
+            {usesFleet && !data && !error && <div className="skeleton" style={{ height: 160 }} />}
 
-            {(() => {
-              const row = drawerId ? data.users.find(x => x.id === drawerId) : null;
-              return row ? (
-                <AdminUserDrawer
-                  row={row} isSelf={row.id === user?.id}
-                  onClose={() => openDrawer(null)}
-                  onChanged={() => load(days)}
-                  onOpenEmails={() => setEmailsOpen(row.id)}
-                />
-              ) : null;
-            })()}
+            {sec === 'overview' && data && (
+              <AdminOverviewPanel
+                data={data} days={days} setDays={setDays} loading={overviewLoading}
+                openIssues={openIssues} sendAlerts={sendAlerts}
+                go={pickSec} goAccounts={goAccounts} openDrawer={openDrawer}
+              />
+            )}
+            {sec === 'accounts' && data && (
+              <AdminAccountsPanel
+                data={data} loading={overviewLoading} selfId={user?.id} busyId={busyId}
+                emailsConfig={emails?.config || null}
+                filter={accountFilter} setFilter={setAccountFilter}
+                inviteOpen={inviteOpen} setInviteOpen={setInviteOpen} invite={invite}
+                act={act} openDrawer={openDrawer} openEmails={setEmailsOpen}
+              />
+            )}
+            {sec === 'requests' && (
+              <AdminRequestsPanel
+                requests={requests} filter={reqFilter} setFilter={setReqFilter} loading={requestsLoading}
+                pending={pending} busyId={busyId} decide={decide}
+                onAddDirectly={() => { setInviteOpen(true); goAccounts('all'); }}
+              />
+            )}
 
-            {(() => {
-              const row = emailsOpen ? data.users.find(x => x.id === emailsOpen) : null;
-              return row ? (
-                <UserEmailsModal
-                  row={row} config={emails?.config || null}
-                  onClose={() => setEmailsOpen(null)}
-                  onChanged={(blockedByAdmin) => setData(d => d && ({
-                    ...d,
-                    users: d.users.map(x => x.id === row.id ? { ...x, emails: { blockedByAdmin, optOut: x.emails?.optOut || [] } } : x),
-                  }))}
-                />
-              ) : null;
-            })()}
-
-            <p style={{ fontSize: 11.5, color: 'var(--text3)', marginTop: 12 }}>
-              Deleting an account is deliberately not possible here — it would have to
-              cascade sixteen collections with no undo. Disable revokes access and keeps
-              the data; <code>scripts/delete-account.js</code> is the offline path.
-            </p>
-          </>
-        )}
-        </Refreshing>
+            {sec === 'sending' && <AdminSending onAlertCount={setSendingCritical} />}
+            {sec === 'platform-runs' && <AdminPlatformRuns accounts={data?.users || []} />}
+            {sec === 'issues' && <AdminIssues onOpenCount={setOpenIssues} />}
+            {sec === 'ai' && <AdminAiLogs />}
+            {sec === 'server-logs' && <AdminServerLogs />}
+            {sec === 'emails' && (
+              <>
+                <AdminEmailsCard data={emails} reload={loadEmails} />
+                <AdminEmailSchedule />
+              </>
+            )}
+          </main>
         </div>
+
+        {/* Outside the sections so ?user=<id> opens over whichever is showing. */}
+        {drawerRow && (
+          <AdminUserDrawer
+            row={drawerRow} isSelf={drawerRow.id === user?.id}
+            onClose={() => openDrawer(null)}
+            onChanged={() => load(days)}
+            onOpenEmails={() => setEmailsOpen(drawerRow.id)}
+          />
+        )}
+        {emailsRow && (
+          <UserEmailsModal
+            row={emailsRow} config={emails?.config || null}
+            onClose={() => setEmailsOpen(null)}
+            onChanged={(blockedByAdmin) => setData(d => d && ({
+              ...d,
+              users: d.users.map(x => x.id === emailsRow.id ? { ...x, emails: { blockedByAdmin, optOut: x.emails?.optOut || [] } } : x),
+            }))}
+          />
+        )}
       </div>
     </Layout>
   );
