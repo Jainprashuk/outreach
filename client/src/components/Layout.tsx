@@ -43,15 +43,21 @@ export default function Layout({ title, subtitle, actions, children, wide, minim
   const { reminders } = useInterviews();
   const actionQueue = useActionQueue();
   const [menuOpen, setMenuOpen] = useState(false);
+  const { pathname } = useLocation();
   // Desktop only: a 64px icon rail. The phone drawer is always full width (see theme.css).
-  const [collapsed, setCollapsed] = useState(() => {
+  // Admin and Analytics have their own section menu, so they open with this one
+  // collapsed; that default is not saved, so other pages keep your own choice.
+  const ownMenu = ['/admin', '/analytics'].some(p => pathname === p || pathname.startsWith(p + '/'));
+  const [collapsed, setCollapsedState] = useState(() => {
+    if (ownMenu) return true;
     try { return localStorage.getItem('outreach-sidebar') === 'collapsed'; } catch { return false; }
   });
-  useEffect(() => {
-    try { localStorage.setItem('outreach-sidebar', collapsed ? 'collapsed' : 'open'); } catch { /* private mode */ }
-  }, [collapsed]);
+  const setCollapsed = (fn: (c: boolean) => boolean) => setCollapsedState(c => {
+    const next = fn(c);
+    try { localStorage.setItem('outreach-sidebar', next ? 'collapsed' : 'open'); } catch { /* private mode */ }
+    return next;
+  });
   const menuBtnRef = useRef<HTMLButtonElement>(null);
-  const { pathname } = useLocation();
 
   // A drawer that covers the page has to be dismissable from the keyboard, and
   // focus has to come back to the control that opened it.
