@@ -337,7 +337,10 @@ export default function NeedsAnswer({ onChanged, platform }: { onChanged: () => 
     try {
       await reviewNaukriAutoAnswerApi(pattern, action, answer, platform);
       toast(action === 'remove' ? 'Removed — that question will need an answer again.' : 'Saved as your answer.', 'success');
-      await load();
+      // Reviewed answers leave the card at once; the reload only resyncs, so
+      // the button does not wait on it.
+      setAutoAnswered(list => list.filter(a => a.pattern !== pattern));
+      load();
     } catch (e: any) { toast(e?.message || 'Could not save', 'error'); }
     finally { setBusy(false); }
   };

@@ -1287,62 +1287,73 @@ async function saveDraft(userId, draft, attempt) {
 // the live path (/ai-answer) and by drafts written or already sitting on the
 // Needs answer page while auto-answer is on — so "the AI is sure enough"
 // means the same thing wherever the draft came from. Returns jobs requeued.
-async function saveAutoRule(userId, { question, answer, options = [], confidence, quote }) {
+async function saveAutoRule(userId, { question, answer, options = [], confidence, quote }, { requeue = true } = {}) {
   const pattern = matchable(question).slice(0, 300);
   const kind = options.length ? 'choice' : /^\d+(\.\d+)?$/.test(answer) ? 'number' : 'text';
   const rule = { pattern, answer, kind, enabled: true, origin: 'auto', confidence, quote, createdAt: new Date() };
   // Atomic, and only if no rule with this pattern exists yet — two jobs
   // asking the same question at once must not add it twice.
-  await NaukriConfig.updateOne(
+  const added = await NaukriConfig.updateOne(
     { userId, 'answers.pattern': { $ne: pattern } },
     { $push: { answers: { $each: [rule], $position: 0 } }, $pull: { drafts: { question } } },
   );
+  // A rule for it already exists: the draft is spent all the same. Left in
+  // place, every Needs answer load tried to promote it again.
+  const isNew = added.modifiedCount > 0;
+  if (!isNew) await NaukriConfig.updateOne({ userId }, { $pull: { drafts: { question } } });
+  if (!requeue) return { rule, requeued: 0, added: isNew };
   const fresh = await NaukriConfig.getForUser(userId);
-  return { rule, requeued: await requeueAnswered(userId, fresh) };
+  return { rule, requeued: await requeueAnswered(userId, fresh), added: isNew };
 }
 
 // With auto-answer on, a draft that passed every check and reached the bar is
 // used, not left waiting for a click. Covers jobs skipped before auto-answer
 // was switched on, whose drafts were written later on this page.
-async function promoteConfidentDrafts(userId, config) {
+// `changed` says the config was written, so a caller holding it reads it again.
+async function promoteConfidentDrafts(userId, config, ctx) {
   const auto = config.autoAnswer || {};
-  if (!auto.enabled) return 0;
+  if (!auto.enabled) return { requeued: 0, changed: false };
   const min = auto.minConfidence || 85;
-  const ctx = await draftContext(userId, config);
-  let requeued = 0;
-  for (const d of config.drafts || []) {
-    if (d.status !== 'ready' || (d.confidence || 0) < min || !ctx.good(d)) continue;
-    requeued += (await saveAutoRule(userId, { question: d.question, answer: d.answer, options: d.options || [], confidence: d.confidence, quote: d.quote })).requeued;
+  const confident = (config.drafts || []).filter(d => d.status === 'ready' && (d.confidence || 0) >= min && ctx.good(d));
+  if (!confident.length) return { requeued: 0, changed: false };
+  let added = 0;
+  for (const d of confident) {
+    if ((await saveAutoRule(userId, { question: d.question, answer: d.answer, options: d.options || [], confidence: d.confidence, quote: d.quote }, { requeue: false })).added) added++;
   }
-  return requeued;
+  // One sweep for all of them, not one per draft.
+  const requeued = added ? await requeueAnswered(userId, await NaukriConfig.getForUser(userId)) : 0;
+  return { requeued, changed: true };
 }
 
 router.get('/needs-answer', async (req, res) => {
   try {
     // Confident drafts first, so the list below no longer shows what they solved.
-    const autoRequeued = await promoteConfidentDrafts(req.userId, await NaukriConfig.getForUser(req.userId));
-    const [rows, config] = await Promise.all([
-      NaukriJob.aggregate([
-        // This platform's questions (all of them in the All view). The answer
-        // bank they go into is shared, so answering one here also frees jobs
-        // on every other platform that asked it.
-        { $match: { userId: req.userId, ...NEEDS_ANSWER_ANY, ...PQ(req), deleted: { $ne: true } } },
-        { $sort: { updatedAt: -1 } },
-        { $group: {
-            _id: '$unknownQuestion',
-            count: { $sum: 1 },
-            lastSeenAt: { $max: '$updatedAt' },
-            options: { $max: '$questionOptions' },
-            jobs: { $push: { id: { $toString: '$_id' }, title: '$title', company: '$company', url: '$url', platform: { $ifNull: ['$platform', 'naukri'] } } },
-            platforms: { $addToSet: { $ifNull: ['$platform', 'naukri'] } },
-        } },
-        { $sort: { count: -1, lastSeenAt: -1 } },
-        { $limit: 100 },
-      ]),
-      NaukriConfig.getForUser(req.userId),
+    let config = await NaukriConfig.getForUser(req.userId);
+    let ctx = await draftContext(req.userId, config);
+    const promoted = await promoteConfidentDrafts(req.userId, config, ctx);
+    const autoRequeued = promoted.requeued;
+    if (promoted.changed) {
+      config = await NaukriConfig.getForUser(req.userId);
+      ctx = await draftContext(req.userId, config);
+    }
+    const rows = await NaukriJob.aggregate([
+      // This platform's questions (all of them in the All view). The answer
+      // bank they go into is shared, so answering one here also frees jobs
+      // on every other platform that asked it.
+      { $match: { userId: req.userId, ...NEEDS_ANSWER_ANY, ...PQ(req), deleted: { $ne: true } } },
+      { $sort: { updatedAt: -1 } },
+      { $group: {
+          _id: '$unknownQuestion',
+          count: { $sum: 1 },
+          lastSeenAt: { $max: '$updatedAt' },
+          options: { $max: '$questionOptions' },
+          jobs: { $push: { id: { $toString: '$_id' }, title: '$title', company: '$company', url: '$url', platform: { $ifNull: ['$platform', 'naukri'] } } },
+          platforms: { $addToSet: { $ifNull: ['$platform', 'naukri'] } },
+      } },
+      { $sort: { count: -1, lastSeenAt: -1 } },
+      { $limit: 100 },
     ]);
     const drafts = config.drafts || [];
-    const ctx = await draftContext(req.userId, config);
     const { text, profile: prof, rules: rulesNow } = ctx;
     res.json({
       aiDrafts: !!config.aiDrafts,
@@ -1713,7 +1724,10 @@ async function resumeTextFor(userId, config) {
   const eff = await effectiveResume(userId, config);
   if (!eff || eff.source !== 'settings') return r.text || '';
   const stamp = `settings:${eff.uploadedAt ? new Date(eff.uploadedAt).toISOString() : eff.size}`;
-  if (from === stamp && r.text) return r.text;
+  // Kept even when empty (a scanned PDF): that file has nothing to read, and
+  // parsing it again on every Needs answer load is what made the page slow.
+  // A new upload changes the stamp, so it is read then.
+  if (from === stamp) return r.text || '';
   const full = await effectiveResume(userId, config, { withData: true });
   const data = full && full.data && (full.data.buffer ? Buffer.from(full.data.buffer) : Buffer.from(full.data));
   const text = data ? await resumeText({ mimetype: full.contentType, buffer: data }) : '';
