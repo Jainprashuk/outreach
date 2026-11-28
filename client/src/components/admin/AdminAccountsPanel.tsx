@@ -11,13 +11,14 @@ import {
   type AdminOverview, type AdminUserRow, type AdminEmailsView,
 } from '../../lib/api';
 
-export type AccountFilter = 'all' | 'active' | 'invited' | 'setup' | 'disabled' | 'admins';
+export type AccountFilter = 'all' | 'active' | 'invited' | 'onboarded' | 'setup' | 'disabled' | 'admins';
 type Sort = 'recent' | 'sent' | 'contacts' | 'newest' | 'email';
 
 const FILTERS: Array<{ id: AccountFilter; label: string; test: (u: AdminUserRow) => boolean }> = [
   { id: 'all', label: 'All', test: () => true },
   { id: 'active', label: 'Active', test: u => u.status === 'active' },
   { id: 'invited', label: 'Never signed in', test: u => u.status === 'invited' },
+  { id: 'onboarded', label: 'Set up', test: u => !!u.onboarding.completedAt },
   { id: 'setup', label: 'Setup incomplete', test: u => u.status === 'active' && !u.onboarding.completedAt },
   { id: 'disabled', label: 'Disabled', test: u => u.status === 'disabled' },
   { id: 'admins', label: 'Admins', test: u => u.isAdmin },

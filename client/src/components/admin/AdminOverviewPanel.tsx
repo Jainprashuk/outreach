@@ -72,7 +72,7 @@ export default function AdminOverviewPanel({ data, days, setDays, loading, openI
 
   const kpis: Array<{ icon: string; label: string; value: ReactNode; sub?: string; run?: () => void }> = [
     { icon: 'ti-users', label: 'Accounts', value: t.users, sub: `${t.active} active · ${t.invited} invited`, run: () => goAccounts('all') },
-    { icon: 'ti-checklist', label: 'Set up', value: t.onboarded, sub: `${t.withGmail} with Gmail connected`, run: () => goAccounts('setup') },
+    { icon: 'ti-checklist', label: 'Set up', value: t.onboarded, sub: `${t.withGmail} with Gmail connected`, run: () => goAccounts('onboarded') },
     { icon: 'ti-address-book', label: 'Contacts', value: t.contacts.toLocaleString(), sub: `${t.leads.toLocaleString()} leads` },
     { icon: 'ti-send', label: 'Emails sent', value: t.everSent.toLocaleString(), sub: `${t.campaigns} campaign(s)`, run: () => go('sending') },
     { icon: 'ti-message-reply', label: 'Replies', value: t.everReplied.toLocaleString(), sub: `${t.replyRate}% reply rate` },
