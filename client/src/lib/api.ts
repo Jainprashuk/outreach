@@ -239,6 +239,8 @@ export interface AnalyticsSummary {
   week: { s1: number; s2: number; r1: number; r2: number };
   adv: number;
   due: number;
+  /** Repliers by the classifier's verdict on their latest reply ('unclassified' when none). */
+  replyTypes?: Array<{ k: string; n: number }>;
   /** The contacts the Interviews store points at — the only rows the interview funnel counts. */
   interviewRows: Array<{ id: string; email: string }>;
   activity: AnalyticsActivity;

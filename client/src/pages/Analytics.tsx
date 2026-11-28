@@ -12,8 +12,12 @@ import ReportsPanel from '../components/ReportsPanel';
 import AdminUserAnalytics from '../components/AdminUserAnalytics';
 import { useSession } from '../context/SessionContext';
 import { Skeleton } from '../components/Skeleton';
-import InterviewFunnelCard from '../components/InterviewFunnelCard';
 import { CampaignsCard, NeedsYouCard } from '../components/OutreachExtraCards';
+import OverviewSection, { type AnSec } from '../components/analytics/OverviewSection';
+import InterviewsSection from '../components/analytics/InterviewsSection';
+import { CATEGORY_LABELS } from '../lib/format';
+import '../styles/admin-redesign.css';
+import '../styles/analytics-redesign.css';
 import { useInterviews } from '../context/InterviewContext';
 import {
   EMPTY_FUNNEL, indexInterviews, interviewFunnel, type InterviewFunnel,
@@ -62,7 +66,7 @@ function TimeSeriesChart({ series }: { series: Array<{ day: number; sent: number
 
   return (
     <>
-      <svg ref={svgRef} width="100%" style={{ display: 'block', overflow: 'visible' }} viewBox={`0 0 ${W} ${H}`}
+      <svg ref={svgRef} className="an-ts" width="100%" style={{ display: 'block', overflow: 'visible' }} viewBox={`0 0 ${W} ${H}`}
         onMouseMove={onMove} onMouseLeave={() => setHover(null)}>
         <defs>
           <linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor={c1} stopOpacity={0.22} /><stop offset="100%" stopColor={c1} stopOpacity={0} /></linearGradient>
@@ -350,16 +354,6 @@ function buildInsights(
       x: <>Follow-ups recovered <b>{m.afterFuCount}</b> replies ({share}% of all replies) that the first email didn't get. Reply rate on follow-ups: {pct(m.afterFuCount, m.fuCount)}%.</> });
   }
 
-  const { s1, s2, r1, r2 } = S.week;
-  if (s1 + s2 > 0) {
-    const dir = s1 > s2 ? 'up' : s1 < s2 ? 'down' : 'flat';
-    items.push({
-      i: dir === 'up' ? 'ti-trending-up' : dir === 'down' ? 'ti-trending-down' : 'ti-minus',
-      c: dir === 'down' ? '--amber' : '--green', t: 'This week vs last',
-      x: <>Sends: <b>{s1}</b> vs {s2} · replies: <b>{r1}</b> vs {r2}. {dir === 'down' ? 'Volume is dropping — queued contacts are waiting.' : dir === 'up' ? 'Volume is growing — keep the cadence.' : 'Steady cadence.'}</>,
-    });
-  }
-
   if (m.sentCount >= 50) {
     const level = m.bounceRate > 20 ? 'critical' : m.bounceRate > 10 ? 'high' : 'healthy';
     items.push({
@@ -371,10 +365,15 @@ function buildInsights(
     });
   }
 
-  if (m.repliedCount >= 5) {
-    const adv = S.adv;
-    items.push({ i: 'ti-target-arrow', c: '--indigo', t: 'Reply → pipeline conversion',
-      x: <><b>{adv}</b> of {m.repliedCount} repliers ({pct(adv, m.repliedCount)}%) progressed to review or closed.{m.repliedCount - adv > 0 ? ` ${m.repliedCount - adv} replies may still need a next step.` : ''}</> });
+  // What the classifier made of the replies — automatic, unlike the In review /
+  // Closed statuses, which only move when you set them by hand.
+  const types = S.replyTypes || [];
+  const classified = types.filter(r => r.k !== 'unclassified').reduce((n, r) => n + r.n, 0);
+  if (classified >= 5) {
+    const interested = types.filter(r => r.k === 'reviewing' || r.k === 'resume-requested').reduce((n, r) => n + r.n, 0);
+    const no = types.find(r => r.k === 'no')?.n || 0;
+    items.push({ i: 'ti-messages', c: interested ? '--green' : '--indigo', t: 'What replies say',
+      x: <><b>{interested}</b> of {classified} classified replies ({pct(interested, classified)}%) show interest — reviewing your profile or asking for a resume; {no} said no.</> });
   }
 
   // The interview store is the only place that knows a reply turned into a real
@@ -398,12 +397,6 @@ function buildInsights(
       x: <>{m.repliedCount} contacts have replied but none are tracked in Interviews — flag the real conversations there so this page can measure what replies actually turn into.</> });
   }
 
-  const due = S.due;
-  if (due > 0 || m.queuedNow > 0) {
-    items.push({ i: 'ti-hourglass-high', c: '--amber', t: 'Waiting on you',
-      x: <>{due > 0 ? <><b>{due}</b> contacts are due a follow-up</> : null}{due > 0 && m.queuedNow > 0 ? ' · ' : ''}{m.queuedNow > 0 ? <><b>{m.queuedNow}</b> are queued and never emailed</> : null}.</> });
-  }
-
   const verdict = m.replyRate >= 15 ? 'well above' : m.replyRate >= 5 ? 'around' : 'below';
   items.push({ i: 'ti-gauge', c: m.replyRate >= 5 ? '--green' : '--red', t: 'Overall reply rate',
     x: <><b>{m.replyRate}%</b> of emailed contacts have ever replied — {verdict} the ~5% cold-email benchmark.{m.replyRate < 5 ? ' Tighter targeting and shorter emails usually move this most.' : ''}</> });
@@ -423,7 +416,65 @@ const EMPTY_SUMMARY: AnalyticsSummary = {
   adv: 0, due: 0, interviewRows: [], activity: EMPTY_ACTIVITY,
 };
 
-// ── Page ─────────────────────────────────────────────────────────────────────
+// ── Replies by hour ──────────────────────────────────────────────────────────
+function HourChart({ hours }: { hours: number[] }) {
+  const accent = cvar('--chart-2') || '#0d9488';
+  const W = 340, H = 150, padL = 8, padR = 8, padT = 14, padB = 22;
+  const cW = W - padL - padR, cH = H - padT - padB;
+  const maxV = Math.max(1, ...hours);
+  const slot = cW / 24, bw = slot * 0.7;
+  if (!hours.some(Boolean)) return <div className="an-empty"><i className="ti ti-clock-off" />No replies yet</div>;
+  return (
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} style={{ display: 'block', overflow: 'visible' }}
+      role="img" aria-label="Replies by hour of day">
+      {hours.map((n, h) => {
+        const bh = n ? Math.max(3, (n / maxV) * cH) : 2;
+        return (
+          <g key={h}>
+            <rect x={padL + h * slot + (slot - bw) / 2} y={padT + cH - bh} width={bw} height={bh} rx={2}
+              style={{ fill: accent, opacity: n ? 0.85 : 0.15 }}><title>{`${h}:00 — ${n} repl${n === 1 ? 'y' : 'ies'}`}</title></rect>
+            {h % 6 === 0 && <text x={padL + h * slot + slot / 2} y={H - 6} textAnchor="middle" style={{ fontSize: 9, fill: 'var(--text3)' }}>
+              {h === 0 ? '12am' : h === 12 ? '12pm' : h < 12 ? `${h}am` : `${h - 12}pm`}</text>}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ── Sections ─────────────────────────────────────────────────────────────────
+type Sec = AnSec;
+const SECS: Sec[] = ['overview', 'outreach', 'replies', 'activity', 'interviews', 'naukri', 'leads', 'discover', 'reports'];
+const NAV: Array<{ group: string; items: Array<{ id: Sec; icon: string; label: string }> }> = [
+  { group: 'Home', items: [{ id: 'overview', icon: 'ti-layout-dashboard', label: 'Overview' }] },
+  { group: 'Email outreach', items: [
+    { id: 'outreach', icon: 'ti-send', label: 'Outreach' },
+    { id: 'replies', icon: 'ti-message-reply', label: 'Replies' },
+    { id: 'activity', icon: 'ti-activity', label: 'Activity log' },
+  ] },
+  { group: 'Pipeline', items: [
+    { id: 'interviews', icon: 'ti-user-check', label: 'Interviews' },
+    { id: 'naukri', icon: 'ti-briefcase', label: 'Job platforms' },
+    { id: 'leads', icon: 'ti-target-arrow', label: 'Leads' },
+    { id: 'discover', icon: 'ti-compass', label: 'Discover' },
+  ] },
+  { group: 'Share', items: [{ id: 'reports', icon: 'ti-file-analytics', label: 'Reports' }] },
+];
+const SUBTITLE: Record<Sec, string> = {
+  overview: 'Your whole search at a glance: what is waiting on you, and how each part is doing.',
+  outreach: 'Who you emailed, how far they got, and which templates and companies work.',
+  replies: 'What replies say, how fast they come, and when.',
+  activity: 'Everything that happened in the last hour, day, week and month.',
+  interviews: 'Every interview you track — from contacts, leads or added by hand.',
+  naukri: 'Job platforms: what was applied to, why the rest stopped, and what recruiters did.',
+  leads: 'Your staged lead pipeline, before it becomes outreach.',
+  discover: 'People found with Discover, and how their guessed emails performed.',
+  reports: 'Reports for any period — on screen, as a PDF, or emailed to you.',
+};
+// Sections built from the contact summary (the rest load their own data).
+const USES_SUMMARY: Sec[] = ['overview', 'outreach', 'replies', 'activity', 'interviews'];
+const secOf = (v: string | null): Sec => (SECS.includes(v as Sec) ? v as Sec : 'overview');
+
 export default function Analytics() {
   const app = useApp();
   const toast = useToast();
@@ -445,143 +496,65 @@ export default function Analytics() {
     if (id) next.set('user', id); else next.delete('user');
     setSearch(next, { replace: true });
   };
-  const [view, setView] = useState<'outreach' | 'leads' | 'discover' | 'naukri' | 'reports'>(() => {
-    const v = search.get('view');
-    return v === 'leads' || v === 'reports' || v === 'discover' || v === 'naukri' ? v : 'outreach';
-  });
-  const [leadsRefresh, setLeadsRefresh] = useState(0);
-  const [discoverRefresh, setDiscoverRefresh] = useState(0);
-  const [naukriRefresh, setNaukriRefresh] = useState(0);
-  const [outreachRefresh, setOutreachRefresh] = useState(0);
+
+  // The section lives in ?view=, so a link or a reload lands on it.
+  const view = secOf(search.get('view'));
+  const go = (s: Sec) => {
+    const next = new URLSearchParams(search);
+    if (s === 'overview') next.delete('view'); else next.set('view', s);
+    setSearch(next, { replace: true });
+    window.scrollTo({ top: 0 });
+  };
+
+  const [refreshToken, setRefreshToken] = useState(0);
   const [range, setRange] = useState(30);
   const [statusMode, setStatusMode] = useState<'current' | 'ever'>('current');
   const [refreshing, setRefreshing] = useState(false);
-  // Everything this view derives from contacts, computed on the server
+  // Everything derived from contacts, computed on the server
   // (GET /api/contacts/analytics-summary) — the contacts themselves never come down.
   const [summary, setSummary] = useState<AnalyticsSummary | null>(null);
-  // Until the first load lands the Outreach view shows skeletons — an empty list
-  // would otherwise render every figure as a confident 0.
-  const [contactsLoaded, setContactsLoaded] = useState(false);
 
-  const load = async () => {
+  const loadSummary = async () => {
     setRefreshing(true);
     try {
-      if (view === 'leads') setLeadsRefresh(n => n + 1);
-      else if (view === 'discover') setDiscoverRefresh(n => n + 1);
-      else if (view === 'naukri') setNaukriRefresh(n => n + 1);
-      else {
-        await Promise.all([loadAnalyticsSummaryApi().then(setSummary), app.loadTemplates()]);
-        setContactsLoaded(true);
-        setOutreachRefresh(n => n + 1);
-      }
+      await Promise.all([loadAnalyticsSummaryApi().then(setSummary), app.loadTemplates()]);
     } catch (err: any) {
       toast('Could not load analytics: ' + err.message, 'error');
     } finally {
       setRefreshing(false);
     }
   };
-
-  // First time the Outreach view is shown — including when the page opened on
-  // Leads or Reports (?view=…) and you switch across afterwards.
-  useEffect(() => { if (!viewUser && view === 'outreach' && !contactsLoaded && !refreshing) load(); }, [view, viewUser]);
+  const refresh = () => {
+    setRefreshToken(n => n + 1);
+    if (USES_SUMMARY.includes(view)) loadSummary();
+  };
+  // First time a summary-based section is shown, wherever the page opened.
+  useEffect(() => { if (!viewUser && USES_SUMMARY.includes(view) && !summary && !refreshing) loadSummary(); }, [view, viewUser]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const S = summary ?? EMPTY_SUMMARY;
   const m = S.metrics;
   // Interviews live in their own store keyed on (sourceType, sourceId), so the
   // join has to happen here — no contact field records that someone interviewed.
-  // Only the contacts an interview points at can count, so those are all the server sends.
   const iv = useMemo(
-    () => (interviewsLoaded
-      ? interviewFunnel(S.interviewRows, indexInterviews(interviews), 'contact', c => c.email)
-      : EMPTY_FUNNEL),
+    () => (interviewsLoaded ? interviewFunnel(S.interviewRows, indexInterviews(interviews), 'contact', c => c.email) : EMPTY_FUNNEL),
     [S, interviews, interviewsLoaded],
   );
-  const series = S.series[String(range) as '30' | '90'] || [];
-  const allPairs = S.pairs;
   const insights = useMemo(() => buildInsights(S, m, app.templates, iv), [S, m, app.templates, iv]);
-
-  const sortedPairs = [...allPairs].sort((a, b) => a - b);
+  const sortedPairs = S.pairs;
   const median = sortedPairs.length ? sortedPairs[Math.floor(sortedPairs.length / 2)] : null;
+  const within24 = sortedPairs.length ? pct(sortedPairs.filter(h => h <= 24).length, sortedPairs.length) : 0;
 
-  const kpis = [
-    { label: 'Total contacts', value: m.total.toLocaleString(), sub: m.inCampaignNow ? `${m.queuedNow} queued · ${m.inCampaignNow} in campaigns` : `${m.queuedNow} still queued`, cls: '' },
-    { label: 'Contacts emailed', value: m.sentCount.toLocaleString(), sub: `${m.fuCount} got a follow-up`, cls: '' },
-    { label: 'Ever replied', value: String(m.repliedCount), sub: `${m.replyRate}% of emailed`, cls: 'green' },
-    { label: 'Bounce rate', value: `${m.bounceRate}%`, sub: `${m.bouncedCount} ever bounced`, cls: m.bounceRate > 10 ? 'red' : '' },
-    { label: 'Advanced', value: String(m.inReviewEver + m.closedEver), sub: `${m.inReviewEver} in review · ${m.closedEver} closed`, cls: 'teal' },
-    { label: 'In interviews', value: String(iv.tracked),
-      sub: iv.tracked
-        ? `${iv.live} still in play · ${iv.selected} selected`
-        : 'nobody tracked in Interviews yet',
-      cls: iv.selected > 0 ? 'green' : iv.tracked > 0 ? 'teal' : '' },
-  ];
-
-  // Funnel
-  // "Moved to review" and "Closed" are resting statuses rather than rungs on the
-  // way to a job, so they sit under the chart instead of inside it — otherwise
-  // the interview steps, which don't require either, would read as a fall-off.
-  const funnelSteps = [
-    { label: 'Contacts added', n: m.total },
-    { label: 'Emailed', n: m.sentCount },
-    { label: 'Replied (ever)', n: m.repliedCount },
-    { label: 'In interviews', n: iv.tracked },
-    { label: 'Reached a booked round', n: iv.interviewed },
-    { label: 'Selected', n: iv.selected },
-  ];
-  const funnelMax = funnelSteps[0].n || 1;
   const accent = cvar('--accent') || '#4f46e5';
-
-  // Status breakdown
-  const statusRows = statusMode === 'current' ? S.statusCurrent : S.statusEver;
-  const nowByStatus = new Map(S.statusCurrent.map(r => [r.s, r.n]));
-
-  // Reply journey
-  const repliersCount = m.repliedCount;
-  const journeyRows = S.journey;
-
-  // Templates
-  const tplRows = S.templates
-    .map(([k, v]) => ({ name: app.templates[k]?.name || k, ...v, rate: pct(v.replied, v.sent) }))
-    .sort((a, b) => b.rate - a.rate);
-
-  // Companies
-  const coRows = S.companies;
-
   const teal = cvar('--teal') || '#085041';
   const amber = cvar('--amber') || '#8a5c00';
-  const fuShare = m.repliedCount ? pct(m.afterFuCount, m.repliedCount) : 0;
 
   const picker = isAdmin && accounts.length > 0 && (
-    <select value={viewUser || ''} onChange={e => pickUser(e.target.value)} aria-label="Whose analytics"
-      style={{ maxWidth: 260 }}>
+    <select value={viewUser || ''} onChange={e => pickUser(e.target.value)} aria-label="Whose analytics" style={{ maxWidth: 260 }}>
       <option value="">My analytics</option>
       {accounts.filter(a => a.id !== me?.id).map(a => (
         <option key={a.id} value={a.id}>{a.email}{a.status !== 'active' ? ` (${a.status})` : ''}</option>
       ))}
     </select>
-  );
-
-  const switcher = (
-    <div className="section-head" style={{ marginBottom: 14, display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-      <div className="nav-tabs">
-        <button type="button" className={`nav-tab${view === 'outreach' ? ' active' : ''}`} onClick={() => setView('outreach')}>
-          <i className="ti ti-send" /> Outreach
-        </button>
-        <button type="button" className={`nav-tab${view === 'leads' ? ' active' : ''}`} onClick={() => setView('leads')}>
-          <i className="ti ti-target-arrow" /> Leads
-        </button>
-        <button type="button" className={`nav-tab${view === 'discover' ? ' active' : ''}`} onClick={() => setView('discover')}>
-          <i className="ti ti-compass" /> Discover
-        </button>
-        <button type="button" className={`nav-tab${view === 'naukri' ? ' active' : ''}`} onClick={() => setView('naukri')}>
-          <i className="ti ti-briefcase" /> Job Platforms
-        </button>
-        <button type="button" className={`nav-tab${view === 'reports' ? ' active' : ''}`} onClick={() => setView('reports')}>
-          <i className="ti ti-file-analytics" /> Reports
-        </button>
-      </div>
-      {picker}
-    </div>
   );
 
   if (viewUser) {
@@ -596,169 +569,115 @@ export default function Analytics() {
     );
   }
 
-  if (view === 'outreach' && !(contactsLoaded && interviewsLoaded)) {
-    return (
-      <Layout title="Analytics" subtitle="Loading…"
-        actions={
-          // Also the way back if the load failed (the toast says why).
-          <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
-            <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} /> Refresh
-          </button>
-        }>
-        {switcher}
-        <div className="stat-grid" style={{ padding: '0 0 4px', marginBottom: 14 }} aria-busy="true">
-          {kpis.map(k => (
-            <div className="stat-card" key={k.label}>
-              <div className="stat-label">{k.label}</div>
-              <Skeleton w="45%" h={28} style={{ marginTop: 4 }} />
-              <Skeleton w="70%" h={10} style={{ marginTop: 10 }} />
-            </div>
+  const waiting = USES_SUMMARY.includes(view) && !(summary && interviewsLoaded);
+  const needsYou = S.queue?.buckets['needs-you'] || 0;
+  const badge = (id: Sec) => {
+    if (id === 'replies' && needsYou) return <span className="adm-pill warn" aria-label={`${needsYou} waiting on you`}>{needsYou}</span>;
+    if (id === 'interviews' && interviewsLoaded && interviews.length) return <span className="adm-count">{interviews.length}</span>;
+    return null;
+  };
+
+  const kpiGrid = (tiles: Array<{ label: string; value: React.ReactNode; sub: string; cls?: string }>) => (
+    <div className="stat-grid">
+      {tiles.map(k => (
+        <div className="stat-card" key={k.label}>
+          <div className="stat-label">{k.label}</div>
+          <div className={`kpi-value stat-value ${k.cls || ''}`}>{k.value}</div>
+          <div className="stat-sub">{k.sub}</div>
+        </div>
+      ))}
+    </div>
+  );
+
+  const trendCard = (
+    <div className="an-card">
+      <div className="an-card-head adm-card-head">
+        <div>
+          <div className="an-card-title"><i className="ti ti-timeline" /> Sends and replies</div>
+          <div className="an-card-sub">Per day, from each contact's status history (follow-ups count as sends)</div>
+        </div>
+        <div className="seg-toggle" role="group" aria-label="Range">
+          {[30, 90].map(d => (
+            <button key={d} className={`btn btn-xs${range === d ? ' active' : ''}`} onClick={() => setRange(d)} type="button">{d}d</button>
           ))}
         </div>
-        <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
-          {[0, 1, 2, 3].map(i => (
-            <div className="an-card" key={i} style={{ padding: 18 }}>
-              <Skeleton w="40%" h={13} style={{ marginBottom: 16 }} />
-              {[0, 1, 2, 3, 4].map(r => <Skeleton key={r} w={`${88 - r * 11}%`} h={10} style={{ marginBottom: 10 }} />)}
-            </div>
-          ))}
-        </div>
-      </Layout>
-    );
-  }
+      </div>
+      <div className="an-card-body"><TimeSeriesChart series={S.series[String(range) as '30' | '90'] || []} /></div>
+    </div>
+  );
 
-  if (view === 'reports') {
-    return (
-      <Layout title="Analytics" subtitle="Reports for any period — on screen, as a PDF, or emailed to you">
-        {switcher}
-        <ReportsPanel />
-      </Layout>
-    );
-  }
-
-  if (view === 'discover') {
-    return (
-      <Layout title="Analytics" subtitle="People found with Discover, and how their guessed emails performed"
-        actions={
-          <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
-            <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} /> Refresh
-          </button>
-        }>
-        {switcher}
-        <DiscoverAnalytics refreshToken={discoverRefresh} />
-      </Layout>
-    );
-  }
-
-  if (view === 'naukri') {
-    return (
-      <Layout title="Analytics" subtitle="Job platforms: what was applied to, why the rest stopped, and what recruiters did"
-        actions={
-          <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
-            <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} /> Refresh
-          </button>
-        }>
-        {switcher}
-        <NaukriAnalytics refreshToken={naukriRefresh} />
-      </Layout>
-    );
-  }
-
-  if (view === 'leads') {
-    return (
-      <Layout title="Analytics" subtitle="Your staged lead pipeline, before it becomes outreach"
-        actions={
-          <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
-            <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} /> Refresh
-          </button>
-        }>
-        {switcher}
-        <LeadsAnalytics refreshToken={leadsRefresh} />
-      </Layout>
-    );
-  }
-
-  return (
-    <Layout title="Analytics"
-      subtitle={`${m.total.toLocaleString()} contacts · ${m.sentCount.toLocaleString()} emailed · ${m.repliedCount.toLocaleString()} ever replied · ${iv.tracked.toLocaleString()} in interviews`}
-      actions={
-        <button className="btn btn-sm" onClick={load} disabled={refreshing} type="button">
-          <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} style={refreshing ? { animation: 'spin 1s linear infinite' } : undefined} /> Refresh
-        </button>
-      }>
-      {switcher}
-      <div className="stat-grid" style={{ padding: '0 0 4px', marginBottom: 14 }}>
-        {kpis.map(k => (
-          <div className="stat-card" key={k.label}>
-            <div className="stat-label">{k.label}</div>
-            <div className={`kpi-value stat-value ${k.cls}`}>{k.value}</div>
-            <div className="stat-sub">{k.sub}</div>
+  const insightsCard = (
+    <div className="an-card">
+      <div className="an-card-head">
+        <div className="an-card-title"><i className="ti ti-bulb" /> Insights</div>
+        <div className="an-card-sub">Worked out from your full history</div>
+      </div>
+      <div className="an-card-body an-grid an-cards-2" style={{ gap: 10 }}>
+        {insights.map(it => (
+          <div className="insight" key={it.t}>
+            <i className={`ti ${it.i}`} style={{ color: `var(${it.c})` }} />
+            <div><div className="in-title">{it.t}</div><div className="in-text">{it.x}</div></div>
           </div>
         ))}
       </div>
+    </div>
+  );
 
-      <ActivitySection initial={S.activity} interviews={interviews} />
+  // ── Outreach ──
+  const funnelSteps = [
+    { label: 'Contacts added', n: m.total },
+    { label: 'Emailed', n: m.sentCount },
+    { label: 'Replied', n: m.repliedCount },
+    { label: 'Reached Interviews', n: iv.tracked },
+    { label: 'Booked a round', n: iv.interviewed },
+    { label: 'Selected', n: iv.selected },
+  ];
+  const statusRows = statusMode === 'current' ? S.statusCurrent : S.statusEver;
+  const nowByStatus = new Map(S.statusCurrent.map(r => [r.s, r.n]));
+  const tplRows = S.templates
+    .map(([k, v]) => ({ name: app.templates[k]?.name || k, ...v, rate: pct(v.replied, v.sent) }))
+    .sort((a, b) => b.rate - a.rate);
+  const fuShare = m.repliedCount ? pct(m.afterFuCount, m.repliedCount) : 0;
 
-      <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
-        <Card title="Outreach funnel" icon="ti-filter"
-          sub="Every stage a contact has ever reached — email history, then the interview record it led to" delay=".04s">
+  const outreach = (
+    <>
+      {kpiGrid([
+        { label: 'Contacts', value: m.total.toLocaleString(), sub: m.inCampaignNow ? `${m.queuedNow} queued · ${m.inCampaignNow} in campaigns` : `${m.queuedNow} still queued` },
+        { label: 'Emailed', value: m.sentCount.toLocaleString(), sub: `${pct(m.sentCount, m.total)}% of contacts` },
+        { label: 'Replied', value: m.repliedCount.toLocaleString(), sub: `${m.replyRate}% of emailed`, cls: 'green' },
+        { label: 'Followed up', value: m.fuCount.toLocaleString(), sub: `${m.afterFuCount} replied after one` },
+        { label: 'Bounce rate', value: `${m.bounceRate}%`, sub: `${m.bouncedCount} ever bounced`, cls: m.bounceRate > 10 ? 'red' : '' },
+      ])}
+      <div className="an-grid an-cards-2">
+        <Card title="Outreach funnel" icon="ti-filter" sub="Every stage a contact has ever reached — email history, then the interview it led to">
           {funnelSteps.map((s, i) => (
-            <HBar key={s.label} label={s.label} n={s.n} d={funnelMax} fill={accent} opacity={1 - i * 0.15}
+            <HBar key={s.label} label={s.label} n={s.n} d={funnelSteps[0].n || 1} fill={accent} opacity={1 - i * 0.13}
               extra={i > 0 ? ` · ${pct(s.n, funnelSteps[i - 1].n)}% of prev` : ''} />
           ))}
-          <div className="an-card-sub" style={{ marginTop: 10 }}>
-            Alongside this, <strong>{m.inReviewEver}</strong> were moved to review and <strong>{m.closedEver}</strong> closed —
-            resting statuses, not steps, so they are charted under “Status breakdown”.
-            {iv.tracked === 0 && m.repliedCount > 0
-              ? ' No contact is tracked in Interviews yet, which is why the last three rows are empty.'
-              : ''}
-          </div>
         </Card>
-        <Card title="Status breakdown" icon="ti-chart-pie" delay=".08s"
-          sub={statusMode === 'current' ? 'Where every contact sits right now' : 'Contacts that ever passed through each status — one contact can count in several'}
+        <Card title="Status breakdown" icon="ti-chart-pie"
+          sub={statusMode === 'current' ? 'Where every contact sits right now' : 'Contacts that ever passed through each status — one can count in several'}
           right={
             <div className="seg-toggle">
-              <button className={`btn btn-xs${statusMode === 'current' ? ' active' : ''}`} onClick={() => setStatusMode('current')} type="button">Current</button>
-              <button className={`btn btn-xs${statusMode === 'ever' ? ' active' : ''}`} onClick={() => setStatusMode('ever')} type="button">Ever reached</button>
+              <button className={`btn btn-xs${statusMode === 'current' ? ' active' : ''}`} onClick={() => setStatusMode('current')} type="button">Now</button>
+              <button className={`btn btn-xs${statusMode === 'ever' ? ' active' : ''}`} onClick={() => setStatusMode('ever')} type="button">Ever</button>
             </div>
           }>
           {statusRows.length === 0 ? <div className="an-empty"><i className="ti ti-inbox" />No contacts yet</div>
             : statusRows.map(({ s, n }) => {
               const meta = STATUS_META[s] || { label: s, c: '--slate' };
               const nowN = statusMode === 'ever' ? (nowByStatus.get(s) || 0) : null;
-              return (
-                <HBar key={s} label={meta.label} dotColor={cvar(meta.c)} n={n} d={m.total || 1} fill={cvar(meta.c)}
-                  extra={nowN !== null && nowN !== n ? ` · now: ${nowN}` : ''} />
-              );
+              return <HBar key={s} label={meta.label} dotColor={cvar(meta.c)} n={n} d={m.total || 1} fill={cvar(meta.c)}
+                extra={nowN !== null && nowN !== n ? ` · now: ${nowN}` : ''} />;
             })}
         </Card>
       </div>
-
-      <div className="an-card" style={{ marginBottom: 14, animationDelay: '.12s' }}>
-        <div className="an-card-head" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <div>
-            <div className="an-card-title"><i className="ti ti-timeline" /> Activity over time</div>
-            <div className="an-card-sub">Send events vs. replies received (from status history)</div>
-          </div>
-          <div className="seg-toggle">
-            <button className={`btn btn-xs${range === 30 ? ' active' : ''}`} onClick={() => setRange(30)} type="button">30d</button>
-            <button className={`btn btn-xs${range === 90 ? ' active' : ''}`} onClick={() => setRange(90)} type="button">90d</button>
-          </div>
-        </div>
-        <div className="an-card-body">
-          <TimeSeriesChart series={series} />
-        </div>
-      </div>
-
-      <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
-        <Card title="Response speed" icon="ti-clock-hour-4" delay=".16s"
-          sub={median !== null ? `Median ${fmtDur(median)} across ${allPairs.length} measurable replies` : 'Time from a send to the reply it earned'}>
-          <ReplyTimeChart pairs={allPairs} />
-        </Card>
-        <Card title="Template performance" icon="ti-template" sub="Reply rate by template (counts contacts that ever replied)" delay=".2s">
+      {trendCard}
+      <div className="an-grid an-cards-2">
+        <Card title="Templates" icon="ti-template" sub="Reply rate by the template each contact was last sent">
           {tplRows.length === 0 ? <div className="an-empty"><i className="ti ti-template-off" />No sends yet</div> : (
             <table className="an-table">
-              <thead><tr><th>Template</th><th className="num">Contacts</th><th className="num">Replied</th><th className="num" style={{ width: 120 }}>Reply rate</th></tr></thead>
+              <thead><tr><th>Template</th><th className="num">Emailed</th><th className="num">Replied</th><th className="num" style={{ width: 120 }}>Rate</th></tr></thead>
               <tbody>
                 {tplRows.map(r => (
                   <tr key={r.name}>
@@ -777,44 +696,12 @@ export default function Analytics() {
             </table>
           )}
         </Card>
-      </div>
-
-      <div className="an-grid" style={{ marginBottom: 14 }}>
-        <InterviewFunnelCard
-          funnel={iv} base={m.repliedCount} baseLabel="of contacts who replied" delay=".22s"
-          sub="Contacts who got a real conversation — tracked in the Interviews store, not in the email status"
-          emptyHint="No contact is tracked in Interviews yet. Flag one from the Contacts page and this fills in."
-          elsewhere={{ n: Math.max(0, interviews.length - iv.records.length),
-            label: 'came from a lead or were added by hand' }}
-        />
-      </div>
-
-      <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
-        <Card title="Reply journey" icon="ti-route" sub="What happened to contacts after they replied" delay=".24s">
-          {repliersCount === 0 ? <div className="an-empty"><i className="ti ti-route-off" />No replies yet</div> : (
-            <>
-              <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 12 }}>
-                {repliersCount} contacts have replied at least once. They currently sit at:
-              </div>
-              {journeyRows.map(([s, n]) => {
-                const meta = STATUS_META[s] || { label: s, c: '--slate' };
-                return <HBar key={s} label={meta.label} dotColor={cvar(meta.c)} n={n} d={repliersCount} fill={cvar(meta.c)} />;
-              })}
-            </>
-          )}
-        </Card>
-        <Card title="Weekly rhythm" icon="ti-calendar-week" sub="Sends vs. replies by day of week" delay=".28s">
-          <WeekdayChart sends={S.weekday.sends} reps={S.weekday.replies} />
-        </Card>
-      </div>
-
-      <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
-        <Card title="Top companies" icon="ti-building" sub="Most-contacted organisations & their reply rate" delay=".32s">
-          {coRows.length === 0 ? <div className="an-empty"><i className="ti ti-building-off" />No company data</div> : (
+        <Card title="Top companies" icon="ti-building" sub="Your most-contacted companies and their reply rate">
+          {S.companies.length === 0 ? <div className="an-empty"><i className="ti ti-building-off" />No company data</div> : (
             <table className="an-table">
               <thead><tr><th>Company</th><th className="num">Contacts</th><th className="num">Replied</th><th className="num">Rate</th></tr></thead>
               <tbody>
-                {coRows.map(r => (
+                {S.companies.map(r => (
                   <tr key={r.co}>
                     <td style={{ fontWeight: 500, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.co}</td>
                     <td className="num" style={{ color: 'var(--text2)' }}>{r.total}</td>
@@ -826,42 +713,132 @@ export default function Analytics() {
             </table>
           )}
         </Card>
-        <Card title="Follow-up effectiveness" icon="ti-repeat" sub="Replies earned before vs. after a follow-up" delay=".36s">
+      </div>
+      <div className="an-grid an-cards-2">
+        <Card title="Follow-up effectiveness" icon="ti-repeat" sub="Replies earned before vs. after a follow-up">
           {!m.fuCount ? <div className="an-empty"><i className="ti ti-repeat-off" />No follow-ups sent yet</div> : (
             <>
-              <HBar label="Replied to first email" dotColor={teal} n={m.beforeFuCount} d={m.sentCount} fill={teal}
-                extra={` of ${m.sentCount.toLocaleString()}`} />
-              <HBar label="Replied after a follow-up" dotColor={amber} n={m.afterFuCount} d={m.fuCount} fill={amber}
-                extra={` of ${m.fuCount.toLocaleString()}`} />
-              <div style={{ marginTop: 14, padding: '11px 13px', borderRadius: 'var(--radius)', background: 'var(--bg2)', border: '0.5px solid var(--border)', fontSize: 12, color: 'var(--text2)', lineHeight: 1.55 }}>
-                <b style={{ color: 'var(--text)' }}>{m.afterFuCount}</b> of your <b style={{ color: 'var(--text)' }}>{m.repliedCount}</b> total replies ({fuShare}%) only came after a follow-up —{' '}
-                {m.afterFuCount > 0 ? 'these are replies you would have missed without following up.' : "follow-ups haven't converted anyone yet."}
+              <HBar label="Replied to the first email" dotColor={teal} n={m.beforeFuCount} d={m.sentCount} fill={teal} extra={` of ${m.sentCount.toLocaleString()}`} />
+              <HBar label="Replied after a follow-up" dotColor={amber} n={m.afterFuCount} d={m.fuCount} fill={amber} extra={` of ${m.fuCount.toLocaleString()}`} />
+              <div className="an-note">
+                <b>{m.afterFuCount}</b> of your <b>{m.repliedCount}</b> replies ({fuShare}%) only came after a follow-up
+                {m.afterFuCount > 0 ? ' — replies you would have missed without it.' : '.'}
+                {S.due > 0 && <> <b>{S.due}</b> contacts are due one now.</>}
               </div>
             </>
           )}
         </Card>
+        <CampaignsCard refreshToken={refreshToken} />
       </div>
+    </>
+  );
 
-      <div className="an-grid an-cards-2" style={{ marginBottom: 14 }}>
-        <NeedsYouCard queue={S.queue} delay=".38s" />
-        <CampaignsCard refreshToken={outreachRefresh} delay=".39s" />
+  // ── Replies ──
+  const types = S.replyTypes || [];
+  const typeTotal = types.reduce((n, r) => n + r.n, 0);
+  const TYPE_COLOR: Record<string, string> = {
+    reviewing: '--green', 'resume-requested': '--teal', 'stay-in-touch': '--blue', 'needs-attention': '--amber',
+    no: '--red', other: '--slate', unclassified: '--slate',
+  };
+  const replies = (
+    <>
+      {kpiGrid([
+        { label: 'Replied', value: m.repliedCount.toLocaleString(), sub: `${m.replyRate}% of emailed`, cls: 'green' },
+        { label: 'Waiting on you', value: needsYou, sub: 'in Mailbox → Needs you', cls: needsYou ? 'amber' : '' },
+        { label: 'Median reply time', value: median !== null ? fmtDur(median) : '—', sub: `${sortedPairs.length} measurable replies` },
+        { label: 'Within 24 hours', value: sortedPairs.length ? `${within24}%` : '—', sub: 'of measurable replies' },
+      ])}
+      <div className="an-grid an-cards-2">
+        <Card title="What replies say" icon="ti-messages" sub="The AI's verdict on each replier's latest reply">
+          {typeTotal === 0 ? <div className="an-empty"><i className="ti ti-message-off" />No replies yet</div>
+            : types.map(r => (
+              <HBar key={r.k} label={r.k === 'unclassified' ? 'Not classified yet' : (CATEGORY_LABELS[r.k] || r.k)}
+                dotColor={cvar(TYPE_COLOR[r.k] || '--slate')} n={r.n} d={typeTotal} fill={cvar(TYPE_COLOR[r.k] || '--slate')} />
+            ))}
+        </Card>
+        <Card title="Reply journey" icon="ti-route" sub="Where everyone who replied sits now">
+          {m.repliedCount === 0 ? <div className="an-empty"><i className="ti ti-route-off" />No replies yet</div>
+            : S.journey.map(([s, n]) => {
+              const meta = STATUS_META[s] || { label: s, c: '--slate' };
+              return <HBar key={s} label={meta.label} dotColor={cvar(meta.c)} n={n} d={m.repliedCount} fill={cvar(meta.c)} />;
+            })}
+        </Card>
       </div>
+      <div className="an-grid an-cards-2">
+        <Card title="Response speed" icon="ti-clock-hour-4"
+          sub={median !== null ? `Median ${fmtDur(median)} across ${sortedPairs.length} replies` : 'Time from a send to the reply it earned'}>
+          <ReplyTimeChart pairs={sortedPairs} />
+        </Card>
+        <Card title="When replies come" icon="ti-calendar-week" sub="Sends vs. replies by weekday, and replies by hour (your timezone)">
+          <WeekdayChart sends={S.weekday.sends} reps={S.weekday.replies} />
+          <div style={{ marginTop: 14 }}><HourChart hours={S.replyHr} /></div>
+        </Card>
+      </div>
+      <NeedsYouCard queue={S.queue} />
+    </>
+  );
 
-      <div className="an-card" style={{ marginBottom: 14, animationDelay: '.4s' }}>
-        <div className="an-card-head">
-          <div className="an-card-title"><i className="ti ti-bulb" /> Insights</div>
-          <div className="an-card-sub">Automatically surfaced from your full status history</div>
+  let content: React.ReactNode;
+  if (waiting) {
+    content = (
+      <>
+        <div className="stat-grid" aria-busy="true">
+          {[0, 1, 2, 3, 4].map(i => (
+            <div className="stat-card" key={i}><Skeleton w="50%" h={11} /><Skeleton w="45%" h={28} style={{ marginTop: 8 }} /><Skeleton w="70%" h={10} style={{ marginTop: 10 }} /></div>
+          ))}
         </div>
-        <div className="an-card-body an-grid an-cards-2" style={{ gap: 10 }}>
-          {insights.map(it => (
-            <div className="insight" key={it.t}>
-              <i className={`ti ${it.i}`} style={{ color: `var(${it.c})` }} />
-              <div>
-                <div className="in-title">{it.t}</div>
-                <div className="in-text">{it.x}</div>
-              </div>
+        <div className="an-grid an-cards-2">
+          {[0, 1].map(i => (
+            <div className="an-card" key={i} style={{ padding: 18 }}>
+              <Skeleton w="40%" h={13} style={{ marginBottom: 16 }} />
+              {[0, 1, 2, 3, 4].map(r => <Skeleton key={r} w={`${88 - r * 11}%`} h={10} style={{ marginBottom: 10 }} />)}
             </div>
           ))}
+        </div>
+      </>
+    );
+  } else if (view === 'overview') {
+    content = <OverviewSection S={S} interviews={interviews} go={go} refreshToken={refreshToken} chart={trendCard} insights={insightsCard} />;
+  } else if (view === 'outreach') content = outreach;
+  else if (view === 'replies') content = replies;
+  else if (view === 'activity') content = <ActivitySection initial={S.activity} interviews={interviews} />;
+  else if (view === 'interviews') content = <InterviewsSection interviews={interviews} funnel={iv} repliedCount={m.repliedCount} />;
+  else if (view === 'naukri') content = <NaukriAnalytics refreshToken={refreshToken} />;
+  else if (view === 'leads') content = <LeadsAnalytics refreshToken={refreshToken} />;
+  else if (view === 'discover') content = <DiscoverAnalytics refreshToken={refreshToken} />;
+  else content = <ReportsPanel />;
+
+  return (
+    <Layout title="Analytics" subtitle={SUBTITLE[view]} wide
+      actions={
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {picker}
+          {view !== 'reports' && (
+            <button className="btn btn-sm" onClick={refresh} disabled={refreshing} type="button">
+              <i className={`ti ${refreshing ? 'ti-loader-2' : 'ti-refresh'}`} /> Refresh
+            </button>
+          )}
+        </div>
+      }>
+      <div className="section" style={{ flex: 1 }}>
+        <div className="adm-layout">
+          <nav className="adm-nav" aria-label="Analytics sections">
+            {NAV.map(g => (
+              <div key={g.group} style={{ display: 'contents' }}>
+                <div className="adm-nav-group">{g.group}</div>
+                {g.items.map(n => (
+                  <button key={n.id} type="button" className={'adm-nav-item' + (view === n.id ? ' on' : '')}
+                    title={n.label} aria-label={n.label}
+                    aria-current={view === n.id ? 'page' : undefined} onClick={() => go(n.id)}>
+                    <i className={'ti ' + n.icon} aria-hidden="true" />
+                    <span className="adm-nav-label">{n.label}</span>
+                    {badge(n.id)}
+                  </button>
+                ))}
+              </div>
+            ))}
+          </nav>
+          <main className="adm-main an-main">{content}</main>
         </div>
       </div>
     </Layout>

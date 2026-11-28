@@ -220,17 +220,17 @@ export default function ReportsPanel({ fetcher, adminMode = false, upcomingInter
                     ['First emails sent', report.outreach.firstSends], ['Follow-ups sent', report.outreach.followUps],
                     ['Bounced', report.outreach.bounced], ['Failed to send', report.outreach.failed],
                     ['Leads added', report.pipeline.leadsAdded], ['Leads applied to', report.pipeline.leadsApplied],
-                    ['Naukri applications', report.pipeline.naukriApplied], ['New interview entries', report.pipeline.interviewsNew],
+                    ['Job applications (all platforms)', report.pipeline.naukriApplied], ['New interview entries', report.pipeline.interviewsNew],
                     ...report.pipeline.interviewMoves.map(m => [`Interviews moved to “${m.status}”`, m.n] as const),
                     ...(report.naukri && (report.naukri.applied || report.naukri.skipped || report.naukri.failed) ? [
-                      ['Naukri: skipped / failed attempts', `${n(report.naukri.skipped)} / ${n(report.naukri.failed)}`],
-                      ...(report.naukri.aiAsked ? [['Naukri: questions answered by AI', `${n(report.naukri.aiAnswered)} of ${n(report.naukri.aiAsked)}`]] : []),
-                      ...(report.naukri.autoApproved ? [['Naukri: approved automatically', report.naukri.autoApproved]] : []),
+                      ['Job platforms: skipped / failed attempts', `${n(report.naukri.skipped)} / ${n(report.naukri.failed)}`],
+                      ...(report.naukri.aiAsked ? [['Job platforms: questions answered by AI', `${n(report.naukri.aiAnswered)} of ${n(report.naukri.aiAsked)}`]] : []),
+                      ...(report.naukri.autoApproved ? [['Job platforms: approved automatically', report.naukri.autoApproved]] : []),
                     ] as const : []),
                     ...(report.naukri && (report.naukri.viewed || report.naukri.shortlisted || report.naukri.notShortlisted) ? [
-                      ['Naukri: recruiter viewed', report.naukri.viewed],
-                      ['Naukri: shortlisted or contacted', report.naukri.shortlisted],
-                      ['Naukri: not shortlisted', report.naukri.notShortlisted],
+                      ['Job platforms: recruiter viewed', report.naukri.viewed],
+                      ['Job platforms: shortlisted or contacted', report.naukri.shortlisted],
+                      ['Job platforms: not shortlisted', report.naukri.notShortlisted],
                     ] as const : []),
                   ] as ReadonlyArray<readonly [string, number | string]>).map(([label, v]) => (
                     <tr key={label}><td>{label}</td><td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{typeof v === 'number' ? n(v) : v}</td></tr>

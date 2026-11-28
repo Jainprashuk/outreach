@@ -80,7 +80,8 @@ function loadReference() {
     same('reply hour', s.replyHr, old.hr);
     same('this week vs last', s.week, old.week);
     same('advanced repliers', s.adv, old.adv);
-    same('follow-up due', s.due, old.due);
+    // Not compared: `due` now counts status 'sent' only, as the Action Center does;
+    // the old page also counted people who had replied.
 
     const ivNew = json(ref.interviewFunnel(s.interviewRows, ref.indexInterviews(interviews), 'contact', c => c.email));
     same('interview funnel', { ...ivNew, records: ivNew.records.map(r => r.id).sort() }, { ...old.iv, records: old.iv.records.map(r => r.id).sort() });

@@ -1,0 +1,26 @@
+/* Analytics redesign. The section nav, attention rows and KPI tiles come from
+   admin-redesign.css (adm-*), so both pages read as one design. */
+
+/* The column spaces its children; the tab components still carry their old
+   inline bottom margins, which would double the gap. */
+.an-main > * { margin-bottom: 0 !important; }
+.an-main .an-grid { gap: 16px; }
+
+.an-week-row { display: flex; align-items: baseline; gap: 10px; padding: 10px 0; border-top: 0.5px solid var(--border); }
+.an-week-row:first-child { border-top: 0; padding-top: 0; }
+.an-week-label { flex: 1; font-size: 13px; color: var(--text2); }
+.an-week-val { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.an-week-prev { font-size: 12px; color: var(--text3); font-variant-numeric: tabular-nums; }
+.an-delta { font-size: 11.5px; font-weight: 600; padding: 2px 7px; border-radius: 7px; background: var(--bg2); color: var(--text2); font-variant-numeric: tabular-nums; }
+.an-delta.up { background: var(--green-bg); color: var(--green); }
+.an-delta.down { background: var(--amber-bg); color: var(--amber); }
+
+.an-note {
+  margin-top: 14px; padding: 11px 13px; border-radius: var(--radius); background: var(--bg2);
+  border: 0.5px solid var(--border); font-size: 12px; color: var(--text2); line-height: 1.55;
+}
+.an-note b { color: var(--text); }
+
+/* The small charts were drawn for half-width cards; in a wide column their
+   viewBox would scale them up to very tall. Keep them a readable height. */
+.an-main .an-card-body > svg:not(.an-ts), .an-main .an-card-body > div > svg { max-height: 220px; }
