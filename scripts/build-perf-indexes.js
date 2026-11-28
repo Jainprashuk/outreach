@@ -28,6 +28,11 @@ const INDEXES = [
   ['scraperuns',   { userId: 1, createdAt: -1 }],                // GET /api/scrapes
   ['activitylogs', { userId: 1, createdAt: -1 }],                // GET /api/logs
   ['blocklists',   { userId: 1, createdAt: -1 }],                // GET /api/blocklist
+  // Job platforms: the period counts on every overview, which otherwise scan
+  // every job the user has ever harvested (grows with each harvest).
+  ['naukrijobs',   { userId: 1, 'applyHistory.at': -1 }],        // week / counts / jobs-overview outcomes
+  ['naukrijobs',   { userId: 1, firstSeenAt: -1 }],              // found this week / in period
+  ['naukrijobs',   { userId: 1, appliedAt: -1 }],                // applied today, results summary
 ];
 
 const sameKey = (a, b) => JSON.stringify(a) === JSON.stringify(b);

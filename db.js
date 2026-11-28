@@ -263,7 +263,10 @@ async function connect() {
   mongoose.set('bufferCommands', false);
 
   await mongoose.connect(uri, {
-    maxPoolSize: 5,              // keep pool small for serverless (each instance has its own)
+    // One long-lived process on the VM serves every user and every worker
+    // check-in, and one Jobs overview fans out ~80 queries — 5 (sized for
+    // Vercel's many instances) left them queuing behind each other.
+    maxPoolSize: Number(process.env.MONGO_POOL_SIZE) || 30,
     serverSelectionTimeoutMS: 5000,
     socketTimeoutMS: 45000,
     monitorCommands: true,       // per-query timings for the perf dashboard

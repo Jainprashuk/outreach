@@ -459,13 +459,12 @@ router.get('/platforms', async (req, res) => {
   try {
     await failStaleRuns(req.userId);
     const config = await NaukriConfig.getForUser(req.userId);
-    const out = [];
-    for (const id of PLATFORM_IDS) {
+    const out = await Promise.all(PLATFORM_IDS.map(async (id) => {
       const site = siteOf(config, id);
       const enabled = isEnabled(site, id);
       const reg = publicRegistry().find(r => r.id === id);
-      out.push({ ...reg, enabled, overview: enabled ? await overviewFor(req.userId, id, { config, light: true }) : null });
-    }
+      return { ...reg, enabled, overview: enabled ? await overviewFor(req.userId, id, { config, light: true }) : null };
+    }));
     res.json({
       platforms: out,
       duplicates: config.duplicates,
@@ -649,8 +648,7 @@ router.get('/counts', async (req, res) => {
     const ids = req.platform === 'all' ? PLATFORM_IDS.filter(id => isEnabled(siteOf(config, id), id)) : [req.platform];
     const tz = siteOf(config, ids[0] || 'naukri').schedule.timezone;
     const win = rangeWindow(range, tz);
-    const counts = {};
-    for (const id of ids) counts[id] = await countsFor(req.userId, id, { __window: win });
+    const counts = Object.fromEntries(await Promise.all(ids.map(async id => [id, await countsFor(req.userId, id, { __window: win })])));
     res.json({ range, from: win.from, to: win.to, counts });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -665,7 +663,7 @@ async function overviewFor(userId, platform, { config: given = null, light = fal
   const config = given || await NaukriConfig.getForUser(userId);
   const site = siteOf(config, platform);
   const weekAgo = new Date(Date.now() - 7 * 86400000);
-  const [worker, activeRun, queued, history, reviewCount, appliedCount, todayCount, waitingCount, skippedCount, needsAnswerCount, week, foundWeek] = await Promise.all([
+  const [worker, activeRun, queued, history, reviewCount, appliedCount, todayCount, waitingCount, skippedCount, needsAnswerCount, week, foundWeek, questionnaireOpenCount] = await Promise.all([
     NaukriWorker.getForUser(userId, platform),
     NaukriRun.findOne({ userId, status: 'running', ...pq, ...BASE_FILTER }).sort({ createdAt: 1 }).lean(),
     NaukriRun.find({ userId, status: 'queued', ...pq, ...BASE_FILTER }).sort({ createdAt: 1 }).limit(10).lean(),
@@ -695,6 +693,7 @@ async function overviewFor(userId, platform, { config: given = null, light = fal
     ]),
     // New jobs found this week, for the All platforms cards.
     NaukriJob.countDocuments({ userId, firstSeenAt: { $gte: weekAgo }, ...pq, ...BASE_FILTER }),
+    NaukriJob.countDocuments({ userId, ...QUESTIONNAIRE_OPEN, ...pq, ...BASE_FILTER }),
   ]);
   const weekOf = (k) => (week.find(w => w._id === k) || {}).n || 0;
   const mode = applyModeOf(site, platform);
@@ -729,7 +728,7 @@ async function overviewFor(userId, platform, { config: given = null, light = fal
     needsAnswerCount,
     // The part of needsAnswerCount that is applied jobs' questionnaires, not
     // skips — so Skipped can subtract only the skips.
-    questionnaireOpenCount: await NaukriJob.countDocuments({ userId, ...QUESTIONNAIRE_OPEN, ...pq, ...BASE_FILTER }),
+    questionnaireOpenCount,
     week: { applied: weekOf('applied'), skipped: weekOf('skipped'), failed: weekOf('failed') },
     perRun: site.apply.maxPerRun,
     perDay: site.apply.maxPerDay,

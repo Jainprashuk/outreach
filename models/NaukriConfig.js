@@ -368,14 +368,18 @@ const naukriConfigSchema = new mongoose.Schema({
   },
 }, { timestamps: true });
 
+// Without the resume bytes: this runs on every overview read and worker
+// check-in, and only GET /resume needs the file (it reads it itself). Saving
+// the doc is still safe — Mongoose writes only the paths that changed.
+const NO_FILE = { 'resume.data': 0 };
 naukriConfigSchema.statics.getForUser = async function (userId) {
-  const doc = await this.findOne({ userId });
+  const doc = await this.findOne({ userId }, NO_FILE);
   if (doc) return doc;
   try {
     return await this.create({ userId });
   } catch (err) {
     // Lost the race to a concurrent first call; the unique index kept it to one.
-    if (err.code === 11000) return this.findOne({ userId });
+    if (err.code === 11000) return this.findOne({ userId }, NO_FILE);
     throw err;
   }
 };
