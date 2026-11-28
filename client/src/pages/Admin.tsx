@@ -24,8 +24,8 @@ import {
 import '../styles/admin-redesign.css';
 
 // One section per hash. The old tab keys are kept so existing links still land.
-type Sec = 'overview' | 'accounts' | 'requests' | 'mail' | 'sending' | 'platform-runs' | 'emails' | 'issues' | 'ai' | 'server-logs';
-const SECS: Sec[] = ['overview', 'accounts', 'requests', 'mail', 'sending', 'platform-runs', 'emails', 'issues', 'ai', 'server-logs'];
+type Sec = 'overview' | 'accounts' | 'requests' | 'mail' | 'sending' | 'platform-runs' | 'emails' | 'issues' | 'ai' | 'server-logs' | 'perf';
+const SECS: Sec[] = ['overview', 'accounts', 'requests', 'mail', 'sending', 'platform-runs', 'emails', 'issues', 'ai', 'server-logs', 'perf'];
 const secOf = (hash: string): Sec => {
   const h = hash.replace(/^#/, '') as Sec;
   return SECS.includes(h) ? h : 'overview';
@@ -47,6 +47,7 @@ const NAV: Array<{ group: string; items: Array<{ id: Sec; icon: string; label: s
     { id: 'issues', icon: 'ti-alert-triangle', label: 'Issues' },
     { id: 'ai', icon: 'ti-sparkles', label: 'Gemini logs' },
     { id: 'server-logs', icon: 'ti-terminal-2', label: 'Server logs' },
+    { id: 'perf', icon: 'ti-activity-heartbeat', label: 'System performance' },
   ] },
 ];
 
@@ -61,6 +62,7 @@ const SUBTITLE: Record<Sec, string> = {
   issues: 'Everything that failed for anyone, with the raw error — including recipient addresses.',
   ai: 'Every AI request for anyone, in full — the prompt (reply text, conversations, profiles) and the raw answer.',
   'server-logs': 'Live output of every container on the server: the portal and each cloud worker.',
+  perf: 'Route and query latency, slow requests and container load on the server, with 7 days of history.',
 };
 
 export default function Admin() {
@@ -279,6 +281,7 @@ export default function Admin() {
             {sec === 'issues' && <AdminIssues onOpenCount={setOpenIssues} />}
             {sec === 'ai' && <AdminAiLogs />}
             {sec === 'server-logs' && <AdminServerLogs />}
+            {sec === 'perf' && <AdminServerLogs path="/perf" title="System performance" />}
             {sec === 'emails' && (
               <>
                 <AdminEmailsCard data={emails} reload={loadEmails} />

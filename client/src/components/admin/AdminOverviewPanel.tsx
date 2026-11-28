@@ -8,7 +8,7 @@ import { fmtAgo } from '../../lib/analytics';
 import type { AdminOverview, SendingAlert } from '../../lib/api';
 import type { AccountFilter } from './AdminAccountsPanel';
 
-type Sec = 'overview' | 'accounts' | 'requests' | 'mail' | 'sending' | 'platform-runs' | 'emails' | 'issues' | 'ai' | 'server-logs';
+type Sec = 'overview' | 'accounts' | 'requests' | 'mail' | 'sending' | 'platform-runs' | 'emails' | 'issues' | 'ai' | 'server-logs' | 'perf';
 const RANGES = [7, 30, 90];
 const TOP = 8;
 

@@ -4,18 +4,19 @@ import { adminServerLogsApi } from '../lib/api';
 // The VM's live container logs (Dozzle), embedded. The page sits behind its own
 // Cloudflare Access login, and that login screen refuses to be framed, so the
 // first visit has to happen in a real tab; after that the session cookie
-// (same site, jainprashuk.in) is sent inside the frame too.
-export default function AdminServerLogs() {
+// (same site, jainprashuk.in) is sent inside the frame too. `path` picks a page
+// on the same host: '/perf' is the performance dashboard (cw perf-ui).
+export default function AdminServerLogs({ path = '', title = 'Server logs' }: { path?: string; title?: string }) {
   const [url, setUrl] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [frameKey, setFrameKey] = useState(0);
   useEffect(() => {
-    adminServerLogsApi().then(r => setUrl(r.url)).catch(e => setError(e.message));
-  }, []);
+    adminServerLogsApi().then(r => setUrl(r.url ? r.url.replace(/\/+$/, '') + path : '')).catch(e => setError(e.message));
+  }, [path]);
 
   if (error) return <div className="login-error" style={{ textAlign: 'left' }}>{error}</div>;
   if (url === null) return <div className="skeleton" style={{ height: 120 }} />;
-  if (!url) return <div className="info-box"><i className="ti ti-info-circle" />No logs page is set up. On the VM run <code>sudo cw logs-ui on</code>.</div>;
+  if (!url) return <div className="info-box"><i className="ti ti-info-circle" />No logs page is set up. On the VM run <code>sudo cw logs-ui on</code>{path === '/perf' && <>, then <code>sudo cw perf-ui on</code></>}.</div>;
 
   return <>
     <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
@@ -26,7 +27,7 @@ export default function AdminServerLogs() {
       </span>
     </div>
     <div className="table-card" style={{ padding: 0, overflow: 'hidden' }}>
-      <iframe key={frameKey} src={url} title="Server logs" referrerPolicy="no-referrer"
+      <iframe key={frameKey} src={url} title={title} referrerPolicy="no-referrer"
         style={{ display: 'block', width: '100%', height: 'calc(100vh - 230px)', minHeight: 480, border: 0 }} />
     </div>
   </>;

@@ -171,3 +171,8 @@ button.adm-kpi:hover { border-color: var(--border-md); box-shadow: var(--shadow-
 .adm-subtable td { padding: 8px 10px; border-bottom: 0.5px solid var(--border); vertical-align: top; }
 .adm-subtable th.adm-num { text-align: right; }
 .adm-subtable td.adm-suberr { color: var(--red); font-size: 12px; padding-top: 0; }
+
+/* Tabs reuse the app's .stat-grid, whose base style carries page padding and a
+   fixed five columns; inside the admin column it should line up and fill. */
+.adm-main .stat-grid { padding: 0; margin: 0; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+@media (max-width: 560px) { .adm-main .stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
